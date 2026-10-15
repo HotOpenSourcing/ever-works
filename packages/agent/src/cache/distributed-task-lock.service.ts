@@ -184,9 +184,12 @@ export class DistributedTaskLockService {
     }
 
     /**
-     * Driver-agnostic unique-violation detection: Postgres reports SQLSTATE
-     * `23505`, SQLite `SQLITE_CONSTRAINT*` / "UNIQUE constraint failed", and
-     * MySQL/MariaDB `ER_DUP_ENTRY` / "Duplicate entry".
+     * Driver-agnostic unique-violation detection, deliberately narrow: only a
+     * DUPLICATE KEY proves contention. Postgres reports SQLSTATE `23505`;
+     * SQLite `SQLITE_CONSTRAINT_PRIMARYKEY` / `SQLITE_CONSTRAINT_UNIQUE` (or a
+     * bare `SQLITE_CONSTRAINT` whose message says "UNIQUE constraint failed");
+     * MySQL/MariaDB `ER_DUP_ENTRY` / "Duplicate entry". Other constraint
+     * failures (NOT NULL, FOREIGN KEY, CHECK) are real errors, never "locked".
      */
     private static isUniqueViolation(error: unknown): boolean {
         const err = error as {
@@ -200,7 +203,8 @@ export class DistributedTaskLockService {
                 (code) =>
                     code === '23505' ||
                     code === 'ER_DUP_ENTRY' ||
-                    code.startsWith('SQLITE_CONSTRAINT'),
+                    code === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+                    code === 'SQLITE_CONSTRAINT_UNIQUE',
             )
         ) {
             return true;

@@ -211,6 +211,14 @@ describe('DistributedTaskLockService', () => {
                     ),
             ],
             [
+                'sqlite (bare SQLITE_CONSTRAINT + UNIQUE message, node-sqlite3 shape)',
+                () =>
+                    Object.assign(
+                        new Error('SQLITE_CONSTRAINT: UNIQUE constraint failed: cache_entries.key'),
+                        { code: 'SQLITE_CONSTRAINT' },
+                    ),
+            ],
+            [
                 'sqlite (message only)',
                 () => new Error('UNIQUE constraint failed: cache_entries.key'),
             ],
@@ -254,6 +262,40 @@ describe('DistributedTaskLockService', () => {
             await expect(service.runExclusive('foo', fn)).rejects.toThrow('not-null constraint');
             expect(fn).not.toHaveBeenCalled();
         });
+
+        it.each([
+            [
+                'SQLITE_CONSTRAINT_NOTNULL',
+                'SQLITE_CONSTRAINT_NOTNULL',
+                'NOT NULL constraint failed: cache_entries.value',
+            ],
+            [
+                'SQLITE_CONSTRAINT_FOREIGNKEY',
+                'SQLITE_CONSTRAINT_FOREIGNKEY',
+                'FOREIGN KEY constraint failed',
+            ],
+            [
+                'bare SQLITE_CONSTRAINT with a NOT NULL message',
+                'SQLITE_CONSTRAINT',
+                'SQLITE_CONSTRAINT: NOT NULL constraint failed: cache_entries.value',
+            ],
+        ])(
+            'a non-unique SQLite constraint failure (%s) is a real error, never "locked"',
+            async (_label, code, message) => {
+                cacheEntryRepository.insert.mockRejectedValue(
+                    Object.assign(new Error(message), { code }),
+                );
+                cacheEntryRepository.findOne.mockResolvedValue(null);
+                const onLocked = jest.fn();
+                const fn = jest.fn();
+
+                await expect(service.runExclusive('foo', fn, { onLocked })).rejects.toThrow(
+                    message,
+                );
+                expect(onLocked).not.toHaveBeenCalled();
+                expect(fn).not.toHaveBeenCalled();
+            },
+        );
     });
 
     describe('runExclusive — fn errors', () => {
