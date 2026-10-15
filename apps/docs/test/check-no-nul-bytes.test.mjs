@@ -28,6 +28,7 @@ function build(name, pages) {
 	return dir;
 }
 
+/** Runs the check on `dir` in a child node process; returns its exit status and output. */
 function check(dir) {
 	return spawnSync(process.execPath, [script, dir], { encoding: 'utf8' });
 }
