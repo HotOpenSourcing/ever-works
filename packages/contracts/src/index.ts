@@ -91,3 +91,7 @@ export * from './safety/index.js';
 // closed key lists of a Works report, the signed report a `stats-sink`
 // provider receives, and the operator API's status shapes.
 export * from './ever-platform/index.js';
+// Integration keys and the integration principal (EW-P1-2, Gauzy ↔ Ever Works):
+// the `ew_int_` key kind, scope vocabulary v1, presets, headers and the error
+// envelope codes shared by the API guards, the settings UI and the contract.
+export * from './integrations/index.js';

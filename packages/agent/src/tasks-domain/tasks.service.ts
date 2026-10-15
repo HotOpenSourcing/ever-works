@@ -11,7 +11,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { Repository } from 'typeorm';
 import type { GateStatus, TaskAcceptanceCheck, TaskExtraRepo } from '@ever-works/contracts';
 import { normalizeTaskExtraRepos } from './task-extra-repos';
-import { Task, TaskPriority, TaskStatus, type TaskActorType } from '../entities/task.entity';
+import {
+    Task,
+    TaskPriority,
+    TaskStatus,
+    type TaskActorType,
+    type TaskAuthorType,
+} from '../entities/task.entity';
 import type { TaskApprover } from '../entities/task-approver.entity';
 import { Mission } from '../entities/mission.entity';
 import { Team } from '../entities/team.entity';
@@ -79,7 +85,8 @@ export interface CreateTaskInput {
     agentId?: string | null;
     goalId?: string | null;
     parentTaskId?: string | null;
-    createdByType: TaskActorType;
+    /** EW-P1-2: `'integration'` (with the key id as `createdById`) for an integration write. */
+    createdByType: TaskAuthorType;
     createdById: string;
     /** Schedule mode "Scheduled": run once at this instant (must be in
      *  the future). Omitted/null = not scheduled. */
