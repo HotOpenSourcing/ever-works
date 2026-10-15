@@ -159,6 +159,39 @@ describe('PostmarkPlugin', () => {
 			expect(msg.references).toEqual(['root@client.test', 'out-1@acme.test']);
 		});
 
+		it('parses Cc from CcFull, or from the raw Cc header (EW-P4-3)', async () => {
+			const full = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm1',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						CcFull: [{ Email: 'c1@b.test', Name: 'C One' }, { Email: 'c2@b.test' }],
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(full.cc).toEqual(['c1@b.test', 'c2@b.test']);
+			const raw = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm2',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						Cc: '"C One" <c1@b.test>, c2@b.test',
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(raw.cc).toEqual(['c1@b.test', 'c2@b.test']);
+		});
+
 		it('leaves the threading fields out when the headers are absent', async () => {
 			const msg = await plugin.parseInboundWebhook(
 				Buffer.from(

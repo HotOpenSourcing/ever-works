@@ -225,6 +225,17 @@ describe('MailgunPlugin', () => {
 		expect(msg.references).toEqual(['root@client.test', 'out-1@acme.test']);
 	});
 
+	it('parses Cc into bare mailboxes (EW-P4-3)', async () => {
+		const form = new URLSearchParams({
+			sender: 'x@y.test',
+			recipient: 'agent@mg.example.com',
+			subject: 's',
+			Cc: '"C One" <c1@b.test>, c2@b.test'
+		});
+		const msg = await plugin.parseInboundWebhook(Buffer.from(form.toString()), {}, {});
+		expect(msg.cc).toEqual(['c1@b.test', 'c2@b.test']);
+	});
+
 	it('falls back to message-headers for the threading headers', async () => {
 		const form = new URLSearchParams({
 			sender: 'x@y.test',

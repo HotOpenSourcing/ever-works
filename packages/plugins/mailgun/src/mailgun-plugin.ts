@@ -325,6 +325,7 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 			return undefined;
 		};
 		const messageIdHeader = normalizeMessageId(header('message-id'));
+		const cc = parseAddressList(header('cc') ?? '');
 		const inReplyTo = parseMessageIdList(header('in-reply-to'))[0];
 		const references = parseMessageIdList(header('references'));
 		return {
@@ -332,6 +333,8 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 			providerMessageId: messageId,
 			from: str('sender') ?? str('from') ?? '',
 			to: parseAddressList(recipient),
+			// EW-P4-3 — Cc is recorded (never routed on).
+			...(cc.length > 0 ? { cc } : {}),
 			subject: str('subject') ?? '',
 			bodyText: str('body-plain') ?? str('stripped-text') ?? '',
 			bodyHtml: str('body-html') ?? str('stripped-html'),

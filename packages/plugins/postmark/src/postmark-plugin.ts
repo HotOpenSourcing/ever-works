@@ -83,6 +83,8 @@ interface PostmarkInboundPayload {
 	readonly FromName?: string;
 	readonly ToFull?: Array<{ readonly Email: string; readonly Name?: string }>;
 	readonly To?: string;
+	readonly CcFull?: Array<{ readonly Email: string; readonly Name?: string }>;
+	readonly Cc?: string;
 	readonly Subject: string;
 	readonly TextBody?: string;
 	readonly HtmlBody?: string;
@@ -272,6 +274,12 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 		// The same bare mailboxes `extractInboundRecipients` names (the raw
 		// `To` fallback may carry a display name).
 		const to = payload.ToFull?.map((t) => t.Email) ?? (payload.To ? [parseEmailAddress(payload.To)] : []);
+		// EW-P4-3 — Cc is recorded (never routed on). `CcFull` is bare;
+		// the raw `Cc` header fallback may carry display names.
+		const cc = (
+			payload.CcFull?.map((c) => c.Email) ??
+			(payload.Cc ? payload.Cc.split(',').map((part) => parseEmailAddress(part)) : [])
+		).filter((address): address is string => typeof address === 'string' && address.length > 0);
 		const attachments: EmailAttachment[] =
 			payload.Attachments?.map((a) => ({
 				filename: a.Name,
@@ -284,6 +292,7 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 			providerMessageId: payload.MessageID,
 			from: payload.From,
 			to,
+			...(cc.length > 0 ? { cc } : {}),
 			subject: payload.Subject,
 			bodyText: payload.TextBody ?? '',
 			bodyHtml: payload.HtmlBody,

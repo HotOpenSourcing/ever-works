@@ -5,16 +5,21 @@ import {
     EmailMessageRepository,
     EmailConversationRepository,
 } from '@src/database';
-import type { EmailMessage } from '@src/entities/email-message.entity';
+import type {
+    EmailMessage,
+    EmailMessageAttachmentRecord,
+} from '@src/entities/email-message.entity';
 import type { EmailConversation } from '@src/entities/email-conversation.entity';
 import type { TenantEmailAddress } from '@src/entities/tenant-email-address.entity';
 import {
     AGENT_INBOUND_EMAIL_DISPATCHER,
+    INBOUND_EMAIL_ATTACHMENT_STORE,
     INBOUND_EMAIL_TASK_SPAWNER,
     deriveThreadKey,
     type AgentInboundEmailDispatcher,
     type AgentInboundEmailDispatchPayload,
     type AgentInboundEmailDispatchResult,
+    type InboundEmailAttachmentStore,
     type InboundEmailTaskSpawner,
     type InboundEmailTaskSpawnerInput,
 } from './agent-inbound-email-dispatcher';
@@ -24,6 +29,52 @@ const INBOUND_DIRECTIONS: readonly string[] = ['inbound', 'both'];
 
 /** Most thread ids looked up per inbound message (newest first). */
 const MAX_THREAD_LOOKUP_IDS = 20;
+
+/** EW-P4-3 — most attachments stored per inbound message; the rest are listed only. */
+export const MAX_INBOUND_ATTACHMENTS = 20;
+
+/** EW-P4-3 — most decoded attachment bytes stored per inbound message. */
+export const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+
+/** EW-P4-3 — most bytes of provider metadata kept on an inbound row. */
+export const MAX_INBOUND_METADATA_CHARS = 32_000;
+
+/**
+ * EW-P4-3 — the provider metadata kept on an inbound row: as given when it
+ * serializes small enough; else without its bulkiest part (the raw header
+ * list) and marked; else only its keys. Never throws (a value that cannot be
+ * serialized is dropped).
+ */
+export function boundInboundMetadata(
+    metadata: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | null {
+    if (!metadata || typeof metadata !== 'object') return null;
+    const fits = (value: unknown): boolean => {
+        try {
+            return JSON.stringify(value).length <= MAX_INBOUND_METADATA_CHARS;
+        } catch {
+            return false;
+        }
+    };
+    if (fits(metadata)) return { ...metadata };
+    const { headers: _headers, ...rest } = metadata as Record<string, unknown>;
+    if (fits(rest)) return { ...rest, headersOmitted: true };
+    return { truncated: true, keys: Object.keys(metadata).slice(0, 50) };
+}
+
+/** A sender-written filename made safe to list: no control characters, bounded. */
+function safeFilename(name: unknown): string {
+    const text = typeof name === 'string' ? name : '';
+    // eslint-disable-next-line no-control-regex
+    const cleaned = text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255);
+    return cleaned || 'attachment';
+}
+
+/** A sender-written MIME type, lower-cased and bounded (the store validates it). */
+function safeMimeType(type: unknown): string {
+    const text = typeof type === 'string' ? type.trim().toLowerCase().slice(0, 127) : '';
+    return text || 'application/octet-stream';
+}
 
 /**
  * EW-P4-3 — the ids an inbound message threads on, most specific first:
@@ -94,6 +145,12 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         @Optional()
         @Inject(INBOUND_EMAIL_TASK_SPAWNER)
         private readonly taskSpawner?: InboundEmailTaskSpawner,
+        // EW-P4-3 — stores inbound attachments; @Optional() and appended LAST
+        // so existing constructions keep working (attachments are then listed
+        // on the row but not stored).
+        @Optional()
+        @Inject(INBOUND_EMAIL_ATTACHMENT_STORE)
+        private readonly attachmentStore?: InboundEmailAttachmentStore,
     ) {}
 
     async dispatch(
@@ -114,10 +171,14 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         const agentId = assignment.agentId;
         const mode = assignment.dispatchMode === 'conversation' ? 'conversation' : 'task-spawn';
 
+        // EW-P4-3 — attachments are stored (for the address owner, in the
+        // address's scope) before the row is written, so the row lists them.
+        const attachments = await this.storeAttachments(payload, address);
+
         if (mode === 'conversation') {
-            return this.dispatchConversation(payload, address.id, address.userId, agentId);
+            return this.dispatchConversation(payload, address, agentId, attachments);
         }
-        return this.dispatchTaskSpawn(payload, address.id, address.userId, agentId);
+        return this.dispatchTaskSpawn(payload, address, agentId, attachments);
     }
 
     /**
@@ -151,21 +212,36 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
 
     private async dispatchTaskSpawn(
         payload: AgentInboundEmailDispatchPayload,
-        emailAddressId: string,
-        userId: string,
+        address: TenantEmailAddress,
         agentId: string,
+        attachments: EmailMessageAttachmentRecord[] | null,
     ): Promise<AgentInboundEmailDispatchResult> {
-        const message = await this.persistMessage(payload, emailAddressId, userId, agentId, null);
+        const userId = address.userId;
+        const message = await this.persistMessage(payload, address, agentId, null, attachments);
 
         let taskId: string | undefined;
         if (this.taskSpawner) {
-            const input = {
+            const input: InboundEmailTaskSpawnerInput = {
                 agentId,
                 userId,
                 emailMessageId: message.id,
                 subject: payload.subject,
                 bodyText: payload.bodyText,
                 from: payload.from,
+                // EW-P4-3 — the Task lives where the receiving address does.
+                tenantId: address.tenantId ?? null,
+                organizationId: address.organizationId ?? null,
+                ...(attachments?.length
+                    ? {
+                          attachments: attachments.map((a) => ({
+                              filename: a.filename,
+                              mimeType: a.mimeType,
+                              size: a.size,
+                              stored: a.stored,
+                              uploadId: a.uploadId ?? null,
+                          })),
+                      }
+                    : {}),
             };
 
             // EW-P4-3 — a reply to a message already linked to a Task joins
@@ -202,10 +278,11 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
 
     private async dispatchConversation(
         payload: AgentInboundEmailDispatchPayload,
-        emailAddressId: string,
-        userId: string,
+        address: TenantEmailAddress,
         agentId: string,
+        attachments: EmailMessageAttachmentRecord[] | null,
     ): Promise<AgentInboundEmailDispatchResult> {
+        const userId = address.userId;
         // EW-P4-3 — the conversation of the message this one replies to, when
         // its headers name one of this Agent's messages; else the subject.
         const parent = await this.findThreadParent(
@@ -232,15 +309,19 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
                 threadKey,
                 participants: [{ address: payload.from }],
                 lastMessageAt: payload.receivedAt,
+                // EW-P4-3 — a public webhook has no request scope: stamp the
+                // receiving address's tenant / organization explicitly.
+                tenantId: address.tenantId ?? null,
+                organizationId: address.organizationId ?? null,
             } as EmailConversation);
         }
 
         const message = await this.persistMessage(
             payload,
-            emailAddressId,
-            userId,
+            address,
             agentId,
             conversation.id,
+            attachments,
         );
         await this.conversations
             .touchLastMessageAt(conversation.id, payload.receivedAt)
@@ -337,24 +418,103 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         }
     }
 
+    /**
+     * EW-P4-3 — store the message's attachments through the optional store,
+     * for the address owner and in the address's scope, within the
+     * per-message limits. Every attachment is listed; one that was refused
+     * (the store's validation, a limit, an unbound store, bad base64) says
+     * why. `null` when the message has none. Never throws.
+     */
+    private async storeAttachments(
+        payload: AgentInboundEmailDispatchPayload,
+        address: TenantEmailAddress,
+    ): Promise<EmailMessageAttachmentRecord[] | null> {
+        const incoming = Array.isArray(payload.attachments) ? payload.attachments : [];
+        if (incoming.length === 0) return null;
+        const records: EmailMessageAttachmentRecord[] = [];
+        let storedBytes = 0;
+        for (const [index, attachment] of incoming.entries()) {
+            const filename = safeFilename(attachment?.filename);
+            const mimeType = safeMimeType(attachment?.mimeType);
+            const cid = typeof attachment?.cid === 'string' ? attachment.cid.slice(0, 255) : null;
+            let content: Buffer;
+            try {
+                content = Buffer.from(
+                    typeof attachment?.content === 'string' ? attachment.content : '',
+                    'base64',
+                );
+            } catch {
+                content = Buffer.alloc(0);
+            }
+            const base = { filename, mimeType, size: content.length, cid };
+            const refuse = (reason: string): void => {
+                records.push({ ...base, stored: false, uploadId: null, reason });
+            };
+            if (content.length === 0) {
+                refuse('empty');
+                continue;
+            }
+            if (!this.attachmentStore) {
+                refuse('no attachment store bound');
+                continue;
+            }
+            if (index >= MAX_INBOUND_ATTACHMENTS) {
+                refuse(`over the ${MAX_INBOUND_ATTACHMENTS}-attachment limit`);
+                continue;
+            }
+            if (storedBytes + content.length > MAX_INBOUND_ATTACHMENT_BYTES) {
+                refuse('over the per-message size limit');
+                continue;
+            }
+            try {
+                const stored = await this.attachmentStore.store({
+                    userId: address.userId,
+                    tenantId: address.tenantId ?? null,
+                    organizationId: address.organizationId ?? null,
+                    filename,
+                    mimeType,
+                    content,
+                });
+                storedBytes += content.length;
+                records.push({
+                    ...base,
+                    stored: true,
+                    uploadId: stored.uploadId,
+                    url: stored.url ?? null,
+                });
+            } catch (error) {
+                refuse(describeRefusal(error));
+            }
+        }
+        return records;
+    }
+
     private async persistMessage(
         payload: AgentInboundEmailDispatchPayload,
-        emailAddressId: string,
-        userId: string,
+        address: TenantEmailAddress,
         agentId: string,
         conversationId: string | null,
+        attachments: EmailMessageAttachmentRecord[] | null = null,
     ): Promise<EmailMessage> {
         return this.messages.save({
-            userId,
+            userId: address.userId,
             agentId,
             taskId: null,
             conversationId,
-            emailAddressId,
+            emailAddressId: address.id,
             direction: 'inbound',
             pluginId: payload.pluginId,
             providerMessageId: payload.providerMessageId,
             from: payload.from,
             toAddresses: payload.to,
+            // EW-P4-3 — Cc, provider metadata and attachments are kept, and the
+            // row is stamped with the receiving address's tenant / organization
+            // (a public webhook has no request scope to stamp it from).
+            ccAddresses: payload.cc?.length ? [...payload.cc] : null,
+            metadata: boundInboundMetadata(payload.metadata),
+            attachments,
+            tenantId: address.tenantId ?? null,
+            organizationId: address.organizationId ?? null,
             subject: payload.subject,
             bodyText: payload.bodyText,
             bodyHtml: payload.bodyHtml ?? null,
@@ -368,6 +528,19 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
             status: 'received',
         } as Parameters<EmailMessageRepository['save']>[0]);
     }
+}
+
+/** A short, caller-safe reason an attachment store refused an attachment. */
+function describeRefusal(error: unknown): string {
+    const response = (error as { response?: { code?: unknown; message?: unknown } })?.response;
+    const code = typeof response?.code === 'string' ? response.code : undefined;
+    const message =
+        typeof response?.message === 'string'
+            ? response.message
+            : error instanceof Error
+              ? error.message
+              : String(error);
+    return (code ? `${code}: ${message}` : message).slice(0, 200);
 }
 
 export const DEFAULT_INBOUND_EMAIL_DISPATCHER_PROVIDER = {

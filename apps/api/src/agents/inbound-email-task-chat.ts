@@ -77,3 +77,31 @@ export function formatInboundEmailChatPost(input: InboundEmailChatPostInput): st
 export function inboundEmailReplyHint(emailMessageId: string): string {
     return `\n\n---\nInbound email message id: ${emailMessageId}. To answer in the same thread, call sendEmail with inReplyToMessageId=${emailMessageId}.`;
 }
+
+/** One attachment line in a spawned Task's description (names are sender-written). */
+export interface InboundEmailAttachmentSummary {
+    filename: string;
+    mimeType: string;
+    size: number;
+    stored: boolean;
+    uploadId?: string | null;
+}
+
+/**
+ * EW-P4-3 — the attachment list appended to a Task spawned from an email.
+ * Filenames are defused like any other email text. Empty when there are none.
+ */
+export function inboundEmailAttachmentList(
+    attachments: readonly InboundEmailAttachmentSummary[] | undefined,
+): string {
+    if (!attachments?.length) return '';
+    const lines = attachments.slice(0, 25).map((a) => {
+        const name = defuseEmailText(a.filename.slice(0, 120));
+        // The MIME type is sender-written too.
+        const type = defuseEmailText(a.mimeType.slice(0, 127));
+        const where = a.stored && a.uploadId ? `upload ${a.uploadId}` : 'not stored';
+        return `- ${name} (${type}, ${a.size} bytes, ${where})`;
+    });
+    if (attachments.length > 25) lines.push(`- … and ${attachments.length - 25} more`);
+    return `\n\nAttachments:\n${lines.join('\n')}`;
+}
