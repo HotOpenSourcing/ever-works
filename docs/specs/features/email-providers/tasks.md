@@ -2,7 +2,7 @@
 
 **Feature ID**: `email-providers`
 **Jira Epic**: [EW-650](https://evertech.atlassian.net/browse/EW-650)
-**Last updated**: 2026-05-28
+**Last updated**: 2026-10-15
 
 Each task = one Jira child issue under EW-650. Approximate target: ~10 min of focused work per task (some larger items decomposed further).
 
@@ -73,6 +73,22 @@ Each task = one Jira child issue under EW-650. Approximate target: ~10 min of fo
 - [ ] **T39** Operator guide: "Connect an email provider".
 - [ ] **T40** Per-provider setup notes (webhook URLs, DNS records).
 - [ ] **T41** Update `docs/specs/architecture/database.md` with new tables.
+
+## Phase 10 — Email fixes for the Gauzy integration (EW-P4-3, spec §14)
+
+One small PR per item, security first.
+
+- [x] **T42** Refuse unsigned Postmark and Mailgun inbound (and delivery-event) webhooks when no secret is configured;
+      explicit opt-out `EMAIL_INBOUND_ALLOW_UNSIGNED=true` (exact string), default secure. Unit tests per plugin plus
+      facade tests with the real plugins (§14.1).
+- [ ] **T43** RFC threading: `messageIdHeader`, `inReplyTo`, `references` columns on `email_messages` (Postgres, MySQL,
+      better-sqlite3 migrations); set on outbound through `EmailSendInput.headers`; parsed on inbound; the dispatcher
+      threads on them before falling back to the normalized subject.
+- [ ] **T44** Inbound data: persist inbound attachments; keep `cc` and the plugin's `metadata`; stamp `tenantId` and
+      `organizationId` on inbound rows from the receiving address; write `email_messages.taskId` after task-spawn.
+- [ ] **T45** Settings → Email addresses: replace the `alert()` placeholder with a real add-address wizard; make
+      verification real (send the confirmation mail, enforce `verified` for sending), grandfathering addresses already
+      in use.
 
 ## Status legend
 
