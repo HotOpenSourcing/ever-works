@@ -81,11 +81,12 @@ One small PR per item, security first.
 - [x] **T42** Refuse unsigned Postmark and Mailgun inbound (and delivery-event) webhooks when no secret is configured;
       explicit opt-out `EMAIL_INBOUND_ALLOW_UNSIGNED=true` (exact string), default secure. Unit tests per plugin plus
       facade tests with the real plugins (§14.1).
-- [ ] **T43** RFC threading: `messageIdHeader`, `inReplyTo`, `references` columns on `email_messages` (Postgres, MySQL,
-      better-sqlite3 migrations); set on outbound through `EmailSendInput.headers`; parsed on inbound; the dispatcher
-      threads on them before falling back to the normalized subject.
+- [x] **T43** RFC threading: `messageIdHeader`, `inReplyTo`, `references` columns on `email_messages` (Postgres, MySQL,
+      better-sqlite3 migration); set on outbound through `EmailSendInput.headers`; parsed on inbound; the dispatcher
+      threads on them before falling back to the normalized subject; reply-in-thread (`inReplyToMessageId`); and the
+      `email_messages.taskId` back-link after task-spawn, which threading needs (§14.2).
 - [ ] **T44** Inbound data: persist inbound attachments; keep `cc` and the plugin's `metadata`; stamp `tenantId` and
-      `organizationId` on inbound rows from the receiving address; write `email_messages.taskId` after task-spawn.
+      `organizationId` on inbound rows from the receiving address.
 - [ ] **T45** Settings → Email addresses: replace the `alert()` placeholder with a real add-address wizard; make
       verification real (send the confirmation mail, enforce `verified` for sending), grandfathering addresses already
       in use.

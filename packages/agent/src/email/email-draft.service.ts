@@ -10,7 +10,8 @@ import { EMAIL_MAX_FAILURE_REASON_CHARS } from '@ever-works/contracts';
 import { AgentApprovalsService } from '../agent-approvals/agent-approvals.service';
 import type { EmailMessage } from '../entities/email-message.entity';
 import { EmailMessageRepository } from '../database/repositories/email-message.repository';
-import { EmailFacadeService, threadingFieldsOf } from '../facades/email.facade';
+import { EmailFacadeService } from '../facades/email.facade';
+import { threadingFieldsOf } from '../facades/email-threading';
 import { EmailSendCapExceededException } from './email-send-cap-exceeded.exception';
 import { EmailSendPolicyService } from './email-send-policy.service';
 
