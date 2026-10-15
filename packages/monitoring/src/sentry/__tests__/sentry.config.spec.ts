@@ -2,11 +2,13 @@
 const sentryInitMock = jest.fn();
 const profilingIntegrationMock = jest.fn(() => ({ name: 'ProfilingIntegration' }));
 const httpIntegrationMock = jest.fn((options: any) => ({ name: 'Http', options }));
+const getClientMock = jest.fn((): any => undefined);
 
 jest.mock('@sentry/nestjs', () => {
     const original = {
         init: sentryInitMock,
         httpIntegration: httpIntegrationMock,
+        getClient: getClientMock,
         captureException: jest.fn(),
         captureMessage: jest.fn(),
         setUser: jest.fn(),
@@ -47,6 +49,8 @@ describe('sentry.config', () => {
         sentryInitMock.mockClear();
         profilingIntegrationMock.mockClear();
         httpIntegrationMock.mockClear();
+        getClientMock.mockReset();
+        getClientMock.mockReturnValue(undefined);
     });
 
     afterEach(() => {
@@ -157,6 +161,21 @@ describe('sentry.config', () => {
             expect(ignore('')).toBe(false);
         });
 
+        it('the real API auth routes live under /api/auth and are matched too', () => {
+            createSentryConfig();
+            const ignore = httpIntegrationMock.mock.calls[0][0].ignoreIncomingRequests;
+            expect(ignore('/api/auth')).toBe(true);
+            expect(ignore('/api/auth/login')).toBe(true);
+            expect(ignore('/api/auth/anonymous?x=1')).toBe(true);
+            expect(ignore('/api/authentication')).toBe(false);
+            expect(ignore('/api/works?next=/api/auth/login')).toBe(false);
+            expect(ignore('/api/works')).toBe(false);
+            const cfg = createSentryConfig();
+            expect(cfg.beforeSend({ request: { url: 'https://api.example/api/auth/register' } })).toBeNull();
+            const kept = { request: { url: 'https://api.example/api/authentication' } };
+            expect(cfg.beforeSend(kept)).toBe(kept);
+        });
+
         it('isAuthPath is path-anchored', () => {
             expect(isAuthPath('/auth')).toBe(true);
             expect(isAuthPath('/auth/x#frag')).toBe(true);
@@ -253,6 +272,15 @@ describe('sentry.config', () => {
                     environment: 'staging',
                 }),
             );
+        });
+    });
+
+    describe('initSentry idempotency', () => {
+        it('does not call Sentry.init again when a client already exists (main.ts + SentryModule.forRoot)', () => {
+            process.env.SENTRY_DSN = 'https://example@sentry.io/1';
+            getClientMock.mockReturnValue({});
+            expect(initSentry()).toBe(true);
+            expect(sentryInitMock).not.toHaveBeenCalled();
         });
     });
 
