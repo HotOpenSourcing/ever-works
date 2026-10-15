@@ -31,20 +31,28 @@ export const redactSentryEventUrls = (event: any): any => {
     return event;
 };
 
-// Path-anchored auth-URL check: only treat URLs whose pathname starts with
-// `/auth` as auth traffic, so unrelated paths like `/authentication` or a
-// query string containing `/auth` are not accidentally scrubbed. Falls back
-// to substring matching for non-URL strings, and null-guards undefined URLs
-// (an event may have no request.url).
+// The API mounts its auth controller at `/api/auth` (this app has no global
+// prefix; every controller carries `api/`), so match that as well as a bare
+// `/auth`. Before 2026-10-15 only `/auth` was matched, so real auth traffic was
+// never dropped.
+const AUTH_PATH_PREFIXES = ['/auth', '/api/auth'];
+const isAuthPathname = (pathname: string): boolean =>
+    AUTH_PATH_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+
+// Path-anchored auth-URL check: only treat URLs whose pathname is an auth path
+// (see AUTH_PATH_PREFIXES) as auth traffic, so unrelated paths like
+// `/authentication` or a query string containing `/auth` are not accidentally
+// scrubbed. Falls back to substring matching for non-URL strings, and
+// null-guards undefined URLs (an event may have no request.url).
 const isAuthUrl = (url?: string): boolean => {
     if (!url) {
         return false;
     }
     try {
         const { pathname } = new URL(url);
-        // Match the `/auth` path segment exactly, or any sub-path under it
-        // (`/auth/login`), but NOT siblings like `/authentication`.
-        return pathname === '/auth' || pathname.startsWith('/auth/');
+        // Match the auth path segment exactly, or any sub-path under it
+        // (`/api/auth/login`), but NOT siblings like `/authentication`.
+        return isAuthPathname(pathname);
     } catch {
         return url.includes('/auth');
     }
@@ -52,14 +60,13 @@ const isAuthUrl = (url?: string): boolean => {
 
 // The same rule for the path Sentry's HTTP integration hands to
 // `ignoreIncomingRequests` (a path, possibly with a query string, never a full
-// URL): `/auth` or anything under `/auth/`, never `/authentication`, and never
-// a query string that merely mentions `/auth`.
+// URL): `/api/auth`, `/auth` or anything under them, never `/authentication`,
+// and never a query string that merely mentions `/auth`.
 export const isAuthPath = (urlPath?: string): boolean => {
     if (!urlPath) {
         return false;
     }
-    const path = urlPath.split(/[?#]/)[0];
-    return path === '/auth' || path.startsWith('/auth/');
+    return isAuthPathname(urlPath.split(/[?#]/)[0]);
 };
 
 /**
@@ -157,6 +164,13 @@ export const createSentryConfig = (config?: SentryConfig): any => {
 };
 
 export const initSentry = (config?: SentryConfig) => {
+    // The API calls initSentry() in main.ts and MonitoringModule calls it again
+    // through SentryModule.forRoot(). Sentry v11 warns that a second init
+    // replaces the active client without closing it, so state can mix. Keep
+    // the first client.
+    if (Sentry.getClient?.()) {
+        return true;
+    }
     const sentryConfig = createSentryConfig(config);
 
     if (sentryConfig.dsn) {
