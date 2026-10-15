@@ -229,6 +229,13 @@ describe('DistributedTaskLockService', () => {
                         code: 'ER_DUP_ENTRY',
                     }),
             ],
+            [
+                'mysql (message only, numeric errno)',
+                () =>
+                    Object.assign(new Error("Duplicate entry 'task-lock:foo' for key 'PRIMARY'"), {
+                        errno: 1062,
+                    }),
+            ],
         ])(
             '%s: returns acquired:false and calls onLocked even though the row is gone',
             async (_driver, makeError) => {
