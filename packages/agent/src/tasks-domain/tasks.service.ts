@@ -32,7 +32,11 @@ import {
     TaskRelationRepository,
     UserTaskCounterRepository,
 } from '../database/repositories/task-side.repositories';
-import { TaskTransitionService, type TransitionOptions } from './task-transition.service';
+import {
+    TaskTransitionService,
+    type TransitionOptions,
+    type SyncTransitionResult,
+} from './task-transition.service';
 import { approverDecisionCountsTowardDone, resolveCompletionGateHead } from './task-agent-review';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
@@ -1647,6 +1651,35 @@ export class TasksService {
             actionType: ActivityActionType.TASK_TRANSITIONED,
             details: { from, to, force: opts.force ?? false },
         });
+        return result;
+    }
+
+    /**
+     * EW-P1-6 — sync transition: walk the shortest legal path to `to`, every
+     * hop gated, no agent work started (see
+     * `TaskTransitionService.transitionSync`). One `task_transitioned`
+     * activity row per hop, so the Task's history shows every status it
+     * passed through, exactly as if each move had been made by hand.
+     */
+    async syncTransition(
+        userId: string,
+        id: string,
+        to: TaskStatus,
+        opts: TransitionOptions = {},
+        ownershipScope?: OwnershipScope,
+    ): Promise<SyncTransitionResult> {
+        const task = await this.getOne(userId, id, ownershipScope);
+        const result = await this.transitions.transitionSync(task, to, opts);
+        let hopFrom = result.from;
+        for (const hop of result.path) {
+            await this.logActivity({
+                userId,
+                taskId: id,
+                actionType: ActivityActionType.TASK_TRANSITIONED,
+                details: { from: hopFrom, to: hop, force: opts.force ?? false, mode: 'sync' },
+            });
+            hopFrom = hop;
+        }
         return result;
     }
 

@@ -67,7 +67,15 @@ describe('TasksController — integration principal (EW-P1-2)', () => {
     const session = { userId: OWNER, authMethod: 'session' } as never;
 
     function build() {
-        const service = { create: jest.fn().mockResolvedValue({ id: TASK }) };
+        const service = {
+            create: jest.fn().mockResolvedValue({ id: TASK }),
+            transition: jest.fn().mockResolvedValue({ id: TASK, status: 'todo' }),
+            syncTransition: jest.fn().mockResolvedValue({
+                task: { id: TASK, status: 'done' },
+                from: 'backlog',
+                path: ['todo', 'in_progress', 'done'],
+            }),
+        };
         const chat = { post: jest.fn().mockResolvedValue({ id: 'm-1' }) };
         const agents = {
             findByUserIdScoped: jest
@@ -89,11 +97,13 @@ describe('TasksController — integration principal (EW-P1-2)', () => {
         return { controller, service, chat, agents };
     }
 
-    it('declares tasks:write on create and chat, and nothing on other routes', () => {
+    it('declares tasks:write on create, chat and transition, and nothing on other routes', () => {
         const proto = TasksController.prototype as unknown as Record<string, object>;
         expect(Reflect.getMetadata(REQUIRE_SCOPES_KEY, proto.create)).toEqual(['tasks:write']);
         expect(Reflect.getMetadata(REQUIRE_SCOPES_KEY, proto.postChat)).toEqual(['tasks:write']);
-        for (const name of ['list', 'getOne', 'update', 'remove', 'transition', 'listChat']) {
+        // EW-P1-6 — sync transitions.
+        expect(Reflect.getMetadata(REQUIRE_SCOPES_KEY, proto.transition)).toEqual(['tasks:write']);
+        for (const name of ['list', 'getOne', 'update', 'remove', 'listChat']) {
             if (proto[name])
                 expect(Reflect.getMetadata(REQUIRE_SCOPES_KEY, proto[name])).toBeUndefined();
         }
@@ -173,5 +183,61 @@ describe('TasksController — integration principal (EW-P1-2)', () => {
         await controller.postChat(session, TASK, { body: '@builder go' } as never);
         expect(agents.findByUserIdScoped).toHaveBeenCalled();
         expect(chat.post.mock.calls[0][2].ownedAgentSlugs.get('builder')).toBe('ag-1');
+    });
+
+    // ── EW-P1-6 — sync transitions ───────────────────────────────────────
+
+    it('mode sync walks through the service and answers the Task', async () => {
+        const { controller, service } = build();
+        const out = await controller.transition(integration(null), TASK, {
+            to: 'done',
+            mode: 'sync',
+        } as never);
+        expect(service.syncTransition).toHaveBeenCalledWith(
+            OWNER,
+            TASK,
+            'done',
+            { force: false },
+            scope,
+        );
+        expect(service.transition).not.toHaveBeenCalled();
+        expect(out).toEqual({ id: TASK, status: 'done' });
+    });
+
+    it('an integration must use mode sync and can never force (422 domain_rule)', async () => {
+        const { controller, service } = build();
+        for (const body of [{ to: 'todo' }, { to: 'done', mode: 'sync', force: true }]) {
+            const err = await controller
+                .transition(integration(null), TASK, body as never)
+                .catch((e: unknown) => e);
+            expect(err).toBeInstanceOf(IntegrationHttpException);
+            expect((err as IntegrationHttpException).code).toBe('domain_rule');
+        }
+        expect(service.transition).not.toHaveBeenCalled();
+        expect(service.syncTransition).not.toHaveBeenCalled();
+    });
+
+    it('a session keeps the single-edge move, and may opt into sync mode', async () => {
+        const { controller, service } = build();
+        await controller.transition(session, TASK, { to: 'todo' } as never);
+        expect(service.transition).toHaveBeenCalledWith(
+            OWNER,
+            TASK,
+            'todo',
+            { force: false },
+            scope,
+        );
+        await controller.transition(session, TASK, {
+            to: 'done',
+            mode: 'sync',
+            force: true,
+        } as never);
+        expect(service.syncTransition).toHaveBeenCalledWith(
+            OWNER,
+            TASK,
+            'done',
+            { force: true },
+            scope,
+        );
     });
 });
