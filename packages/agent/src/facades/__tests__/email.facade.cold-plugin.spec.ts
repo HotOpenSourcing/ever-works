@@ -696,7 +696,9 @@ describe('EmailFacadeService — inbound webhooks over a lazy email plugin (PLG-
                 const { rawBody } = postmarkWebhook('anything');
 
                 const unhandled = await collectUnhandled(async () => {
-                    await expect(facade.parseInbound('postmark', rawBody, {})).rejects.toMatchObject({
+                    await expect(
+                        facade.parseInbound('postmark', rawBody, {}),
+                    ).rejects.toMatchObject({
                         status: 401,
                         message: 'Invalid webhook signature',
                     });
@@ -721,7 +723,9 @@ describe('EmailFacadeService — inbound webhooks over a lazy email plugin (PLG-
                 );
 
                 const unhandled = await collectUnhandled(async () => {
-                    await expect(facade.parseInbound('mailgun', unsigned, {})).rejects.toMatchObject({
+                    await expect(
+                        facade.parseInbound('mailgun', unsigned, {}),
+                    ).rejects.toMatchObject({
                         status: 401,
                         message: 'Invalid webhook signature',
                     });
@@ -738,14 +742,20 @@ describe('EmailFacadeService — inbound webhooks over a lazy email plugin (PLG-
             it('postmark: the delivery-event webhook is refused the same way', async () => {
                 const facade = realWorld('postmark', {});
                 const event = Buffer.from(
-                    JSON.stringify({ RecordType: 'Delivery', MessageID: 'pm-1', Recipient: 'x@y.test' }),
+                    JSON.stringify({
+                        RecordType: 'Delivery',
+                        MessageID: 'pm-1',
+                        Recipient: 'x@y.test',
+                    }),
                 );
-                await expect(facade.parseEventWebhook('postmark', event, {})).rejects.toMatchObject({
-                    status: 401,
-                });
+                await expect(facade.parseEventWebhook('postmark', event, {})).rejects.toMatchObject(
+                    {
+                        status: 401,
+                    },
+                );
             });
 
-            it('accepts a webhook signed with the address owner\'s own secret', async () => {
+            it("accepts a webhook signed with the address owner's own secret", async () => {
                 const registry = createRegistry();
                 registerRealLazy(registry, new PostmarkPlugin());
                 const { service } = realSettings(registry, {
@@ -753,13 +763,16 @@ describe('EmailFacadeService — inbound webhooks over a lazy email plugin (PLG-
                 });
                 const facade = facadeFor(registry, service, addressesStub('postmark'));
 
+                // Only the owner has a secret (no admin, no env), so a
+                // success proves the webhook was verified at the owner scope.
                 const legit = postmarkWebhook('pm-owner');
                 await expect(
                     facade.parseInbound('postmark', legit.rawBody, legit.headers),
-                ).resolves.toMatchObject({
-                    providerMessageId: 'pm-in-1',
-                    authenticatedRecipient: { userId: OWNER_ID },
-                });
+                ).resolves.toMatchObject({ providerMessageId: 'pm-in-1' });
+                const forged = postmarkWebhook('pm-forged');
+                await expect(
+                    facade.parseInbound('postmark', forged.rawBody, forged.headers),
+                ).rejects.toMatchObject({ status: 401 });
             });
 
             it('accepts unsigned only under the explicit opt-out EMAIL_INBOUND_ALLOW_UNSIGNED=true', async () => {
@@ -768,7 +781,9 @@ describe('EmailFacadeService — inbound webhooks over a lazy email plugin (PLG-
                 try {
                     const facade = realWorld('postmark', {});
                     const { rawBody } = postmarkWebhook('anything');
-                    await expect(facade.parseInbound('postmark', rawBody, {})).resolves.toMatchObject({
+                    await expect(
+                        facade.parseInbound('postmark', rawBody, {}),
+                    ).resolves.toMatchObject({
                         providerMessageId: 'pm-in-1',
                     });
                     expect(warn).toHaveBeenCalledWith(

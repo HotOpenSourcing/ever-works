@@ -481,12 +481,12 @@ anyone who knew `POST /api/email/inbound/<pluginId>` could inject mail into a te
 
 Now **verification is mandatory**:
 
-| Secret at the resolved scope (owner → admin → env) | Request | Result |
-| --- | --- | --- |
-| configured | correctly signed | accepted (`202`) |
-| configured | unsigned / wrong signature | `401 Invalid webhook signature` |
-| **none** | anything | **`401 Invalid webhook signature`** (was: accepted) |
-| none, and `EMAIL_INBOUND_ALLOW_UNSIGNED=true` | anything | accepted, with a loud `console.warn` (operator opt-out) |
+| Secret at the resolved scope (owner → admin → env) | Request                    | Result                                                  |
+| -------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
+| configured                                         | correctly signed           | accepted (`202`)                                        |
+| configured                                         | unsigned / wrong signature | `401 Invalid webhook signature`                         |
+| **none**                                           | anything                   | **`401 Invalid webhook signature`** (was: accepted)     |
+| none, and `EMAIL_INBOUND_ALLOW_UNSIGNED=true`      | anything                   | accepted, with a loud `console.warn` (operator opt-out) |
 
 - Postmark secret: `inboundWebhookSecret` setting / `POSTMARK_INBOUND_SECRET` (HTTP Basic `postmark:<secret>`).
   Mailgun key: `webhookSigningKey` setting / `MAILGUN_WEBHOOK_SIGNING_KEY` (HMAC-SHA256 over `timestamp + token`).
