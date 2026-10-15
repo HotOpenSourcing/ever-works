@@ -74,8 +74,10 @@ a record with no team is organization-scoped. `private` records never leave Ever
 | GET    | `/whoami` | any           | `{keyId, keyName, tenant{id,slug}, organizations[{id,slug,displayName}], scopes[], apiVersion:"1", feedHead:"<seq>", limits{readsPerMin,writesPerMin}}` ([schema](./contract/schemas/resources/whoami.schema.json))                                                                                                                                                                   |
 | GET    | `/events` | `events:read` | `?after=<seq>&limit=≤1000&types=task.*,goal.*&excludeOrigin=gauzy:<id>` → `{events:[Envelope], nextCursor, hasMore, head}` ([schema](./contract/schemas/resources/events-page.schema.json)). Only pinned orgs, and never events of `private` aggregates except the id-only `*.visibility_changed` notice (below). A cursor older than retention → `410 cursor_expired` (full resync). |
 
-- Events come in ascending `seq`. `nextCursor` is the `seq` to pass as `after` next time; `head` is the newest `seq`
-  visible to the key. `seq` is a gap-free feed position assigned when Ever Works dispatches the event, so a consumer
+- Events come in ascending `seq`. `nextCursor` is the `seq` to pass as `after` next time; `head` is the newest feed
+  position overall. Positions are global across organizations, so `head` (and `whoami.feedHead`) is never below the
+  retention floor: a consumer that is caught up, or a quiet organization, can always continue from `head` without a
+  `410`. `seq` is a gap-free feed position assigned when Ever Works dispatches the event, so a consumer
   paging with `after` never misses a committed event (see [`domain-events`](../domain-events/spec.md) §2).
 - **Private records**: events of an aggregate that is `private` at event time are never served. The one exception is
   `<aggregate>.visibility_changed` **to** `private`: it is always served (for pinned orgs) with `data` reduced to

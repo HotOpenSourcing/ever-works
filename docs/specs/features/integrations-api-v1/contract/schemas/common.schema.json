@@ -122,6 +122,11 @@
 					"minLength": 1,
 					"maxLength": 100
 				},
+				"installationId": {
+					"description": "The integration installation (for Gauzy: the connection id), as in external_record_links. Optional; when omitted it is taken from X-Sync-Origin (`gauzy:<connectionId>` → `<connectionId>`), else null.",
+					"type": ["string", "null"],
+					"maxLength": 200
+				},
 				"externalId": {
 					"type": "string",
 					"minLength": 1,

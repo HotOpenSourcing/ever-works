@@ -29,7 +29,7 @@ const UNICODE_BODY = JSON.stringify({
 const sign = (secret, t, body) => hmac(secret, `${t}.${body}`);
 const header = (t, ...sigs) => `t=${t},${sigs.map((s) => `v1=${s}`).join(',')}`;
 
-const v = [];
+let v = [];
 const add = (o) => v.push({ toleranceSeconds: TOL, ...o });
 
 const good = sign(SECRET, T, BODY);
