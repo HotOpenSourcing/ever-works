@@ -107,7 +107,10 @@ export const SENTRY_DATA_COLLECTION = {
 };
 
 export const createSentryConfig = (config?: SentryConfig): any => {
-    const { profilesSampleRate, ...rest } = config ?? {};
+    // Pull out the fields resolved below so an explicit `undefined` in `rest`
+    // cannot overwrite the computed value.
+    const { profilesSampleRate, profileSessionSampleRate, beforeSendSpan: callerBeforeSendSpan, ...rest } =
+        config ?? {};
     const defaultConfig = {
         dsn: process.env.SENTRY_DSN,
         environment: process.env.NODE_ENV || 'development',
@@ -116,7 +119,9 @@ export const createSentryConfig = (config?: SentryConfig): any => {
         // lifecycle profile the sampled root spans, as the old option did. A
         // caller's legacy `profilesSampleRate` still sets the session rate.
         profileSessionSampleRate:
-            profilesSampleRate ?? (process.env.NODE_ENV === 'production' ? 0.1 : 1.0),
+            profileSessionSampleRate ??
+            profilesSampleRate ??
+            (process.env.NODE_ENV === 'production' ? 0.1 : 1.0),
         profileLifecycle: 'trace' as const,
         // v11 removed `enableLogs`: logs are sent whenever `Sentry.logger.*` is
         // called (SentryService does), so there is nothing left to switch on.
@@ -137,9 +142,11 @@ export const createSentryConfig = (config?: SentryConfig): any => {
             return redactSentryEventUrls(event);
         },
         // Streamed-span replacement for the redaction `beforeSendTransaction`
-        // used to do on the transaction.
+        // used to do on the transaction. A caller's own `beforeSendSpan` runs
+        // first and cannot switch the redaction off.
         beforeSendSpan(span: any) {
-            return redactSentrySpanUrls(span);
+            const result = callerBeforeSendSpan ? callerBeforeSendSpan(span) : span;
+            return redactSentrySpanUrls(result ?? span);
         },
     };
 
