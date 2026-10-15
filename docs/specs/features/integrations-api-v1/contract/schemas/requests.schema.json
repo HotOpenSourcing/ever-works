@@ -1,0 +1,330 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "https://ever.works/schemas/integrations/v1/requests.schema.json",
+	"title": "P1 request bodies (contract v1, B.5/B.6)",
+	"description": "Bodies of the P1 write routes. Unknown properties answer 400 validation_failed. PUT set routes replace the whole set and answer the parent DTO. Every POST that creates something needs an Idempotency-Key header; every write should send X-Sync-Origin.",
+	"$defs": {
+		"WritableVisibility": {
+			"description": "Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.",
+			"type": "string",
+			"enum": ["team", "organization"]
+		},
+		"CreateTeam": {
+			"description": "POST /teams",
+			"type": "object",
+			"required": ["name"],
+			"properties": {
+				"name": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,99}$" },
+				"description": { "type": ["string", "null"], "maxLength": 5000 },
+				"parentTeamId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"avatarIcon": { "type": ["string", "null"], "maxLength": 100 },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateTeam": {
+			"description": "PATCH /teams/:id (If-Match optional)",
+			"type": "object",
+			"minProperties": 1,
+			"properties": {
+				"name": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"description": { "type": ["string", "null"], "maxLength": 5000 },
+				"parentTeamId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"avatarIcon": { "type": ["string", "null"], "maxLength": 100 }
+			},
+			"additionalProperties": false
+		},
+		"PutTeamMembers": {
+			"description": "PUT /teams/:id/members — the full member set.",
+			"type": "object",
+			"required": ["members"],
+			"properties": {
+				"members": {
+					"type": "array",
+					"maxItems": 500,
+					"items": { "$ref": "resources/team.schema.json#/$defs/TeamMemberRef" }
+				}
+			},
+			"additionalProperties": false
+		},
+		"PutTeamResources": {
+			"description": "PUT /teams/:id/resources — the full resource set.",
+			"type": "object",
+			"required": ["resources"],
+			"properties": {
+				"resources": {
+					"type": "array",
+					"maxItems": 5000,
+					"items": { "$ref": "resources/team.schema.json#/$defs/TeamResourceRef" }
+				}
+			},
+			"additionalProperties": false
+		},
+		"CreateTask": {
+			"description": "POST /tasks. Status on create may only be backlog (default) or todo; later moves go through /transition.",
+			"type": "object",
+			"required": ["title"],
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"description": { "type": ["string", "null"], "maxLength": 100000 },
+				"status": { "type": "string", "enum": ["backlog", "todo"] },
+				"priority": { "type": "string", "enum": ["p0", "p1", "p2", "p3", "p4"] },
+				"labels": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "type": "string", "minLength": 1, "maxLength": 80 }
+				},
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" },
+				"workId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"missionId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"ideaId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"parentTaskId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"assignees": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "$ref": "resources/task.schema.json#/$defs/PrincipalRef" }
+				},
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateTask": {
+			"description": "PATCH /tasks/:id (If-Match optional). No `status` here: use /transition.",
+			"type": "object",
+			"minProperties": 1,
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"description": { "type": ["string", "null"], "maxLength": 100000 },
+				"priority": { "type": "string", "enum": ["p0", "p1", "p2", "p3", "p4"] },
+				"labels": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "type": "string", "minLength": 1, "maxLength": 80 }
+				},
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" },
+				"workId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"parentTaskId": { "$ref": "common.schema.json#/$defs/NullableUuid" }
+			},
+			"additionalProperties": false
+		},
+		"TransitionTask": {
+			"description": "POST /tasks/:id/transition. mode 'sync' walks the shortest legal path through ALLOWED_TRANSITIONS; each hop records task.transitioned; gates fail with 409 transition_blocked.",
+			"type": "object",
+			"required": ["to", "mode"],
+			"properties": {
+				"to": { "$ref": "resources/task.schema.json#/$defs/TaskStatus" },
+				"mode": { "const": "sync" }
+			},
+			"additionalProperties": false
+		},
+		"PutTaskAssignees": {
+			"description": "PUT /tasks/:id/assignees — the full set.",
+			"type": "object",
+			"required": ["assignees"],
+			"properties": {
+				"assignees": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "$ref": "resources/task.schema.json#/$defs/PrincipalRef" }
+				}
+			},
+			"additionalProperties": false
+		},
+		"PutTaskWatchers": {
+			"description": "PUT /tasks/:id/watchers — the full set of watcher user ids.",
+			"type": "object",
+			"required": ["userIds"],
+			"properties": {
+				"userIds": {
+					"type": "array",
+					"maxItems": 200,
+					"items": { "$ref": "common.schema.json#/$defs/Uuid" },
+					"uniqueItems": true
+				}
+			},
+			"additionalProperties": false
+		},
+		"PutTaskBlocks": {
+			"description": "PUT /tasks/:id/blocks — the full set of blocking task ids. A cycle answers 422 domain_rule.",
+			"type": "object",
+			"required": ["blockedBy"],
+			"properties": {
+				"blockedBy": {
+					"type": "array",
+					"maxItems": 200,
+					"items": { "$ref": "common.schema.json#/$defs/Uuid" },
+					"uniqueItems": true
+				}
+			},
+			"additionalProperties": false
+		},
+		"PutTaskRelations": {
+			"description": "PUT /tasks/:id/relations — the full set.",
+			"type": "object",
+			"required": ["relations"],
+			"properties": {
+				"relations": {
+					"type": "array",
+					"maxItems": 200,
+					"items": {
+						"type": "object",
+						"required": ["taskId", "kind"],
+						"properties": {
+							"taskId": { "$ref": "common.schema.json#/$defs/Uuid" },
+							"kind": { "type": "string", "enum": ["related", "duplicates", "follow-up"] }
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"CreateComment": {
+			"description": "POST /tasks/:id/comments. With X-Act-As-User the author is that user; without it authorType=integration and externalAuthor is shown.",
+			"type": "object",
+			"required": ["body"],
+			"properties": {
+				"body": { "type": "string", "minLength": 1, "maxLength": 50000 },
+				"externalAuthor": {
+					"type": "object",
+					"required": ["name"],
+					"properties": {
+						"name": { "type": "string", "minLength": 1, "maxLength": 200 },
+						"avatarUrl": { "type": ["string", "null"], "maxLength": 2048 },
+						"source": { "type": "string", "maxLength": 100 }
+					},
+					"additionalProperties": false
+				},
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateComment": {
+			"description": "PATCH /tasks/:id/comments/:cid. Integration-authored comments have no edit window; act-as user comments follow the 5-minute window.",
+			"type": "object",
+			"required": ["body"],
+			"properties": {
+				"body": { "type": "string", "minLength": 1, "maxLength": 50000 }
+			},
+			"additionalProperties": false
+		},
+		"PutLink": {
+			"description": "PUT /links/:entityType/:entityId. `source` comes from the key's integrationKind (ever-gauzy → gauzy).",
+			"type": "object",
+			"required": ["externalId"],
+			"properties": {
+				"externalId": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"externalUrl": { "type": ["string", "null"], "format": "uri", "maxLength": 2048 },
+				"installationId": { "type": ["string", "null"], "maxLength": 200 }
+			},
+			"additionalProperties": false
+		},
+		"CreateWebhook": {
+			"description": "POST /webhooks → webhook-subscription DTO with `secret` (returned once).",
+			"type": "object",
+			"required": ["url", "events", "organizationIds"],
+			"properties": {
+				"url": { "type": "string", "format": "uri", "maxLength": 2048 },
+				"events": {
+					"type": "array",
+					"minItems": 1,
+					"maxItems": 200,
+					"items": { "type": "string", "maxLength": 64 }
+				},
+				"organizationIds": {
+					"type": "array",
+					"minItems": 1,
+					"items": { "$ref": "common.schema.json#/$defs/Uuid" }
+				},
+				"excludeOriginTags": {
+					"type": "array",
+					"maxItems": 20,
+					"items": { "type": "string", "maxLength": 100 }
+				},
+				"description": { "type": ["string", "null"], "maxLength": 500 }
+			},
+			"additionalProperties": false
+		},
+		"UpdateWebhook": {
+			"description": "PATCH /webhooks/:id. status active resumes (v2), paused pauses.",
+			"type": "object",
+			"minProperties": 1,
+			"properties": {
+				"url": { "type": "string", "format": "uri", "maxLength": 2048 },
+				"events": {
+					"type": "array",
+					"minItems": 1,
+					"maxItems": 200,
+					"items": { "type": "string", "maxLength": 64 }
+				},
+				"organizationIds": {
+					"type": "array",
+					"minItems": 1,
+					"items": { "$ref": "common.schema.json#/$defs/Uuid" }
+				},
+				"excludeOriginTags": {
+					"type": "array",
+					"maxItems": 20,
+					"items": { "type": "string", "maxLength": 100 }
+				},
+				"description": { "type": ["string", "null"], "maxLength": 500 },
+				"status": { "type": "string", "enum": ["active", "paused"] }
+			},
+			"additionalProperties": false
+		},
+		"Batch": {
+			"description": "POST /batch: at most 100 operations, executed in order, not atomic. Each operation counts against limits. Response: BatchResult.",
+			"type": "object",
+			"required": ["operations"],
+			"properties": {
+				"operations": {
+					"type": "array",
+					"minItems": 1,
+					"maxItems": 100,
+					"items": {
+						"type": "object",
+						"required": ["method", "path"],
+						"properties": {
+							"method": { "type": "string", "enum": ["GET", "POST", "PATCH", "PUT", "DELETE"] },
+							"path": {
+								"description": "Relative to /api/integrations/v1, e.g. /tasks/<id>.",
+								"type": "string",
+								"pattern": "^/(?!batch)"
+							},
+							"headers": {
+								"description": "Per-operation Idempotency-Key, If-Match, X-Act-As-User. Auth and X-Scope-Slug come from the outer request.",
+								"type": "object",
+								"additionalProperties": { "type": "string" }
+							},
+							"body": {}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"additionalProperties": false
+		},
+		"BatchResult": {
+			"type": "object",
+			"required": ["results"],
+			"properties": {
+				"results": {
+					"type": "array",
+					"items": {
+						"type": "object",
+						"required": ["status", "body"],
+						"properties": {
+							"status": { "type": "integer", "minimum": 100, "maximum": 599 },
+							"body": {}
+						},
+						"additionalProperties": false
+					}
+				}
+			},
+			"additionalProperties": false
+		}
+	}
+}
