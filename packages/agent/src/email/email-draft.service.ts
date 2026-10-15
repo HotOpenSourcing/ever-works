@@ -10,7 +10,7 @@ import { EMAIL_MAX_FAILURE_REASON_CHARS } from '@ever-works/contracts';
 import { AgentApprovalsService } from '../agent-approvals/agent-approvals.service';
 import type { EmailMessage } from '../entities/email-message.entity';
 import { EmailMessageRepository } from '../database/repositories/email-message.repository';
-import { EmailFacadeService } from '../facades/email.facade';
+import { EmailFacadeService, threadingFieldsOf } from '../facades/email.facade';
 import { EmailSendCapExceededException } from './email-send-cap-exceeded.exception';
 import { EmailSendPolicyService } from './email-send-policy.service';
 
@@ -42,6 +42,12 @@ export interface SubmitAgentEmailInput {
     workId?: string;
     taskId?: string;
     runId?: string;
+    /**
+     * EW-P4-3 — RFC threading headers (`In-Reply-To` / `References`) when the
+     * message replies to an earlier one. A held draft keeps them on its row,
+     * so the release still threads.
+     */
+    headers?: Readonly<Record<string, string>>;
 }
 
 export type SubmitAgentEmailResult =
@@ -101,6 +107,7 @@ export class EmailDraftService {
                     bodyText: input.bodyText,
                     bodyHtml: input.bodyHtml,
                     messageRef: input.messageRef,
+                    headers: input.headers,
                 },
                 {
                     userId: input.userId,
@@ -113,6 +120,10 @@ export class EmailDraftService {
             );
             return { held: false, result };
         }
+
+        // EW-P4-3 — what the draft replies to; its own Message-ID is set when
+        // it is released (the send that actually goes out).
+        const replyThreading = input.headers ? threadingFieldsOf(input.headers) : null;
 
         const draft = await this.messages.save({
             userId: input.userId,
@@ -132,6 +143,8 @@ export class EmailDraftService {
             bodyHtml: input.bodyHtml ?? null,
             metadata: null,
             messageRef: input.messageRef,
+            inReplyTo: replyThreading?.inReplyTo ?? null,
+            references: replyThreading?.references ?? null,
             sentAt: null,
             deliveryStatus: null,
             status: 'draft',
@@ -222,6 +235,8 @@ export class EmailDraftService {
                     bodyText: draft.bodyText,
                     bodyHtml: draft.bodyHtml ?? undefined,
                     messageRef: draft.messageRef ?? `draft-${draft.id}`,
+                    // EW-P4-3 — a held reply still threads when released.
+                    headers: draftReplyHeaders(draft),
                 },
                 {
                     userId,
@@ -378,4 +393,18 @@ function draftTitle(to: readonly string[], subject: string): string {
 
 function describe(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * EW-P4-3 — the `In-Reply-To` / `References` a held draft was written with,
+ * rebuilt from its row for the release. `undefined` when it replies to
+ * nothing.
+ */
+function draftReplyHeaders(draft: EmailMessage): Record<string, string> | undefined {
+    const headers: Record<string, string> = {};
+    if (draft.inReplyTo) headers['In-Reply-To'] = `<${draft.inReplyTo}>`;
+    if (draft.references?.length) {
+        headers.References = draft.references.map((id) => `<${id}>`).join(' ');
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
 }

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, MoreThan, MoreThanOrEqual, Repository, type FindOptionsWhere } from 'typeorm';
+import { In, IsNull, MoreThan, MoreThanOrEqual, Repository, type FindOptionsWhere } from 'typeorm';
 import type { EmailMessageStatus } from '@ever-works/contracts';
 import { AgentActionProposal } from '../../entities/agent-action-proposal.entity';
 import { EmailMessage, EmailMessageDirection } from '../../entities/email-message.entity';
@@ -165,6 +165,30 @@ export class EmailMessageRepository {
         });
     }
 
+    /**
+     * EW-P4-3 — RFC threading: this owner's messages whose `Message-ID` is one
+     * of `ids` (bare ids, see `normalizeMessageId`). Owner-scoped: a header is
+     * sender-written, so a reply can never thread into another owner's mail.
+     * Newest first; callers rank by the order of `ids` themselves.
+     */
+    async findByMessageIdHeaders(userId: string, ids: readonly string[]): Promise<EmailMessage[]> {
+        if (ids.length === 0) return [];
+        return this.repository.find({
+            where: { userId, messageIdHeader: In([...ids]) },
+            order: { createdAt: 'DESC' },
+            take: 100,
+        });
+    }
+
+    /**
+     * EW-P4-3 — link a message to the Task it spawned or joined. Only fills an
+     * EMPTY link: a message already bound to a Task keeps it.
+     */
+    async linkTask(id: string, taskId: string): Promise<boolean> {
+        const result = await this.repository.update({ id, taskId: IsNull() }, { taskId });
+        return (result.affected ?? 0) > 0;
+    }
+
     async findByUser(
         userId: string,
         options: EmailMessageQueryOptions = {},
@@ -318,6 +342,9 @@ export class EmailMessageRepository {
                 | 'sentAt'
                 | 'deliveryStatus'
                 | 'pluginId'
+                | 'messageIdHeader'
+                | 'inReplyTo'
+                | 'references'
             >
         > = {},
     ): Promise<number> {

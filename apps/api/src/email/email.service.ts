@@ -9,6 +9,7 @@ import {
     IsObject,
     IsOptional,
     IsString,
+    IsUUID,
     MaxLength,
     ValidateNested,
 } from 'class-validator';
@@ -22,7 +23,7 @@ import {
     AgentInboxRepository,
 } from '@ever-works/agent/database';
 import type { TenantEmailAddress, EmailAddressDirection } from '@ever-works/agent/entities';
-import { EmailFacadeService } from '@ever-works/agent/facades';
+import { EmailFacadeService, replyHeadersFor } from '@ever-works/agent/facades';
 import { EmailDraftService } from '@ever-works/agent/email';
 import type { EmailSendOrigin } from '@ever-works/contracts';
 
@@ -131,6 +132,15 @@ export class SendMessageInput {
     @IsString()
     @MaxLength(256)
     readonly fromAddressId?: string;
+
+    /**
+     * EW-P4-3 — reply in thread: the `email_messages.id` (one of the caller's
+     * own messages) this message answers. Sets `In-Reply-To` / `References`
+     * from it, so the recipient's mail client threads the reply.
+     */
+    @IsOptional()
+    @IsUUID()
+    readonly inReplyToMessageId?: string;
 }
 
 /**
@@ -329,6 +339,19 @@ export class EmailService {
         const messageRef = `compose-${input.agentId}-${Date.now()}`;
         const origin: EmailSendOrigin = options.origin ?? 'human';
 
+        // EW-P4-3 — reply in thread. Owner-scoped: a message of another
+        // account answers 404, exactly like a missing one.
+        let headers: Record<string, string> | undefined;
+        let replyTaskId: string | undefined;
+        if (input.inReplyToMessageId) {
+            const parent = await this.messages.findByIdAndUserId(input.inReplyToMessageId, userId);
+            if (!parent) throw new NotFoundException('Message to reply to not found');
+            const replyHeaders = replyHeadersFor(parent);
+            headers = Object.keys(replyHeaders).length > 0 ? replyHeaders : undefined;
+            // The reply belongs to the same Task as the message it answers.
+            replyTaskId = parent.taskId ?? undefined;
+        }
+
         // AW-05 — an Agent's message goes through the draft loop, which
         // either sends it (inbox sends on its own) or holds it for a person.
         if (origin === 'agent' && this.drafts) {
@@ -345,6 +368,8 @@ export class EmailService {
                 bodyHtml,
                 messageRef,
                 runId: options.runId,
+                taskId: replyTaskId,
+                headers,
             });
             if (outcome.held === false) {
                 return { messageRef, ...outcome.result };
@@ -369,8 +394,9 @@ export class EmailService {
                 bodyText,
                 bodyHtml,
                 messageRef,
+                headers,
             },
-            { userId, agentId: input.agentId, addressId: address.id, origin },
+            { userId, agentId: input.agentId, addressId: address.id, origin, taskId: replyTaskId },
         );
         return { messageRef, ...result };
     }

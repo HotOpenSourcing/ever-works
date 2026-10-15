@@ -61,6 +61,10 @@ export interface EmailSendReservationRow {
     readonly bodyHtml: string | null;
     readonly metadata: Record<string, unknown> | null;
     readonly messageRef: string | null;
+    /** EW-P4-3 — RFC threading ids the send carries (bare). */
+    readonly messageIdHeader?: string | null;
+    readonly inReplyTo?: string | null;
+    readonly references?: string[] | null;
 }
 
 /**

@@ -209,6 +209,12 @@ describe('EmailFacadeService.send — send policy gate (AW-05)', () => {
                         bodyHtml: null,
                         metadata: null,
                         messageRef: 'ref-1',
+                        // EW-P4-3 — the reservation records the RFC threading ids too.
+                        messageIdHeader: expect.stringMatching(
+                            /^[0-9a-f-]{36}@agents\.example\.com$/,
+                        ),
+                        inReplyTo: null,
+                        references: null,
                     },
                 },
             );
