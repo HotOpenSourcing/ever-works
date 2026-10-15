@@ -54,7 +54,15 @@ describe('DomainEventFeedService', () => {
         const page = await feed.readPage({ organizationIds: [ORG_A], after: '0' });
         expect(page.events.map((event) => event.seq)).toEqual(['1', '3']);
         expect(page.events.every((event) => event.organizationId === ORG_A)).toBe(true);
-        expect(page).toMatchObject({ head: '4', hasMore: false, nextCursor: '3' });
+        // Nothing after 3 is ORG_A's, so the cursor moves straight to the head.
+        expect(page).toMatchObject({ head: '4', hasMore: false, nextCursor: '4' });
+    });
+
+    it('moves a quiet organization’s cursor to the head, so it never falls below the retention floor', async () => {
+        await recordMany(dataSource, 3, () => ({ organizationId: ORG_B }));
+        await dispatch();
+        const page = await feed.readPage({ organizationIds: [ORG_A], after: '0' });
+        expect(page).toEqual({ events: [], nextCursor: '3', hasMore: false, head: '3' });
     });
 
     it('never serves personal-scope events', async () => {

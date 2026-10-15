@@ -62,7 +62,8 @@ const MAX_SCAN = 5000;
  *  - `after` below the retention floor → {@link DomainEventCursorExpiredError}.
  *
  * `nextCursor` is the last SCANNED position, not the last returned one, so a
- * page that filtered rows out still moves the consumer forward.
+ * page that filtered rows out still moves the consumer forward; when nothing is
+ * left for the caller's organizations it is the head itself.
  */
 @Injectable()
 export class DomainEventFeedService {
@@ -117,6 +118,11 @@ export class DomainEventFeedService {
             }
         }
 
+        // Nothing left for these organizations up to the head read above: move the
+        // consumer to the head, so a quiet organization's cursor keeps up with the
+        // retention floor instead of expiring with nothing missed. Safe because every
+        // position <= head was assigned and committed before `head` was read.
+        if (exhausted && head > cursor) cursor = head;
         const hasMore = !exhausted && cursor < head;
         const moved = cursor > after;
         return {
