@@ -1,10 +1,12 @@
 // Mock Sentry SDK and the profiling integration BEFORE importing the module.
 const sentryInitMock = jest.fn();
 const profilingIntegrationMock = jest.fn(() => ({ name: 'ProfilingIntegration' }));
+const httpIntegrationMock = jest.fn((options: any) => ({ name: 'Http', options }));
 
 jest.mock('@sentry/nestjs', () => {
     const original = {
         init: sentryInitMock,
+        httpIntegration: httpIntegrationMock,
         captureException: jest.fn(),
         captureMessage: jest.fn(),
         setUser: jest.fn(),
@@ -27,7 +29,13 @@ jest.mock('@sentry/profiling-node', () => ({
     nodeProfilingIntegration: profilingIntegrationMock,
 }));
 
-import { createSentryConfig, initSentry, getSentryInstance } from '../sentry.config';
+import {
+    createSentryConfig,
+    initSentry,
+    getSentryInstance,
+    isAuthPath,
+    SENTRY_DATA_COLLECTION,
+} from '../sentry.config';
 
 describe('sentry.config', () => {
     let originalEnv: NodeJS.ProcessEnv;
@@ -38,6 +46,7 @@ describe('sentry.config', () => {
         delete process.env.NODE_ENV;
         sentryInitMock.mockClear();
         profilingIntegrationMock.mockClear();
+        httpIntegrationMock.mockClear();
     });
 
     afterEach(() => {
@@ -52,10 +61,17 @@ describe('sentry.config', () => {
             expect(cfg.dsn).toBe('https://example@sentry.io/1');
             expect(cfg.environment).toBe('development');
             expect(cfg.tracesSampleRate).toBe(1.0);
-            expect(cfg.profilesSampleRate).toBe(1.0);
-            expect(cfg.enableLogs).toBe(true);
+            // Sentry v11: profilesSampleRate -> profileSessionSampleRate + trace lifecycle.
+            expect(cfg.profileSessionSampleRate).toBe(1.0);
+            expect(cfg.profileLifecycle).toBe('trace');
+            expect(cfg.profilesSampleRate).toBeUndefined();
+            // Sentry v11 removed enableLogs (logs follow Sentry.logger usage).
+            expect(cfg.enableLogs).toBeUndefined();
+            // v11 no longer runs beforeSendTransaction; /auth is dropped by the HTTP integration.
+            expect(cfg.beforeSendTransaction).toBeUndefined();
             expect(Array.isArray(cfg.integrations)).toBe(true);
             expect(profilingIntegrationMock).toHaveBeenCalledTimes(1);
+            expect(httpIntegrationMock).toHaveBeenCalledTimes(1);
         });
 
         it('uses 0.1 sample rates when NODE_ENV=production', () => {
@@ -63,7 +79,7 @@ describe('sentry.config', () => {
             process.env.NODE_ENV = 'production';
             const cfg = createSentryConfig();
             expect(cfg.tracesSampleRate).toBe(0.1);
-            expect(cfg.profilesSampleRate).toBe(0.1);
+            expect(cfg.profileSessionSampleRate).toBe(0.1);
             expect(cfg.environment).toBe('production');
         });
 
@@ -85,23 +101,52 @@ describe('sentry.config', () => {
             expect(cfg.enableLogs).toBe(false);
         });
 
+        it('maps a caller-supplied legacy profilesSampleRate onto profileSessionSampleRate', () => {
+            const cfg = createSentryConfig({ profilesSampleRate: 0.25 });
+            expect(cfg.profileSessionSampleRate).toBe(0.25);
+            expect(cfg.profilesSampleRate).toBeUndefined();
+        });
+
+        it('keeps the v10 privacy baseline: dataCollection is set explicitly, not left to the permissive v11 default', () => {
+            const cfg = createSentryConfig();
+            expect(cfg.dataCollection).toBe(SENTRY_DATA_COLLECTION);
+            expect(cfg.dataCollection.userInfo).toBe(false);
+            expect(cfg.dataCollection.cookies).toBe(false);
+            expect(cfg.dataCollection.httpBodies).toEqual([]);
+            expect(cfg.dataCollection.databaseQueryData).toBe(false);
+            expect(cfg.dataCollection.genAI).toEqual({ inputs: false, outputs: false });
+            expect(cfg.dataCollection.queues).toBe(false);
+            expect(cfg.dataCollection.graphQL).toEqual({ document: false, variables: false });
+            expect(cfg.dataCollection.httpHeaders.request.deny).toEqual(
+                expect.arrayContaining(['forwarded', '-ip', 'remote-', 'via', '-user']),
+            );
+        });
+
+        it('drops incoming /auth requests before a span exists (httpIntegration ignoreIncomingRequests)', () => {
+            createSentryConfig();
+            const ignore = httpIntegrationMock.mock.calls[0][0].ignoreIncomingRequests;
+            expect(ignore('/auth')).toBe(true);
+            expect(ignore('/auth/login')).toBe(true);
+            expect(ignore('/auth/refresh?redirect=/works')).toBe(true);
+            expect(ignore('/authentication/status')).toBe(false);
+            expect(ignore('/works?next=/auth/login')).toBe(false);
+            expect(ignore('/works')).toBe(false);
+            expect(ignore('')).toBe(false);
+        });
+
+        it('isAuthPath is path-anchored', () => {
+            expect(isAuthPath('/auth')).toBe(true);
+            expect(isAuthPath('/auth/x#frag')).toBe(true);
+            expect(isAuthPath('/authx')).toBe(false);
+            expect(isAuthPath(undefined)).toBe(false);
+        });
+
         it('beforeSend filters out /auth events but keeps others', () => {
             const cfg = createSentryConfig();
             expect(
                 cfg.beforeSend({ request: { url: 'https://api.example/auth/login' } }),
             ).toBeNull();
             const kept = cfg.beforeSend({ request: { url: 'https://api.example/works' } });
-            expect(kept).toEqual({ request: { url: 'https://api.example/works' } });
-        });
-
-        it('beforeSendTransaction filters out /auth transactions but keeps others', () => {
-            const cfg = createSentryConfig();
-            expect(
-                cfg.beforeSendTransaction({ request: { url: 'https://api.example/auth/refresh' } }),
-            ).toBeNull();
-            const kept = cfg.beforeSendTransaction({
-                request: { url: 'https://api.example/works' },
-            });
             expect(kept).toEqual({ request: { url: 'https://api.example/works' } });
         });
 
@@ -121,20 +166,13 @@ describe('sentry.config', () => {
             expect(cfg.beforeSend(malformedKept)).toBe(malformedKept);
         });
 
-        it('beforeSendTransaction uses path-anchored /auth matching (not substring includes)', () => {
-            const cfg = createSentryConfig();
-            const authn = { request: { url: 'https://api.example/authentication/status' } };
-            expect(cfg.beforeSendTransaction(authn)).toBe(authn);
-            expect(
-                cfg.beforeSendTransaction({ request: { url: 'https://api.example/auth/refresh' } }),
-            ).toBeNull();
-        });
-
         it('beforeSend tolerates events without a request.url', () => {
             const cfg = createSentryConfig();
             const ev = { level: 'error' };
             expect(cfg.beforeSend(ev)).toBe(ev);
-            expect(cfg.beforeSendTransaction(ev)).toBe(ev);
+            const span = { name: 'GET /works', attributes: {} };
+            expect(cfg.beforeSendSpan(span)).toBe(span);
+            expect(cfg.beforeSendSpan(null)).toBeNull();
         });
         it('redacts share tokens from the request URL, transaction name and breadcrumbs', () => {
             const cfg = createSentryConfig();
@@ -151,11 +189,19 @@ describe('sentry.config', () => {
             expect(JSON.stringify(sent)).not.toContain(token);
             expect(sent.request.url).toBe('https://app.example/en/share/[redacted]');
 
-            const transaction = cfg.beforeSendTransaction({
-                request: { url: `https://app.example/share/${token}` },
-                transaction: `GET /share/${token}`,
+            // Sentry v11 streams spans: the redaction now runs in beforeSendSpan.
+            const span = cfg.beforeSendSpan({
+                name: `GET /share/${token}`,
+                is_segment: true,
+                attributes: {
+                    'url.full': `https://app.example/share/${token}`,
+                    'url.path': `/share/${token}`,
+                    'http.target': `/share/${token}`,
+                    'sentry.op': 'http.server',
+                },
             });
-            expect(JSON.stringify(transaction)).not.toContain(token);
+            expect(JSON.stringify(span)).not.toContain(token);
+            expect(span.attributes['sentry.op']).toBe('http.server');
         });
     });
 
