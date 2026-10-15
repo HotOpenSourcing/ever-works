@@ -98,15 +98,19 @@ describe('MailgunPlugin', () => {
 	// inject mail). Only the explicit operator opt-out accepts it.
 	describe('verifyWebhookSignature with no signing key configured', () => {
 		const savedOptOut = process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+		const savedSigningKey = process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
 		const unsigned = Buffer.from(JSON.stringify({ timestamp: '1', token: 't', signature: 'whatever' }));
 
 		beforeEach(() => {
 			delete process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+			delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
 		});
 
 		afterEach(() => {
 			if (savedOptOut === undefined) delete process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
 			else process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = savedOptOut;
+			if (savedSigningKey === undefined) delete process.env.MAILGUN_WEBHOOK_SIGNING_KEY;
+			else process.env.MAILGUN_WEBHOOK_SIGNING_KEY = savedSigningKey;
 		});
 
 		it('refuses an unsigned (or unverifiable) webhook', () => {
