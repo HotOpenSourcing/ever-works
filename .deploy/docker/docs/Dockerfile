@@ -73,7 +73,8 @@ RUN NODE_OPTIONS="--max-old-space-size=8192" pnpm --filter ever-works-docs build
 RUN pnpm --filter ever-works-docs check:nul-bytes
 
 #-- Runtime: nginx serving the static build output
-FROM nginx:1.27-alpine
+# 1.31 is nginx's current mainline; the 1.27-alpine tag was last rebuilt in April 2025.
+FROM nginx:1.31-alpine
 
 # Copy nginx config tuned for an SPA with locale subpaths
 COPY .deploy/docker/docs/nginx.conf /etc/nginx/conf.d/default.conf

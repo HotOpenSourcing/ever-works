@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { JSX } from 'react';
 import { useThemeConfig } from '@docusaurus/theme-common';
 import type { Props } from '@theme/Footer/Copyright';
 
