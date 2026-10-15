@@ -113,25 +113,41 @@ describe('sentry.config', () => {
 
         it('an explicit undefined profileSessionSampleRate keeps the computed fallback (review fix)', () => {
             process.env.NODE_ENV = 'production';
-            expect(createSentryConfig({ profileSessionSampleRate: undefined }).profileSessionSampleRate).toBe(0.1);
+            expect(
+                createSentryConfig({ profileSessionSampleRate: undefined })
+                    .profileSessionSampleRate,
+            ).toBe(0.1);
             expect(
                 createSentryConfig({ profileSessionSampleRate: undefined, profilesSampleRate: 0.3 })
                     .profileSessionSampleRate,
             ).toBe(0.3);
-            expect(createSentryConfig({ profileSessionSampleRate: 0.05, profilesSampleRate: 0.3 }).profileSessionSampleRate).toBe(0.05);
+            expect(
+                createSentryConfig({ profileSessionSampleRate: 0.05, profilesSampleRate: 0.3 })
+                    .profileSessionSampleRate,
+            ).toBe(0.05);
         });
 
         it('a caller beforeSendSpan runs first and cannot switch the URL redaction off (review fix)', () => {
             const token = 'Zb3kQ9x_T1-vYwP0aLmN8cR4sD6fG2hJ5kL7qW9eR1t';
-            const callerHook = jest.fn((span: any) => ({ ...span, attributes: { ...span.attributes, extra: 'kept' } }));
+            const callerHook = jest.fn((span: any) => ({
+                ...span,
+                attributes: { ...span.attributes, extra: 'kept' },
+            }));
             const cfg = createSentryConfig({ beforeSendSpan: callerHook });
-            const out = cfg.beforeSendSpan({ name: `GET /share/${token}`, attributes: { 'url.path': `/share/${token}` } });
+            const out = cfg.beforeSendSpan({
+                name: `GET /share/${token}`,
+                attributes: { 'url.path': `/share/${token}` },
+            });
             expect(callerHook).toHaveBeenCalledTimes(1);
             expect(out.attributes.extra).toBe('kept');
             expect(JSON.stringify(out)).not.toContain(token);
             // A caller returning null (which Sentry ignores) still yields the redacted original.
             const cfg2 = createSentryConfig({ beforeSendSpan: () => null });
-            expect(JSON.stringify(cfg2.beforeSendSpan({ name: `GET /share/${token}`, attributes: {} }))).not.toContain(token);
+            expect(
+                JSON.stringify(
+                    cfg2.beforeSendSpan({ name: `GET /share/${token}`, attributes: {} }),
+                ),
+            ).not.toContain(token);
         });
 
         it('keeps the v10 privacy baseline: dataCollection is set explicitly, not left to the permissive v11 default', () => {
@@ -171,7 +187,9 @@ describe('sentry.config', () => {
             expect(ignore('/api/works?next=/api/auth/login')).toBe(false);
             expect(ignore('/api/works')).toBe(false);
             const cfg = createSentryConfig();
-            expect(cfg.beforeSend({ request: { url: 'https://api.example/api/auth/register' } })).toBeNull();
+            expect(
+                cfg.beforeSend({ request: { url: 'https://api.example/api/auth/register' } }),
+            ).toBeNull();
             const kept = { request: { url: 'https://api.example/api/authentication' } };
             expect(cfg.beforeSend(kept)).toBe(kept);
         });

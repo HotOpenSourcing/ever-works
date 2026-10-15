@@ -116,8 +116,12 @@ export const SENTRY_DATA_COLLECTION = {
 export const createSentryConfig = (config?: SentryConfig): any => {
     // Pull out the fields resolved below so an explicit `undefined` in `rest`
     // cannot overwrite the computed value.
-    const { profilesSampleRate, profileSessionSampleRate, beforeSendSpan: callerBeforeSendSpan, ...rest } =
-        config ?? {};
+    const {
+        profilesSampleRate,
+        profileSessionSampleRate,
+        beforeSendSpan: callerBeforeSendSpan,
+        ...rest
+    } = config ?? {};
     const defaultConfig = {
         dsn: process.env.SENTRY_DSN,
         environment: process.env.NODE_ENV || 'development',
