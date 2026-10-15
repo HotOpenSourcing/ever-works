@@ -43,6 +43,19 @@ function resolveSigningKey(options: EmailOptions): string | undefined {
 	return fromEnv && fromEnv.length > 0 ? fromEnv : undefined;
 }
 
+/**
+ * Operator opt-out (EW-P4-3): accept inbound webhooks that carry no
+ * signature when no signing key is configured. Off unless the env var is the
+ * exact string `'true'`, so a typo or an empty value stays secure. Meant for
+ * a local/dev stack with no public webhook URL — never for an environment
+ * a provider can reach.
+ */
+const EMAIL_INBOUND_ALLOW_UNSIGNED_ENV = 'EMAIL_INBOUND_ALLOW_UNSIGNED';
+
+function unsignedInboundAllowed(): boolean {
+	return process.env[EMAIL_INBOUND_ALLOW_UNSIGNED_ENV] === 'true';
+}
+
 /** Mailgun delivers webhooks as JSON OR form-urlencoded; decode both. */
 function decodeBody(rawBody: Buffer): Record<string, unknown> {
 	const text = rawBody.toString('utf8');
@@ -224,7 +237,23 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 
 	verifyWebhookSignature(rawBody: Buffer, _headers: Readonly<Record<string, string>>, options: EmailOptions): void {
 		const signingKey = resolveSigningKey(options);
-		if (!signingKey) return; // No key configured — operator opt-in to signature checking.
+		if (!signingKey) {
+			// Security (EW-P4-3): FAIL CLOSED. With no key there is nothing to
+			// authenticate the caller against, and the route is public: accepting
+			// the webhook would let ANY caller who knows the URL inject mail into a
+			// tenant's scope (it used to be accepted silently). The facade answers
+			// this throw with a 401, as for a mismatch.
+			if (!unsignedInboundAllowed()) {
+				throw new Error(
+					`Mailgun inbound: no \`webhookSigningKey\`/MAILGUN_WEBHOOK_SIGNING_KEY configured; refusing an unsigned webhook (${EMAIL_INBOUND_ALLOW_UNSIGNED_ENV}=true accepts it on a local stack only).`
+				);
+			}
+			// The operator opted out explicitly: accept, loudly.
+			console.warn(
+				`[mailgun] inbound webhook accepted WITHOUT signature verification: no \`webhookSigningKey\`/MAILGUN_WEBHOOK_SIGNING_KEY configured and ${EMAIL_INBOUND_ALLOW_UNSIGNED_ENV}=true. Configure a signing key to authenticate inbound mail.`
+			);
+			return;
+		}
 		const sig = extractSignature(decodeBody(rawBody));
 		if (!sig) {
 			throw new Error('Mailgun inbound: missing timestamp/token/signature.');
