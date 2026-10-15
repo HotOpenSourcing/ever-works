@@ -8,8 +8,12 @@
 			"type": "object",
 			"required": ["id", "visibility"],
 			"properties": {
-				"id": { "$ref": "../common.schema.json#/$defs/Uuid" },
-				"visibility": { "const": "private" }
+				"id": {
+					"$ref": "../common.schema.json#/$defs/Uuid"
+				},
+				"visibility": {
+					"const": "private"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -17,9 +21,17 @@
 			"type": "object",
 			"required": ["id", "visibility", "version"],
 			"properties": {
-				"id": { "$ref": "../common.schema.json#/$defs/Uuid" },
-				"visibility": { "$ref": "../common.schema.json#/$defs/Visibility" },
-				"version": { "$ref": "../common.schema.json#/$defs/Version" }
+				"id": {
+					"$ref": "../common.schema.json#/$defs/Uuid"
+				},
+				"visibility": {
+					"description": "team or organization only: a change to private always uses the id-only first branch.",
+					"type": "string",
+					"enum": ["team", "organization"]
+				},
+				"version": {
+					"$ref": "../common.schema.json#/$defs/Version"
+				}
 			}
 		}
 	]

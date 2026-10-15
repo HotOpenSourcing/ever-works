@@ -14,12 +14,29 @@
 			"type": "object",
 			"required": ["name"],
 			"properties": {
-				"name": { "type": "string", "minLength": 1, "maxLength": 200 },
-				"slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,99}$" },
-				"description": { "type": ["string", "null"], "maxLength": 5000 },
-				"parentTeamId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"avatarIcon": { "type": ["string", "null"], "maxLength": 100 },
-				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+				"name": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 200
+				},
+				"slug": {
+					"type": "string",
+					"pattern": "^[a-z0-9][a-z0-9-]{0,99}$"
+				},
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 5000
+				},
+				"parentTeamId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"avatarIcon": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"externalRef": {
+					"$ref": "common.schema.json#/$defs/ExternalRef"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -28,10 +45,22 @@
 			"type": "object",
 			"minProperties": 1,
 			"properties": {
-				"name": { "type": "string", "minLength": 1, "maxLength": 200 },
-				"description": { "type": ["string", "null"], "maxLength": 5000 },
-				"parentTeamId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"avatarIcon": { "type": ["string", "null"], "maxLength": 100 }
+				"name": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 200
+				},
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 5000
+				},
+				"parentTeamId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"avatarIcon": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				}
 			},
 			"additionalProperties": false
 		},
@@ -43,7 +72,9 @@
 				"members": {
 					"type": "array",
 					"maxItems": 500,
-					"items": { "$ref": "resources/team.schema.json#/$defs/TeamMemberRef" }
+					"items": {
+						"$ref": "resources/team.schema.json#/$defs/TeamMemberRef"
+					}
 				}
 			},
 			"additionalProperties": false
@@ -56,7 +87,9 @@
 				"resources": {
 					"type": "array",
 					"maxItems": 5000,
-					"items": { "$ref": "resources/team.schema.json#/$defs/TeamResourceRef" }
+					"items": {
+						"$ref": "resources/team.schema.json#/$defs/TeamResourceRef"
+					}
 				}
 			},
 			"additionalProperties": false
@@ -66,27 +99,60 @@
 			"type": "object",
 			"required": ["title"],
 			"properties": {
-				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
-				"description": { "type": ["string", "null"], "maxLength": 100000 },
-				"status": { "type": "string", "enum": ["backlog", "todo"] },
-				"priority": { "type": "string", "enum": ["p0", "p1", "p2", "p3", "p4"] },
+				"title": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 200
+				},
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 100000
+				},
+				"status": {
+					"type": "string",
+					"enum": ["backlog", "todo"]
+				},
+				"priority": {
+					"type": "string",
+					"enum": ["p0", "p1", "p2", "p3", "p4"]
+				},
 				"labels": {
 					"type": "array",
 					"maxItems": 50,
-					"items": { "type": "string", "minLength": 1, "maxLength": 80 }
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					}
 				},
-				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
-				"visibility": { "$ref": "#/$defs/WritableVisibility" },
-				"workId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"missionId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"ideaId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"parentTaskId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"teamIds": {
+					"$ref": "common.schema.json#/$defs/TeamIds"
+				},
+				"visibility": {
+					"$ref": "#/$defs/WritableVisibility"
+				},
+				"workId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"missionId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"ideaId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"parentTaskId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
 				"assignees": {
 					"type": "array",
 					"maxItems": 50,
-					"items": { "$ref": "resources/task.schema.json#/$defs/PrincipalRef" }
+					"items": {
+						"$ref": "resources/task.schema.json#/$defs/PrincipalRef"
+					}
 				},
-				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+				"externalRef": {
+					"$ref": "common.schema.json#/$defs/ExternalRef"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -95,18 +161,40 @@
 			"type": "object",
 			"minProperties": 1,
 			"properties": {
-				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
-				"description": { "type": ["string", "null"], "maxLength": 100000 },
-				"priority": { "type": "string", "enum": ["p0", "p1", "p2", "p3", "p4"] },
+				"title": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 200
+				},
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 100000
+				},
+				"priority": {
+					"type": "string",
+					"enum": ["p0", "p1", "p2", "p3", "p4"]
+				},
 				"labels": {
 					"type": "array",
 					"maxItems": 50,
-					"items": { "type": "string", "minLength": 1, "maxLength": 80 }
+					"items": {
+						"type": "string",
+						"minLength": 1,
+						"maxLength": 80
+					}
 				},
-				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
-				"visibility": { "$ref": "#/$defs/WritableVisibility" },
-				"workId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
-				"parentTaskId": { "$ref": "common.schema.json#/$defs/NullableUuid" }
+				"teamIds": {
+					"$ref": "common.schema.json#/$defs/TeamIds"
+				},
+				"visibility": {
+					"$ref": "#/$defs/WritableVisibility"
+				},
+				"workId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"parentTaskId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -115,8 +203,12 @@
 			"type": "object",
 			"required": ["to", "mode"],
 			"properties": {
-				"to": { "$ref": "resources/task.schema.json#/$defs/TaskStatus" },
-				"mode": { "const": "sync" }
+				"to": {
+					"$ref": "resources/task.schema.json#/$defs/TaskStatus"
+				},
+				"mode": {
+					"const": "sync"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -128,7 +220,9 @@
 				"assignees": {
 					"type": "array",
 					"maxItems": 50,
-					"items": { "$ref": "resources/task.schema.json#/$defs/PrincipalRef" }
+					"items": {
+						"$ref": "resources/task.schema.json#/$defs/PrincipalRef"
+					}
 				}
 			},
 			"additionalProperties": false
@@ -141,7 +235,9 @@
 				"userIds": {
 					"type": "array",
 					"maxItems": 200,
-					"items": { "$ref": "common.schema.json#/$defs/Uuid" },
+					"items": {
+						"$ref": "common.schema.json#/$defs/Uuid"
+					},
 					"uniqueItems": true
 				}
 			},
@@ -155,7 +251,9 @@
 				"blockedBy": {
 					"type": "array",
 					"maxItems": 200,
-					"items": { "$ref": "common.schema.json#/$defs/Uuid" },
+					"items": {
+						"$ref": "common.schema.json#/$defs/Uuid"
+					},
 					"uniqueItems": true
 				}
 			},
@@ -173,8 +271,13 @@
 						"type": "object",
 						"required": ["taskId", "kind"],
 						"properties": {
-							"taskId": { "$ref": "common.schema.json#/$defs/Uuid" },
-							"kind": { "type": "string", "enum": ["related", "duplicates", "follow-up"] }
+							"taskId": {
+								"$ref": "common.schema.json#/$defs/Uuid"
+							},
+							"kind": {
+								"type": "string",
+								"enum": ["related", "duplicates", "follow-up"]
+							}
 						},
 						"additionalProperties": false
 					}
@@ -187,18 +290,34 @@
 			"type": "object",
 			"required": ["body"],
 			"properties": {
-				"body": { "type": "string", "minLength": 1, "maxLength": 50000 },
+				"body": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 50000
+				},
 				"externalAuthor": {
 					"type": "object",
 					"required": ["name"],
 					"properties": {
-						"name": { "type": "string", "minLength": 1, "maxLength": 200 },
-						"avatarUrl": { "type": ["string", "null"], "maxLength": 2048 },
-						"source": { "type": "string", "maxLength": 100 }
+						"name": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 200
+						},
+						"avatarUrl": {
+							"type": ["string", "null"],
+							"maxLength": 2048
+						},
+						"source": {
+							"type": "string",
+							"maxLength": 100
+						}
 					},
 					"additionalProperties": false
 				},
-				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+				"externalRef": {
+					"$ref": "common.schema.json#/$defs/ExternalRef"
+				}
 			},
 			"additionalProperties": false
 		},
@@ -207,7 +326,11 @@
 			"type": "object",
 			"required": ["body"],
 			"properties": {
-				"body": { "type": "string", "minLength": 1, "maxLength": 50000 }
+				"body": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 50000
+				}
 			},
 			"additionalProperties": false
 		},
@@ -216,9 +339,20 @@
 			"type": "object",
 			"required": ["externalId"],
 			"properties": {
-				"externalId": { "type": "string", "minLength": 1, "maxLength": 200 },
-				"externalUrl": { "type": ["string", "null"], "format": "uri", "maxLength": 2048 },
-				"installationId": { "type": ["string", "null"], "maxLength": 200 }
+				"externalId": {
+					"type": "string",
+					"minLength": 1,
+					"maxLength": 200
+				},
+				"externalUrl": {
+					"type": ["string", "null"],
+					"format": "uri",
+					"maxLength": 2048
+				},
+				"installationId": {
+					"type": ["string", "null"],
+					"maxLength": 200
+				}
 			},
 			"additionalProperties": false
 		},
@@ -227,24 +361,41 @@
 			"type": "object",
 			"required": ["url", "events", "organizationIds"],
 			"properties": {
-				"url": { "type": "string", "format": "uri", "maxLength": 2048 },
+				"url": {
+					"type": "string",
+					"format": "uri",
+					"maxLength": 2048
+				},
 				"events": {
 					"type": "array",
 					"minItems": 1,
 					"maxItems": 200,
-					"items": { "type": "string", "maxLength": 64 }
+					"items": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"uniqueItems": true
 				},
 				"organizationIds": {
 					"type": "array",
 					"minItems": 1,
-					"items": { "$ref": "common.schema.json#/$defs/Uuid" }
+					"items": {
+						"$ref": "common.schema.json#/$defs/Uuid"
+					},
+					"uniqueItems": true
 				},
 				"excludeOriginTags": {
 					"type": "array",
 					"maxItems": 20,
-					"items": { "type": "string", "maxLength": 100 }
+					"items": {
+						"type": "string",
+						"maxLength": 100
+					}
 				},
-				"description": { "type": ["string", "null"], "maxLength": 500 }
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 500
+				}
 			},
 			"additionalProperties": false
 		},
@@ -253,25 +404,45 @@
 			"type": "object",
 			"minProperties": 1,
 			"properties": {
-				"url": { "type": "string", "format": "uri", "maxLength": 2048 },
+				"url": {
+					"type": "string",
+					"format": "uri",
+					"maxLength": 2048
+				},
 				"events": {
 					"type": "array",
 					"minItems": 1,
 					"maxItems": 200,
-					"items": { "type": "string", "maxLength": 64 }
+					"items": {
+						"type": "string",
+						"maxLength": 64
+					},
+					"uniqueItems": true
 				},
 				"organizationIds": {
 					"type": "array",
 					"minItems": 1,
-					"items": { "$ref": "common.schema.json#/$defs/Uuid" }
+					"items": {
+						"$ref": "common.schema.json#/$defs/Uuid"
+					},
+					"uniqueItems": true
 				},
 				"excludeOriginTags": {
 					"type": "array",
 					"maxItems": 20,
-					"items": { "type": "string", "maxLength": 100 }
+					"items": {
+						"type": "string",
+						"maxLength": 100
+					}
 				},
-				"description": { "type": ["string", "null"], "maxLength": 500 },
-				"status": { "type": "string", "enum": ["active", "paused"] }
+				"description": {
+					"type": ["string", "null"],
+					"maxLength": 500
+				},
+				"status": {
+					"type": "string",
+					"enum": ["active", "paused"]
+				}
 			},
 			"additionalProperties": false
 		},
@@ -288,7 +459,10 @@
 						"type": "object",
 						"required": ["method", "path"],
 						"properties": {
-							"method": { "type": "string", "enum": ["GET", "POST", "PATCH", "PUT", "DELETE"] },
+							"method": {
+								"type": "string",
+								"enum": ["GET", "POST", "PATCH", "PUT", "DELETE"]
+							},
 							"path": {
 								"description": "Relative to /api/integrations/v1, e.g. /tasks/<id>.",
 								"type": "string",
@@ -297,7 +471,9 @@
 							"headers": {
 								"description": "Per-operation Idempotency-Key, If-Match, X-Act-As-User. Auth and X-Scope-Slug come from the outer request.",
 								"type": "object",
-								"additionalProperties": { "type": "string" }
+								"additionalProperties": {
+									"type": "string"
+								}
 							},
 							"body": {}
 						},
@@ -317,7 +493,11 @@
 						"type": "object",
 						"required": ["status", "body"],
 						"properties": {
-							"status": { "type": "integer", "minimum": 100, "maximum": 599 },
+							"status": {
+								"type": "integer",
+								"minimum": 100,
+								"maximum": 599
+							},
 							"body": {}
 						},
 						"additionalProperties": false

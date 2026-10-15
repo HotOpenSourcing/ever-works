@@ -2,19 +2,32 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ever.works/schemas/integrations/v1/resources/events-page.schema.json",
 	"title": "GET /events response (B.2 change feed)",
-	"description": "?after=<seq>&limit=<=1000&types=task.*,goal.*&excludeOrigin=gauzy:<id>. Only pinned orgs and only non-private aggregates. Events are in ascending seq order. `nextCursor` is the seq to pass as `after` next time (null when there is nothing after this page); `head` is the newest seq visible to the key. A cursor older than retention answers 410 cursor_expired (full resync). task.runtime_updated is excluded unless `types` names it explicitly.",
+	"description": "?after=<seq>&limit=<=1000&types=task.*,goal.*&excludeOrigin=gauzy:<id>. Only pinned orgs. Events of aggregates that are private at event time are never served, EXCEPT <aggregate>.visibility_changed to private, which is always served with data {id, visibility:'private'} so consumers stop syncing. Events are in ascending, gap-free seq order. `nextCursor` is the seq to pass as `after` next time (null when there is nothing after this page); `head` is the newest seq visible to the key. A cursor older than retention answers 410 cursor_expired (full resync). task.runtime_updated is excluded unless `types` names it exactly.",
 	"type": "object",
 	"required": ["events", "nextCursor", "hasMore", "head"],
 	"properties": {
 		"events": {
 			"type": "array",
-			"items": { "$ref": "../event-envelope.schema.json" }
+			"items": {
+				"$ref": "../event-envelope.schema.json"
+			}
 		},
 		"nextCursor": {
-			"oneOf": [{ "$ref": "../common.schema.json#/$defs/Seq" }, { "type": "null" }]
+			"oneOf": [
+				{
+					"$ref": "../common.schema.json#/$defs/Seq"
+				},
+				{
+					"type": "null"
+				}
+			]
 		},
-		"hasMore": { "type": "boolean" },
-		"head": { "$ref": "../common.schema.json#/$defs/Seq" }
+		"hasMore": {
+			"type": "boolean"
+		},
+		"head": {
+			"$ref": "../common.schema.json#/$defs/Seq"
+		}
 	},
 	"additionalProperties": false
 }

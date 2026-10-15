@@ -8,8 +8,8 @@ organization roster, and **Mine / Shared with me / Organization** list tabs.
 - [plan.md](./plan.md) — implementation plan
 - [tasks.md](./tasks.md) — task breakdown
 
-Related: [`teams-and-companies`](../teams-and-companies/spec.md), [`tenants-and-organizations`](../tenants-and-organizations/),
-[`work-members`](../work-members/), [`integration-keys`](../integration-keys/README.md) (the integration principal reads
+Related: [`teams-and-companies`](../teams-and-companies/spec.md), [`tenants-and-organizations`](../tenants-and-organizations/spec.md),
+[`work-members`](../work-members/spec.md), [`integration-keys`](../integration-keys/README.md) (the integration principal reads
 `team` and `organization` rows), [`integrations-api-v1`](../integrations-api-v1/README.md).
 
 Plan of record: _Gauzy ↔ Ever Works integration plan_ (2026-10-15), private `ever-co/homelab` repo,

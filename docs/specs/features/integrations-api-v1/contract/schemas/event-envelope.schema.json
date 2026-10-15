@@ -25,7 +25,10 @@
 			"type": "string",
 			"pattern": "^evt_[0-9A-HJKMNP-TV-Z]{26}$"
 		},
-		"seq": { "$ref": "common.schema.json#/$defs/Seq" },
+		"seq": {
+			"description": "Feed position: assigned by Ever Works when it dispatches the event, strictly increasing and gap-free in the feed, so paging with `after` never misses a committed event.",
+			"$ref": "common.schema.json#/$defs/Seq"
+		},
 		"type": {
 			"description": "Catalog type, `<aggregate>.<verb>` or `<aggregate>.<child>.<verb>`. See event-catalog.v1.json.",
 			"type": "string",
@@ -37,8 +40,12 @@
 			"type": "integer",
 			"minimum": 1
 		},
-		"occurredAt": { "$ref": "common.schema.json#/$defs/DateTime" },
-		"tenantId": { "$ref": "common.schema.json#/$defs/Uuid" },
+		"occurredAt": {
+			"$ref": "common.schema.json#/$defs/DateTime"
+		},
+		"tenantId": {
+			"$ref": "common.schema.json#/$defs/Uuid"
+		},
 		"organizationId": {
 			"description": "Never null on the integration feed or webhooks: personal-scope events (organizationId null) are recorded for in-process listeners but never served to integrations.",
 			"$ref": "common.schema.json#/$defs/NullableUuid"
@@ -64,29 +71,41 @@
 						"email_message"
 					]
 				},
-				"id": { "$ref": "common.schema.json#/$defs/Uuid" },
+				"id": {
+					"$ref": "common.schema.json#/$defs/Uuid"
+				},
 				"version": {
-					"description": "The aggregate's version AFTER the change (A.4). Consumers skip an event whose aggregate.version <= the version they already applied. For child events this is the PARENT's new version; for *.deleted it is the last version + 1.",
+					"description": "The aggregate's version AFTER the change (A.4). For child events this is the PARENT's new version; for *.deleted it is the last version + 1; for task.runtime_updated it is the unchanged current version. Consumers skip a FULL-SNAPSHOT event whose aggregate.version <= the version already applied; child events and task.runtime_updated are applied by their own rules (spec.md §3), never skipped by version.",
 					"$ref": "common.schema.json#/$defs/Version"
 				}
 			},
 			"additionalProperties": false
 		},
-		"actor": { "$ref": "common.schema.json#/$defs/Actor" },
+		"actor": {
+			"$ref": "common.schema.json#/$defs/Actor"
+		},
 		"origin": {
 			"description": "Loop-prevention marker (C.2/C.4). `tag` is the X-Sync-Origin header of the write that caused the event (e.g. gauzy:<connectionId>), null for native EW writes.",
 			"type": "object",
 			"required": ["tag", "integrationKeyId"],
 			"properties": {
-				"tag": { "type": ["string", "null"], "maxLength": 100 },
-				"integrationKeyId": { "$ref": "common.schema.json#/$defs/NullableUuid" }
+				"tag": {
+					"type": ["string", "null"],
+					"maxLength": 100
+				},
+				"integrationKeyId": {
+					"$ref": "common.schema.json#/$defs/NullableUuid"
+				}
 			},
 			"additionalProperties": false
 		},
 		"changedFields": {
 			"description": "DTO field names that changed. Empty for *.created and *.deleted. For child events: the parent's set field that changed (e.g. [\"assignees\"]).",
 			"type": "array",
-			"items": { "type": "string", "maxLength": 64 },
+			"items": {
+				"type": "string",
+				"maxLength": 64
+			},
 			"uniqueItems": true
 		},
 		"data": {

@@ -22,7 +22,8 @@ Two pull requests keep the change reviewable:
 
 - **P2.1** Entities `DomainEvent`, `DomainEventRelayState`, `PluginEventCursor` (registered in the entity barrel,
   `_entities-inventory.ts`, `_entity-names.ts`).
-- **P2.2** One migration, three dialects, idempotent, with `down`: `domain_events` (bigint auto-increment `seq`),
+- **P2.2** One migration, three dialects, idempotent, with `down`: `domain_events` (bigint auto-increment `outboxSeq`,
+  relay-assigned `seq`),
   `domain_event_relay_state`, `plugin_event_cursors`, and `version int NOT NULL DEFAULT 1` on `tasks`, `teams`,
   `agents`, `works`, `organizations`.
 - **P2.3** Migration spec (better-sqlite3): columns, indexes, idempotent second `up`, `down`.
@@ -41,12 +42,13 @@ Two pull requests keep the change reviewable:
 - **P4.1** Lease: compare-and-set on `domain_event_relay_state` (pattern of `instance-stats-lease.service.ts`).
 - **P4.2** Loop: 1 s tick (`setInterval` + `unref`, re-entry guard, stop on module destroy); Postgres `LISTEN` on a
   dedicated `pg` client for early wake-up; batch of 200.
-- **P4.3** Gap handling with `DOMAIN_EVENTS_GAP_TIMEOUT_MS`; watermark persisted with each batch.
+- **P4.3** Positions: assign `seq` to committed undispatched rows in `outboxSeq` order, in one compare-and-set
+  transaction per batch that also checks the lease (fencing); late commits get later positions, so no gap handling.
 - **P4.4** Delivery: `emitAsync('domain.<type>')`; registered consumers; plugin cursors (per plugin and tenant,
   timeout, dead-letter after 10 failures).
 - **P4.5** Retention job (`@Cron`, distributed task lock, bounded batches, floor recorded).
 - **P4.6** Flags: `DOMAIN_EVENTS_RELAY_ENABLED` (default on), `DOMAIN_EVENTS_RETENTION_DAYS` (30),
-  `DOMAIN_EVENTS_GAP_TIMEOUT_MS` (10000), `DOMAIN_EVENTS_PLUGIN_TIMEOUT_MS` (10000).
+  `DOMAIN_EVENTS_PLUGIN_TIMEOUT_MS` (10000).
 
 ## Phase 5 — Plugin capability (B1)
 

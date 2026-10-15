@@ -69,13 +69,17 @@ a record with no team is organization-scoped. `private` records never leave Ever
 
 ## 2. Identity and change feed (B.2)
 
-| Method | Path      | Scope         | Notes                                                                                                                                                                                                                                                                                                              |
-| ------ | --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| GET    | `/whoami` | any           | `{keyId, keyName, tenant{id,slug}, organizations[{id,slug,displayName}], scopes[], apiVersion:"1", feedHead:"<seq>", limits{readsPerMin,writesPerMin}}` ([schema](./contract/schemas/resources/whoami.schema.json))                                                                                                |
-| GET    | `/events` | `events:read` | `?after=<seq>&limit=≤1000&types=task.*,goal.*&excludeOrigin=gauzy:<id>` → `{events:[Envelope], nextCursor, hasMore, head}` ([schema](./contract/schemas/resources/events-page.schema.json)). Only pinned orgs and only non-private aggregates. A cursor older than retention → `410 cursor_expired` (full resync). |
+| Method | Path      | Scope         | Notes                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------ | --------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/whoami` | any           | `{keyId, keyName, tenant{id,slug}, organizations[{id,slug,displayName}], scopes[], apiVersion:"1", feedHead:"<seq>", limits{readsPerMin,writesPerMin}}` ([schema](./contract/schemas/resources/whoami.schema.json))                                                                                                                                                                   |
+| GET    | `/events` | `events:read` | `?after=<seq>&limit=≤1000&types=task.*,goal.*&excludeOrigin=gauzy:<id>` → `{events:[Envelope], nextCursor, hasMore, head}` ([schema](./contract/schemas/resources/events-page.schema.json)). Only pinned orgs, and never events of `private` aggregates except the id-only `*.visibility_changed` notice (below). A cursor older than retention → `410 cursor_expired` (full resync). |
 
 - Events come in ascending `seq`. `nextCursor` is the `seq` to pass as `after` next time; `head` is the newest `seq`
-  visible to the key.
+  visible to the key. `seq` is a gap-free feed position assigned when Ever Works dispatches the event, so a consumer
+  paging with `after` never misses a committed event (see [`domain-events`](../domain-events/spec.md) §2).
+- **Private records**: events of an aggregate that is `private` at event time are never served. The one exception is
+  `<aggregate>.visibility_changed` **to** `private`: it is always served (for pinned orgs) with `data` reduced to
+  `{id, visibility:'private'}`, so consumers learn to stop syncing without seeing the content.
 - `types` takes exact types and `<domain>.*` wildcards. `task.runtime_updated` is returned only when named exactly.
 - Retention is 30 days (`DOMAIN_EVENTS_RETENTION_DAYS`), see [`domain-events`](../domain-events/spec.md).
 
@@ -102,8 +106,19 @@ The feed, webhooks v2 and EW plugins share one envelope ([schema](./contract/sch
 }
 ```
 
-- `aggregate.version` is the aggregate's version **after** the change. Consumers skip an event whose
-  `aggregate.version` ≤ the version they already applied.
+- `aggregate.version` is the aggregate's version **after** the change.
+- **Applying events (consumer rules).** Webhooks may arrive out of order and more than once; the feed is in `seq`
+  order. Dedupe every event on `id`. Then:
+    - **Full-snapshot events** (`<x>.created`, `<x>.updated`, `<x>.transitioned`, `<x>.status_changed`,
+      `<x>.archived`, `<x>.deleted`, `<x>.visibility_changed`): skip the event when `aggregate.version` ≤ the version
+      already applied for that aggregate; otherwise apply `data` and store `aggregate.version`.
+    - **Child events** (`catalog.child` set, e.g. `task.comment.created`, `team.member.added`): `data` is only the child,
+      so never skip one by the parent's version — an older child event can still carry a change the newer one does not.
+      Apply them idempotently by child identity (comments by `data.id` + `updatedAt`, set edges by their keys: adding an
+      existing member or removing an absent one is a no-op). When in doubt, fetch the parent's full DTO, which carries
+      every set.
+    - **`task.runtime_updated`** carries the unchanged current version: apply it when its `seq` (feed) or `occurredAt`
+      (webhooks) is newer than the last runtime update applied for that task; it never conflicts with user edits.
 - **Delete events**: `data` is the last known snapshot plus `"deleted": true`; `aggregate.version` is the last version + 1.
 - **Child events** (for example `task.comment.created`, `team.member.added`): `data` is the child DTO and `aggregate` is
   the parent with its new version.
@@ -129,6 +144,10 @@ phase, child / opt-in flags).
 | KB (P3)       | `kb.document.created/updated/moved/archived/unarchived/deleted/review_changed`; `kb.folder.created/updated/deleted`                                                                                                                                                                                             |
 | Email (P4)    | `email.message.received`, `email.message.sent`, `email.message.status_changed`                                                                                                                                                                                                                                  |
 | Visibility    | `task.visibility_changed`, `goal.visibility_changed`, `mission.visibility_changed`, `idea.visibility_changed`, `agent.visibility_changed`. A change **to** `private` carries only `{id, visibility:'private'}` in `data`.                                                                                       |
+
+Changes with no dedicated child event record the parent's full-snapshot event: a task's **approvers** and **reviewers**
+(added, removed, or a decision such as `approvalState`) record `task.updated` with `changedFields` `["approvers"]` or
+`["reviewers"]`; labels, teams and every other field change likewise record `task.updated`.
 
 `task.runtime_updated` is emitted for machine-only task writes (PR, CI and run state). It bumps neither `version` nor
 `updatedAt`, carries the unchanged current version, and is excluded from the feed and webhooks unless requested by its
@@ -219,7 +238,10 @@ are never accepted or built through this API, and PATCH can neither activate a g
 Recorded as CR-1 on the plan's STATUS board (additive, nothing breaking): canonical `/api/integrations/v1` paths;
 `organizations` gets a `version` so organization events carry one; child rows have no own version and comment routes take
 no `If-Match`; team visibility fixed to `organization`, work visibility derived; delete events carry last version + 1;
-`internal_error` for 5xx; optional envelope `correlationId`; PUT-set bodies are objects and answer the parent DTO; the
+`internal_error` for 5xx; optional envelope `correlationId`; feed `seq` is a relay-assigned, gap-free position;
+consumer rules for applying full-snapshot, child and runtime events (§3); private aggregates' events are never served
+except the id-only `*.visibility_changed` notice; approver and reviewer changes record `task.updated`; `Actor.id` is
+always set; PUT-set bodies are objects and answer the parent DTO; the
 webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation; task create status `backlog|todo`; link
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.

@@ -50,9 +50,14 @@
   `visibility <> 'private'` ([`record-visibility`](../record-visibility/spec.md)). Inbox reads return all recipients in
   the pinned orgs with `recipientUserId`.
 - **Writes**: optional `X-Act-As-User: <ewUserId>` — active, in the tenant, on the target org's roster
-  (`403 act_as_forbidden` otherwise). The row's owner/creator/author is that user and `activity_log.actorKind='external'`
-  records the integration as the means. Without act-as, the owner is the key's `ownerUserId`,
-  `createdByType='integration'`, `createdById=<keyId>`, with optional `externalAuthor{name, avatarUrl, source}`.
+  (`403 act_as_forbidden` otherwise). **Act-as attributes; it never authorizes.** Every write made with act-as must also
+  pass that user's own permission checks for the operation (owner and role rules, participant rules), exactly as if the
+  user made it in the app; a write the user could not make answers `403 act_as_forbidden`. The integration key's scopes
+  and pins are checked as well, so the effective permission is the intersection of both. The row's
+  owner/creator/author is that user and `activity_log.actorKind='external'` records the integration as the means.
+  Without act-as, the write runs with the key's own rights within its scopes and pins: the owner is the key's
+  `ownerUserId`, `createdByType='integration'`, `createdById=<keyId>`, with optional
+  `externalAuthor{name, avatarUrl, source}`.
 - **Attribution columns**: `tasks.createdByType` gains `'integration'`; `task_chat_messages.authorType` gains
   `'integration'` plus an `externalAuthor` JSON column.
 
@@ -89,8 +94,9 @@ grantable: `goals:activate`, `missions:activate`, `ideas:build` (spend safety, D
 
 ## 5. Audit
 
-Every integration write produces an `activity_log` row with `actorKind='external'`,
-`actorLabel='Ever Gauzy (<keyName>)'` and the act-as user.
+Every integration write produces an `activity_log` row with `actorKind='external'`, the act-as user (if any) and an
+`actorLabel` derived from the key's `integrationKind`: `Ever Gauzy (<keyName>)` for `ever-gauzy`, and
+`Integration (<keyName>)` for `generic` (a new kind adds its own display name).
 
 ## 6. Later: Ever ID (P5)
 

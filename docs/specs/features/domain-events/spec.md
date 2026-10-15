@@ -8,7 +8,7 @@
 **Plan items**: EW-P1-1 (outbox, relay, plugin capability, P1 recording points); later phases add goal, mission, idea,
 inbox, KB and email recording points.
 **Related**: [`event-subscriptions`](../event-subscriptions/spec.md) (EW-664 notification registry),
-[`integrations-api-v1`](../integrations-api-v1/spec.md) (feed and webhooks v2), [`activity-log`](../activity-log/),
+[`integrations-api-v1`](../integrations-api-v1/spec.md) (feed and webhooks v2), [`activity-log`](../activity-log/spec.md),
 `docs/specs/architecture/events.md` (today's EventEmitter2 events).
 
 > **Problem.** Ever Works emits no domain events for tasks, goals, missions, teams, inbox or docs. EventEmitter2 carries
@@ -39,31 +39,43 @@ inbox, KB and email recording points.
 
 ## 2. Outbox table `domain_events`
 
-| Column                               | Type                     | Notes                                                                   |
-| ------------------------------------ | ------------------------ | ----------------------------------------------------------------------- |
-| `seq`                                | bigint auto-increment PK | Global order; the feed cursor is its decimal string                     |
-| `id`                                 | varchar(32) unique       | `evt_<ULID>`                                                            |
-| `type`                               | varchar(64)              | e.g. `task.updated`                                                     |
-| `version`                            | smallint                 | payload schema version (1)                                              |
-| `tenantId`, `organizationId`         | uuid                     | `organizationId` null for personal scope — never served to integrations |
-| `aggregateType`, `aggregateId`       | varchar(32) / uuid       |                                                                         |
-| `aggregateVersion`                   | int                      | the aggregate's `version` after the change (§4)                         |
-| `actorType`, `actorId`, `actorLabel` | varchar                  | `user` \| `agent` \| `integration` \| `system`                          |
-| `originTag`                          | varchar(100) null        | from `X-Sync-Origin`, e.g. `gauzy:<connectionId>`                       |
-| `integrationKeyId`                   | uuid null                |                                                                         |
-| `changedFields`                      | json `string[]`          |                                                                         |
-| `data`                               | json                     | full post-change snapshot in the integration DTO shape                  |
-| `previous`                           | json                     | previous values of `changedFields` only                                 |
-| `occurredAt`                         | timestamp                |                                                                         |
-| `dispatchedAt`                       | timestamp null           | set by the relay                                                        |
-| `correlationId`                      | varchar(100) null        |                                                                         |
+| Column                               | Type                     | Notes                                                                                                  |
+| ------------------------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `outboxSeq`                          | bigint auto-increment PK | Insert order (internal). Allocated when the row is inserted, so it can commit out of order             |
+| `seq`                                | bigint null, unique      | **Feed position**: assigned by the relay when it dispatches the row, strictly increasing, never reused |
+| `id`                                 | varchar(32) unique       | `evt_<ULID>`                                                                                           |
+| `type`                               | varchar(64)              | e.g. `task.updated`                                                                                    |
+| `version`                            | smallint                 | payload schema version (1)                                                                             |
+| `tenantId`, `organizationId`         | uuid                     | `organizationId` null for personal scope — never served to integrations                                |
+| `aggregateType`, `aggregateId`       | varchar(32) / uuid       |                                                                                                        |
+| `aggregateVersion`                   | int                      | the aggregate's `version` after the change (§4)                                                        |
+| `visibility`                         | varchar(16) null         | the aggregate's visibility at event time (`private` rows are never served, §5)                         |
+| `actorType`, `actorId`, `actorLabel` | varchar                  | `user` \| `agent` \| `integration` \| `system`                                                         |
+| `originTag`                          | varchar(100) null        | from `X-Sync-Origin`, e.g. `gauzy:<connectionId>`                                                      |
+| `integrationKeyId`                   | uuid null                |                                                                                                        |
+| `changedFields`                      | json `string[]`          |                                                                                                        |
+| `data`                               | json (MySQL `longtext`)  | full post-change snapshot in the integration DTO shape                                                 |
+| `previous`                           | json                     | previous values of `changedFields` only                                                                |
+| `occurredAt`                         | timestamp                |                                                                                                        |
+| `dispatchedAt`                       | timestamp null           | set by the relay together with `seq`                                                                   |
+| `correlationId`                      | varchar(100) null        |                                                                                                        |
 
-Indexes: `(tenantId, seq)`, `(organizationId, seq)`, `(aggregateType, aggregateId, seq)`, `(dispatchedAt)`.
+Indexes: unique `(seq)`, `(tenantId, seq)`, `(organizationId, seq)`, `(aggregateType, aggregateId, seq)`,
+`(dispatchedAt, outboxSeq)` (partial `WHERE dispatchedAt IS NULL` on Postgres and SQLite).
+
+**Why two sequence columns.** An auto-increment value is allocated at insert time, so two concurrent transactions can
+commit out of order: if the slower one holds the lower value, a cursor that already moved past the higher one would
+never see it. A timeout cannot tell a slow commit from a rollback. So the feed does not page on the insert order:
+the single leader relay assigns `seq` only to rows it can already see as committed, in one compare-and-set transaction
+per batch. A row that commits late simply receives a later `seq`. The feed (`after=<seq>`) is therefore gap-free and
+never skips a committed event. Per aggregate, order is preserved: two writes to one aggregate are serialized by the
+`version` bump's row lock, so the second event can only become visible after the first.
+
 Retention: 30 days (`DOMAIN_EVENTS_RETENTION_DAYS`); a nightly job deletes dispatched rows older than that and records
-the retention floor, below which the feed answers `410 cursor_expired`.
+the retention floor (the highest deleted `seq`), below which the feed answers `410 cursor_expired`.
 
-Relay state `domain_event_relay_state` (one row per relay): the DB lease (`holder`, `leaseExpiresAt`), the dispatch
-**watermark** (`watermarkSeq`) and the retention floor (`retentionFloorSeq`).
+Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `leaseExpiresAt`), the last assigned position
+(`lastSeq`, which is the feed `head`) and the retention floor (`retentionFloorSeq`).
 
 ## 3. Recording
 
@@ -96,16 +108,20 @@ Relay state `domain_event_relay_state` (one row per relay): the DB lease (`holde
 `DomainEventRelay` (API process):
 
 - **One leader** across replicas via a compare-and-set DB lease on `domain_event_relay_state` (works on Postgres, MySQL
-  and better-sqlite3). Non-leaders retry the lease on every tick.
-- **Wake-up**: polls every 1 s; on Postgres it also `LISTEN`s on `domain_events`, and the recorder issues
-  `pg_notify('domain_events', '')` inside the writing transaction, so a commit wakes the relay at once.
-- **Order and gaps**: it dispatches rows with `seq > watermark` in `seq` order. A missing `seq` (a concurrent transaction
-  that has not committed yet, or one that rolled back) holds the watermark for up to `DOMAIN_EVENTS_GAP_TIMEOUT_MS`
-  (default 10 s) before it is skipped, so the feed never serves a `seq` beyond a still-committing lower one.
-- For each event: `eventEmitter.emitAsync('domain.<type>', envelope)` (listener errors are logged, never block the
-  relay), hand-off to registered consumers (webhooks v2 in EW-P1-5), then `dispatchedAt` and the watermark advance.
-- The feed (`GET /api/integrations/v1/events`) serves only `seq ≤ watermark`; `head` is the watermark.
-- Off switch: `DOMAIN_EVENTS_RELAY_ENABLED=false` stops the relay (recording continues; events wait in the outbox).
+  and better-sqlite3). Non-leaders retry the lease every few seconds; the leader renews it well before it expires.
+- **Wake-up**: polls every 1 s; on Postgres it also `LISTEN`s on `ever_works_domain_events`, and the recorder issues
+  `pg_notify('ever_works_domain_events', '')` inside the writing transaction, so a commit wakes the relay at once.
+- **Positions**: each tick reads up to 200 committed rows with `dispatchedAt IS NULL` in `outboxSeq` order and, in one
+  transaction, gives them `seq = lastSeq + 1, + 2, …` and `dispatchedAt = now`, and advances `lastSeq` with a
+  compare-and-set that also checks it still holds the lease (fencing). A relay that lost its lease writes nothing.
+- **Delivery** after the commit, in `seq` order: `eventEmitter.emitAsync('domain.<type>', envelope)` (listener errors are
+  logged and never block the relay; in-process delivery is at most once, like EventEmitter2 today), then the
+  cursor-based consumers — EW plugins (§6) and webhooks v2 (EW-P1-5) — which read from the table and are at least once.
+- The feed (`GET /api/integrations/v1/events`) serves rows with `seq > after` in `seq` order; `head` is `lastSeq`.
+  It never serves events of `private` aggregates, **except** `*.visibility_changed` events to `private`, whose `data`
+  carries only `{id, visibility:'private'}` so consumers learn to stop syncing.
+- Off switch: `DOMAIN_EVENTS_RELAY_ENABLED=false` stops the relay (recording continues; events wait in the outbox and
+  get their positions when it is switched back on).
 
 ## 6. Plugin capability `IDomainEventSubscriberPlugin`
 
@@ -157,7 +173,7 @@ domain-event types use the same `plugin:<pluginId>:` prefix rule as plugin notif
 - [ ] A state change and its event commit together; a rolled-back change leaves no event.
 - [ ] With two API replicas only one relays; killing it hands over within one lease period.
 - [ ] Postgres: an event is relayed within ~100 ms of commit (LISTEN); MySQL/SQLite within ~1 s (polling).
-- [ ] A slow transaction holding a lower `seq` never lets the feed skip it.
+- [ ] A slow transaction that commits after later ones is still served by the feed (it gets a later `seq`).
 - [ ] Every mutating route in scope records its event (coverage test).
 - [ ] Runtime-only task writes record `task.runtime_updated` and change neither `version` nor `updatedAt`.
 - [ ] A plugin that was stopped receives the events it missed, in `seq` order, once it is back.

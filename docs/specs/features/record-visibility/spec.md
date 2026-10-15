@@ -33,7 +33,11 @@
   `team_resources`, or for agents a team membership), otherwise `organization`; `visibilityExplicit = false`.
 - Personal-scope rows (`organizationId IS NULL`) stay `private`.
 - **Roster backfill**: insert an `organization_members` row for every active user whose `tenantId` matches the org's
-  tenant. They already have tenant-wide access, so access does not change.
+  tenant. They already have tenant-wide access (a user joins a tenant only by accepting an organization invitation, and
+  `organization-membership.service.ts` authorizes on `user.tenantId === org.tenantId`), so access does not change. The
+  roster only records that existing membership; it grants no permission by itself, and it is not what authorizes a
+  write — an integration's act-as user still passes that user's own permission checks for every operation
+  ([`integration-keys`](../integration-keys/spec.md) §2).
 
 ## 3. Who can read an org-scoped record
 

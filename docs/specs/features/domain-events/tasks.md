@@ -12,11 +12,11 @@
       organizations; spec with idempotency and `down`.
 - [ ] **T5** `DomainEventRecorder` + `bumpAggregateVersion` + `pg_notify`.
 - [ ] **T6** Relay lease (compare-and-set).
-- [ ] **T7** Relay loop: polling, Postgres `LISTEN`, watermark, gap timeout.
+- [ ] **T7** Relay loop: polling, Postgres `LISTEN`, position assignment with lease fencing.
 - [ ] **T8** EventEmitter2 `domain.<type>` delivery + consumer registry.
 - [ ] **T9** `IDomainEventSubscriberPlugin` capability + manifest type + guard.
 - [ ] **T10** Plugin delivery with cursors, timeout, dead-letter.
-- [ ] **T11** Retention job + floor.
+- [ ] **T11** Retention job + floor (+ tests: purge window, floor, 410 below the floor).
 
 ## B2 — Recording points
 
