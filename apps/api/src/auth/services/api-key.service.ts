@@ -2,10 +2,16 @@ import {
     Injectable,
     BadRequestException,
     ConflictException,
+    Logger,
     NotFoundException,
+    Optional,
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
-import { ApiKeyRepository } from '@ever-works/agent/database';
+import {
+    ApiKeyRepository,
+    OrganizationMemberRepository,
+    TenantRepository,
+} from '@ever-works/agent/database';
 import type { ApiKey } from '@ever-works/agent/entities';
 import {
     API_KEY_ROTATION_DEFAULT_GRACE_HOURS,
@@ -61,7 +67,16 @@ const MAX_KEYS_PER_USER = 10;
  */
 @Injectable()
 export class ApiKeyService {
-    constructor(private readonly apiKeyRepository: ApiKeyRepository) {}
+    private readonly logger = new Logger(ApiKeyService.name);
+
+    constructor(
+        private readonly apiKeyRepository: ApiKeyRepository,
+        // EW-P2-6 — an integration key created by an Organization admin may act only
+        // in the Organizations its creator still administers. Both @Optional(): a
+        // graph without them (unit tests) keeps the stored pins, as before.
+        @Optional() private readonly tenants?: TenantRepository,
+        @Optional() private readonly members?: OrganizationMemberRepository,
+    ) {}
 
     async createKey(userId: string, name: string, expiresAt?: string) {
         const count = await this.apiKeyRepository.countByUserId(userId);
@@ -164,7 +179,40 @@ export class ApiKeyService {
             return null;
         }
         this.apiKeyRepository.updateLastUsed(apiKey.id).catch(() => {});
-        return apiKey;
+        // EW-P2-6 — the principal is built from these pins: narrow them to what the
+        // creator may use NOW (a copy when narrowed; the stored row is untouched).
+        const usable = await this.effectivePins(apiKey);
+        if (usable.length === apiKey.organizationIds.length) return apiKey;
+        return { ...apiKey, organizationIds: usable } as ApiKey;
+    }
+
+    /**
+     * EW-P2-6 — the pins an integration key may use right now: all of them when its
+     * creator owns the Tenant; otherwise only the ones the creator still administers
+     * (roster role `admin`), so demoting or removing an admin takes their keys' pins
+     * away at once. Fails closed for a non-owner (a lookup error = no pins). Without
+     * the repositories (unit tests) the stored pins, as before.
+     */
+    async effectivePins(
+        key: Pick<ApiKey, 'userId' | 'tenantId' | 'organizationIds'>,
+    ): Promise<string[]> {
+        const pins = Array.isArray(key.organizationIds) ? [...key.organizationIds] : [];
+        if (!this.tenants) return pins;
+        if (!key.tenantId) return [];
+        try {
+            const tenant = await this.tenants.findById(key.tenantId);
+            if (tenant?.ownerUserId === key.userId) return pins;
+            if (!this.members) return [];
+            const administered = new Set(
+                await this.members.listAdministeredOrganizationIds(key.userId, key.tenantId),
+            );
+            return pins.filter((id) => administered.has(id));
+        } catch (error) {
+            this.logger.warn(
+                `Integration key ${String((key as { id?: string }).id ?? '')} pins: ${String(error)}`,
+            );
+            return [];
+        }
     }
 
     /**

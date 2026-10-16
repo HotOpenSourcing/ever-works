@@ -628,7 +628,8 @@ export async function buildMemberSnapshot(
         organizationId: member.organizationId,
         userId: member.userId,
         username: user.username,
-        displayName: null,
+        // EW-P2-6 — the optional `users.displayName` (null = the username).
+        displayName: user.displayName ?? null,
         email: user.email ?? null,
         emailVerified: !!user.emailVerified,
         avatarUrl: user.avatar || null,

@@ -560,6 +560,13 @@ export class OrganizationService {
                     visionUpdatedAt: vision !== null ? new Date() : null,
                 });
                 const saved = await manager.getRepository<Organization>('organizations').save(org);
+                // EW-P2-6 — `organization.created` commits with the Organization.
+                await this.domainEvents?.created(
+                    manager,
+                    'organization',
+                    saved.id,
+                    'organization.created',
+                );
 
                 // Step (d): pin the new Org as the user's last-seen scope
                 // so the next login lands on it. Only do this if the user

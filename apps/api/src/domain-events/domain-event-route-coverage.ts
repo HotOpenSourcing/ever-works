@@ -110,16 +110,19 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         exempt: 'Revokes a pending invitation; the roster (organization_members) does not change.',
     },
     'DELETE /api/organizations/:orgId/members/:userId': { events: ['organization.member.removed'] },
+    // EW-P2-6 — admin / member.
+    'PATCH /api/organizations/:orgId/members/:userId': { events: ['organization.member.updated'] },
     'POST /api/org-invite/preview': {
         exempt: 'Read-only preview of an invitation token (POST only to keep the token out of URLs).',
     },
     'POST /api/org-invite/accept': { events: ['organization.member.added'] },
 
     // ── Organizations (`api/organizations`) ──────────────────────────────────
-    'POST /api/organizations': {
-        exempt: 'Creates an organization: catalog v1 has no organization.created (organization creation through integrations is P2, org:write).',
+    // EW-P2-6 — `organization.created` (catalog v1-draft.8).
+    'POST /api/organizations': { events: ['organization.created'] },
+    'POST /api/organizations/register-company': {
+        events: ['work.created', 'organization.created'],
     },
-    'POST /api/organizations/register-company': { events: ['work.created'] },
     'PATCH /api/organizations/:id': { events: ['organization.updated'] },
     'POST /api/organizations/:id/upgrade-from-account': {
         exempt: 'Bulk move of a personal account into a NEW organization (scope backfill); no v1 type covers organization creation (P2).',
@@ -435,6 +438,12 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['mission.work.linked', 'mission.work.unlinked'],
     },
     'DELETE /api/integrations/v1/missions/:id': { events: ['mission.deleted'] },
+
+    // ── Integration API v1 — Organizations (EW-P2-6, `org:write`) ─────────────
+    // + `organization.member.added` when an admin's key adds its creator as admin.
+    'POST /api/integrations/v1/organizations': {
+        events: ['organization.created', 'organization.member.added'],
+    },
 };
 
 /** The routes a list of events covers (for messages). */

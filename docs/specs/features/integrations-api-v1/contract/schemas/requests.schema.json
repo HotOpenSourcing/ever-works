@@ -551,6 +551,22 @@
 			},
 			"additionalProperties": false
 		},
+		"CreateOrganization": {
+			"description": "POST /organizations (EW-P2-6, scope org:write — opt-in, not in the Ever Gauzy preset; Idempotency-Key required; no X-Scope-Slug needed). Creates an organization in the key's tenant, owned by the tenant owner, and pins it to the calling key (at most 50 pins, else 400). A key created by an organization admin makes that admin an `admin` of the new organization. Answers 201 with the organization DTO. Records organization.created.",
+			"type": "object",
+			"required": ["displayName"],
+			"properties": {
+				"displayName": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"slug": {
+					"description": "Optional; allocated from displayName when omitted (a taken slug gets a suffix).",
+					"type": "string",
+					"pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+				},
+				"legalName": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"countryCode": { "type": "string", "pattern": "^[A-Za-z]{2}$" }
+			},
+			"additionalProperties": false
+		},
 		"PutLink": {
 			"description": "PUT /links/:entityType/:entityId. `source` comes from the key's integrationKind (ever-gauzy → gauzy).",
 			"type": "object",

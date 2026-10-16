@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.7`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2) and Missions (EW-P2-5) served
+**Status**: `Draft` — contract `v1-draft.8`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2), Missions (EW-P2-5) and organization create (EW-P2-6) served
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -133,12 +133,12 @@ Machine-readable: [`contract/event-catalog.v1.json`](./contract/event-catalog.v1
 phase, child / opt-in flags).
 
 | Domain        | Events                                                                                                                                                                                                                                                                                                          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| Organization  | `organization.updated`, `organization.member.added`, `organization.member.updated`, `organization.member.removed`                                                                                                                                                                                               |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Organization  | `GET /organization` (the `X-Scope-Slug` org); P2: `POST /organizations` (`org:write`, §6.6)                                                                                                                                                                                                                     | `org:read`, `org:write` | [organization](./contract/schemas/resources/organization.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateOrganization` |
 | Agents        | `agent.created`, `agent.updated`, `agent.status_changed`, `agent.archived`, `agent.deleted`                                                                                                                                                                                                                     |
 | Teams         | `team.created`, `team.updated`, `team.deleted`, `team.member.added`, `team.member.updated`, `team.member.removed`, `team.resource.added`, `team.resource.removed`                                                                                                                                               |
 | Works         | `work.created`, `work.updated`, `work.archived`, `work.deleted`, `work.member.added`, `work.member.updated`, `work.member.removed`                                                                                                                                                                              |
-| Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works` (§6.5)                                                                                                                           | `missions:*` | [mission](./contract/schemas/resources/mission.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateMission` |
+| Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works` (§6.5)                                                                                                                           | `missions:*`            | [mission](./contract/schemas/resources/mission.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateMission`                |
 | Goals (P2)    | `goal.created`, `goal.updated`, `goal.status_changed`, `goal.progress_changed` (at most 1 per goal per 5 min), `goal.archived`, `goal.unarchived`, `goal.deleted`                                                                                                                                               |
 | Ideas (P2)    | `idea.created`, `idea.updated`, `idea.status_changed`, `idea.deleted`                                                                                                                                                                                                                                           |
 | Tasks         | `task.created`, `task.updated`, `task.transitioned`, `task.deleted`; `task.assignee.added/removed`, `task.watcher.added/removed`, `task.block.added/removed`, `task.relation.added/removed`; `task.comment.created/updated/deleted`; `task.attachment.added/removed` (P3); `task.runtime_updated` (opt-in only) |
@@ -319,6 +319,24 @@ visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-dupli
   version), `mission.visibility_changed`.
 - **Writes act as the Mission's owner** (the key's owner, or `X-Act-As-User`); `PUT /links/mission/:id` is served.
 
+### 6.6 Organizations and members (EW-P2-6)
+
+- **`POST /organizations`** ([`CreateOrganization`](./contract/schemas/requests.schema.json) `{displayName, slug?,
+legalName?, countryCode?}`, scope `org:write` — opt-in, not in the Ever Gauzy preset; `Idempotency-Key` required; no
+  `X-Scope-Slug`): creates an Organization in the key's Tenant, owned by the Tenant owner like every Organization of
+  the Tenant, and **pins it to the calling key** (at most 50 pins, `400` beyond). A key created by an Organization
+  admin also makes its creator an `admin` of the new Organization. Answers `201` with the organization DTO and records
+  `organization.created` (new in the catalog; also recorded when a person creates an Organization in the app).
+- **Member roles:** `owner` (the Tenant owner, a member of every Organization by construction), `admin`, `member`
+  (every existing roster row). Only the Tenant owner promotes or demotes (`PATCH
+/api/organizations/:orgId/members/:userId {role: admin|member}` in the app, `organization.member.updated`); invitations
+  always create `member`s. Today `admin` grants exactly one thing: **creating integration keys** pinned to the
+  Organizations the admin administers. Such a key acts as its creator, and its usable pins are re-read on every
+  request, so a demoted or removed admin's key loses those pins at once (`403 org_not_pinned`). The Tenant owner sees
+  and may revoke every key of the Tenant; an admin sees their own.
+- **`displayName`:** members now carry the optional `users.displayName` (null when the person set none; fall back to
+  `username`). Profile fields are copied once by the consumer (plan 01 §3): changing them records no event.
+
 ## 7. Acceptance criteria
 
 - [ ] Every DTO and event served under `/api/integrations/v1` validates against [`contract/`](./contract/README.md)
@@ -372,3 +390,10 @@ Additive. Recorded as CR-7 on the plan's STATUS board: the Missions routes of §
 now marks `child: goal` / `child: work`; the Goal DTO's `missionIds` / `primaryMissionId` change records `goal.updated`;
 request bodies `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; `mission` is a served link
 entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap).
+
+## 13. Changes in `v1-draft.8` (CR-8, EW-P2-6 organizations and members)
+
+Additive. Recorded as CR-8 on the plan's STATUS board: `POST /organizations` (`org:write`, §6.6) with the new catalog
+type `organization.created` (`data` = the organization DTO); member `role` values `owner` / `admin` / `member`
+(`admin` may create integration keys for the Organizations it administers; such a key's usable pins follow the
+creator's current roles); member `displayName` from `users.displayName`; request body `CreateOrganization`.

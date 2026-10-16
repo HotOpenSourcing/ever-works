@@ -174,6 +174,20 @@ export class ApiKeyRepository {
      * and `findByPreviousHashedKey` both filter on `isActive`, so a
      * deactivated key is refused by the same check as a deleted one.
      */
+    /** EW-P2-6 — one key by id (any kind). */
+    async findById(id: string): Promise<ApiKey | null> {
+        return this.repository.findOne({ where: { id } });
+    }
+
+    /**
+     * EW-P2-6 — replace an ACTIVE integration key's Organization pins (`org:write`
+     * auto-pins the Organization it creates). `false` when no active key matched.
+     */
+    async updateOrganizationIds(id: string, organizationIds: string[]): Promise<boolean> {
+        const result = await this.repository.update({ id, isActive: true }, { organizationIds });
+        return (result.affected ?? 0) > 0;
+    }
+
     async deactivateById(id: string): Promise<boolean> {
         const result = await this.repository.update({ id, isActive: true }, { isActive: false });
         return (result.affected ?? 0) > 0;
