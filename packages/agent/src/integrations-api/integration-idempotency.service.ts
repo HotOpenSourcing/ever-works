@@ -9,6 +9,12 @@ import { IdempotencyConflictError } from './integration-api.errors';
 /** How long a stored response is replayed (contract v1 B.1: 24 h). */
 export const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * A claim still `in_progress` after this long belongs to a request that died
+ * (process stopped, or its final write failed): the key is free again.
+ */
+export const IDEMPOTENCY_STALE_CLAIM_MS = 5 * 60 * 1000;
+
 /** `Idempotency-Key` is at most 128 characters (contract v1 B.1). */
 export const IDEMPOTENCY_KEY_MAX_LENGTH = 128;
 
@@ -85,14 +91,7 @@ export class IntegrationIdempotencyService {
             await this.release(claim.id);
             return { ...result, replayed: false };
         }
-        await this.repo.update(
-            { id: claim.id },
-            {
-                state: 'completed',
-                responseStatus: result.status,
-                responseBody: JSON.stringify(result.body ?? null),
-            },
-        );
+        await this.complete(claim.id, result);
         return { ...result, replayed: false };
     }
 
@@ -129,6 +128,12 @@ export class IntegrationIdempotencyService {
                     throw new IdempotencyConflictError('request_mismatch');
                 }
                 if (existing.state !== 'completed') {
+                    const age = now.getTime() - new Date(existing.createdAt).getTime();
+                    if (age > IDEMPOTENCY_STALE_CLAIM_MS) {
+                        // The first request died without settling its claim.
+                        await this.repo.delete({ id: existing.id });
+                        continue;
+                    }
                     throw new IdempotencyConflictError('in_progress');
                 }
                 return {
@@ -154,6 +159,34 @@ export class IntegrationIdempotencyService {
             }
         }
         throw new IdempotencyConflictError('in_progress');
+    }
+
+    /**
+     * Store the response for replay. The work already succeeded, so a failed
+     * write must not fail the request: retry once, then leave the claim — it
+     * becomes free again after {@link IDEMPOTENCY_STALE_CLAIM_MS} instead of
+     * blocking retries for the whole 24 h window.
+     */
+    private async complete(id: string, result: { status: number; body: unknown }): Promise<void> {
+        const patch = {
+            state: 'completed' as const,
+            responseStatus: result.status,
+            responseBody: JSON.stringify(result.body ?? null),
+        };
+        for (let attempt = 0; attempt < 2; attempt++) {
+            try {
+                await this.repo.update({ id }, patch);
+                return;
+            } catch (error) {
+                if (attempt === 1) {
+                    this.logger.warn(
+                        `Could not store an Idempotency-Key response (the key frees up after ${IDEMPOTENCY_STALE_CLAIM_MS / 60000} min): ${
+                            error instanceof Error ? error.message : String(error)
+                        }`,
+                    );
+                }
+            }
+        }
     }
 
     private async release(id: string): Promise<void> {

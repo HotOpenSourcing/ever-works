@@ -151,7 +151,7 @@ describe('integration API v1 foundation', () => {
                 { ...scope, source: 'jira' },
                 { entityType: 'task', entityId: b, externalId: 'J-1' },
             );
-            const byEntity = await links.linksFor('task', [a, b], 'gauzy');
+            const byEntity = await links.linksFor(ORG_A, 'task', [a, b], 'gauzy');
             expect(
                 byEntity
                     .get(a)
@@ -159,6 +159,46 @@ describe('integration API v1 foundation', () => {
                     .sort(),
             ).toEqual(['conn-1', 'conn-2']);
             expect(byEntity.has(b)).toBe(false);
+            // Org-scoped: the same record id in another organization is another link set.
+            expect((await links.linksFor(ORG_B, 'task', [a], 'gauzy')).has(a)).toBe(false);
+        });
+
+        it('removes a record links in ONE organization only', async () => {
+            const memberId = randomUUID();
+            await links.create(scope, {
+                entityType: 'member',
+                entityId: memberId,
+                externalId: 'emp-1',
+            });
+            await links.create(
+                { ...scope, organizationId: ORG_B },
+                { entityType: 'member', entityId: memberId, externalId: 'emp-9' },
+            );
+            expect(await links.removeAllFor(ORG_A, 'member', memberId)).toBe(1);
+            expect(
+                await links.findByExternal({ ...scope, organizationId: ORG_B }, 'member', 'emp-9'),
+            ).not.toBeNull();
+        });
+
+        it('reports which side collides before inserting (safe inside a Postgres transaction)', async () => {
+            const [a, b] = [randomUUID(), randomUUID()];
+            await links.create(scope, { entityType: 'task', entityId: a, externalId: 'g-1' });
+            await expect(
+                dataSource.transaction((manager) =>
+                    links.create(
+                        scope,
+                        { entityType: 'task', entityId: a, externalId: 'g-2' },
+                        manager,
+                    ),
+                ),
+            ).rejects.toMatchObject({
+                side: 'entity',
+                existingEntityId: a,
+                existingExternalId: 'g-1',
+            });
+            await expect(
+                links.put(scope, { entityType: 'task', entityId: b, externalId: 'g-1' }),
+            ).rejects.toMatchObject({ side: 'external', existingEntityId: a });
         });
 
         it('takes the installation from X-Sync-Origin when externalRef has none', () => {
@@ -248,6 +288,30 @@ describe('integration API v1 foundation', () => {
             expect(ok).toEqual({ status: 201, body: { id: 'ok' }, replayed: false });
         });
 
+        it('frees a claim left in progress by a request that died', async () => {
+            await dataSource.getRepository(IntegrationIdempotencyKey).insert({
+                integrationKeyId: KEY,
+                idempotencyKey: 'k-stale',
+                requestHash: hash,
+                state: 'in_progress',
+                expiresAt: new Date(Date.now() + IDEMPOTENCY_TTL_MS),
+            } as unknown as IntegrationIdempotencyKey);
+            // Still fresh: refused.
+            await expect(
+                idempotency.run(
+                    { integrationKeyId: KEY, idempotencyKey: 'k-stale', requestHash: hash },
+                    async () => ({ status: 201, body: {} }),
+                ),
+            ).rejects.toBeInstanceOf(IdempotencyConflictError);
+            // Six minutes later the dead claim is replaced.
+            const later = new Date(Date.now() + 6 * 60 * 1000);
+            const result = await idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-stale', requestHash: hash, now: later },
+                async () => ({ status: 201, body: { id: 'retried' } }),
+            );
+            expect(result).toEqual({ status: 201, body: { id: 'retried' }, replayed: false });
+        });
+
         it('forgets responses after 24 h and purges them', async () => {
             const past = new Date(Date.now() - IDEMPOTENCY_TTL_MS - 1000);
             await idempotency.run(
@@ -270,9 +334,25 @@ describe('integration API v1 foundation', () => {
 
     describe('keyset paging', () => {
         it('round-trips cursors and refuses foreign ones', () => {
-            const position = { updatedAt: new Date('2026-10-16T05:00:00.123Z'), id: 'abc' };
-            expect(decodeKeysetCursor(encodeKeysetCursor(position))).toEqual(position);
-            for (const bad of ['', 'not-base64!', Buffer.from('{"v":2}').toString('base64url')]) {
+            for (const updatedAt of [
+                '2026-10-16 05:00:00.123',
+                '2026-10-16 05:00:00.123456',
+                '2026-10-16 05:00:00',
+            ]) {
+                const position = { updatedAt, id: 'abc' };
+                expect(decodeKeysetCursor(encodeKeysetCursor(position))).toEqual(position);
+            }
+            const forged = (value: unknown) =>
+                Buffer.from(JSON.stringify(value)).toString('base64url');
+            for (const bad of [
+                '',
+                'not-base64!',
+                forged({ v: 2 }),
+                forged({ v: 1, u: 1e20, i: 'abc' }),
+                forged({ v: 1, u: '2026-13-99 99:99', i: 'abc' }),
+                forged({ v: 1, u: '2026-10-16 05:00:00', i: '' }),
+                forged(null),
+            ]) {
                 expect(() => decodeKeysetCursor(bad)).toThrow(InvalidCursorError);
             }
             expect(keysetLimit(undefined)).toBe(200);
