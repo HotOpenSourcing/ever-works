@@ -205,6 +205,9 @@ import { WorkAppProvisioning } from '../entities/work-app-provisioning.entity';
 import { EverInstance } from '../entities/ever-instance.entity';
 import { EverStatsReport } from '../entities/ever-stats-report.entity';
 import { EverStatsLease } from '../entities/ever-stats-lease.entity';
+import { DomainEvent } from '../entities/domain-event.entity';
+import { DomainEventRelayState } from '../entities/domain-event-relay-state.entity';
+import { PluginEventCursor } from '../entities/plugin-event-cursor.entity';
 
 import {
     PluginEntity,
@@ -534,4 +537,10 @@ export const ENTITIES = [
     EverInstance,
     EverStatsReport,
     EverStatsLease,
+    // Domain events (EW-P1-1) — the outbox written in the same transaction as
+    // each state change, the one relay lease/position row, and the per-plugin
+    // delivery cursors.
+    DomainEvent,
+    DomainEventRelayState,
+    PluginEventCursor,
 ];

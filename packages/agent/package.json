@@ -201,6 +201,10 @@
             "types": "./dist/teams/index.d.ts",
             "default": "./dist/teams/index.js"
         },
+        "./domain-events": {
+            "types": "./dist/domain-events/index.d.ts",
+            "default": "./dist/domain-events/index.js"
+        },
         "./schedules": {
             "types": "./dist/schedules/index.d.ts",
             "default": "./dist/schedules/index.js"
