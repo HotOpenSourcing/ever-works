@@ -103,7 +103,10 @@ export class ApiKeysController {
         @Body() dto: RotateApiKeyDto,
     ) {
         const rotated = await this.apiKeyService.rotateKey(id, req.user.userId, dto?.graceHours);
-        await this.integrationKeys?.recordRotation(req.user.userId, id);
+        // The new secret exists only in this response: the audit row can never
+        // be allowed to fail the request (`recordRotation` swallows its own
+        // errors too; this is the belt to those braces).
+        await this.integrationKeys?.recordRotation(req.user.userId, id).catch(() => undefined);
         return rotated;
     }
 

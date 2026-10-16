@@ -426,6 +426,26 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
             expect(res.body.scopes).toContain('tasks:write');
         });
 
+        it('whoami needs no org header, but a supplied slug must still name a pin', async () => {
+            const { key } = await createIntegrationKey();
+            for (const slug of ['owner', 'beta']) {
+                const res = await request(app.getHttpServer())
+                    .get('/api/integrations/v1/whoami')
+                    .set('x-api-key', key)
+                    .set('X-Scope-Slug', slug);
+                expect({ slug, status: res.status, code: res.body?.error?.code }).toEqual({
+                    slug,
+                    status: 403,
+                    code: 'org_not_pinned',
+                });
+            }
+            const pinned = await request(app.getHttpServer())
+                .get('/api/integrations/v1/whoami')
+                .set('x-api-key', key)
+                .set('X-Scope-Slug', 'acme');
+            expect(pinned.status).toBe(200);
+        });
+
         it('whoami refuses a session (the integration API is for integration keys only)', async () => {
             const res = await request(app.getHttpServer())
                 .get('/api/integrations/v1/whoami')
@@ -507,6 +527,8 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
                 { 'X-Organization-Id': 'not-a-uuid' },
                 { 'X-Scope-Slug': 'acme', 'X-Organization-Id': ORG_B },
                 { 'X-Scope-Slug': 'owner' }, // a personal (user) slug is no org
+                // …nor next to a pinned X-Organization-Id (review: a supplied slug must be a pin).
+                { 'X-Scope-Slug': 'owner', 'X-Organization-Id': ORG_A },
             ];
             for (const headers of cases) {
                 const res = await request(app.getHttpServer())
@@ -687,6 +709,34 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
                 .get('/api/integrations/v1/whoami')
                 .set('x-api-key', oldKey);
             expect(stale.status).toBe(401);
+        });
+
+        it('a failing rotation audit never hides the new secret', async () => {
+            const { id } = await createIntegrationKey();
+            const original = keys.findByIdAndUserId.bind(keys);
+            let calls = 0;
+            const spy = jest
+                .spyOn(keys, 'findByIdAndUserId')
+                .mockImplementation(async (...args) => {
+                    calls += 1;
+                    // 1st call: the rotation itself; 2nd: the audit lookup, which fails.
+                    if (calls === 2) throw new Error('db hiccup');
+                    return original(...args);
+                });
+            try {
+                const res = await request(app.getHttpServer())
+                    .post(`/api/auth/api-keys/${id}/rotate`)
+                    .set(session(OWNER))
+                    .send({ graceHours: 0 });
+                expect(res.status).toBe(200);
+                expect(res.body.key).toMatch(/^ew_int_/);
+                const who = await request(app.getHttpServer())
+                    .get('/api/integrations/v1/whoami')
+                    .set('x-api-key', res.body.key);
+                expect(who.status).toBe(200);
+            } finally {
+                spy.mockRestore();
+            }
         });
 
         it('graceHours 0 retires the old secret immediately; out-of-range grace is a 400', async () => {

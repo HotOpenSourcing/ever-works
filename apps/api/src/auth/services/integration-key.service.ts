@@ -192,17 +192,28 @@ export class IntegrationKeyService {
         return true;
     }
 
-    /** Record a rotation of an integration key (the rotation itself is `ApiKeyService.rotateKey`). */
+    /**
+     * Record a rotation of an integration key (the rotation itself is
+     * `ApiKeyService.rotateKey`). Best-effort end to end, the lookup included:
+     * it runs after the new secret is saved, and the caller must still get
+     * that secret back whatever happens here.
+     */
     async recordRotation(userId: string, keyId: string): Promise<void> {
         if (!UUID_RE.test(keyId)) return;
-        const row = await this.apiKeys.findByIdAndUserId(keyId, userId);
-        if (!row || row.kind !== INTEGRATION_API_KEY_KIND) return;
-        await this.audit(
-            userId,
-            ActivityActionType.INTEGRATION_KEY_ROTATED,
-            row,
-            'Integration key rotated',
-        );
+        try {
+            const row = await this.apiKeys.findByIdAndUserId(keyId, userId);
+            if (!row || row.kind !== INTEGRATION_API_KEY_KIND) return;
+            await this.audit(
+                userId,
+                ActivityActionType.INTEGRATION_KEY_ROTATED,
+                row,
+                'Integration key rotated',
+            );
+        } catch (err) {
+            this.logger.warn(
+                `Failed to record the rotation of integration key ${keyId}: ${(err as Error).message}`,
+            );
+        }
     }
 
     // ── internals ────────────────────────────────────────────────────────
