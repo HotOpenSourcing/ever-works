@@ -56,15 +56,15 @@
 
 ## Phase 2b — P2 resources (EW-P2)
 
-- [x] **T27** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
+- [x] **T31** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
       `external` + `pending`, `missionId` in the pinned org), `PATCH /ideas/:id` (title, description, `teamIds`,
       `visibility`; `If-Match` re-checked in the edit's transaction), `POST /ideas/:id/dismiss` / `restore`
       (idempotent; other statuses `422`); `idea` link target; keyset index `idx_work_proposals_org_updated`
       (migration `1795120000000`, also `goals` / `missions`); request schemas `CreateIdea` / `UpdateIdea`; contract
-      `v1-draft.4` (CR-4). Recording points: [`domain-events`](../domain-events/tasks.md) T20.
-- [ ] **T28** Goals (EW-P2-2).
-- [ ] **T29** Missions (EW-P2-5).
-- [ ] **T30** Organization create + member roles (EW-P2-6).
+      `v1-draft.5` (CR-5). Recording points: [`domain-events`](../domain-events/tasks.md) T20.
+- [ ] **T32** Goals (EW-P2-2).
+- [ ] **T33** Missions (EW-P2-5).
+- [ ] **T34** Organization create + member roles (EW-P2-6).
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 

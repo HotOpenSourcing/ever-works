@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.4`; P1 resources live, P2 Ideas served (EW-P2-1), Goals and Missions next
+**Status**: `Draft` — contract `v1-draft.5`; P1 resources live, P2 Ideas served (EW-P2-1), Goals and Missions next
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -273,11 +273,11 @@ webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.
 
-## 9. Changes in `v1-draft.4` (CR-4, EW-P2-1 Ideas)
+## 10. Changes in `v1-draft.5` (CR-5, EW-P2-1 Ideas)
 
-Additive. Recorded as CR-4 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
+Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
 [idea DTO](./contract/schemas/resources/idea.schema.json) is the `data` of `idea.created`, `idea.updated`,
 `idea.status_changed` and `idea.deleted` (catalog rows filled); request bodies `CreateIdea` / `UpdateIdea`; `idea` is a
 served link entity type; dismiss / restore are idempotent and answer `422 domain_rule` from any other status; writes act
-as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2) and `v1-draft.3` (CR-3, task dates and estimate)
+as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
 are recorded on the same board.

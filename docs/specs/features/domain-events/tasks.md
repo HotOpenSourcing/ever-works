@@ -36,7 +36,7 @@
       `WorkProposalRepository`, `WorkProposalService.createExternal` / `updateContent` / `restore`, idea DTO schema
       (`idea-recording.spec.ts`; the coverage gate now scans `work-proposals.controller.ts`). The integration `PATCH`
       records title / description edits in the edit's own transaction, so a stale `If-Match` rolls back; the routes
-      are [`integrations-api-v1`](../integrations-api-v1/tasks.md) T27.
+      are [`integrations-api-v1`](../integrations-api-v1/tasks.md) T31.
 - [ ] **T21** Goals (EW-P2-2).
 - [ ] **T22** Missions (EW-P2-5), incl. the Ideas a Mission clone copies.
 
