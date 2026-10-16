@@ -684,6 +684,8 @@ export class TasksController {
     @ApiOperation({ summary: 'State-machine transition.' })
     @HttpCode(HttpStatus.OK)
     @Throttle({ long: { limit: 60, ttl: 60_000 } })
+    // EW-P1-6 — open to integration keys holding `tasks:write`, sync mode only.
+    @RequireScopes('tasks:write')
     async transition(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
@@ -704,6 +706,36 @@ export class TasksController {
             throw new ForbiddenException(
                 'A fleet-run credential cannot force a Task transition past its approver gate.',
             );
+        }
+        // EW-P1-6 — an integration mirrors a status: it moves in sync mode only
+        // (no agent work started, D9) and can never force the approver gate.
+        if (isIntegrationPrincipal(auth)) {
+            if (body.force === true) {
+                throw new IntegrationHttpException(
+                    422,
+                    'domain_rule',
+                    'An integration cannot force a Task transition past its approver gate.',
+                    { field: 'force' },
+                );
+            }
+            if (body.mode !== 'sync') {
+                throw new IntegrationHttpException(
+                    422,
+                    'domain_rule',
+                    "Integrations move Tasks with mode 'sync'.",
+                    { field: 'mode' },
+                );
+            }
+        }
+        if (body.mode === 'sync') {
+            const result = await this.service.syncTransition(
+                auth.userId,
+                id,
+                body.to,
+                { force: body.force === true },
+                this.scopeContext.getScope(),
+            );
+            return result.task;
         }
         return this.service.transition(
             auth.userId,
