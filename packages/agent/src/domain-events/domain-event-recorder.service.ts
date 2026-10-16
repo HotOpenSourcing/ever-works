@@ -57,11 +57,8 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         agent: Agent,
         work: Work,
         organization: Organization,
-<<<<<<< HEAD
         inbox_item: InboxItem,
-=======
         idea: WorkProposal,
->>>>>>> 5e264b7b2e9f49e2dca8724e9353779a2884db58
     };
 
 /** Thrown for a type outside the catalog: an event nobody can parse is a bug, not data. */

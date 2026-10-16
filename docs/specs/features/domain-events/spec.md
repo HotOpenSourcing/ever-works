@@ -128,16 +128,10 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
 
 ## 4. Aggregate `version` and `updatedAt`
 
-<<<<<<< HEAD
-- `version int NOT NULL DEFAULT 1` on the P1 aggregates `tasks`, `teams`, `agents`, `works` and `organizations`
-  (later phases add `goals`, `missions`, `work_proposals`, `work_knowledge_documents`). P3 added `inbox_items`
-  (`AddInboxItemVersion1795090000000`).
-=======
 - `version int NOT NULL DEFAULT 1` on the P1 aggregates `tasks`, `teams`, `agents`, `works` and `organizations`.
   Migration `1795100000000-AddP2AggregateSyncColumns` adds it to `work_proposals`, `goals` and `missions` (EW-P2), with
-  nullable `createdByType` / `createdById` (the integration key that created the row; NULL = the owner). Later phases
-  add `inbox_items` and `work_knowledge_documents`.
->>>>>>> 5e264b7b2e9f49e2dca8724e9353779a2884db58
+  nullable `createdByType` / `createdById` (the integration key that created the row; NULL = the owner). P3 added
+  `inbox_items` (`AddInboxItemVersion1795090000000`). Later phases add `work_knowledge_documents`.
 - Incremented on **every** change to the aggregate, **including edge/child changes**: assignees, watchers, approvers,
   reviewers, blocks, relations, attachments and chat on a task; members and resources on a team; members on a work;
   roster rows on an organization.
