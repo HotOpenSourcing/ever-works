@@ -53,6 +53,12 @@ export interface AggregateSnapshot<T> {
     readonly dto: T;
     readonly tenantId: string | null;
     readonly organizationId: string | null;
+    /**
+     * The event's `visibility` when the DTO carries none of its own (absent =
+     * the DTO's `visibility`). `'private'` keeps the event out of the
+     * integration feed and webhooks v2; in-process listeners still get it.
+     */
+    readonly visibility?: string | null;
 }
 
 const iso = (value: Date | string | null | undefined): string | null =>
@@ -539,6 +545,13 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
  * organization's (inbox rows written before tenancy stamping carry only the
  * organization), else `null` (a personal-scope message: recorded for
  * in-process listeners, never served to integrations).
+ *
+ * Recorded `private`: an inbox item is ONE person's message (the question an
+ * agent asked them, their approval, their answer). An organization-scoped
+ * event would reach every key with `events:read` on the organization and
+ * every webhook on it, not just the recipient. Until delivery is scoped to
+ * the recipient (T21: `inbox:*` + act-as = the recipient), these events stay
+ * off the integration feed and webhooks v2.
  */
 export async function buildInboxItemSnapshot(
     manager: EntityManager,
@@ -557,5 +570,6 @@ export async function buildInboxItemSnapshot(
         dto: toIntegrationInboxItemDto(row),
         tenantId,
         organizationId: row.organizationId ?? null,
+        visibility: 'private',
     };
 }
