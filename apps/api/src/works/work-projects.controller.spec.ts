@@ -33,13 +33,11 @@ describe('WorkProjectsController', () => {
     beforeEach(() => {
         authService = { getUser: jest.fn().mockResolvedValue(user) };
         lifecycle = {
-            createProjectWork: jest
-                .fn()
-                .mockImplementation(async (_u, params) => ({
-                    id: 'w1',
-                    kind: 'project',
-                    ...params,
-                })),
+            createProjectWork: jest.fn().mockImplementation(async (_u, params) => ({
+                id: 'w1',
+                kind: 'project',
+                ...params,
+            })),
         };
         query = {
             checkSlugAvailability: jest
