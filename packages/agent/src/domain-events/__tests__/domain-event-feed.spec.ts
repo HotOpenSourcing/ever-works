@@ -106,6 +106,16 @@ describe('DomainEventFeedService', () => {
         }
     });
 
+    it('treats a non-finite limit as the default instead of looping on an empty page', async () => {
+        await recordMany(dataSource, 3);
+        await dispatch();
+        for (const limit of [Number.NaN, Number.POSITIVE_INFINITY]) {
+            const page = await feed.readPage({ organizationIds: [ORG_A], after: '0', limit });
+            expect(page.events.map((event) => event.seq)).toEqual(['1', '2', '3']);
+            expect(page.hasMore).toBe(false);
+        }
+    });
+
     it('never serves personal-scope events', async () => {
         await recordMany(dataSource, 1, () => ({ organizationId: null }));
         await dispatch();
