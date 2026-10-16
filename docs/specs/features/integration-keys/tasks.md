@@ -32,5 +32,7 @@
 - [ ] EW-P1-4: integration resources under `/api/integrations/v1` (each with `@RequireScopes`), the error envelope for
       validation errors, `externalAuthor` on comment creates.
 - [ ] EW-P1-5: disable a key's webhook subscriptions on `integration-key.revoked`.
-- [ ] EW-P1-7: Settings → API keys integration dialog (Ever Gauzy preset, deep link), list with Rotate; Integrations card.
+- [x] EW-P1-7: Settings → API keys integration dialog (Ever Gauzy preset, deep link), list with Rotate; Integrations
+      card (`IntegrationKeysSection`, `EverGauzyIntegrationCard`, `/settings/integrations/ever-gauzy`).
+- [ ] EW-P1-5: list the key's webhook subscriptions on the Ever Gauzy card; revoke disables both.
 - [ ] EW-P2-6: org owner/admin roles may create integration keys.

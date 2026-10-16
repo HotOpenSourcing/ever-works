@@ -47,7 +47,14 @@ Guard order (providers order in `ApiModule`): `AuthSessionGuard` → `SessionSco
 
 ## Web
 
-Task chat shows an integration author (🔗, `externalAuthor.name` when present). Settings UI is EW-P1-7.
+Task chat shows an integration author (🔗, `externalAuthor.name` when present).
+
+Settings UI (EW-P1-7): `apps/web/src/components/settings/IntegrationKeysSection.tsx` (list, create dialog with the Ever
+Gauzy preset, rotate, revoke) rendered on `settings/api-keys/page.tsx` (reads `?new=integration&preset=…`);
+`EverGauzyIntegrationCard.tsx` on `settings/integrations/ever-gauzy/page.tsx`; server actions `createIntegrationKey`,
+`rotateApiKey`; client `apiKeysAPI.listIntegration|createIntegration|rotate`; strings in `messages/en.json`
+(`dashboard.settings.apiKeys.integration`, `dashboard.settings.everGauzy`; other locales fall back to English through
+`i18n/request.ts`'s deep merge).
 
 ## Tests
 

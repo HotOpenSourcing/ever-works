@@ -5,7 +5,6 @@ import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { AlertTriangle, Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-react';
 import {
-    EVER_GAUZY_PRESET_SCOPES,
     INTEGRATION_KEY_PRESETS,
     INTEGRATION_SCOPES,
     type IntegrationKeySummary,
@@ -245,7 +244,9 @@ export function IntegrationKeysSection({
                     >
                         {t('title')}
                     </h3>
-                    <p className="text-text-muted dark:text-text-muted-dark text-sm">{t('subtitle')}</p>
+                    <p className="text-text-muted dark:text-text-muted-dark text-sm">
+                        {t('subtitle')}
+                    </p>
                 </div>
                 <Button
                     onClick={() => setShowCreate(true)}
@@ -267,14 +268,16 @@ export function IntegrationKeysSection({
                     <table className="w-full" data-testid="integration-keys-table">
                         <thead>
                             <tr className="bg-surface-secondary dark:bg-surface-secondary-dark border-b border-border dark:border-border-dark">
-                                {(['name', 'key', 'pins', 'scopes', 'lastUsed'] as const).map((column) => (
-                                    <th
-                                        key={column}
-                                        className="text-left px-4 py-3 text-xs font-medium text-text-muted dark:text-text-muted-dark"
-                                    >
-                                        {t(`columns.${column}`)}
-                                    </th>
-                                ))}
+                                {(['name', 'key', 'pins', 'scopes', 'lastUsed'] as const).map(
+                                    (column) => (
+                                        <th
+                                            key={column}
+                                            className="text-left px-4 py-3 text-xs font-medium text-text-muted dark:text-text-muted-dark"
+                                        >
+                                            {t(`columns.${column}`)}
+                                        </th>
+                                    ),
+                                )}
                                 <th className="text-right px-4 py-3 text-xs font-medium text-text-muted dark:text-text-muted-dark">
                                     {t('columns.actions')}
                                 </th>
@@ -293,10 +296,13 @@ export function IntegrationKeysSection({
                                             {key.description ? ` — ${key.description}` : ''}
                                         </div>
                                         {key.previousKeyGraceUntil &&
-                                        new Date(key.previousKeyGraceUntil).getTime() > Date.now() ? (
+                                        new Date(key.previousKeyGraceUntil).getTime() >
+                                            Date.now() ? (
                                             <div className="text-warning mt-1">
                                                 {t('graceUntil', {
-                                                    date: new Date(key.previousKeyGraceUntil).toLocaleString(),
+                                                    date: new Date(
+                                                        key.previousKeyGraceUntil,
+                                                    ).toLocaleString(),
                                                 })}
                                             </div>
                                         ) : null}
@@ -310,7 +316,12 @@ export function IntegrationKeysSection({
                                         {(key.organizations.length > 0
                                             ? key.organizations
                                             : key.organizationIds.map(
-                                                  (id) => orgById.get(id) ?? { id, slug: id, displayName: id },
+                                                  (id) =>
+                                                      orgById.get(id) ?? {
+                                                          id,
+                                                          slug: id,
+                                                          displayName: id,
+                                                      },
                                               )
                                         )
                                             .map((org) => org.displayName)
@@ -398,7 +409,9 @@ export function IntegrationKeysSection({
                                                 key={org.id}
                                                 label={org.displayName}
                                                 checked={orgIds.includes(org.id)}
-                                                onChange={() => setOrgIds((prev) => toggle(prev, org.id))}
+                                                onChange={() =>
+                                                    setOrgIds((prev) => toggle(prev, org.id))
+                                                }
                                             />
                                         ))}
                                     </div>
@@ -413,7 +426,9 @@ export function IntegrationKeysSection({
                                     {t('dialog.presetLabel')}
                                 </label>
                                 <Select value={preset} onValueChange={choosePreset}>
-                                    <option value="ever-gauzy">{t('dialog.presets.ever-gauzy')}</option>
+                                    <option value="ever-gauzy">
+                                        {t('dialog.presets.ever-gauzy')}
+                                    </option>
                                     <option value="custom">{t('dialog.presets.custom')}</option>
                                 </Select>
                                 {preset === 'ever-gauzy' ? (
@@ -427,23 +442,21 @@ export function IntegrationKeysSection({
                                 <legend className="block text-sm font-medium text-text dark:text-text-dark mb-1.5">
                                     {t('dialog.scopesLabel')}
                                 </legend>
-                                <div className="grid grid-cols-2 gap-1.5" data-testid="integration-scopes">
+                                <div
+                                    className="grid grid-cols-2 gap-1.5"
+                                    data-testid="integration-scopes"
+                                >
                                     {INTEGRATION_SCOPES.map((scope) => (
                                         <Checkbox
                                             key={scope}
                                             label={scope}
                                             checked={scopes.includes(scope)}
-                                            onChange={() => {
-                                                setScopes((prev) => toggle(prev, scope));
-                                                if (
-                                                    preset === 'ever-gauzy' &&
-                                                    !EVER_GAUZY_PRESET_SCOPES.includes(scope)
-                                                ) {
-                                                    // Opting into org:write / email:write keeps the
-                                                    // Ever Gauzy kind; only the scope set grows.
-                                                    return;
-                                                }
-                                            }}
+                                            // Ticking an opt-in scope (org:write, email:write) under
+                                            // the Ever Gauzy preset keeps the Ever Gauzy kind; only
+                                            // the scope set grows.
+                                            onChange={() =>
+                                                setScopes((prev) => toggle(prev, scope))
+                                            }
                                         />
                                     ))}
                                 </div>
