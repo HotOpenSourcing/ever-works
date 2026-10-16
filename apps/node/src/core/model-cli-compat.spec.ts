@@ -41,6 +41,9 @@ Options:
   --strict-mcp-config               Only use MCP servers from --mcp-config
   --allowedTools, --allowed-tools <tools...>  Comma or space-separated list of tool names to allow
   --dangerously-skip-permissions    Bypass all permission checks
+  --verbose                         Override verbose mode setting from config
+  -r, --resume [value]              Resume a conversation by session ID
+  --fork-session                    When resuming, create a new session ID instead of reusing the original
   -h, --help                        Display help for command
 `;
 
@@ -61,6 +64,7 @@ Options:
   -C, --cd <DIR>               Tell the agent to use the specified directory as its working root
       --add-dir <DIR>          Additional directories that should be writable
       --json                   Print events to stdout as JSONL
+      --ignore-user-config     Do not load CODEX_HOME/config.toml; auth still uses CODEX_HOME
   -h, --help                   Print help
 `;
 
@@ -109,6 +113,33 @@ describe('judgeModelCliHelp', () => {
 		const compat = judgeModelCliHelp('claude-code', '/bin/claude', '9.0.0', help);
 		expect(isModelCliCompatible(compat)).toBe(false);
 		expect(compat.missingRequiredFlags).toEqual(['--permission-mode']);
+	});
+
+	it('the MCP isolation flags are REQUIRED: every fleet Claude Code run passes them (#2598)', () => {
+		// Since #2584 each run carries `--mcp-config <file> --strict-mcp-config` (the
+		// empty strict config, or the bridge's). A build without them fails EVERY run,
+		// so doctor must call it incompatible, not "runs that need it will fail".
+		const help = CLAUDE_HELP.split('\n')
+			.filter((line) => !line.includes('--strict-mcp-config'))
+			.join('\n');
+		const compat = judgeModelCliHelp('claude-code', '/bin/claude', '9.0.0', help);
+		expect(isModelCliCompatible(compat)).toBe(false);
+		expect(compat.missingRequiredFlags).toEqual(['--strict-mcp-config']);
+		expect(compat.missingConditionalFlags).toEqual([]);
+	});
+
+	it('names the stream / session-continuity flags a build lacks as CONDITIONAL (handover item 18)', () => {
+		// `--verbose` rides every run that records evidence (stream-json needs it);
+		// `--resume` / `--fork-session` ride only a continued session (slice AU).
+		const help = CLAUDE_HELP.split('\n')
+			.filter(
+				(line) => !line.includes('--fork-session') && !line.includes('--verbose') && !line.includes('--resume')
+			)
+			.join('\n');
+		const compat = judgeModelCliHelp('claude-code', '/bin/claude', '9.0.0', help);
+		expect(isModelCliCompatible(compat)).toBe(true);
+		expect(compat.missingRequiredFlags).toEqual([]);
+		expect(compat.missingConditionalFlags).toEqual(['--verbose', '--resume', '--fork-session']);
 	});
 
 	it('an UNRECOGNISED help text is "could not tell", never "supports nothing"', () => {
@@ -261,11 +292,90 @@ describe('ModelCliCompatibilityProbe', () => {
 		expect(recovered.supportedFlags).not.toBeNull();
 		expect(recovered.version).toBe('2.1.3');
 
-		// A COMPLETE answer from a stamped file is then kept until the file changes.
+		// A COMPLETE answer from a stamped file is then kept far longer than the
+		// incomplete retry: up to the stamped maximum age (1 h by default).
 		const calls = run.run.mock.calls.length;
-		now = 10 * 60 * 60_000;
+		now = 61_000 + 50 * 60_000;
 		await probe.probe('claude-code', '/opt/claude');
 		expect(run.run.mock.calls.length).toBe(calls);
+	});
+
+	it('re-asks a stamped binary after the maximum age: an upgrade BEHIND a stable wrapper (#2598 b)', async () => {
+		// The pinned path is an npm shim (`claude.cmd`). `npm i -g` replaces the
+		// package it launches, so the shim's mtime and size never change.
+		let now = 0;
+		let installed = '2.1.3';
+		const run = {
+			run: vi.fn(async (_command: string, args: string[]) =>
+				args[0] === '--version'
+					? { code: 0, stdout: `${installed} (Claude Code)`, stderr: '' }
+					: { code: 0, stdout: CLAUDE_HELP, stderr: '' }
+			)
+		};
+		const probe = new ModelCliCompatibilityProbe({
+			runner: run as never,
+			statFile: () => ({ mtimeMs: 1, size: 100 }),
+			now: () => now,
+			stampedMaxAgeMs: 60 * 60_000
+		});
+
+		expect((await probe.probe('claude-code', 'C:\\npm\\claude.cmd')).version).toBe('2.1.3');
+		installed = '2.2.0'; // upgraded behind the unchanged shim
+		now = 59 * 60_000;
+		expect((await probe.probe('claude-code', 'C:\\npm\\claude.cmd')).version).toBe('2.1.3'); // within the age
+		now = 61 * 60_000;
+		expect((await probe.probe('claude-code', 'C:\\npm\\claude.cmd')).version).toBe('2.2.0');
+		expect(run.run).toHaveBeenCalledTimes(4);
+	});
+
+	it('a probe the runner KILLED at its timeout is incomplete, even with partial output (#2598)', async () => {
+		// A busy machine: `--help` prints its banner and the first options, then the
+		// runner kills it. Judged as an answer, that half page would be cached until
+		// the file changes; as an incomplete answer it is retried after a minute.
+		let now = 0;
+		let slow = true;
+		const partialHelp = CLAUDE_HELP.split('\n').slice(0, 6).join('\n');
+		const run = {
+			run: vi.fn(async (_command: string, args: string[]) => {
+				if (args[0] === '--version') return { code: 0, stdout: '2.1.3 (Claude Code)', stderr: '' };
+				return slow
+					? { code: 1, stdout: partialHelp, stderr: '', timedOut: true }
+					: { code: 0, stdout: CLAUDE_HELP, stderr: '' };
+			})
+		};
+		const probe = new ModelCliCompatibilityProbe({
+			runner: run as never,
+			statFile: () => ({ mtimeMs: 1, size: 100 }),
+			now: () => now,
+			incompleteRetryMs: 60_000
+		});
+
+		const first = await probe.probe('claude-code', '/opt/claude');
+		expect(first.supportedFlags).toBeNull();
+		expect(first.missingRequiredFlags).toEqual([]);
+
+		slow = false;
+		now = 61_000;
+		const recovered = await probe.probe('claude-code', '/opt/claude');
+		expect(recovered.supportedFlags).not.toBeNull();
+		expect(isModelCliCompatible(recovered)).toBe(true);
+	});
+
+	it('a non-zero exit WITHOUT a timeout is still judged by its text (some CLIs exit 1 on --help)', async () => {
+		const run = {
+			run: vi.fn(async (_command: string, args: string[]) =>
+				args[0] === '--version'
+					? { code: 0, stdout: '2.1.3', stderr: '' }
+					: { code: 1, stdout: CLAUDE_HELP, stderr: '', timedOut: false }
+			)
+		};
+		const probe = new ModelCliCompatibilityProbe({
+			runner: run as never,
+			statFile: () => ({ mtimeMs: 1, size: 1 })
+		});
+		const compat = await probe.probe('claude-code', '/opt/claude');
+		expect(compat.supportedFlags).not.toBeNull();
+		expect(isModelCliCompatible(compat)).toBe(true);
 	});
 
 	it('asks codex through `exec --help` and quotes a Windows path with spaces', async () => {

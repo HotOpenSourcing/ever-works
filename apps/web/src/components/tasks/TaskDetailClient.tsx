@@ -1,5 +1,6 @@
 'use client';
 
+import { RecordVisibilityPanel } from '@/components/record-visibility';
 import { useRef, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, ArrowUpRight, Loader2, Pencil } from 'lucide-react';
@@ -84,7 +85,8 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
     in_review: ['in_progress', 'blocked', 'done', 'cancelled'],
     blocked: ['todo', 'in_progress', 'cancelled'],
     done: ['in_progress'],
-    cancelled: [],
+    // EW-P1-6 — a cancelled Task re-opens into the backlog or todo.
+    cancelled: ['backlog', 'todo'],
 };
 
 function formatDate(iso: string): string {
@@ -581,12 +583,19 @@ export function TaskDetailClient({
                                             className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm bg-surface-secondary dark:bg-surface-secondary-dark"
                                             aria-hidden
                                         >
-                                            {m.authorType === 'agent' ? '🤖' : '👤'}
+                                            {m.authorType === 'agent'
+                                                ? '🤖'
+                                                : m.authorType === 'integration'
+                                                  ? '🔗'
+                                                  : '👤'}
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2 text-[11px] text-text-muted">
                                                 <span className="font-mono">
-                                                    {m.authorId.slice(0, 8)}…
+                                                    {m.authorType === 'integration' &&
+                                                    m.externalAuthor?.name
+                                                        ? m.externalAuthor.name
+                                                        : `${m.authorId.slice(0, 8)}…`}
                                                 </span>
                                                 <span>
                                                     {new Date(m.createdAt).toLocaleString()}
@@ -650,6 +659,13 @@ export function TaskDetailClient({
 
                 {/* ---- Right rail: Details + recurring -------------------- */}
                 <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+                    {/* Record visibility (EW-P1-3): who else can see this Task. */}
+                    <div
+                        className="rounded-xl border border-border/60 dark:border-border-dark/60 bg-card dark:bg-card-primary-dark p-5"
+                        data-testid="task-visibility"
+                    >
+                        <RecordVisibilityPanel aggregate="task" id={task.id} />
+                    </div>
                     <div className="rounded-xl border border-border/60 dark:border-border-dark/60 bg-card dark:bg-card-primary-dark p-5">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-4">
                             {t('details')}
