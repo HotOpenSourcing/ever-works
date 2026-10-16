@@ -589,6 +589,8 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		}
 	};
 	let lanesStarted: Promise<void> = Promise.resolve();
+	let laneStartFailed = false;
+	let laneStartFailure: unknown = undefined;
 	if (worker || attendedWorker) {
 		if (loop.getState().state === 'connected') {
 			await startLanes();
@@ -596,22 +598,27 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 			deps.out(
 				'Waiting for the platform to accept a heartbeat before leasing work (its answer carries this node’s limits and version verdict)'
 			);
-			lanesStarted = untilHeartbeatAccepted(loop, () => !shuttingDown)
-				.then(async (accepted) => {
-					if (!accepted || shuttingDown) return;
+			lanesStarted = startLanesAfterAcceptedHeartbeat(
+				loop,
+				async () => {
 					deps.io.logger.info('Heartbeat accepted — starting the worker lanes');
 					await startLanes();
-				})
-				.catch((error: unknown) => {
-					// A lane that cannot start leaves a node that beats but never
-					// works: fail closed and let the supervisor restart it.
-					deps.io.logger.error(
-						`Worker lanes failed to start after the first accepted heartbeat: ${
-							error instanceof Error ? error.message : String(error)
-						} — shutting down`
-					);
-					requestShutdown();
-				});
+				},
+				() => !shuttingDown
+			).then((outcome) => {
+				if (!outcome.failed) return;
+				// A lane that cannot start leaves a node that beats but never
+				// works: fail closed, and exit NON-zero below so a supervisor
+				// with `Restart=on-failure` restarts it (review on #2637).
+				laneStartFailed = true;
+				laneStartFailure = outcome.error;
+				deps.io.logger.error(
+					`Worker lanes failed to start after the first accepted heartbeat: ${describeError(
+						outcome.error
+					)} — shutting down`
+				);
+				requestShutdown();
+			});
 		}
 	}
 	// The workspace reaper rides with the worker: it is the process that
@@ -690,6 +697,38 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		deps.out(`Worker host stopped (completed ${state.completed}, failed ${state.failed}).`);
 	}
 	deps.out('Stopped.');
+	if (laneStartFailed) {
+		throw new CliError(
+			`Worker lanes failed to start after the first accepted heartbeat: ${describeError(laneStartFailure)}`,
+			EXIT_FAILURE
+		);
+	}
+}
+
+/**
+ * The CLI's deferred lane start (#2628): wait for an ACCEPTED heartbeat, then
+ * run `startLanes`, unless `shouldWait()` turned false (a shutdown) first.
+ * Never rejects: a failing start is reported as `failed`, so the caller can
+ * shut down AND exit non-zero instead of losing the error in a background
+ * promise. Exported for its own tests.
+ */
+export async function startLanesAfterAcceptedHeartbeat(
+	loop: Parameters<typeof untilHeartbeatAccepted>[0],
+	startLanes: () => Promise<void>,
+	shouldWait: () => boolean
+): Promise<{ started: boolean; failed: boolean; error?: unknown }> {
+	const accepted = await untilHeartbeatAccepted(loop, shouldWait);
+	if (!accepted || !shouldWait()) return { started: false, failed: false };
+	try {
+		await startLanes();
+		return { started: true, failed: false };
+	} catch (error) {
+		return { started: false, failed: true, error };
+	}
+}
+
+function describeError(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
 }
 
 /** Parse `--concurrency`; anything unparseable falls back to the default. */

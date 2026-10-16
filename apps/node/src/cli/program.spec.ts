@@ -13,6 +13,7 @@ import {
 	EXIT_OK,
 	parseIntervalSeconds,
 	runCli,
+	startLanesAfterAcceptedHeartbeat,
 	type CliDeps
 } from './program';
 
@@ -775,5 +776,76 @@ describe('program surface', () => {
 	it('fails on an unknown subcommand', async () => {
 		const h = harness();
 		expect(await runCli(['teleport'], h.deps)).toBe(EXIT_FAILURE);
+	});
+});
+
+describe('startLanesAfterAcceptedHeartbeat (#2628)', () => {
+	type State = 'connected' | 'retrying' | 'stopped';
+	function loopIn(initial: State) {
+		let state = initial;
+		const listeners = new Set<(s: { state: State }) => void>();
+		return {
+			loop: {
+				getState: () => ({ state }) as never,
+				onChange: (listener: (s: never) => void) => {
+					listeners.add(listener as never);
+					return () => listeners.delete(listener as never);
+				}
+			} as never,
+			emit(next: State) {
+				state = next;
+				for (const listener of [...listeners]) listener({ state });
+			}
+		};
+	}
+
+	it('starts the lanes once a beat is accepted', async () => {
+		const o = loopIn('retrying');
+		let started = 0;
+		const outcome = startLanesAfterAcceptedHeartbeat(
+			o.loop,
+			async () => void (started += 1),
+			() => true
+		);
+		o.emit('connected');
+		await expect(outcome).resolves.toEqual({ started: true, failed: false });
+		expect(started).toBe(1);
+	});
+
+	it('starts nothing when the caller stops waiting (a shutdown) before any accepted beat', async () => {
+		const o = loopIn('retrying');
+		let started = 0;
+		let wait = true;
+		const outcome = startLanesAfterAcceptedHeartbeat(
+			o.loop,
+			async () => void (started += 1),
+			() => wait
+		);
+		wait = false;
+		o.emit('stopped');
+		await expect(outcome).resolves.toEqual({ started: false, failed: false });
+		expect(started).toBe(0);
+	});
+
+	it('never rejects: a failing start is reported as failed, with its error (review: the CLI then exits non-zero)', async () => {
+		const boom = new Error('safety marker could not be written');
+		await expect(
+			startLanesAfterAcceptedHeartbeat(
+				loopIn('connected').loop,
+				async () => {
+					throw boom;
+				},
+				() => true
+			)
+		).resolves.toEqual({ started: false, failed: true, error: boom });
+		await expect(
+			startLanesAfterAcceptedHeartbeat(
+				loopIn('connected').loop,
+				async () => {
+					throw undefined;
+				},
+				() => true
+			)
+		).resolves.toMatchObject({ started: false, failed: true });
 	});
 });
