@@ -45,9 +45,12 @@
 - [x] **T16** Links: `GET /links`, `PUT`/`DELETE /links/:entityType/:entityId` (the record must be visible; types not
       served in v1 yet → `400`).
 - [x] **T17** OpenAPI in production: `GET /api/integrations/v1/openapi.json` (`serveIntegrationOpenApi`).
-- [ ] **T17a** One transaction per request: create + link, and every edge of a `PUT` set or of a create's assignees /
-      extra teams. Today each step commits on its own (create, then link, undone on a lost race; a `PUT` set that fails
-      half-way keeps the steps before the failure); a crash between create and link leaves an unlinked record.
+- [~] **T17a** One transaction per request: create + link, and every edge of a `PUT` set or of a create's assignees /
+  extra teams. **Done for create + link of tasks and teams**: `TasksService.create` / `TeamsService.create` take a
+  `withinCreate` hook that runs in the row's own transaction (with its `*.created` event), and the integration
+  routes write the `externalRef` link there, so a lost race rolls the create back instead of undoing it and a crash
+  can no longer leave an unlinked task or team. Still step by step: a `PUT` set, and a create's extra teams /
+  assignees / visibility after the row (each step commits on its own; the reconcile covers a half-applied set).
 - [ ] **T17b** OpenAPI request/response bodies (`@ApiProperty` or the Swagger CLI plugin under SWC); today the document
       lists every route, scope and summary, and the bodies are the contract JSON Schemas.
 - [x] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through
