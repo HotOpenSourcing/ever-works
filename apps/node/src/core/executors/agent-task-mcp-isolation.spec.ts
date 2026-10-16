@@ -343,10 +343,10 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 		expect(spellings(envs[0], 'ENABLE_CLAUDEAI_MCP_SERVERS')).toEqual([]);
 	});
 
-	it("keeps only the owner's Codex sandbox mode and model defaults, read from CODEX_HOME/config.toml (control 16)", async () => {
+	it("keeps only the owner's Codex sandbox mode and model defaults, read from the CODEX_HOME the run passes (control 16)", async () => {
 		stub.dropIsolation = false;
 		const scratch = scratchFs();
-		const { commands, spawnFn } = recordingSpawn();
+		const { commands, envs, spawnFn } = recordingSpawn();
 		const reads: string[] = [];
 		const ownerConfig = [
 			'model = "gpt-6-astra"',
@@ -359,7 +359,10 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 		].join('\n');
 
 		await runAgentTaskJob(
-			job({ ...basePayload, execution: { ...basePayload.execution, provider: 'codex' } }),
+			job({
+				...basePayload,
+				execution: { ...basePayload.execution, provider: 'codex', envPassthrough: ['CODEX_HOME'] }
+			}),
 			io({
 				spawnFn,
 				scratchFs: scratch.fs,
@@ -373,6 +376,8 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 			})
 		);
 
+		// The reader uses the home the CHILD gets, so settings and login come from one place.
+		expect(spellings(envs[0], 'CODEX_HOME')).toEqual([['CODEX_HOME', '/owner/codex-home']]);
 		expect(reads).toContain('/owner/codex-home/config.toml');
 		expect(commands[0]).toContain(' exec --ignore-user-config --json ');
 		expect(commands[0]).toContain('-c windows.sandbox=elevated');
@@ -382,10 +387,12 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 		expect(commands[0]).not.toContain('notify');
 	});
 
-	it("reads the owner settings from the operator's modelSessionHome.codex when one is set (review)", async () => {
+	it("an ISOLATED run reads the owner settings from the operator's modelSessionHome.codex, the CODEX_HOME it is given (review)", async () => {
 		stub.dropIsolation = false;
 		const scratch = scratchFs();
-		const { commands, spawnFn } = recordingSpawn();
+		// `mkdir` lets the model step build its per-run isolated home.
+		scratch.fs.mkdir = async () => undefined;
+		const { commands, envs, spawnFn } = recordingSpawn();
 		const reads: string[] = [];
 
 		await runAgentTaskJob(
@@ -407,9 +414,41 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 			})
 		);
 
+		expect(spellings(envs[0], 'CODEX_HOME').map(([, value]) => value?.replace(/\\/g, '/'))).toEqual([
+			'/operator/codex'
+		]);
 		expect(reads).toContain('/operator/codex/config.toml');
 		expect(reads.some((path) => path.startsWith('/not/this/home'))).toBe(false);
 		expect(commands[0]).toContain('-c windows.sandbox=elevated');
+	});
+
+	it('a run that is NOT isolated and does not pass CODEX_HOME reads <real home>/.codex, the home its Codex uses (review)', async () => {
+		stub.dropIsolation = false;
+		const scratch = scratchFs(); // no mkdir: the isolated home is downgraded
+		const { envs, spawnFn } = recordingSpawn();
+		const reads: string[] = [];
+
+		await runAgentTaskJob(
+			job({ ...basePayload, execution: { ...basePayload.execution, provider: 'codex' } }),
+			io({
+				spawnFn,
+				scratchFs: scratch.fs,
+				parentEnv: { CODEX_HOME: '/not/passed', HOME: '/home/owner', USERPROFILE: '/home/owner' },
+				modelSessionHome: { codex: '/operator/codex' },
+				sessionConfigFs: {
+					readFile: async (path: string) => {
+						reads.push(path.replace(/\\/g, '/'));
+						return null;
+					}
+				}
+			})
+		);
+
+		// CODEX_HOME is not on the allowlist: the child never sees the parent's,
+		// and nothing applies the operator's session home without isolation.
+		expect(spellings(envs[0], 'CODEX_HOME')).toEqual([]);
+		expect(reads).toContain('/home/owner/.codex/config.toml');
+		expect(reads.some((path) => path.startsWith('/not/passed') || path.startsWith('/operator/codex'))).toBe(false);
 	});
 
 	it('a Codex config that cannot be read keeps nothing, and the run is STILL isolated', async () => {

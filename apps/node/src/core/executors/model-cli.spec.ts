@@ -880,6 +880,31 @@ describe('readCodexUserSettings / codexUserSettings (control 16)', () => {
 		expect(readCodexUserSettings(config)).toEqual({ model: 'gpt-6-astra' });
 	});
 
+	it('an ESCAPED \""" inside a basic multiline string does not close it (review)', () => {
+		const body = [
+			'notes = """',
+			String.raw`an escaped \""" stays inside`,
+			'model = "inside"',
+			'"""',
+			'model = "gpt-6-astra"'
+		];
+		expect(readCodexUserSettings(body.join('\n'))).toEqual({ model: 'gpt-6-astra' });
+		const opening = [String.raw`notes = """starts \""" here`, 'model = "inside"', '"""', 'model = "gpt-6-astra"'];
+		expect(readCodexUserSettings(opening.join('\n'))).toEqual({ model: 'gpt-6-astra' });
+	});
+
+	it('an escaped BACKSLASH before """ still closes, and a literal string has no escapes', () => {
+		const basic = ['notes = """', String.raw`ends with a backslash \\"""`, 'model = "gpt-6-astra"'];
+		expect(readCodexUserSettings(basic.join('\n'))).toEqual({ model: 'gpt-6-astra' });
+		const literal = ["notes = '''", String.raw`a literal \''' closes`, 'model = "gpt-6-astra"'];
+		expect(readCodexUserSettings(literal.join('\n'))).toEqual({ model: 'gpt-6-astra' });
+	});
+
+	it('a line of many ESCAPED delimiters keeps the string open', () => {
+		const escapedRun = ('\\'.repeat(3) + '"""').repeat(10_000);
+		expect(readCodexUserSettings(['notes = """', escapedRun, 'model = "x"'].join('\n'))).toEqual({});
+	});
+
 	it('parses table headers by position, so a pathological header line stays cheap and unrecognised (CodeQL)', () => {
 		const hostile = '[' + '\t'.repeat(50_000) + 'Z';
 		expect(readCodexUserSettings(`${hostile}\nmodel = "x"`)).toEqual({});

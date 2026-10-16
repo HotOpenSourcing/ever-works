@@ -171,7 +171,7 @@ export function readCodexUserSettings(configToml: string | null | undefined): Co
 	let openMultiline: (typeof TOML_MULTILINE_DELIMITERS)[number] | null = null;
 	for (const raw of configToml.split(/\r?\n/)) {
 		if (openMultiline !== null) {
-			if (raw.includes(openMultiline)) openMultiline = null;
+			if (indexOfTomlClosingDelimiter(raw, openMultiline) !== -1) openMultiline = null;
 			continue;
 		}
 		const line = raw.trim();
@@ -182,7 +182,7 @@ export function readCodexUserSettings(configToml: string | null | undefined): Co
 		const opening = TOML_MULTILINE_VALUE_START.exec(line);
 		if (opening) {
 			const delimiter = opening[1] as (typeof TOML_MULTILINE_DELIMITERS)[number];
-			if (!line.slice(opening[0].length).includes(delimiter)) {
+			if (indexOfTomlClosingDelimiter(line.slice(opening[0].length), delimiter) === -1) {
 				openMultiline = delimiter;
 				continue;
 			}
@@ -209,6 +209,25 @@ export function readCodexUserSettings(configToml: string | null | undefined): Co
 		}
 	}
 	return settings;
+}
+
+/**
+ * Index of the first CLOSING `delimiter` in `text`, or -1. In a basic
+ * multiline string (`"""`) a quote preceded by an ODD run of backslashes
+ * is escaped content: `\"""` does not close it, `\\"""` does (review on
+ * #2635). A literal one (`'''`) has no escapes. Linear: a candidate is only
+ * ever preceded by a backslash run once, so each run is scanned once.
+ */
+function indexOfTomlClosingDelimiter(text: string, delimiter: (typeof TOML_MULTILINE_DELIMITERS)[number]): number {
+	let from = 0;
+	for (;;) {
+		const at = text.indexOf(delimiter, from);
+		if (at === -1 || delimiter === "'''") return at;
+		let backslashes = 0;
+		for (let i = at - 1; i >= 0 && text[i] === '\\'; i -= 1) backslashes += 1;
+		if (backslashes % 2 === 0) return at;
+		from = at + 1;
+	}
 }
 
 function assertCodexSetting(name: string, value: string | undefined): string | undefined {
