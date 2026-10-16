@@ -161,11 +161,27 @@ export class AddIntegrationApiKeys1795060100000 implements MigrationInterface {
     public async down(queryRunner: QueryRunner): Promise<void> {
         const C = AddIntegrationApiKeys1795060100000;
 
+        // Identifiers below are fixed table/column names quoted by the driver;
+        // no value reaches these statements from outside.
+        const esc = (name: string) => queryRunner.connection.driver.escape(name);
+
+        // Before integration authorship disappears, hand every row it wrote
+        // back to a real person so history stays resolvable: an integration
+        // writing WITHOUT act-as always writes as the key's owner, who is the
+        // owner (`tasks.userId`) of the Task it created or commented on.
+        if (await queryRunner.getTable('tasks')) {
+            await queryRunner.query(
+                `UPDATE ${esc('tasks')} SET ${esc('createdByType')} = 'user', ${esc('createdById')} = ${esc('userId')} WHERE ${esc('createdByType')} = 'integration'`,
+            );
+        }
+
         const chat = await queryRunner.getTable(C.CHAT);
         if (chat) {
-            if (chat.findColumnByName('authorType')) {
+            if (chat.findColumnByName('authorType') && (await queryRunner.getTable('tasks'))) {
                 await queryRunner.query(
-                    `UPDATE ${queryRunner.connection.driver.escape(C.CHAT)} SET ${queryRunner.connection.driver.escape('authorType')} = 'user' WHERE ${queryRunner.connection.driver.escape('authorType')} = 'integration'`,
+                    `UPDATE ${esc(C.CHAT)} SET ${esc('authorType')} = 'user', ${esc('authorId')} = ` +
+                        `(SELECT t.${esc('userId')} FROM ${esc('tasks')} t WHERE t.${esc('id')} = ${esc(C.CHAT)}.${esc('taskId')}) ` +
+                        `WHERE ${esc('authorType')} = 'integration'`,
                 );
             }
             const column = chat.findColumnByName('externalAuthor');
@@ -178,7 +194,6 @@ export class AddIntegrationApiKeys1795060100000 implements MigrationInterface {
         if (!table) return;
 
         if (table.findColumnByName('kind')) {
-            const esc = (name: string) => queryRunner.connection.driver.escape(name);
             await queryRunner.query(
                 `DELETE FROM ${esc(C.API_KEYS)} WHERE ${esc('kind')} = 'integration'`,
             );

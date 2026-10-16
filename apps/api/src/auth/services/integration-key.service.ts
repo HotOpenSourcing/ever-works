@@ -126,6 +126,19 @@ export class IntegrationKeyService {
             organizationId: null,
         });
 
+        // The count above and the insert are not one atomic step, so two
+        // overlapping creates could both pass it. Re-count with the new row in
+        // place and withdraw it when the cap is exceeded: the request fails
+        // closed (it never returned a secret), and a retry succeeds once a slot
+        // is really free.
+        const afterInsert = await this.apiKeys.countActiveIntegrationKeysByTenant(tenantId);
+        if (afterInsert > INTEGRATION_KEYS_MAX_PER_TENANT) {
+            await this.apiKeys.deleteByIdAndUserId(row.id, userId);
+            throw new BadRequestException(
+                `Maximum of ${INTEGRATION_KEYS_MAX_PER_TENANT} integration keys allowed per workspace`,
+            );
+        }
+
         const summary = this.toSummary(row, tenantOrgs);
         await this.audit(
             userId,
@@ -159,7 +172,11 @@ export class IntegrationKeyService {
         const row = await this.apiKeys.findByIdAndUserId(id, userId);
         if (!row || row.kind !== INTEGRATION_API_KEY_KIND) return false;
         const deactivated = await this.apiKeys.deactivateById(row.id);
-        if (!deactivated) return false;
+        // Already revoked: the request is handled (idempotent 200). It must
+        // NOT fall through to the personal-key delete, which would destroy the
+        // row the audit trail and webhook subscriptions point at. The event and
+        // the audit row are written only by the revoke that switched it off.
+        if (!deactivated) return true;
         const event: IntegrationKeyRevokedEvent = {
             keyId: row.id,
             tenantId: row.tenantId ?? null,

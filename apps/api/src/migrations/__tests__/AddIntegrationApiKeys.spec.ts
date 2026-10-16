@@ -55,6 +55,14 @@ describe('AddIntegrationApiKeys1795060100000', () => {
             `CREATE UNIQUE INDEX "idx_api_keys_hashed_key" ON "api_keys" ("hashedKey")`,
         );
         await dataSource.query(`
+            CREATE TABLE "tasks" (
+                "id" varchar PRIMARY KEY,
+                "userId" varchar NOT NULL,
+                "createdByType" varchar(16) NOT NULL,
+                "createdById" varchar NOT NULL
+            )
+        `);
+        await dataSource.query(`
             CREATE TABLE "task_chat_messages" (
                 "id" varchar PRIMARY KEY,
                 "taskId" varchar NOT NULL,
@@ -176,9 +184,27 @@ describe('AddIntegrationApiKeys1795060100000', () => {
             `INSERT INTO "api_keys" ("id","userId","name","hashedKey","prefix","kind") VALUES ('k3','u1','Int','h3','ew_int_abcd','integration')`,
         );
         await dataSource.query(
+            `INSERT INTO "tasks" ("id","userId","createdByType","createdById") VALUES ('t1','owner-1','integration','k3'), ('t2','u2','user','u2')`,
+        );
+        await dataSource.query(
             `INSERT INTO "task_chat_messages" ("id","taskId","authorType","authorId","body") VALUES ('m3','t1','integration','k3','x')`,
         );
         await run('down');
+        // Integration authorship goes back to a real person — the Task owner,
+        // which is who an integration without act-as writes as — before the key
+        // rows disappear, so no history points at a deleted key.
+        expect(
+            await dataSource.query(
+                `SELECT "id","createdByType","createdById" FROM "tasks" ORDER BY "id"`,
+            ),
+        ).toEqual([
+            { id: 't1', createdByType: 'user', createdById: 'owner-1' },
+            { id: 't2', createdByType: 'user', createdById: 'u2' },
+        ]);
+        const [m3row] = await dataSource.query(
+            `SELECT "authorType","authorId" FROM "task_chat_messages" WHERE "id"='m3'`,
+        );
+        expect(m3row).toEqual({ authorType: 'user', authorId: 'owner-1' });
         const ids = (await dataSource.query(`SELECT "id" FROM "api_keys" ORDER BY "id"`)).map(
             (r: { id: string }) => r.id,
         );

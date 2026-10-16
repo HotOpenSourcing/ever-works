@@ -1,6 +1,6 @@
 jest.mock('@ever-works/agent/database', () => ({}));
 
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { createHash } from 'crypto';
 import { ApiKeyService } from './api-key.service';
 import type { ApiKeyRepository } from '@ever-works/agent/database';
@@ -33,7 +33,7 @@ describe('ApiKeyService', () => {
             // EW-P1-2 — rotation grace lookup + in-place rotation.
             findByPreviousHashedKey: jest.fn().mockResolvedValue(null),
             findByIdAndUserId: jest.fn(),
-            applyRotation: jest.fn().mockResolvedValue(undefined),
+            applyRotation: jest.fn().mockResolvedValue(true),
         } as any;
         service = new ApiKeyService(repo as unknown as ApiKeyRepository);
     });
@@ -380,11 +380,25 @@ describe('ApiKeyService', () => {
             expect(out.id).toBe('k-1');
             expect(out.key).toMatch(/^ew_int_[0-9a-f]{64}$/);
             expect(out.prefix).toBe(out.key.slice(0, 12));
-            const patch = repo.applyRotation.mock.calls[0][1];
+            expect(repo.applyRotation.mock.calls[0][1]).toBe('old-digest');
+            const patch = repo.applyRotation.mock.calls[0][2];
             expect(patch.hashedKey).toBe(createHash('sha256').update(out.key).digest('hex'));
             expect(patch.previousHashedKey).toBe('old-digest');
             const grace = new Date(patch.previousKeyGraceUntil as Date).getTime();
             expect(grace).toBeGreaterThanOrEqual(before + 24 * 3_600_000);
+        });
+
+        it('refuses with 409 when another rotation landed first (compare-and-set lost)', async () => {
+            repo.findByIdAndUserId.mockResolvedValue({
+                id: 'k-1',
+                name: 'Gauzy',
+                kind: 'integration',
+                isActive: true,
+                expiresAt: null,
+                hashedKey: 'old-digest',
+            } as any);
+            repo.applyRotation.mockResolvedValueOnce(false);
+            await expect(service.rotateKey('k-1', 'user-1')).rejects.toThrow(ConflictException);
         });
 
         it('rotates a personal key with the ew_live_ prefix', async () => {

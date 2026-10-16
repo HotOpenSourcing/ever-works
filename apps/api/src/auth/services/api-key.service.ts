@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+    Injectable,
+    BadRequestException,
+    ConflictException,
+    NotFoundException,
+} from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
 import { ApiKeyRepository } from '@ever-works/agent/database';
 import type { ApiKey } from '@ever-works/agent/entities';
@@ -208,13 +213,18 @@ export class ApiKeyService {
         const rawKey = prefix + randomBytes(32).toString('hex');
         const now = new Date();
         const previousKeyGraceUntil = new Date(now.getTime() + graceHours * 3_600_000);
-        await this.apiKeyRepository.applyRotation(apiKey.id, {
+        const applied = await this.apiKeyRepository.applyRotation(apiKey.id, apiKey.hashedKey, {
             hashedKey: sha256(rawKey),
             prefix: rawKey.substring(0, 12),
             previousHashedKey: apiKey.hashedKey,
             previousKeyGraceUntil,
             rotatedAt: now,
         });
+        if (!applied) {
+            // Another rotation (or a revoke) landed between our read and write.
+            // Never hand out a secret that is not the one stored.
+            throw new ConflictException('The API key was changed by another request; try again.');
+        }
 
         return {
             id: apiKey.id,
