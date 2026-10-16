@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
+import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
@@ -36,6 +37,8 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
     goal: buildGoalSnapshot,
+    // EW-P4-2 — agent email (recipient-scoped).
+    email_message: buildEmailMessageSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */
@@ -105,6 +108,7 @@ export class DomainEventPublisher {
             changedFields: options.changedFields,
             previous: options.previous,
             actor: options.actor,
+            visibility: snapshot.visibility,
         });
         return version;
     }
@@ -134,6 +138,7 @@ export class DomainEventPublisher {
             },
             data: snapshot.dto as Record<string, unknown>,
             actor: options.actor,
+            visibility: snapshot.visibility,
         });
     }
 
@@ -163,7 +168,10 @@ export class DomainEventPublisher {
             changedFields: options.changedFields,
             previous: options.previous,
             actor: options.actor,
-            visibility: (snapshot.dto as { visibility?: string }).visibility ?? null,
+            visibility:
+                snapshot.visibility !== undefined
+                    ? snapshot.visibility
+                    : ((snapshot.dto as { visibility?: string }).visibility ?? null),
         });
         return version;
     }
@@ -212,6 +220,7 @@ export class DomainEventPublisher {
             },
             data: { ...(tombstone.snapshot.dto as Record<string, unknown>), deleted: true },
             actor: options.actor,
+            visibility: tombstone.snapshot.visibility,
         });
     }
 

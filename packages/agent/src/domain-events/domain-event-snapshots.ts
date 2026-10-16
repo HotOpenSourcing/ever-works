@@ -1,5 +1,6 @@
 import {
     getWorkCapabilities,
+    RECIPIENT_EVENT_VISIBILITY,
     type IntegrationAgentDto,
     type IntegrationGoalDto,
     type IntegrationInboxItemDto,
@@ -56,6 +57,12 @@ export interface AggregateSnapshot<T> {
     readonly dto: T;
     readonly tenantId: string | null;
     readonly organizationId: string | null;
+    /**
+     * The event's `visibility` when the DTO carries none of its own (absent =
+     * the DTO's `visibility`). `'private'` keeps the event out of the
+     * integration feed and webhooks v2; in-process listeners still get it.
+     */
+    readonly visibility?: string | null;
 }
 
 const iso = (value: Date | string | null | undefined): string | null =>
@@ -623,7 +630,8 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
         workId: row.workId ?? null,
         escalationId: row.escalationId ?? null,
         proposalId: row.proposalId ?? null,
-        webUrl: webUrl('/inbox'),
+        // The Inbox deep link the bell and channel messages use (`/inbox?id=`).
+        webUrl: webUrl(`/inbox?id=${encodeURIComponent(row.id)}`),
     };
 }
 
@@ -632,6 +640,15 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
  * organization's (inbox rows written before tenancy stamping carry only the
  * organization), else `null` (a personal-scope message: recorded for
  * in-process listeners, never served to integrations).
+ *
+ * Recorded `recipient` ({@link RECIPIENT_EVENT_VISIBILITY}): an inbox item is
+ * ONE person's message (the question an agent asked them, their approval, their
+ * answer). An ordinary organization event would reach every key with
+ * `events:read` on the organization and every webhook on it. A `recipient`
+ * event reaches only an integration key that also holds `inbox:read` (the
+ * scope that reads every recipient's messages through `GET /inbox/items`), and
+ * never a user-owned webhook subscription; in-process listeners get them all.
+ * (It was recorded `private` until those routes existed, #2644.)
  */
 export async function buildInboxItemSnapshot(
     manager: EntityManager,
@@ -650,5 +667,6 @@ export async function buildInboxItemSnapshot(
         dto: toIntegrationInboxItemDto(row),
         tenantId,
         organizationId: row.organizationId ?? null,
+        visibility: RECIPIENT_EVENT_VISIBILITY,
     };
 }

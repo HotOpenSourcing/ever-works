@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
+import { InboxModule as AgentInboxModule } from '@ever-works/agent/inbox';
+import { NotificationsModule as AgentNotificationsModule } from '@ever-works/agent/notifications';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
 import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
@@ -9,7 +11,9 @@ import { UserResearchModule } from '@ever-works/agent/user-research';
 import { GoalsModule } from '@ever-works/agent/goals';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
+import { IntegrationEmailController } from './email.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
+import { IntegrationInboxController } from './inbox.controller';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
@@ -51,6 +55,12 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         UserResearchModule,
         // Goals (EW-P2-2): `GoalsService` + the orchestrator's Definition of Done.
         GoalsModule,
+        // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
+        // `InboxService` (steer, resume, decide exactly like the Inbox UI).
+        AgentInboxModule,
+        // `POST /email/inbound` (EW-P4-1) dispatches through the same inbound
+        // dispatcher as provider mail (AGENT_INBOUND_EMAIL_DISPATCHER).
+        AgentNotificationsModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -67,6 +77,10 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // P2 resources.
         IntegrationIdeasController,
         IntegrationGoalsController,
+        // EW-P3-1 — the Inbox (`inbox:*`).
+        IntegrationInboxController,
+        // EW-P4-2 / EW-P4-1 — agent email (`email:*`).
+        IntegrationEmailController,
     ],
     providers: [
         IntegrationOnlyGuard,

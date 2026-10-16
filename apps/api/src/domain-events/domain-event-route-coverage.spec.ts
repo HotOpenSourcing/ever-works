@@ -32,6 +32,10 @@ const CONTROLLER_FILES: readonly string[] = [
     'works/works.controller.ts',
     'work-proposals/work-proposals.controller.ts',
     'goals/goals.controller.ts',
+    // Inbox (EW-P3-1) and the other doors that close an Inbox mirror.
+    'inbox/inbox.controller.ts',
+    'escalations/escalations.controller.ts',
+    'agent-approvals/agent-approvals.controller.ts',
     // Integration API v1 (EW-P1-4) — writes delegate to the same services.
     'integrations-api/v1/tasks-write.controller.ts',
     'integrations-api/v1/tasks-sets.controller.ts',
@@ -40,6 +44,8 @@ const CONTROLLER_FILES: readonly string[] = [
     // P2 resources (EW-P2-1 ideas).
     'integrations-api/v1/ideas.controller.ts',
     'integrations-api/v1/goals.controller.ts',
+    'integrations-api/v1/inbox.controller.ts',
+    'integrations-api/v1/email.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([

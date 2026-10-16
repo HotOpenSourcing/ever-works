@@ -286,10 +286,14 @@ describe('idea recording points', () => {
         ]);
     });
 
-    const newMission = async (organizationId: string, visibility = 'organization') =>
+    const newMission = async (
+        organizationId: string,
+        visibility = 'organization',
+        userId: string = OWNER,
+    ) =>
         dataSource.getRepository(Mission).save(
             dataSource.getRepository(Mission).create({
-                userId: OWNER,
+                userId,
                 title: 'Grow',
                 description: 'Grow the customer base.',
                 type: 'one-shot',
@@ -300,7 +304,7 @@ describe('idea recording points', () => {
             } as unknown as Partial<Mission>),
         );
 
-    it('createExternal links a Mission of the pinned Organization; a foreign or private one is 404 and writes nothing', async () => {
+    it("createExternal links the caller's Mission of the pinned Organization; a foreign, private or someone else's one is 404 and writes nothing", async () => {
         const mission = await newMission(ORG_A);
         const idea = await external({ missionId: mission.id });
         expect(idea.missionId).toBe(mission.id);
@@ -309,7 +313,9 @@ describe('idea recording points', () => {
 
         const foreign = await newMission(randomUUID());
         const secret = await newMission(ORG_A, 'private');
-        for (const missionId of [foreign.id, secret.id, randomUUID()]) {
+        // Someone else's Mission, even organization-visible: owner-scoped writes (404).
+        const others = await newMission(ORG_A, 'organization', randomUUID());
+        for (const missionId of [foreign.id, secret.id, others.id, randomUUID()]) {
             await expect(external({ missionId })).rejects.toThrow('Mission not found');
         }
         expect(await dataSource.getRepository(WorkProposal).count()).toBe(1);
