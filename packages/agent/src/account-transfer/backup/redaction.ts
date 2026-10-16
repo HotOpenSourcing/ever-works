@@ -334,7 +334,9 @@ const ENTITY_DROPPED_COLUMNS: Readonly<Record<string, readonly string[]>> = Obje
         'magicLinkToken',
         'isPlatformAdmin',
     ]),
-    ApiKey: Object.freeze(['hashedKey']),
+    // EW-P1-2: `previousHashedKey` is the digest of a just-rotated secret that
+    // still authenticates until `previousKeyGraceUntil` -- key material too.
+    ApiKey: Object.freeze(['hashedKey', 'previousHashedKey']),
     FleetNode: Object.freeze(['enrollmentTokenHash']),
     AuthSession: Object.freeze(['token', 'tokenHash']),
     // AW-18 Shared view. The share-link token is a read capability over the

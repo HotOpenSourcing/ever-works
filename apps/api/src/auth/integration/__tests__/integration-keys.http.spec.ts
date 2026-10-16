@@ -39,7 +39,6 @@ import { ScopeResolverMiddleware } from '../../../scope/scope-resolver.middlewar
 import { SessionScopeGuard } from '../../../scope/session-scope.guard';
 import { ScopeOwnershipGuard } from '../../../scope/scope-ownership.guard';
 import { UserAwareThrottlerGuard } from '../../../config/user-aware-throttler.guard';
-import { throttlerConfig } from '../../../config/throttler.config';
 import { IntegrationWhoamiController } from '../../../integrations-api/v1/whoami.controller';
 import { IntegrationPrincipalGuard } from '../integration-principal.guard';
 import { IntegrationAuditInterceptor } from '../integration-audit.interceptor';
@@ -174,7 +173,20 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
 
     /** The app under test: real guards, interceptor, middleware and controllers; fake repositories. */
     @Module({
-        imports: [ThrottlerModule.forRoot(throttlerConfig), EventEmitterModule.forRoot()],
+        // The platform's three named tiers, with limits no SESSION in this suite
+        // can reach: CI runs the ~80 owner-session calls fast enough to trip the
+        // real 50/s burst tier. Integration keys are throttled by their own tier
+        // (`INTEGRATION_THROTTLE_*`, per key), which the 429 case below drives.
+        imports: [
+            ThrottlerModule.forRoot({
+                throttlers: ['short', 'medium', 'long'].map((name) => ({
+                    name,
+                    ttl: 60_000,
+                    limit: 1_000_000,
+                })),
+            }),
+            EventEmitterModule.forRoot(),
+        ],
         controllers: [
             ApiKeysController,
             IntegrationWhoamiController,
