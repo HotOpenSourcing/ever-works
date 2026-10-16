@@ -106,6 +106,12 @@ removal (removal emits `organization.member.removed`).
 - List tabs **Mine | Shared with me | Organization** on `/tasks`, `/goals`, `/missions`, `/ideas` and `/agents`; `Mine`
   stays the default.
 
+**As implemented (web):** `components/record-visibility/` — `RecordViewTabs` (the tab lives in `?tab=` on the web URL,
+because `/tasks` already uses `?view=` for board / list; sent to the API as `view`; every other filter is kept and paging
+resets), `VisibilityControl` (lock / team / organization icon; "Automatic (…)" until a value is picked; only the owner
+gets the picker), `RecordTeamsEditor` (the goal's Teams) and `RecordVisibilityPanel` (both, the control re-reads after a
+Teams save). Other locales fall back to `en.json` through the request-time deep merge.
+
 ## 8. Implementation shape
 
 One `RecordAccessPolicy` service plus a repository helper `visibleTo(principal)`. Every list and get path goes through
