@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { LessThan, Repository } from 'typeorm';
+import { isUniqueConstraintError } from '../../utils/db-error.utils';
 import {
     WebhookDelivery,
     type WebhookDeliveryStatus,
@@ -38,6 +39,45 @@ export class WebhookDeliveryRepository {
             attempts: 0,
         });
         return this.repository.save(row);
+    }
+
+    /**
+     * Webhooks v2: the pending delivery of ONE domain event to ONE subscription,
+     * or `null` when that pair already has its delivery (the fan-out is at least
+     * once; the unique `(subscriptionId, eventId)` index keeps it to one send).
+     */
+    async createPendingForEvent(input: {
+        readonly subscriptionId: string;
+        readonly accountId: string;
+        readonly event: string;
+        readonly eventId: string;
+        readonly payload: Record<string, unknown>;
+        readonly tenantId?: string | null;
+        readonly organizationId?: string | null;
+    }): Promise<WebhookDelivery | null> {
+        const existing = await this.repository.findOne({
+            where: { subscriptionId: input.subscriptionId, eventId: input.eventId },
+            select: ['id'],
+        });
+        if (existing) return null;
+        try {
+            return await this.repository.save(
+                this.repository.create({
+                    subscriptionId: input.subscriptionId,
+                    accountId: input.accountId,
+                    event: input.event,
+                    eventId: input.eventId,
+                    payload: input.payload,
+                    status: 'pending',
+                    attempts: 0,
+                    tenantId: input.tenantId ?? null,
+                    organizationId: input.organizationId ?? null,
+                }),
+            );
+        } catch (error) {
+            if (isUniqueConstraintError(error)) return null;
+            throw error;
+        }
     }
 
     async recordAttempt(id: string, attempt: RecordAttemptInput): Promise<void> {

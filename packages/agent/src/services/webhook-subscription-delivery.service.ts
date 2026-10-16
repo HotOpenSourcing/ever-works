@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { WebhookSubscriptionRepository, WebhookDeliveryRepository } from '../database';
+import type { WebhookSubscriptionStatus } from '../entities/webhook-subscription.entity';
 import { WebhookDeliveryService, type DeliveryResult } from './webhook-delivery.service';
 
 /**
@@ -23,7 +24,7 @@ export interface DispatchWebhookInput {
 
 export interface DispatchedWebhookResult {
     readonly result: DeliveryResult;
-    readonly subscription: { id: string; status: 'active' | 'paused' | 'failed' };
+    readonly subscription: { id: string; status: WebhookSubscriptionStatus };
     /**
      * `true` when the outcome is retryable AND we have NOT yet hit the
      * dead-letter threshold. Producers (Trigger.dev task) throw to trigger
@@ -212,19 +213,33 @@ export class WebhookSubscriptionDeliveryService {
             };
         }
 
+        // Webhooks v2 (EW-P1-5): v2 subscriptions sign `t=,v1=` and, inside a
+        // rotation's grace window, also with the previous secret.
+        const isV2 = Number(sub.version) === 2;
+        let previousSecret: string | null = null;
+        if (
+            isV2 &&
+            sub.previousSecretEncrypted &&
+            sub.previousSecretExpiresAt &&
+            sub.previousSecretExpiresAt.getTime() > Date.now()
+        ) {
+            previousSecret = this.decryptSecret(sub.previousSecretEncrypted) || null;
+        }
         const result = await this.delivery.deliver({
             url: sub.url,
             secret,
             event: input.event,
             payload: input.payload,
             deliveryId: input.deliveryId,
+            signatureVersion: isV2 ? 2 : 1,
+            previousSecret,
         });
 
         return this.applyResult(sub, result, input);
     }
 
     private async applyResult(
-        sub: { id: string; status: 'active' | 'paused' | 'failed'; consecutiveFailures: number },
+        sub: { id: string; status: WebhookSubscriptionStatus; consecutiveFailures: number },
         result: DeliveryResult,
         input: DispatchWebhookInput,
     ): Promise<DispatchedWebhookResult> {
