@@ -23,6 +23,7 @@ import { TaskChatMessage } from '../../entities/task-chat-message.entity';
 import { TaskKbMention } from '../../entities/task-kb-mention.entity';
 import { TaskRelation } from '../../entities/task-relation.entity';
 import { TaskReviewer } from '../../entities/task-reviewer.entity';
+import { TeamResource } from '../../entities/team-resource.entity';
 import { UserTaskCounter } from '../../entities/user-task-counter.entity';
 import { TaskChatService } from '../../tasks-domain/task-chat.service';
 import { TaskRunDenormService } from '../../tasks-domain/task-run-denorm.service';
@@ -30,6 +31,7 @@ import { TaskTransitionService } from '../../tasks-domain/task-transition.servic
 import { TasksService } from '../../tasks-domain/tasks.service';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
+import { describeTaskPatchIn } from '../domain-event-task-fields';
 import {
     contractValidator,
     createDomainEventsDataSource,
@@ -210,6 +212,42 @@ describe('task recording points', () => {
         expect(transitioned?.data).toMatchObject({ status: 'todo' });
     });
 
+    it('a transition that stamps startedAt names it among the changed fields', async () => {
+        const task = await newTask();
+        await tasks.transition(OWNER, task.id, TaskStatus.TODO, {}, scope);
+        await tasks.transition(OWNER, task.id, TaskStatus.IN_PROGRESS, {}, scope);
+        const started = (await events()).filter((event) => event.type === 'task.transitioned')[1];
+        expect(started).toMatchObject({
+            changedFields: ['status', 'startedAt'],
+            previous: { status: 'todo', startedAt: null },
+            aggregateVersion: 3,
+        });
+        expect((started.data as { startedAt: string | null }).startedAt).toEqual(expect.any(String));
+    });
+
+    it('a teamId change reports the previous teamIds as the DTO had them (teamId + links)', async () => {
+        const task = await newTask();
+        const [teamA, teamB, linked] = [randomUUID(), randomUUID(), randomUUID()];
+        await dataSource.getRepository(TeamResource).insert({
+            teamId: linked,
+            resourceType: 'task',
+            resourceId: task.id,
+            addedById: OWNER,
+            createdAt: new Date(),
+        } as unknown as TeamResource);
+        const described = await describeTaskPatchIn(
+            dataSource.manager,
+            task.id,
+            { teamId: teamB },
+            { teamId: teamA },
+        );
+        expect(described).toEqual({
+            changedFields: ['teamIds'],
+            previous: { teamIds: [teamA, linked] },
+        });
+        await dataSource.getRepository(TeamResource).delete({ resourceId: task.id });
+    });
+
     it('edges record child events that bump the parent version and carry the child', async () => {
         const task = await newTask();
         const other = await newTask('Blocker');
@@ -245,7 +283,7 @@ describe('task recording points', () => {
         expect(await versionOf(task.id)).toBe(2);
     });
 
-    it('delete records task.deleted with the last snapshot, deleted: true and version + 1', async () => {
+    it('delete records task.deleted with the last snapshot, deleted: true, at a version claimed first', async () => {
         const task = await newTask();
         await tasks.update(OWNER, task.id, { title: 'Doomed' }, scope);
         await tasks.remove(OWNER, task.id, scope);
@@ -254,7 +292,7 @@ describe('task recording points', () => {
         expect(deleted?.data).toMatchObject({
             id: task.id,
             title: 'Doomed',
-            version: 2,
+            version: 3,
             deleted: true,
         });
         expectValid('resources/task.schema.json', deleted?.data);

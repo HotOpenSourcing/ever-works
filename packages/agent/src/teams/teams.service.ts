@@ -12,6 +12,7 @@ import { Agent } from '../entities/agent.entity';
 import { Organization } from '../entities/organization.entity';
 import { Team } from '../entities/team.entity';
 import { TeamMember } from '../entities/team-member.entity';
+import { TeamResource } from '../entities/team-resource.entity';
 import { User } from '../entities/user.entity';
 import { slugifyText } from '../utils/text.utils';
 import {
@@ -61,7 +62,7 @@ export class TeamsService {
             publisher: DomainEventPublisher,
             manager: EntityManager,
             result: T,
-        ) => Promise<void>,
+        ) => Promise<unknown>,
     ): Promise<T> {
         const publisher = this.domainEvents;
         if (!publisher) return write(undefined);
@@ -166,11 +167,14 @@ export class TeamsService {
 
         return this.withTeamEvent(
             (manager) => (manager ? manager.getRepository(Team) : this.teams).save(team),
-            (publisher, manager, saved) =>
-                publisher.changed(manager, 'team', saved.id, 'team.updated', {
+            async (publisher, manager, saved) => {
+                const version = await publisher.changed(manager, 'team', saved.id, 'team.updated', {
                     changedFields: Object.keys(previous),
                     previous,
-                }),
+                });
+                // The bump is a SQL increment the saved entity did not see.
+                if (version !== null) saved.version = version;
+            },
         );
     }
 
@@ -198,8 +202,52 @@ export class TeamsService {
         }
         await publisher.transaction(async (em) => {
             const tombstone = await publisher.beforeDelete(em, 'team', teamId);
+            // What the delete changes beyond the team itself (EW-P1-1 B2): child
+            // teams are re-parented, and the roster rows and resource links go
+            // with it, so agents, tasks and works lose this team from `teamIds`.
+            const [children, agentMembers, links] = await Promise.all([
+                em.getRepository(Team).find({
+                    where: { parentTeamId: teamId, organizationId: orgId },
+                    select: ['id'],
+                }),
+                em.getRepository(TeamMember).find({
+                    where: { teamId, memberType: 'agent' as TeamMember['memberType'] },
+                    select: ['memberId'],
+                }),
+                em.getRepository(TeamResource).find({
+                    where: { teamId },
+                    select: ['resourceType', 'resourceId'],
+                }),
+            ]);
             await removeIn(em);
+            // The database cascades these rows; delete them here too, so the
+            // side events below snapshot the state after the delete on every
+            // dialect (better-sqlite3 runs with foreign keys off in places).
+            await em.getRepository(TeamMember).delete({ teamId });
+            await em.getRepository(TeamResource).delete({ teamId });
             await publisher.deleted(em, tombstone, 'team.deleted');
+            for (const child of children) {
+                await publisher.changed(em, 'team', child.id, 'team.updated', {
+                    changedFields: ['parentTeamId'],
+                    previous: { parentTeamId: teamId },
+                });
+            }
+            for (const agentId of new Set(agentMembers.map((row) => row.memberId))) {
+                await publisher.changed(em, 'agent', agentId, 'agent.updated', {
+                    changedFields: ['teamIds'],
+                });
+            }
+            for (const link of links) {
+                if (link.resourceType === 'task' || link.resourceType === 'work') {
+                    await publisher.changed(
+                        em,
+                        link.resourceType,
+                        link.resourceId,
+                        `${link.resourceType}.updated`,
+                        { changedFields: ['teamIds'] },
+                    );
+                }
+            }
         });
     }
 
@@ -303,8 +351,8 @@ export class TeamsService {
         try {
             const saved = await this.withTeamEvent(
                 (manager) => (manager ? manager.getRepository(TeamMember) : this.members).save(row),
-                (publisher, manager, member) =>
-                    publisher.child(
+                async (publisher, manager, member) => {
+                    await publisher.child(
                         manager,
                         'team',
                         teamId,
@@ -316,7 +364,14 @@ export class TeamsService {
                             role: member.role,
                         },
                         { changedFields: ['members'] },
-                    ),
+                    );
+                    // An agent's team scope is its team memberships (`teamIds`).
+                    if (member.memberType === 'agent') {
+                        await publisher.changed(manager, 'agent', member.memberId, 'agent.updated', {
+                            changedFields: ['teamIds'],
+                        });
+                    }
+                },
             );
             const [view] = await this.resolveMemberViews([saved]);
             return view;
@@ -361,6 +416,11 @@ export class TeamsService {
                     },
                     { changedFields: ['members'] },
                 );
+                if (memberType === 'agent') {
+                    await publisher.changed(manager, 'agent', memberId, 'agent.updated', {
+                        changedFields: ['teamIds'],
+                    });
+                }
             },
         );
         if (!result.affected) {

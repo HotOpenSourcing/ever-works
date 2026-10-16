@@ -1,4 +1,6 @@
+import type { EntityManager } from 'typeorm';
 import type { Task } from '../entities/task.entity';
+import { teamResourceIds } from './domain-event-snapshots';
 
 /**
  * Task entity column → integration DTO field (integration contract v1, B.6).
@@ -30,9 +32,9 @@ const toEventValue = (value: unknown): unknown =>
 
 /**
  * `changedFields` and `previous` of a `task.updated` event for a patch about to
- * be written to `before`. `teamId` is reported as `teamIds`, whose previous
- * value is the old `teamId` as a one-element set (team resources are separate
- * edges).
+ * be written to `before`. `teamId` is reported as `teamIds`; its previous value
+ * here is the old `teamId` alone — {@link describeTaskPatchIn} completes it with
+ * the task's `team_resources` links, which is what the DTO's `teamIds` holds.
  */
 export function describeTaskPatch(
     patch: Partial<Task>,
@@ -60,4 +62,25 @@ export function describeTaskPatch(
         }
     }
     return { changedFields, previous };
+}
+
+/**
+ * {@link describeTaskPatch}, with `previous.teamIds` as the DTO had it: the old
+ * `teamId` plus the task's `team_resources` links (which a `teamId` patch does
+ * not change), in the snapshot's order.
+ */
+export async function describeTaskPatchIn(
+    manager: EntityManager,
+    taskId: string,
+    patch: Partial<Task>,
+    before?: Partial<Task> | null,
+): Promise<{ changedFields: string[]; previous: Record<string, unknown> }> {
+    const described = describeTaskPatch(patch, before);
+    if (before && described.changedFields.includes('teamIds')) {
+        const links = await teamResourceIds(manager, 'task', taskId);
+        described.previous.teamIds = [
+            ...new Set([...(before.teamId ? [before.teamId] : []), ...links]),
+        ];
+    }
+    return described;
 }

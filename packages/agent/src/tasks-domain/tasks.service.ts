@@ -53,7 +53,7 @@ import { TenantRepository } from '../database/repositories/tenant.repository';
 import type { AgentRunStatus } from '../entities/agent-run.entity';
 import { TaskNotificationService } from './task-notification.service';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
-import { describeTaskPatch } from '../domain-events/domain-event-task-fields';
+import { describeTaskPatchIn } from '../domain-events/domain-event-task-fields';
 import { WorkKnowledgeUploadRepository } from '../database/repositories/work-knowledge-upload.repository';
 import { WorkRepository } from '../database/repositories/work.repository';
 import { RepoConnectionRepository } from '../database/repositories/repo-connection.repository';
@@ -1698,7 +1698,7 @@ export class TasksService {
             publisher: DomainEventPublisher,
             manager: EntityManager,
             result: T,
-        ) => Promise<void>,
+        ) => Promise<unknown>,
     ): Promise<T> {
         const publisher = this.domainEvents;
         if (!publisher) return write(undefined);
@@ -1713,14 +1713,15 @@ export class TasksService {
     private async updateTaskRow(id: string, patch: Partial<Task>, before?: Task): Promise<void> {
         await this.withTaskEvent(
             (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
-            (publisher, manager) =>
-                publisher.changed(
+            async (publisher, manager) => {
+                await publisher.changed(
                     manager,
                     'task',
                     id,
                     'task.updated',
-                    describeTaskPatch(patch, before),
-                ),
+                    await describeTaskPatchIn(manager, id, patch, before),
+                );
+            },
         );
     }
 
@@ -1733,11 +1734,13 @@ export class TasksService {
         const publisher = this.domainEvents;
         if (!publisher) return;
         try {
-            await publisher.transaction((manager) =>
-                type.endsWith('.created')
-                    ? publisher.created(manager, 'task', taskId, type)
-                    : publisher.changed(manager, 'task', taskId, type),
-            );
+            await publisher.transaction(async (manager) => {
+                if (type.endsWith('.created')) {
+                    await publisher.created(manager, 'task', taskId, type);
+                } else {
+                    await publisher.changed(manager, 'task', taskId, type);
+                }
+            });
         } catch (err) {
             this.logger.warn(`Could not record ${type} for task ${taskId}: ${err}`);
         }

@@ -74,7 +74,8 @@ export class DomainEventPublisher {
     /**
      * A full-snapshot event (`<x>.created`, `<x>.updated`, `<x>.transitioned`,
      * `<x>.status_changed`, `<x>.archived`): bump the version, snapshot, record.
-     * A row that no longer exists records nothing.
+     * Returns the new version (callers that return the written entity set it),
+     * or `null` when the row no longer exists and nothing was recorded.
      */
     async changed(
         manager: EntityManager,
@@ -82,11 +83,11 @@ export class DomainEventPublisher {
         id: string,
         type: string,
         options: PublishOptions = {},
-    ): Promise<void> {
+    ): Promise<number | null> {
         const builder = this.builderFor(aggregateType);
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
         const snapshot = await builder(manager, id);
-        if (!snapshot) return;
+        if (!snapshot) return null;
         await this.recorder.record(manager, {
             type,
             tenantId: snapshot.tenantId,
@@ -97,6 +98,7 @@ export class DomainEventPublisher {
             previous: options.previous,
             actor: options.actor,
         });
+        return version;
     }
 
     /**
@@ -138,11 +140,11 @@ export class DomainEventPublisher {
         type: string,
         data: Record<string, unknown>,
         options: PublishOptions = {},
-    ): Promise<void> {
+    ): Promise<number | null> {
         const builder = this.builderFor(aggregateType);
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, parentId);
         const snapshot = await builder(manager, parentId);
-        if (!snapshot) return;
+        if (!snapshot) return null;
         await this.recorder.record(manager, {
             type,
             tenantId: snapshot.tenantId,
@@ -154,19 +156,33 @@ export class DomainEventPublisher {
             actor: options.actor,
             visibility: (snapshot.dto as { visibility?: string }).visibility ?? null,
         });
+        return version;
     }
 
-    /** Snapshot an aggregate before it is hard-deleted (call inside the delete's transaction). */
+    /**
+     * Claim the tombstone's version and snapshot an aggregate before it is
+     * hard-deleted (call inside the delete's transaction).
+     *
+     * The version is bumped FIRST: the `UPDATE` takes the row lock, so an edit
+     * racing the delete either committed before (and the snapshot includes it)
+     * or waits and then finds the row gone — the tombstone can never reuse a
+     * version a concurrent edit also recorded. Where the delete cannot share
+     * this transaction (works, agents), the bump commits on its own; a delete
+     * that then fails leaves only a gap in the versions, which consumers
+     * tolerate.
+     */
     async beforeDelete(
         manager: EntityManager,
         aggregateType: DomainEventAggregateType,
         id: string,
     ): Promise<AggregateTombstone | null> {
-        const snapshot = await this.builderFor(aggregateType)(manager, id);
+        const builder = this.builderFor(aggregateType);
+        await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
+        const snapshot = await builder(manager, id);
         return snapshot ? { aggregateType, id, snapshot } : null;
     }
 
-    /** Record `<x>.deleted` with the last snapshot + `deleted: true`, version = last + 1. */
+    /** Record `<x>.deleted` with the snapshot `beforeDelete` took (its version) + `deleted: true`. */
     async deleted(
         manager: EntityManager,
         tombstone: AggregateTombstone | null,
@@ -182,7 +198,7 @@ export class DomainEventPublisher {
             aggregate: {
                 type: tombstone.aggregateType,
                 id: tombstone.id,
-                version: (Number(dto.version) || 1) + 1,
+                version: Number(dto.version) || 1,
             },
             data: { ...(tombstone.snapshot.dto as Record<string, unknown>), deleted: true },
             actor: options.actor,

@@ -28,6 +28,7 @@ import {
 } from './task-dispatcher';
 import { TaskNotificationService } from './task-notification.service';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import { describeTaskPatch } from '../domain-events/domain-event-task-fields';
 import { TaskRunDenormService } from './task-run-denorm.service';
 // Value import (not `import type`): Nest resolves the @Optional() class
 // injection below via emitted design:paramtypes metadata, which needs the
@@ -325,9 +326,14 @@ export class TaskTransitionService {
             ? await publisher.transaction(async (manager) => {
                   const landed = await this.tasks.casUpdateStatus(task.id, from, patch, manager);
                   if (landed) {
+                      // `status`, plus `startedAt` / `completedAt` when this entry sets them.
+                      const described = describeTaskPatch(patch, task);
                       await publisher.changed(manager, 'task', task.id, 'task.transitioned', {
-                          changedFields: ['status'],
-                          previous: { status: from },
+                          changedFields: [
+                              'status',
+                              ...described.changedFields.filter((field) => field !== 'status'),
+                          ],
+                          previous: { ...described.previous, status: from },
                           actor:
                               opts.actorType === 'agent' && task.agentId
                                   ? { type: 'agent', id: task.agentId, label: null }

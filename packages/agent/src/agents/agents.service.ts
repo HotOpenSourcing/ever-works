@@ -303,11 +303,13 @@ export class AgentsService {
         const publisher = this.domainEvents;
         if (!publisher) return;
         try {
-            await publisher.transaction((manager) =>
-                type === 'agent.created'
-                    ? publisher.created(manager, 'agent', id, type, options)
-                    : publisher.changed(manager, 'agent', id, type, options),
-            );
+            await publisher.transaction(async (manager) => {
+                if (type === 'agent.created') {
+                    await publisher.created(manager, 'agent', id, type, options);
+                } else {
+                    await publisher.changed(manager, 'agent', id, type, options);
+                }
+            });
         } catch (err) {
             this.logger.warn(`Could not record ${type} for agent ${id}: ${err}`);
         }

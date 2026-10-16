@@ -106,7 +106,7 @@ describe('agent recording points', () => {
         for (const event of recorded) expectValid(event);
     });
 
-    it('a hard delete records an agent.deleted tombstone one version past the last snapshot', async () => {
+    it('a hard delete records an agent.deleted tombstone at a version claimed before the delete', async () => {
         const agent = await newAgent();
         await agents.deleteHard(OWNER, agent.id, scope);
         const deleted = (await events()).find((event) => event.type === 'agent.deleted');

@@ -72,7 +72,8 @@ function unique<T>(values: readonly T[]): T[] {
     return [...new Set(values)];
 }
 
-async function teamResourceIds(
+/** The teams a resource is linked to through `team_resources`, oldest link first. */
+export async function teamResourceIds(
     manager: EntityManager,
     resourceType: string,
     resourceId: string,

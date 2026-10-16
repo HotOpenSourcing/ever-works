@@ -64,10 +64,15 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     // ── Teams (`api/organizations/:orgId`) ───────────────────────────────────
     'POST /api/organizations/:orgId/teams': { events: ['team.created'] },
     'PATCH /api/organizations/:orgId/teams/:teamId': { events: ['team.updated'] },
-    'DELETE /api/organizations/:orgId/teams/:teamId': { events: ['team.deleted'] },
-    'POST /api/organizations/:orgId/teams/:teamId/members': { events: ['team.member.added'] },
+    'DELETE /api/organizations/:orgId/teams/:teamId': {
+        // + child teams re-parented, agents / tasks / works losing the team from `teamIds`.
+        events: ['team.deleted', 'team.updated', 'agent.updated', 'task.updated', 'work.updated'],
+    },
+    'POST /api/organizations/:orgId/teams/:teamId/members': {
+        events: ['team.member.added', 'agent.updated'],
+    },
     'DELETE /api/organizations/:orgId/teams/:teamId/members/:memberId': {
-        events: ['team.member.removed'],
+        events: ['team.member.removed', 'agent.updated'],
     },
     'POST /api/organizations/:orgId/teams/:teamId/resources': {
         events: ['team.resource.added', 'task.updated', 'work.updated'],

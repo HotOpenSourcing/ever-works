@@ -135,7 +135,11 @@ describe('team recording points', () => {
 
     it('update records team.updated with only the changed fields and their previous values', async () => {
         const team = await newTeam();
-        await teams.update(ORG_A, team.id, { name: 'Platform Core', description: null });
+        const returned = await teams.update(ORG_A, team.id, {
+            name: 'Platform Core',
+            description: null,
+        });
+        expect(returned.version).toBe(2);
         const updated = (await events()).find((event) => event.type === 'team.updated');
         expect(updated).toMatchObject({
             aggregateVersion: 2,
@@ -172,6 +176,15 @@ describe('team recording points', () => {
             expectValid(event);
         }
         expect(await versionOf(Team, team.id)).toBe(3);
+        // The agent's team scope moved with each roster change.
+        const agentSide = (await events()).filter((event) => event.aggregateId === AGENT);
+        expect(agentSide.map((event) => [event.type, event.changedFields])).toEqual([
+            ['agent.updated', ['teamIds']],
+            ['agent.updated', ['teamIds']],
+        ]);
+        expect(agentSide[0].data).toMatchObject({ teamIds: [team.id], visibility: 'team' });
+        expect(agentSide[1].data).toMatchObject({ teamIds: [], visibility: 'organization' });
+        for (const event of agentSide) expectValid(event);
     });
 
     it('a resource attach records team.resource.added and the task side event', async () => {
@@ -192,14 +205,41 @@ describe('team recording points', () => {
         expect(await versionOf(Task, TASK)).toBe(3);
     });
 
-    it('delete records a team.deleted tombstone one version past the last snapshot', async () => {
+    it('delete records a team.deleted tombstone at a version claimed before the delete', async () => {
         const team = await newTeam();
         await teams.remove(ORG_A, team.id);
         const deleted = (await events()).find((event) => event.type === 'team.deleted');
         expect(deleted).toMatchObject({ aggregateId: team.id, aggregateVersion: 2 });
-        expect(deleted?.data).toMatchObject({ id: team.id, deleted: true });
+        expect(deleted?.data).toMatchObject({ id: team.id, version: 2, deleted: true });
         expectValid(deleted!);
         expect(await dataSource.getRepository(Team).findOneBy({ id: team.id })).toBeNull();
+    });
+
+    it('delete also records what it changes: re-parented children and everything losing the team', async () => {
+        const parent = await newTeam('Engineering');
+        const team = await teams.create(OWNER, ORG_A, { name: 'Platform', parentTeamId: parent.id });
+        const child = await teams.create(OWNER, ORG_A, { name: 'Runtime', parentTeamId: team.id });
+        await teams.addMember(OWNER, ORG_A, team.id, { memberType: 'agent', memberId: AGENT });
+        await resources.attach(OWNER, ORG_A, team.id, { resourceType: 'task', resourceId: TASK });
+        const before = (await events()).length;
+
+        await teams.remove(ORG_A, team.id);
+
+        const recorded = (await events()).slice(before);
+        expect(recorded.map((event) => [event.type, event.aggregateId])).toEqual([
+            ['team.deleted', team.id],
+            ['team.updated', child.id],
+            ['agent.updated', AGENT],
+            ['task.updated', TASK],
+        ]);
+        expect(recorded[1]).toMatchObject({
+            changedFields: ['parentTeamId'],
+            previous: { parentTeamId: team.id },
+        });
+        expect(recorded[1].data).toMatchObject({ parentTeamId: parent.id });
+        expect(recorded[2].data).toMatchObject({ teamIds: [] });
+        expect(recorded[3].data).toMatchObject({ teamIds: [], visibility: 'organization' });
+        for (const event of recorded) expectValid(event);
     });
 
     it('a failed write records nothing (the event shares its transaction)', async () => {
