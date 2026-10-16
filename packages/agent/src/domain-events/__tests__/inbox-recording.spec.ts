@@ -109,7 +109,7 @@ describe('inbox recording points', () => {
         expectValid(event);
     });
 
-    it('records inbox events private: one person's message never reaches the org feed or its webhooks', async () => {
+    it('records inbox events private: a message for one person never reaches the org feed or its webhooks', async () => {
         await fileNotice();
         const item = await onlyItem();
         await inbox.setUnread(item.id, RECIPIENT, false);
