@@ -55,6 +55,9 @@ export type EmailMessageDirection = 'outbound' | 'inbound';
 // sent since T?". Both are read on every send.
 @Index('idx_email_messages_agent_direction_sent', ['agentId', 'direction', 'sentAt'])
 @Index('idx_email_messages_user_direction_sent', ['userId', 'direction', 'sentAt'])
+// EW-P4-3 — RFC threading: "which of this owner's messages has Message-ID X?"
+// is asked for every id of an inbound reply's In-Reply-To / References.
+@Index('idx_email_messages_user_message_id_header', ['userId', 'messageIdHeader'])
 export class EmailMessage {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -100,6 +103,24 @@ export class EmailMessage {
 
     @Column({ type: 'varchar', length: 200, nullable: true })
     providerMessageId?: string | null;
+
+    /**
+     * EW-P4-3 — RFC 5322 `Message-ID` of this message, bare (no angle
+     * brackets; `normalizeMessageId` in `@ever-works/plugin`). Outbound: the
+     * id the platform set on the send. Inbound: the sender's, when the
+     * provider surfaced it. Distinct from `providerMessageId`, the provider's
+     * own handle. NULL when unknown, or longer than 255 characters.
+     */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    messageIdHeader?: string | null;
+
+    /** EW-P4-3 — first id of `In-Reply-To`, bare. */
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    inReplyTo?: string | null;
+
+    /** EW-P4-3 — ids of `References`, bare, oldest first (at most 50). */
+    @Column({ type: 'simple-json', nullable: true })
+    references?: string[] | null;
 
     @Column({ type: 'varchar', length: 254 })
     from: string;
