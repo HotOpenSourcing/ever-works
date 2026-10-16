@@ -226,40 +226,59 @@ export class IntegrationTeamsWriteController {
                     };
                 }
             }
-            const team = await this.teams.create(user.userId, organizationId, {
-                name: dto.name,
-                slug: dto.slug,
-                description: dto.description ?? null,
-                parentTeamId: dto.parentTeamId ?? null,
-                avatarIcon: dto.avatarIcon ?? null,
-            });
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'team',
-                        entityId: team.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.teams.remove(organizationId, team.id);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'team',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return {
-                                status: 200,
-                                body: await this.dto(organizationId, winner.entityId, source),
-                            };
-                        }
+            const externalRef = dto.externalRef;
+            let team: Awaited<ReturnType<TeamsService['create']>>;
+            try {
+                team = await this.teams.create(
+                    user.userId,
+                    organizationId,
+                    {
+                        name: dto.name,
+                        slug: dto.slug,
+                        description: dto.description ?? null,
+                        parentTeamId: dto.parentTeamId ?? null,
+                        avatarIcon: dto.avatarIcon ?? null,
+                    },
+                    // T17a — the team and its externalRef link commit together.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'team',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled
+                // back with its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'team',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return {
+                            status: 200,
+                            body: await this.dto(organizationId, winner.entityId, source),
+                        };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const created = await this.resources.get('team', organizationId, team.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);

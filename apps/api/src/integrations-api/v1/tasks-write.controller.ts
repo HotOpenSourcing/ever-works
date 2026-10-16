@@ -344,63 +344,80 @@ export class IntegrationTasksWriteController {
 
             const [teamId, ...extraTeams] = dto.teamIds ?? [];
             const createdBy = writeAttribution(user);
-            const task = await this.tasks.create(
-                user.userId,
-                {
-                    title: dto.title,
-                    description: dto.description ?? null,
-                    status: dto.status === 'todo' ? TaskStatus.TODO : TaskStatus.BACKLOG,
-                    priority: dto.priority as TaskPriority | undefined,
-                    labels: dto.labels ?? null,
-                    teamId: teamId ?? null,
-                    workId: dto.workId ?? null,
-                    missionId: dto.missionId ?? null,
-                    ideaId: dto.ideaId ?? null,
-                    parentTaskId: dto.parentTaskId ?? null,
-                    createdByType: createdBy.type,
-                    createdById: createdBy.id,
-                    // EW-P2-3 — planning dates + estimate (contract v1 B.6).
-                    dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
-                    startAt: dto.startAt ? new Date(dto.startAt) : null,
-                    estimateMinutes: dto.estimateMinutes ?? null,
-                },
-                this.scope.getScope() as never,
-            );
-
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'task',
-                        entityId: task.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.tasks.remove(user.userId, task.id, this.scope.getScope() as never);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'task',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return {
-                                status: 200,
-                                body: (
-                                    await this.resources.get(
-                                        'task',
-                                        organizationId,
-                                        winner.entityId,
-                                        source,
-                                    )
-                                ).dto,
-                            };
-                        }
+            const externalRef = dto.externalRef;
+            let task: Awaited<ReturnType<TasksService['create']>>;
+            try {
+                task = await this.tasks.create(
+                    user.userId,
+                    {
+                        title: dto.title,
+                        description: dto.description ?? null,
+                        status: dto.status === 'todo' ? TaskStatus.TODO : TaskStatus.BACKLOG,
+                        priority: dto.priority as TaskPriority | undefined,
+                        labels: dto.labels ?? null,
+                        teamId: teamId ?? null,
+                        workId: dto.workId ?? null,
+                        missionId: dto.missionId ?? null,
+                        ideaId: dto.ideaId ?? null,
+                        parentTaskId: dto.parentTaskId ?? null,
+                        createdByType: createdBy.type,
+                        createdById: createdBy.id,
+                        // EW-P2-3 — planning dates + estimate (contract v1 B.6).
+                        dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+                        startAt: dto.startAt ? new Date(dto.startAt) : null,
+                        estimateMinutes: dto.estimateMinutes ?? null,
+                    },
+                    this.scope.getScope() as never,
+                    // T17a — the task and its externalRef link commit together (one
+                    // transaction): a lost race rolls the task back instead of
+                    // leaving it to be undone, and a crash can no longer leave an
+                    // unlinked task behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'task',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled
+                // back with its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'task',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return {
+                            status: 200,
+                            body: (
+                                await this.resources.get(
+                                    'task',
+                                    organizationId,
+                                    winner.entityId,
+                                    source,
+                                )
+                            ).dto,
+                        };
                     }
-                    throw error;
                 }
+                throw error;
             }
             for (const extra of extraTeams) {
                 await this.teamResources.attach(user.userId, organizationId, extra, {
