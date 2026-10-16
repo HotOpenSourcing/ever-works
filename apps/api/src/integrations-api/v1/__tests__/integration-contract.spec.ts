@@ -173,10 +173,13 @@ function objectSchemaOf(
 function dtoShape(dto: new () => object): { properties: Set<string>; optional: Set<string> } {
     const metadata = getMetadataStorage().getTargetValidationMetadatas(dto, '', true, false);
     const properties = new Set(metadata.map((entry) => entry.propertyName));
-    // `@IsOptional()` / `@ValidateIf()` register a conditional validation.
+    // `@IsOptional()` only: a bare `@ValidateIf(v => v !== null)` makes a
+    // property nullable, still required (e.g. MoveKbDocument.folderId).
     const optional = new Set(
         metadata
-            .filter((entry) => entry.type === 'conditionalValidation')
+            .filter(
+                (entry) => entry.type === 'conditionalValidation' && entry.name === 'isOptional',
+            )
             .map((entry) => entry.propertyName),
     );
     return { properties, optional };
