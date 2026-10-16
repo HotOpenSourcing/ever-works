@@ -5,8 +5,8 @@
 **Status**: `Draft (v1.1)`
 **Jira Epic**: [EW-650](https://evertech.atlassian.net/browse/EW-650)
 **Created**: 2026-05-26
-**Last updated**: 2026-05-28
-**Version**: v1.1 — added §11 React-Email/composer UI, §12 agent-to-agent communication, §13 sibling-spec cross-references. v1 sections 0–10 unchanged.
+**Last updated**: 2026-10-15
+**Version**: v1.2 — added §14 email fixes for the Gauzy integration (EW-P4-3). v1.1 added §11 React-Email/composer UI, §12 agent-to-agent communication, §13 sibling-spec cross-references. v1 sections 0–10 unchanged except where §14 says so.
 **Owner**: Product (Ruslan)
 **Related code today**:
 
@@ -319,7 +319,7 @@ POST /api/email/events/:pluginId       -- provider delivery events (bounces, ope
 GET  /api/email/verify/:tokenId        -- tenant address verification click-through
 ```
 
-Each `POST` route dispatches to the plugin's `verifyWebhookSignature` + `parseInboundWebhook` / `parseEventWebhook`. Auth: webhook secret stored per plugin instance; rejection on signature mismatch returns 401 with a generic body (`Invalid webhook signature`) — don't leak which secrets are wrong: the plugin's own reason is only logged (`EmailFacadeService.verifyWebhookSignature`). A plugin that cannot load answers 503, so the provider retries; the webhook is never accepted unverified.
+Each `POST` route dispatches to the plugin's `verifyWebhookSignature` + `parseInboundWebhook` / `parseEventWebhook`. Auth: webhook secret stored per plugin instance, and **required** — with no secret configured the webhook is refused too (§14.1); rejection on signature mismatch returns 401 with a generic body (`Invalid webhook signature`) — don't leak which secrets are wrong: the plugin's own reason is only logged (`EmailFacadeService.verifyWebhookSignature`). A plugin that cannot load answers 503, so the provider retries; the webhook is never accepted unverified.
 
 Rate-limited per plugin id (default 600/min — reduces blast radius if a provider mis-routes traffic).
 
@@ -463,3 +463,39 @@ notification-channels ────────────────┘
 ```
 
 `email-providers` and `notification-channels` are independent (can ship in either order). `event-subscriptions` is the user-facing aggregator and depends on at least one channel surface (in-app via v1, plus any of email/Discord/Slack/etc.).
+
+---
+
+## 14. Email fixes for the Gauzy integration (EW-P4-3 — additive)
+
+**Added**: 2026-10-15. **Plan item**: EW-P4-3 in the Gauzy ↔ Ever Works integration plan (`ever-co/homelab` →
+`docs/superpowers/specs/2026-10-15-gauzy-ever-works-integration/07-ever-works-implementation-plan.md`, Phase 4). The
+Gauzy Inbox's agent-mail bridge (plan doc 04 §6) needs these, and each also stands on its own. Shipped as separate small
+PRs, security first; status per item in [tasks.md](./tasks.md) Phase 10.
+
+### 14.1 Inbound webhooks are refused when no secret is configured
+
+Before: the shipped `postmark` and `mailgun` plugins **accepted an unsigned inbound webhook** when no secret was
+configured at the resolved scope (Postmark logged a warning, Mailgun returned silently). The inbound routes are public, so
+anyone who knew `POST /api/email/inbound/<pluginId>` could inject mail into a tenant's scope.
+
+Now **verification is mandatory**:
+
+| Secret at the resolved scope (owner → admin → env) | Request                    | Result                                                  |
+| -------------------------------------------------- | -------------------------- | ------------------------------------------------------- |
+| configured                                         | correctly signed           | accepted (`202`)                                        |
+| configured                                         | unsigned / wrong signature | `401 Invalid webhook signature`                         |
+| **none**                                           | anything                   | **`401 Invalid webhook signature`** (was: accepted)     |
+| none, and `EMAIL_INBOUND_ALLOW_UNSIGNED=true`      | anything                   | accepted, with a loud `console.warn` (operator opt-out) |
+
+- Postmark secret: `inboundWebhookSecret` setting / `POSTMARK_INBOUND_SECRET` (HTTP Basic `postmark:<secret>`).
+  Mailgun key: `webhookSigningKey` setting / `MAILGUN_WEBHOOK_SIGNING_KEY` (HMAC-SHA256 over `timestamp + token`).
+- The same rule covers the delivery-event route (`POST /api/email/events/<pluginId>`), which verifies with the same
+  plugin method at admin/env scope.
+- **Opt-out** `EMAIL_INBOUND_ALLOW_UNSIGNED`: only the exact string `true` enables it (a typo, `1`, `TRUE` or an empty
+  value stays secure). It is meant for a local stack with no public webhook URL and is never set on a deployed
+  environment. It never weakens a configured secret: with a secret set, a missing or wrong signature is still refused.
+- The plugin's own reason (`... refusing an unsigned webhook ...`) is logged; the caller only ever sees the generic 401
+  (§7), so the response does not reveal whether a secret exists.
+- Rollout check (2026-10-15): no deployed environment had an inbound address or an inbound message, so the change broke no
+  working path. An operator who adds an inbound address must also configure the provider secret.

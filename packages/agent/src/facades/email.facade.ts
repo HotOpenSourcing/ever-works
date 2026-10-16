@@ -382,9 +382,11 @@ export class EmailFacadeService extends BaseFacadeService {
      * loaded instance ({@link getUsableInboundPlugin} — 503 when it cannot
      * load), never through the registry's lazy proxy, and the verification is
      * awaited ({@link verifyWebhookSignature} — 401 with a generic body when
-     * it fails). Note that a plugin with NO secret at the resolved scope
-     * accepts unsigned webhooks (an operator opt-in in the shipped postmark
-     * and mailgun plugins).
+     * it fails). A shipped plugin (postmark, mailgun) with NO secret at the
+     * resolved scope refuses the webhook too (EW-P4-3): there is nothing to
+     * authenticate it against. Only the operator opt-out
+     * `EMAIL_INBOUND_ALLOW_UNSIGNED=true` (exact string) accepts it, for a
+     * local stack with no public webhook URL.
      */
     async parseInbound(
         pluginId: string,
