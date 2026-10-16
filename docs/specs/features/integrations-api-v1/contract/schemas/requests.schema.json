@@ -286,14 +286,14 @@
 			"additionalProperties": false
 		},
 		"CreateComment": {
-			"description": "POST /tasks/:id/comments. With X-Act-As-User the author is that user; without it authorType=integration and externalAuthor is shown.",
+			"description": "POST /tasks/:id/comments. With X-Act-As-User the author is that user; without it authorType=integration and externalAuthor is shown. body: at most 16384 characters (CR-2: Ever Works' task chat limit); a body that looks like it carries a credential is refused with 400 validation_failed.",
 			"type": "object",
 			"required": ["body"],
 			"properties": {
 				"body": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 50000
+					"maxLength": 16384
 				},
 				"externalAuthor": {
 					"type": "object",
@@ -322,14 +322,14 @@
 			"additionalProperties": false
 		},
 		"UpdateComment": {
-			"description": "PATCH /tasks/:id/comments/:cid. Integration-authored comments have no edit window; act-as user comments follow the 5-minute window.",
+			"description": "PATCH /tasks/:id/comments/:cid. Integration-authored comments have no edit window; act-as user comments follow the 5-minute window. Only the author may edit (or DELETE): the integration key that wrote it, or the act-as user who wrote it; otherwise, or past the window, 422 domain_rule (CR-2).",
 			"type": "object",
 			"required": ["body"],
 			"properties": {
 				"body": {
 					"type": "string",
 					"minLength": 1,
-					"maxLength": 50000
+					"maxLength": 16384
 				}
 			},
 			"additionalProperties": false

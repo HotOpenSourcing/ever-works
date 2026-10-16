@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { DataSource } from 'typeorm';
 import { TaskRepository } from '../../database/repositories/task.repository';
+import { UserRepository } from '../../database/repositories/user.repository';
+import { User } from '../../entities/user.entity';
 import {
     TaskApproverRepository,
     TaskAssigneeRepository,
@@ -10,6 +12,7 @@ import {
     TaskKbMentionRepository,
     TaskRelationRepository,
     TaskReviewerRepository,
+    TaskWatcherRepository,
     UserTaskCounterRepository,
 } from '../../database/repositories/task-side.repositories';
 import type { OwnershipScope } from '../../database/ownership-scope';
@@ -23,12 +26,17 @@ import { TaskChatMessage } from '../../entities/task-chat-message.entity';
 import { TaskKbMention } from '../../entities/task-kb-mention.entity';
 import { TaskRelation } from '../../entities/task-relation.entity';
 import { TaskReviewer } from '../../entities/task-reviewer.entity';
+import { TaskWatcher } from '../../entities/task-watcher.entity';
 import { TeamResource } from '../../entities/team-resource.entity';
 import { UserTaskCounter } from '../../entities/user-task-counter.entity';
 import { TaskChatService } from '../../tasks-domain/task-chat.service';
 import { TaskRunDenormService } from '../../tasks-domain/task-run-denorm.service';
 import { TaskTransitionService } from '../../tasks-domain/task-transition.service';
 import { TasksService } from '../../tasks-domain/tasks.service';
+import {
+    AggregateVersionConflictError,
+    runExpectingAggregateVersion,
+} from '../domain-event-context';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
 import { describeTaskPatchIn } from '../domain-event-task-fields';
@@ -110,12 +118,16 @@ describe('task recording points', () => {
             u,
             u,
             u,
-            u,
+            // users (20): user actors (watchers) must be active in the task's tenant.
+            new UserRepository(dataSource.getRepository(User)),
             u,
             u,
             u,
             u,
             publisher,
+            u, // accessPolicy (EW-P1-3)
+            u, // visibility (EW-P1-3)
+            new TaskWatcherRepository(dataSource.getRepository(TaskWatcher)),
         );
         // The same graph WITHOUT the publisher: today's behaviour, no events.
         const plainTransitions = new TaskTransitionService(taskRepo, blocks, approvers, assignees);
@@ -150,6 +162,7 @@ describe('task recording points', () => {
             'task_assignees',
             'task_blocks',
             'task_relations',
+            'task_watchers',
             'task_chat_messages',
             'user_task_counter',
         ]) {
@@ -274,6 +287,41 @@ describe('task recording points', () => {
         expect(await versionOf(task.id)).toBe(5);
     });
 
+    it('watchers and relation removal record task.watcher.* / task.relation.removed', async () => {
+        await dataSource.query(`DELETE FROM "users" WHERE "id" = ?`, [OWNER]);
+        await dataSource.getRepository(User).insert({
+            id: OWNER,
+            username: 'owner',
+            slug: `owner-${OWNER.slice(0, 6)}`,
+            tenantId: TENANT,
+            isActive: true,
+        } as unknown as User);
+        const task = await newTask();
+        const other = await newTask('Related');
+        await tasks.addWatcher(OWNER, task.id, OWNER, scope);
+        await tasks.addWatcher(OWNER, task.id, OWNER, scope); // idempotent: no second event
+        await tasks.removeWatcher(OWNER, task.id, OWNER, scope);
+        const relation = await tasks.addRelation(OWNER, task.id, other.id, 'related', scope);
+        await tasks.removeRelation(OWNER, task.id, relation.id, scope);
+        const child = (await events()).filter(
+            (event) => event.aggregateId === task.id && event.type !== 'task.created',
+        );
+        expect(child.map((event) => event.type)).toEqual([
+            'task.watcher.added',
+            'task.watcher.removed',
+            'task.relation.added',
+            'task.relation.removed',
+        ]);
+        expect(child[0].data).toEqual({ taskId: task.id, userId: OWNER });
+        expect(child[3].data).toEqual({
+            taskId: task.id,
+            relatedTaskId: other.id,
+            kind: 'related',
+            deleted: true,
+        });
+        expect((await tasks.listWatchers(OWNER, task.id, scope)).length).toBe(0);
+    });
+
     it('a refused write (409 duplicate assignee) records nothing', async () => {
         const task = await newTask();
         await tasks.addAssignee(OWNER, task.id, 'agent', AGENT, scope);
@@ -318,6 +366,82 @@ describe('task recording points', () => {
         expect(comments[1].previous).toEqual({ body: 'First!' });
         for (const comment of comments)
             expectValid('resources/task-comment.schema.json', comment.data);
+    });
+
+    it('an integration edits its own comment past the window and deletes it: task.comment.deleted', async () => {
+        const task = await newTask();
+        const keyId = randomUUID();
+        const message = await chat.post(
+            OWNER,
+            {
+                taskId: task.id,
+                authorType: 'integration',
+                authorId: keyId,
+                body: 'From Gauzy',
+                externalAuthor: { name: 'Ada', avatarUrl: null, source: 'gauzy' },
+            },
+            {},
+            scope,
+        );
+        // Older than the 5-minute window that binds human authors.
+        await dataSource
+            .getRepository(TaskChatMessage)
+            .update(message.id, { createdAt: new Date(Date.now() - 60 * 60_000) });
+        await expect(chat.edit(OWNER, message.id, 'nope', {}, scope)).rejects.toThrow(
+            'Only the original author',
+        );
+        await expect(chat.edit(OWNER, message.id, 'nope', {}, scope, randomUUID())).rejects.toThrow(
+            'Only the original author',
+        );
+        await chat.edit(OWNER, message.id, 'From Gauzy (edited)', {}, scope, keyId);
+
+        await expect(chat.remove(OWNER, message.id, scope, randomUUID())).rejects.toThrow(
+            'Only the original author',
+        );
+        await chat.remove(OWNER, message.id, scope, keyId);
+        expect(
+            await dataSource.getRepository(TaskChatMessage).findOneBy({ id: message.id }),
+        ).toBeNull();
+
+        const comments = (await events()).filter((event) => event.type.startsWith('task.comment.'));
+        expect(comments.map((event) => [event.type, event.aggregateVersion])).toEqual([
+            ['task.comment.created', 2],
+            ['task.comment.updated', 3],
+            ['task.comment.deleted', 4],
+        ]);
+        expect(comments[2].data).toMatchObject({
+            id: message.id,
+            authorType: 'integration',
+            authorId: keyId,
+            body: 'From Gauzy (edited)',
+            externalAuthor: { name: 'Ada', avatarUrl: null, source: 'gauzy' },
+            deleted: true,
+        });
+        for (const comment of comments)
+            expectValid('resources/task-comment.schema.json', comment.data);
+    });
+
+    it('an If-Match expectation is re-checked at the bump: a stale write rolls back with nothing recorded', async () => {
+        const task = await newTask();
+        await tasks.update(OWNER, task.id, { title: 'Moved on' }, scope);
+        const before = (await events()).length;
+        // The caller read version 1; the task is now at 2.
+        await expect(
+            runExpectingAggregateVersion({ aggregateType: 'task', id: task.id, version: 1 }, () =>
+                tasks.update(OWNER, task.id, { title: 'Stale' }, scope),
+            ),
+        ).rejects.toBeInstanceOf(AggregateVersionConflictError);
+        const row = await dataSource.getRepository(Task).findOneByOrFail({ id: task.id });
+        expect(row.title).toBe('Moved on');
+        expect(Number(row.version)).toBe(2);
+        expect((await events()).length).toBe(before);
+        // The right version goes through.
+        await runExpectingAggregateVersion({ aggregateType: 'task', id: task.id, version: 2 }, () =>
+            tasks.update(OWNER, task.id, { title: 'Fresh' }, scope),
+        );
+        expect((await dataSource.getRepository(Task).findOneByOrFail({ id: task.id })).title).toBe(
+            'Fresh',
+        );
     });
 
     it('a runtime-only write records task.runtime_updated and bumps neither version nor updatedAt', async () => {

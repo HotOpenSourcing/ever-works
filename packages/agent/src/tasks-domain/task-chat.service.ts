@@ -359,11 +359,21 @@ export class TaskChatService {
         newBody: string,
         lookups: MentionLookups = {},
         ownershipScope?: OwnershipScope,
+        // Integration API v1 (EW-P1-4): an integration edits the comments IT
+        // wrote (`authorType: 'integration'`, author = its key) with no edit
+        // window. Appended LAST; absent, the rules below are unchanged.
+        integrationAuthorId?: string,
     ): Promise<TaskChatMessage> {
         const msg = await this.messages.findById(messageId);
         if (!msg) throw new NotFoundException(`Chat message ${messageId} not found.`);
 
         const ownedTask = await this.requireReadableTask(userId, msg.taskId, ownershipScope);
+        if (integrationAuthorId !== undefined) {
+            if (msg.authorType !== 'integration' || msg.authorId !== integrationAuthorId) {
+                throw new ForbiddenException('Only the original author can edit this message.');
+            }
+            return this.applyEdit(msg, ownedTask, newBody, lookups);
+        }
 
         // Authorship — only the original author can edit (when author
         // is a user; agent-authored messages are not user-editable).
@@ -377,6 +387,16 @@ export class TaskChatService {
             throw new ForbiddenException('Edit window has expired (5 minutes).');
         }
 
+        return this.applyEdit(msg, ownedTask, newBody, lookups);
+    }
+
+    private async applyEdit(
+        msg: TaskChatMessage,
+        ownedTask: Task,
+        newBody: string,
+        lookups: MentionLookups,
+    ): Promise<TaskChatMessage> {
+        const messageId = msg.id;
         this.assertBody(newBody);
 
         // Review-fix I3: re-parse mentions on edit AND persist the
@@ -433,6 +453,52 @@ export class TaskChatService {
         const refreshed = await this.messages.findById(messageId);
         if (!refreshed) throw new NotFoundException(`Chat message ${messageId} vanished.`);
         return refreshed;
+    }
+
+    /**
+     * Integration API v1 (EW-P1-4): delete a comment. Only its author may: the
+     * integration key that wrote it (`integrationAuthorId`), or else the user
+     * who wrote it. No time window — the 5-minute window is an edit rule.
+     * Records `task.comment.deleted` (the comment as it was, plus
+     * `deleted: true`) in the same transaction as the delete.
+     */
+    async remove(
+        userId: string,
+        messageId: string,
+        ownershipScope?: OwnershipScope,
+        integrationAuthorId?: string,
+    ): Promise<void> {
+        const msg = await this.messages.findById(messageId);
+        if (!msg) throw new NotFoundException(`Chat message ${messageId} not found.`);
+
+        const ownedTask = await this.requireReadableTask(userId, msg.taskId, ownershipScope);
+        const isAuthor =
+            integrationAuthorId !== undefined
+                ? msg.authorType === 'integration' && msg.authorId === integrationAuthorId
+                : msg.authorType === 'user' && msg.authorId === userId;
+        if (!isAuthor) {
+            throw new ForbiddenException('Only the original author can delete this message.');
+        }
+
+        const publisher = this.domainEvents;
+        if (!publisher) {
+            await this.messages.delete(messageId);
+            return;
+        }
+        await publisher.transaction(async (manager) => {
+            await publisher.child(
+                manager,
+                'task',
+                msg.taskId,
+                'task.comment.deleted',
+                {
+                    ...toTaskCommentDto(msg, ownedTask.organizationId),
+                    deleted: true,
+                } as unknown as Record<string, unknown>,
+                { changedFields: ['comments'] },
+            );
+            await this.messages.delete(messageId, manager);
+        });
     }
 
     /**
