@@ -84,7 +84,8 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
     in_review: ['in_progress', 'blocked', 'done', 'cancelled'],
     blocked: ['todo', 'in_progress', 'cancelled'],
     done: ['in_progress'],
-    cancelled: [],
+    // EW-P1-6 — a cancelled Task re-opens into the backlog or todo.
+    cancelled: ['backlog', 'todo'],
 };
 
 function formatDate(iso: string): string {
