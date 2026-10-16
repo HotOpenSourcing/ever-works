@@ -8,10 +8,12 @@ import {
 	FLEET_AGENT_EXECUTION_DEFAULT_TIMEOUT_SEC,
 	FLEET_AGENT_EXECUTION_MODEL_PATTERN,
 	fleetAgentExecutionProviderSupportsMountGrants,
+	fleetAgentExecutionProviderSupportsSessionResume,
 	isFleetAgentExecutionEffort,
-	isFleetAgentExecutionPermissionMode
+	isFleetAgentExecutionPermissionMode,
+	isFleetAgentModelSessionId
 } from '@ever-works/contracts';
-import type { NodeCheckResult, WireCheck } from './acceptance-checks';
+import type { NodeCheckResult, NodeCommandEnvOverlay, WireCheck } from './acceptance-checks';
 
 /**
  * Model-CLI step of an `agent-task` — agent execution v2.
@@ -75,6 +77,220 @@ export interface ModelCliMcpBridge {
 	serverName: string;
 	/** Loopback URL the CLI connects to. */
 	serverUrl: string;
+}
+
+/**
+ * The MCP config a fleet Claude Code run is handed when the platform MCP
+ * bridge is NOT on: no servers at all.
+ *
+ * Written to the run's SCRATCH directory (the same `mcp.json` path the
+ * bridge would have used, so it never lands in the worktree) and passed as
+ * `--mcp-config <file> --strict-mcp-config`. The flag pair is what keeps a
+ * fleet run from loading the MACHINE OWNER's own MCP servers: without
+ * `--strict-mcp-config`, `claude -p` loads every server in `~/.claude.json`,
+ * every enabled plugin's servers and the account's claude.ai connectors.
+ * Measured 2026-10-09 (Claude Code 2.1.295, Windows): a no-bridge fleet run
+ * loaded the owner's `mcp-atlassian`, `trigger`, `posthog` and `sentry`,
+ * the `claude.ai Claude Docs` connector and, on a machine with plugins, 21
+ * plugin-bundled servers — tools the platform never vetted, callable with
+ * the owner's credentials by a prompt-injected run that carries
+ * `--dangerously-skip-permissions`. With this file and the flag the same
+ * run's init event lists zero MCP servers.
+ */
+export const MODEL_CLI_EMPTY_MCP_CONFIG = `${JSON.stringify({ mcpServers: {} }, null, 2)}\n`;
+
+/**
+ * The machine owner's Codex settings a fleet run KEEPS once
+ * `--ignore-user-config` drops the rest of `$CODEX_HOME/config.toml`
+ * (fleet session trust model, control 16).
+ *
+ * Every fleet Codex run is started with `--ignore-user-config`: that is the
+ * one switch that keeps the owner's `[mcp_servers.*]`, every enabled
+ * plugin's servers (computer-use and browser among them on a desktop with
+ * the Codex app), the `notify` command and the rest of the owner's config
+ * away from an untrusted prompt. Measured on codex-cli 0.130.0
+ * (2026-10-16): with the owner's config the run starts its MCP workers;
+ * with `--ignore-user-config` it starts none, and auth still comes from
+ * `CODEX_HOME`.
+ *
+ * The flag would also drop two things the run should keep, so they are
+ * forwarded explicitly, and nothing else is. `[windows] sandbox` is the
+ * owner's sandbox mode for model-run shell commands (`"elevated"` on
+ * EVERDESK2), which isolation must not weaken. `model` and
+ * `model_reasoning_effort` are the owner's model defaults (a job's own
+ * `model` still wins).
+ */
+export interface CodexUserSettings {
+	model?: string;
+	reasoningEffort?: string;
+	windowsSandbox?: string;
+}
+
+/**
+ * A forwarded value: a bare identifier only. It is placed on a SHELL command
+ * line, so anything else (quotes, spaces, `$`, `&`, `|`, `%`, `^`) is refused
+ * rather than escaped.
+ */
+const CODEX_SETTING_VALUE = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * `key = "value"` / `key = 'value'`, optionally followed by a comment,
+ * matched against a TRIMMED line. No leading/trailing whitespace runs and no
+ * nested quantifiers, so it stays linear on any input (CodeQL review on
+ * #2635 flagged the previous header pattern as polynomial).
+ */
+const TOML_STRING_ASSIGNMENT = /^([A-Za-z0-9_-]+)[ \t]*=[ \t]*(?:"([^"\\]*)"|'([^']*)')(?:[ \t]+#.*|#.*)?$/;
+
+/** TOML multiline string delimiters (basic and literal). */
+const TOML_MULTILINE_DELIMITERS = ['"""', "'''"] as const;
+
+/**
+ * An assignment whose VALUE starts with a multiline delimiter. The key is
+ * everything before the first `=` with no `#` in it, so quoted keys with
+ * spaces count and a comment never does. Linear: the class excludes `=`.
+ */
+const TOML_MULTILINE_VALUE_START = /^[^=#]*=[ \t]*("""|''')/;
+
+/**
+ * The {@link CodexUserSettings} in a Codex `config.toml`, read with a
+ * deliberately tiny scanner: only plain string assignments to the three keys,
+ * in the top-level table (`model`, `model_reasoning_effort`) or in `[windows]`
+ * (`sandbox`). Anything it does not recognise, or a value outside
+ * {@link CODEX_SETTING_VALUE}, is simply not forwarded. A config it cannot
+ * read therefore yields `{}`, which is the run an owner with no config gets.
+ *
+ * The CONTENT of a multiline string (`"""` or `'''`, e.g. an instructions
+ * field holding an example `model = "…"` or `[windows]` line) is skipped:
+ * it is text, not config (review on #2635). Table headers are parsed by
+ * position, not by a regular expression.
+ */
+export function readCodexUserSettings(configToml: string | null | undefined): CodexUserSettings {
+	const settings: CodexUserSettings = {};
+	if (typeof configToml !== 'string' || configToml.length === 0) return settings;
+	let table = '';
+	let openMultiline: (typeof TOML_MULTILINE_DELIMITERS)[number] | null = null;
+	for (const raw of configToml.split(/\r?\n/)) {
+		if (openMultiline !== null) {
+			if (indexOfTomlClosingDelimiter(raw, openMultiline) !== -1) openMultiline = null;
+			continue;
+		}
+		const line = raw.trim();
+		// A multiline string opens only where a VALUE starts with its delimiter
+		// (`key = """…`) and does not close on the same line: everything up to
+		// its closing delimiter is then string content. A delimiter anywhere
+		// else (a comment, mid-value) opens nothing (review on #2635).
+		const opening = TOML_MULTILINE_VALUE_START.exec(line);
+		if (opening) {
+			const delimiter = opening[1] as (typeof TOML_MULTILINE_DELIMITERS)[number];
+			if (indexOfTomlClosingDelimiter(line.slice(opening[0].length), delimiter) === -1) {
+				openMultiline = delimiter;
+				continue;
+			}
+		}
+		if (line.startsWith('[')) {
+			if (line.startsWith('[[')) {
+				table = '\u0000array';
+			} else {
+				const close = line.indexOf(']');
+				table = close > 1 ? line.slice(1, close).trim() : '\u0000unknown';
+			}
+			continue;
+		}
+		const assignment = TOML_STRING_ASSIGNMENT.exec(line);
+		if (!assignment) continue;
+		const key = assignment[1];
+		const value = assignment[2] ?? assignment[3] ?? '';
+		if (!CODEX_SETTING_VALUE.test(value)) continue;
+		if (table === '' && key === 'model' && settings.model === undefined) settings.model = value;
+		else if (table === '' && key === 'model_reasoning_effort' && settings.reasoningEffort === undefined) {
+			settings.reasoningEffort = value;
+		} else if (table === 'windows' && key === 'sandbox' && settings.windowsSandbox === undefined) {
+			settings.windowsSandbox = value;
+		}
+	}
+	return settings;
+}
+
+/**
+ * Index of the first CLOSING `delimiter` in `text`, or -1. In a basic
+ * multiline string (`"""`) a quote preceded by an ODD run of backslashes
+ * is escaped content: `\"""` does not close it, `\\"""` does (review on
+ * #2635). A literal one (`'''`) has no escapes. Linear: a candidate is only
+ * ever preceded by a backslash run once, so each run is scanned once.
+ */
+function indexOfTomlClosingDelimiter(text: string, delimiter: (typeof TOML_MULTILINE_DELIMITERS)[number]): number {
+	let from = 0;
+	for (;;) {
+		const at = text.indexOf(delimiter, from);
+		if (at === -1 || delimiter === "'''") return at;
+		let backslashes = 0;
+		for (let i = at - 1; i >= 0 && text[i] === '\\'; i -= 1) backslashes += 1;
+		if (backslashes % 2 === 0) return at;
+		from = at + 1;
+	}
+}
+
+function assertCodexSetting(name: string, value: string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	if (!CODEX_SETTING_VALUE.test(value)) {
+		throw new ModelCliCommandError(`Refusing to forward the Codex setting '${name}': not a bare identifier`);
+	}
+	return value;
+}
+
+/**
+ * Environment a fleet model step is FORCED to see so the CLI never fetches
+ * the account's own remote MCP connectors, or null when the provider has
+ * no such switch.
+ *
+ * Claude Code: `ENABLE_CLAUDEAI_MCP_SERVERS=false` is the documented
+ * per-process form of `disableClaudeAiConnectors` ("Disable claude.ai
+ * connectors", code.claude.com/docs/en/mcp) and leaves servers passed with
+ * `--mcp-config` — the platform bridge — untouched. `--strict-mcp-config`
+ * already drops the connectors on the CLI version this was measured on;
+ * this is the connector-specific switch on top of it, so the property
+ * does not rest on one flag's reading of "all other MCP configurations".
+ *
+ * Applied through the command runner's containment overlay, which runs
+ * LAST and deletes every case-spelling first — so an owner-exported
+ * `ENABLE_CLAUDEAI_MCP_SERVERS=true` cannot re-open it.
+ */
+export function modelCliMcpIsolationEnv(provider: FleetAgentExecutionProvider): NodeCommandEnvOverlay | null {
+	return provider === 'claude-code' ? { ENABLE_CLAUDEAI_MCP_SERVERS: 'false' } : null;
+}
+
+/**
+ * Where Claude Code looks for an enterprise `managed-mcp.json`
+ * (code.claude.com/docs/en/managed-mcp, "Deploy managed-mcp.json").
+ *
+ * A machine-wide, administrator-deployed file that takes EXCLUSIVE control
+ * of MCP. While a readable, parseable one is present, Claude Code "exits at
+ * startup" when given `--mcp-config` ("You cannot dynamically configure MCP
+ * servers when an enterprise MCP config is present") or
+ * `--strict-mcp-config` — the two flags every fleet Claude Code run now
+ * carries. See {@link claudeManagedMcpConfigInEffect}.
+ */
+export function claudeManagedMcpConfigPath(platform: NodeJS.Platform = process.platform): string {
+	if (platform === 'win32') return 'C:\\Program Files\\ClaudeCode\\managed-mcp.json';
+	if (platform === 'darwin') return '/Library/Application Support/ClaudeCode/managed-mcp.json';
+	return '/etc/claude-code/managed-mcp.json';
+}
+
+/**
+ * Whether the contents read from {@link claudeManagedMcpConfigPath} are a
+ * managed MCP config Claude Code would APPLY — i.e. one it can parse. The
+ * CLI only takes exclusive control for a file it "can read and parse"; an
+ * absent (`null`) or unparseable one is ignored by the CLI, so it is ignored
+ * here too rather than refusing a run that would have started.
+ */
+export function claudeManagedMcpConfigInEffect(raw: string | null): boolean {
+	if (typeof raw !== 'string' || !raw.trim()) return false;
+	try {
+		const parsed = JSON.parse(raw) as unknown;
+		return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed);
+	} catch {
+		return false;
+	}
 }
 
 export class ModelCliCommandError extends Error {
@@ -172,6 +388,74 @@ function assertModelId(model: string | undefined): string | null {
 	return model;
 }
 
+/**
+ * Node lifecycle (self-build slice AR) — the command-line flags this
+ * builder may DROP when the pinned CLI binary does not advertise them.
+ *
+ * Optional means: the run is still the run the tenant asked for without
+ * it, only less tuned. `--effort` is a quality knob and `--max-budget-usd`
+ * a per-run spend cap the platform's own daily ceilings back up. Before
+ * this list both were emitted unconditionally, so ONE upstream CLI release
+ * that renamed either failed every run on every PC at once — after the
+ * plan, the lease and the provisioning were already spent.
+ *
+ * Nothing else is droppable, on purpose: `--strict-mcp-config`,
+ * `--add-dir`, `--permission-mode`, the sandbox flags and the rest decide
+ * WHAT the model may touch, and a run that silently lost one would be a
+ * different, less contained run that still reports success. A binary that
+ * lacks one of those is reported by `doctor` as incompatible instead.
+ */
+export const MODEL_CLI_OPTIONAL_FLAGS: Readonly<Record<'claude-code' | 'codex', readonly string[]>> = {
+	'claude-code': ['--effort', '--max-budget-usd'],
+	codex: []
+};
+
+/**
+ * The optional flags THIS execution would emit that the pinned binary does
+ * not advertise — i.e. the ones the builder should drop.
+ *
+ * `supportedFlags === null` means "could not tell" (the probe failed, or
+ * the help text was not recognisable), and then nothing is dropped: that
+ * is exactly the behaviour before this existed, and guessing would trade a
+ * loud failure for a silent downgrade.
+ */
+export function unsupportedOptionalModelCliFlags(
+	execution: Pick<FleetAgentModelExecution, 'provider' | 'effort' | 'maxBudgetUsd'>,
+	supportedFlags: ReadonlySet<string> | null | undefined
+): string[] {
+	if (!supportedFlags) return [];
+	const wanted: string[] = [];
+	if (execution.provider === 'claude-code') {
+		if (execution.effort) wanted.push('--effort');
+		if (execution.maxBudgetUsd !== undefined) wanted.push('--max-budget-usd');
+	}
+	const droppable = new Set(
+		MODEL_CLI_OPTIONAL_FLAGS[execution.provider as keyof typeof MODEL_CLI_OPTIONAL_FLAGS] ?? []
+	);
+	return wanted.filter((flag) => droppable.has(flag) && !supportedFlags.has(flag));
+}
+
+/**
+ * Self-build slice AU — the session id a command may carry, or null for a
+ * fresh run. Throws for an id that is not the contracts' strict UUID shape
+ * (it is interpolated into a shell command line) and for a provider the
+ * fleet never resumes: `codex exec resume` takes neither `--sandbox`,
+ * `-C` nor `--add-dir`, so a resumed Codex run could not be held to the
+ * sandbox its job was planned with (see
+ * `fleetAgentExecutionProviderSupportsSessionResume`). The executor never
+ * asks for either; this is the last gate if something ever does.
+ */
+function assertResumableSession(provider: FleetAgentExecutionProvider, sessionId: string | undefined): string | null {
+	if (sessionId === undefined) return null;
+	if (!fleetAgentExecutionProviderSupportsSessionResume(provider)) {
+		throw new ModelCliCommandError(`Provider '${String(provider)}' cannot resume a CLI session on the fleet`);
+	}
+	if (!isFleetAgentModelSessionId(sessionId)) {
+		throw new ModelCliCommandError('CLI session id is not an opaque identifier');
+	}
+	return sessionId;
+}
+
 function formatBudget(value: number | undefined): string | null {
 	if (value === undefined) return null;
 	if (!Number.isFinite(value) || value <= 0) {
@@ -208,13 +492,70 @@ export function buildModelCliCommand(input: {
 	/**
 	 * Slice Z — the loopback MCP bridge, when this run has one. Absent
 	 * (the default) produces byte-for-byte the command this step has
-	 * always built.
+	 * always built, unless `emptyMcpConfigPath` is given.
 	 */
 	mcp?: ModelCliMcpBridge;
+	/**
+	 * Absolute path of the EMPTY MCP config ({@link MODEL_CLI_EMPTY_MCP_CONFIG})
+	 * the node wrote to this run's scratch directory. With no bridge, a
+	 * Claude Code run is pointed at it under `--strict-mcp-config`, so it
+	 * loads NO MCP server rather than the machine owner's own. Ignored when
+	 * `mcp` is given (the bridge config is then the one strict config) and
+	 * for Codex, which has no equivalent switch (see the codex branch).
+	 *
+	 * Optional so a direct caller keeps the command it always had; the
+	 * fleet's model step always passes it and then refuses to spawn a
+	 * Claude Code command that does not carry the isolation — see
+	 * {@link assertMcpIsolationInCommand}.
+	 */
+	emptyMcpConfigPath?: string;
+	/**
+	 * Codex only: the owner settings kept under `--ignore-user-config` (see
+	 * {@link CodexUserSettings}), as read by {@link readCodexUserSettings}.
+	 * Absent: none are forwarded. The isolation flag itself is ALWAYS emitted
+	 * for Codex, whatever this says.
+	 */
+	codexUserSettings?: CodexUserSettings;
+	/**
+	 * Self-build slice AU — continue this CLI session instead of starting
+	 * one. Absent (the default) produces byte-for-byte the command this step
+	 * has always built. Validated against the contracts' session-id shape
+	 * HERE, at the last point before it reaches argv, whatever validated it
+	 * upstream — refused, never escaped.
+	 */
+	resumeSessionId?: string;
 	platform?: NodeJS.Platform;
+	/**
+	 * Node lifecycle (slice AR) — optional flags to leave off because the
+	 * pinned binary does not advertise them (see
+	 * {@link unsupportedOptionalModelCliFlags}). Only members of
+	 * {@link MODEL_CLI_OPTIONAL_FLAGS} are honoured: a containment flag can
+	 * never be dropped through this, whatever a caller passes. Absent (the
+	 * default) produces byte-for-byte the command this step always built.
+	 */
+	omitFlags?: readonly string[];
+	/**
+	 * Self-build slice AP — ask Claude Code for its LINE-DELIMITED event
+	 * stream (`--output-format stream-json --verbose`) instead of the one
+	 * result document `--output-format json` prints at exit. The stream is
+	 * what carries every turn and tool call, which is the only place the
+	 * run's step records can come from, and — unlike the single document —
+	 * it is written AS the run goes, so a run killed at its timeout still
+	 * leaves the steps it took. Its last line is the same `result` envelope
+	 * the parser already reads (see `parseClaudeEnvelope`'s JSONL branch).
+	 *
+	 * Absent (the default) produces byte-for-byte the command this step has
+	 * always built. Codex is unaffected: `exec --json` is already a stream.
+	 */
+	stream?: boolean;
 }): string {
 	const platform = input.platform ?? process.platform;
 	const { execution } = input;
+	const resumeSessionId = assertResumableSession(execution.provider, input.resumeSessionId);
+	const droppable = new Set(
+		MODEL_CLI_OPTIONAL_FLAGS[execution.provider as keyof typeof MODEL_CLI_OPTIONAL_FLAGS] ?? []
+	);
+	const omitted = new Set((input.omitFlags ?? []).filter((flag) => droppable.has(flag)));
 	const exe = quoteShellPath(input.executable, platform);
 	const stdin = quoteShellPath(input.scratch.instructionsPath, platform);
 	const stdout = quoteShellPath(input.scratch.resultPath, platform);
@@ -291,10 +632,26 @@ export function buildModelCliCommand(input: {
 
 	const args: string[] = [];
 	if (execution.provider === 'claude-code') {
-		args.push('-p', '--output-format', 'json', '--permission-mode', permissionMode);
+		if (input.stream === true) {
+			// `--verbose` is REQUIRED by `-p` with `stream-json`; the CLI
+			// refuses the combination without it.
+			args.push('-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', permissionMode);
+		} else {
+			args.push('-p', '--output-format', 'json', '--permission-mode', permissionMode);
+		}
+		// ── Slice AU: continue the session the earlier run left here ────
+		//
+		// `--resume <id>` reopens that conversation and `-p` still reads the
+		// NEW prompt (the owner's answer) from stdin, under every flag below
+		// exactly as a fresh run would get them. `--fork-session` writes the
+		// continuation to a NEW session id: the session the question was
+		// asked in stays exactly as it was, so a retried attempt (a lapsed
+		// lease, a crash) branches from the same point instead of from a
+		// half-finished first attempt. The id is a validated UUID by now.
+		if (resumeSessionId) args.push('--resume', resumeSessionId, '--fork-session');
 		if (model) args.push('--model', model);
-		if (execution.effort) args.push('--effort', execution.effort);
-		if (budget) args.push('--max-budget-usd', budget);
+		if (execution.effort && !omitted.has('--effort')) args.push('--effort', execution.effort);
+		if (budget && !omitted.has('--max-budget-usd')) args.push('--max-budget-usd', budget);
 		if (execution.skipPermissions === true) args.push('--dangerously-skip-permissions');
 		// ── Slice Z: the platform MCP bridge ────────────────────────────
 		//
@@ -329,6 +686,20 @@ export function buildModelCliCommand(input: {
 				'--allowedTools',
 				`mcp__${assertMcpServerName(mcp.serverName)}`
 			);
+		} else if (input.emptyMcpConfigPath !== undefined) {
+			// ── No bridge: an EMPTY strict MCP config ──────────────────
+			//
+			// The `--strict-mcp-config` reasoning above holds with or
+			// without a bridge: a run the platform gave NO tools must not
+			// pick up the owner's instead. So the no-bridge run gets the
+			// same flag pair pointed at `{"mcpServers":{}}` — every MCP
+			// source the CLI would otherwise consult (`~/.claude.json`,
+			// enabled plugins, a repository's `.mcp.json`, the account's
+			// claude.ai connectors) is ignored. Same ordering rules:
+			// `--mcp-config` is variadic, so `--strict-mcp-config` follows
+			// it to close the list, and both precede `--add-dir`. No
+			// `--allowedTools`: there is no server whose tools to allow.
+			args.push('--mcp-config', quoteShellPath(input.emptyMcpConfigPath, platform), '--strict-mcp-config');
 		}
 		// `--add-dir <directories...>` is variadic — ONE flag, every granted
 		// directory after it. Emitted LAST so it can never swallow another
@@ -338,7 +709,26 @@ export function buildModelCliCommand(input: {
 		if (roots.length > 0) args.push('--add-dir', ...roots);
 	} else if (execution.provider === 'codex') {
 		const sandbox = permissionMode === 'plan' ? 'read-only' : 'workspace-write';
-		args.push('exec', '--json', '--sandbox', sandbox, '-C', quoteShellPath(input.workspacePath, platform));
+		// `--ignore-user-config` on EVERY fleet Codex run (control 16): the
+		// owner's `$CODEX_HOME/config.toml` (its MCP servers, plugins, notify
+		// hook and the rest) is not loaded, so an untrusted prompt never
+		// reaches the owner's tools. Only the settings in CodexUserSettings
+		// are put back below. Auth still comes from CODEX_HOME.
+		args.push(
+			'exec',
+			'--ignore-user-config',
+			'--json',
+			'--sandbox',
+			sandbox,
+			'-C',
+			quoteShellPath(input.workspacePath, platform)
+		);
+		const kept = input.codexUserSettings ?? {};
+		const windowsSandbox = assertCodexSetting('windows.sandbox', kept.windowsSandbox);
+		const reasoningEffort = assertCodexSetting('model_reasoning_effort', kept.reasoningEffort);
+		const ownerModel = assertCodexSetting('model', kept.model);
+		if (windowsSandbox) args.push('-c', `windows.sandbox=${windowsSandbox}`);
+		if (reasoningEffort) args.push('-c', `model_reasoning_effort=${reasoningEffort}`);
 		// `--add-dir <DIR>` takes ONE directory and accumulates across
 		// occurrences. Only alongside `workspace-write`: in `read-only` the
 		// run writes nowhere at all, the primary included, so an extra
@@ -354,13 +744,24 @@ export function buildModelCliCommand(input: {
 		// FILE is still written (it is the record of what the run was
 		// given, and keeps both providers on one code path), but for codex
 		// the override on argv is what actually takes effect.
+		//
+		// Isolated from the owner's own MCP servers by `--ignore-user-config`
+		// above (2026-10-16). The alternatives measured on codex-cli 0.130.0
+		// (2026-10-09) do not work: `-c mcp_servers={}` is a no-op (overrides
+		// are DEEP-MERGED into the user layer), and
+		// `-c mcp_servers.<name>.enabled=false` needs each name and refuses a
+		// plugin-provided server. The bridge's own server is added here on
+		// top of that empty user layer.
 		if (mcp) {
 			args.push(
 				'-c',
 				`mcp_servers.${assertMcpServerName(mcp.serverName)}.url=${assertLoopbackUrl(mcp.serverUrl)}`
 			);
 		}
-		if (model) args.push('-m', model);
+		// The job's model wins; otherwise the owner's default model, which
+		// `--ignore-user-config` would otherwise drop.
+		const codexModel = model ?? ownerModel;
+		if (codexModel) args.push('-m', codexModel);
 		if (execution.skipPermissions === true) args.push('--dangerously-bypass-approvals-and-sandbox');
 		args.push('-');
 	} else {
@@ -414,6 +815,52 @@ export function assertMountGrantsInCommand(input: {
 					`would be silently discarded`
 			);
 		}
+	}
+}
+
+/**
+ * `--mcp-config "<file>" --strict-mcp-config`, adjacent and in that order:
+ * the variadic config list closed by the strict flag, which is itself
+ * followed by another token (every command ends in its stdin redirect).
+ */
+const STRICT_MCP_CONFIG_IN_COMMAND = / --mcp-config "[^"]+" --strict-mcp-config /;
+
+/** `exec --ignore-user-config`, adjacent: the flag the codex branch emits right after the subcommand. */
+const CODEX_IGNORE_USER_CONFIG_IN_COMMAND = / exec --ignore-user-config /;
+
+/**
+ * Refuse to spawn a Claude Code run that is not isolated from the machine
+ * owner's own MCP servers.
+ *
+ * The fleet's model step always hands {@link buildModelCliCommand} either
+ * the bridge or an empty config; this checks the property on the real
+ * string the node is about to hand the shell, immediately before the spawn
+ * — the same reason {@link assertMountGrantsInCommand} lives here. A
+ * refactor that computes the isolation and then fails to emit it would
+ * otherwise go unnoticed: the run still succeeds, it just succeeds with the
+ * owner's Atlassian, Sentry or claude.ai tools in reach of an untrusted
+ * prompt.
+ *
+ * Codex (control 16, 2026-10-16): the command must carry
+ * `exec --ignore-user-config`, the switch that keeps the owner's
+ * `config.toml` (MCP servers, plugins, notify) out of the run.
+ */
+export function assertMcpIsolationInCommand(input: { command: string; execution: FleetAgentModelExecution }): void {
+	if (input.execution.provider === 'codex') {
+		if (!CODEX_IGNORE_USER_CONFIG_IN_COMMAND.test(input.command)) {
+			throw new ModelCliCommandError(
+				'The codex command line does not carry exec --ignore-user-config, so the run would load the machine ' +
+					"owner's own config.toml: its MCP servers, plugins and notify hook"
+			);
+		}
+		return;
+	}
+	if (input.execution.provider !== 'claude-code') return;
+	if (!STRICT_MCP_CONFIG_IN_COMMAND.test(input.command)) {
+		throw new ModelCliCommandError(
+			'The claude-code command line does not carry --mcp-config <file> --strict-mcp-config, so the run ' +
+				"would load the machine owner's own MCP servers"
+		);
 	}
 }
 
@@ -604,11 +1051,37 @@ export function parseModelCliResult(
 ): FleetAgentTaskModelResult {
 	return redactModelResult(
 		parseModelCliOutcome(provider, rawOutput, step),
-		mergeProtectedValues(
-			collectProtectedValues([...(envPassthrough ?? []), ...(envGrants ?? [])], parentEnv),
-			extraValues
-		)
+		collectModelOutputProtectedValues(envPassthrough, envGrants, parentEnv, extraValues)
 	);
+}
+
+/**
+ * The credential VALUES a model run's reported text is scrubbed of — the
+ * values behind the granted env NAMES (`envPassthrough`, `envGrants`), read
+ * from this process, plus values that live in no environment at all (the
+ * run's delivered `.env` file contents, self-build slice Y). Longest first,
+ * 8-character floor.
+ *
+ * Exported so every channel a model run reports through — the summary and
+ * output tail here, and the step records and transcript of self-build slice
+ * AP — is scrubbed of exactly the SAME set. Two channels computing the set
+ * two ways is how one of them ends up scrubbing nothing.
+ */
+export function collectModelOutputProtectedValues(
+	envPassthrough?: readonly string[],
+	envGrants?: readonly string[],
+	parentEnv?: NodeJS.ProcessEnv,
+	extraValues?: readonly string[]
+): string[] {
+	return mergeProtectedValues(
+		collectProtectedValues([...(envPassthrough ?? []), ...(envGrants ?? [])], parentEnv),
+		extraValues
+	);
+}
+
+/** Replace every protected value in `text` with {@link MODEL_CLI_REDACTED}. */
+export function scrubModelOutputText(text: string, values: readonly string[]): string {
+	return scrub(text, values) ?? text;
 }
 
 /** Placeholder left where a credential value was removed. */
@@ -650,12 +1123,36 @@ export function redactCommandResult(
  * ordinary prose out of every tail the node reports.
  */
 function mergeProtectedValues(values: readonly string[], extra?: readonly string[]): string[] {
-	if (!extra?.length) return [...values];
 	const merged = new Set<string>(values);
-	for (const value of extra) {
+	for (const value of extra ?? []) {
 		if (typeof value === 'string' && value.trim().length >= 8) merged.add(value);
 	}
-	return [...merged].sort((a, b) => b.length - a.length);
+	return withJsonEscapedSpellings([...merged]);
+}
+
+/**
+ * Self-build slice AP (review) — `values` plus the spellings JSON gives them.
+ *
+ * Every text this node reports that came out of a CLI's JSON stream — the
+ * raw output tail of a run that wrote no verdict line, a Codex event tail,
+ * the half-written last line of a killed run — carries a value the way JSON
+ * wrote it: a quote as `\"`, a backslash as `\\`, a control character as
+ * `\uXXXX`. A `.env` value like `pa"ss\word` is then in the report in a
+ * spelling a verbatim match never finds. So each value is also protected in
+ * its JSON-escaped spelling, and in the doubly escaped one a JSON document
+ * quoted inside another (a tool result holding a JSON file) produces.
+ * Longest first, so a value that contains another is replaced whole.
+ */
+export function withJsonEscapedSpellings(values: readonly string[]): string[] {
+	const all = new Set<string>(values);
+	for (const value of values) {
+		const once = JSON.stringify(value).slice(1, -1);
+		if (once !== value) {
+			all.add(once);
+			all.add(JSON.stringify(once).slice(1, -1));
+		}
+	}
+	return [...all].sort((a, b) => b.length - a.length);
 }
 
 /**
@@ -749,6 +1246,15 @@ function parseModelCliOutcome(
 	const combinedTail = tail([output, step.logTail ?? ''].filter((part) => part.trim()).join('\n'));
 
 	if (provider === 'claude-code') {
+		// Self-build slice AP (review): Claude Code's `stream-json` output is
+		// every turn of the run — tool RESULTS included, i.e. file bodies and
+		// command output. The `json` document it replaced held only the final
+		// envelope, and a run that died before writing one left an empty
+		// stdout, so its tail was the CLI's stderr. Keep that: for a stream,
+		// the tail is what the model SAID last plus stderr, never the raw
+		// stream (it reaches the Task chat on failure).
+		const streamTail = claudeStreamTail(output, step.logTail);
+		const outputTail = streamTail ?? combinedTail;
 		const envelope = parseClaudeEnvelope(output);
 		if (envelope) {
 			const summary = nonEmptyString(envelope.result);
@@ -765,9 +1271,10 @@ function parseModelCliOutcome(
 				// travel with the cost, so the run row and the Costs dashboard
 				// read a fleet run exactly like a cloud one.
 				...tokenFields(parseClaudeUsage(envelope.usage), dominantClaudeModel(envelope.modelUsage)),
-				...(summary ? {} : { outputTail: combinedTail })
+				...(summary ? {} : outputTail ? { outputTail } : {})
 			};
 		}
+		return { ...base, ...(outputTail ? { outputTail } : {}) };
 	} else if (provider === 'codex') {
 		const parsed = parseCodexEvents(output);
 		if (parsed) {
@@ -786,6 +1293,51 @@ function parseModelCliOutcome(
 		}
 	}
 	return { ...base, ...(combinedTail ? { outputTail: combinedTail } : {}) };
+}
+
+/**
+ * The output tail of a Claude Code `stream-json` run, or null when the
+ * output is not such a stream (the single `json` document, nothing, noise).
+ *
+ * The last assistant TEXT the model wrote (decoded, newest last) followed by
+ * the CLI's stderr, cut to {@link MODEL_CLI_OUTPUT_TAIL_BYTES}. Never a tool
+ * result and never a tool's arguments: the stream carries both, and the tail
+ * is what the reconciler quotes back into the Task chat when a run fails.
+ *
+ * A stream is recognised by at least one line that parses to an event of
+ * the stream's own vocabulary (`system` / `assistant` / `user` / `result`)
+ * that is NOT the lone `result` document `json` mode prints — so a `json`
+ * run keeps exactly the tail it always had.
+ */
+function claudeStreamTail(output: string, stderrTail: string | null | undefined): string | null {
+	const lines = output.split(/\r?\n/).filter((line) => line.trim());
+	let streamEvents = 0;
+	const said: string[] = [];
+	for (const line of lines) {
+		let event: Record<string, unknown> | null = null;
+		try {
+			const parsed = JSON.parse(line) as unknown;
+			event =
+				parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+					? (parsed as Record<string, unknown>)
+					: null;
+		} catch {
+			continue;
+		}
+		if (!event) continue;
+		if (event.type === 'system' || event.type === 'assistant' || event.type === 'user') streamEvents += 1;
+		if (event.type !== 'assistant') continue;
+		const message = event.message as Record<string, unknown> | undefined;
+		const blocks = message && Array.isArray(message.content) ? message.content : [];
+		for (const block of blocks) {
+			const record = block as Record<string, unknown> | null;
+			if (record && record.type === 'text' && typeof record.text === 'string' && record.text.trim()) {
+				said.push(record.text.trim());
+			}
+		}
+	}
+	if (streamEvents === 0) return null;
+	return tail([...said, stderrTail ?? ''].filter((part) => part.trim()).join('\n'));
 }
 
 /** Claude Code `--output-format json` prints ONE JSON document; be tolerant of leading noise. */

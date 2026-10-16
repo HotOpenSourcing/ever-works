@@ -7,6 +7,11 @@ import {
     Optional,
 } from '@nestjs/common';
 import {
+    buildMemberSnapshot,
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '@ever-works/agent/domain-events';
+import {
     OrganizationInvitationService,
     type IssuedOrganizationInvitation,
 } from '@ever-works/agent/services';
@@ -94,6 +99,9 @@ export class OrganizationInvitationFlowService {
         @Optional()
         @Inject(SEAT_GUARD)
         private readonly seats?: SeatGuard,
+        // Domain events (EW-P1-1 B2) — `organization.member.added` / `.removed`,
+        // recorded right after the roster write. Appended LAST + @Optional.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -472,9 +480,34 @@ export class OrganizationInvitationFlowService {
             throw new BadRequestException('cannot_remove_tenant_owner');
         }
 
+        const leaving = this.domainEvents
+            ? await this.members.findByOrgAndUser(orgId, targetUserId)
+            : null;
+        const memberBefore =
+            leaving && this.domainEvents
+                ? await this.domainEvents
+                      .transaction((manager) => buildMemberSnapshot(manager, leaving))
+                      .catch(() => null)
+                : null;
         const removed = await this.members.deleteByOrgAndUser(orgId, targetUserId);
         if (!removed) {
             throw new BadRequestException('not_a_member');
+        }
+        if (memberBefore) {
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.child(
+                        manager,
+                        'organization',
+                        orgId,
+                        'organization.member.removed',
+                        { ...memberBefore, deleted: true },
+                        { changedFields: ['members'] },
+                    ),
+                (message) => this.logger.warn(message),
+                `organization.member.removed for ${orgId}`,
+            );
         }
 
         if (!organization.tenantId) return;
@@ -510,7 +543,7 @@ export class OrganizationInvitationFlowService {
     ): Promise<void> {
         const existing = await this.members.findByOrgAndUser(organizationId, userId);
         if (existing) return;
-        await this.members.create({
+        const created = await this.members.create({
             organizationId,
             tenantId,
             userId,
@@ -519,5 +552,22 @@ export class OrganizationInvitationFlowService {
             invitationId: extra.invitationId ?? null,
             joinedAt: new Date(),
         });
+        await recordAfterWrite(
+            this.domainEvents,
+            async (publisher, manager) => {
+                const member = await buildMemberSnapshot(manager, created);
+                if (!member) return;
+                await publisher.child(
+                    manager,
+                    'organization',
+                    organizationId,
+                    'organization.member.added',
+                    member as unknown as Record<string, unknown>,
+                    { changedFields: ['members'] },
+                );
+            },
+            (message) => this.logger.warn(message),
+            `organization.member.added for ${organizationId}`,
+        );
     }
 }

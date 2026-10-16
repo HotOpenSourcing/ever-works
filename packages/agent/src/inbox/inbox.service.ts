@@ -16,6 +16,7 @@ import {
     type InboxItemDto,
     type InboxItemOption,
     type InboxItemSourceMeta,
+    type InboxItemSourceType,
     type InboxItemStatus,
 } from '@ever-works/contracts';
 import {
@@ -29,6 +30,10 @@ import { AgentEscalationService } from '../agents/agent-escalation.service';
 import { NotificationService } from '../notifications/notification.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
+import {
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '../domain-events/domain-event-publisher.service';
 import type { InboxItem } from '../entities/inbox-item.entity';
 import type {
     InboxEscalationRaisedInput,
@@ -77,9 +82,15 @@ export interface ListInboxOptions {
     status?: InboxItemStatus;
     /** Only items linked to this Task (the Task page's open-question lookup, slice Q). */
     taskId?: string;
+    /** Only items from this producer — `fleet-run` for the fleet filter (slice AU). */
+    sourceType?: InboxItemSourceType;
     limit?: number;
     offset?: number;
 }
+
+/** The two fixed parts of {@link composeFleetAnswerMessage} — shared with its parser. */
+const FLEET_ANSWER_QUESTION_PREFIX = 'Your question from the previous run: ';
+const FLEET_ANSWER_SEPARATOR = "\n\nOwner's answer: ";
 
 /**
  * Self-build slice Q — the message a resumed FLEET run receives for an
@@ -91,7 +102,35 @@ export interface ListInboxOptions {
  * is gone, and the run may land on another machine.
  */
 export function composeFleetAnswerMessage(questionTitle: string, answer: string): string {
-    return `Your question from the previous run: ${questionTitle}\n\nOwner's answer: ${answer}`;
+    return `${FLEET_ANSWER_QUESTION_PREFIX}${questionTitle}${FLEET_ANSWER_SEPARATOR}${answer}`;
+}
+
+/**
+ * Self-build slice AU — the inverse of {@link composeFleetAnswerMessage}:
+ * the question and the owner's answer back out of one resumed run's
+ * `pendingInput` entry, or `null` for any entry that is not one (a
+ * reviewer rejection block, a plain steer, a Resume note).
+ *
+ * The fleet planner reads it to replay a Task's answered questions into a
+ * run that starts a FRESH CLI session — the answers it was resumed for
+ * earlier live only in those runs' rows, because `TasksModule` cannot
+ * reach the Inbox repository. Split on the FIRST separator: the question
+ * is an Inbox title (one line, never a blank line), while the answer is
+ * free text that may contain anything, the separator included.
+ */
+export function parseFleetAnswerMessage(
+    message: unknown,
+): { question: string; answer: string } | null {
+    if (typeof message !== 'string' || !message.startsWith(FLEET_ANSWER_QUESTION_PREFIX)) {
+        return null;
+    }
+    const rest = message.slice(FLEET_ANSWER_QUESTION_PREFIX.length);
+    const at = rest.indexOf(FLEET_ANSWER_SEPARATOR);
+    if (at < 0) return null;
+    const question = rest.slice(0, at).trim();
+    const answer = rest.slice(at + FLEET_ANSWER_SEPARATOR.length).trim();
+    if (!question || !answer) return null;
+    return { question, answer };
 }
 
 /**
@@ -142,6 +181,10 @@ export class InboxService implements InboxProducer {
         @Optional() private readonly escalations?: AgentEscalationService,
         @Optional() private readonly notifications?: NotificationService,
         @Optional() private readonly activityLog?: ActivityLogService,
+        // EW-P3-1 — `inbox.item.*` domain events, recorded right after each
+        // write (best-effort, `recordAfterWrite`). Appended LAST + @Optional:
+        // a graph without it (unit tests, the worker) behaves exactly as before.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     // ── reads ─────────────────────────────────────────────────────
@@ -217,9 +260,19 @@ export class InboxService implements InboxProducer {
     // ── read-state / archive ──────────────────────────────────────
 
     async setUnread(id: string, userId: string, unread: boolean): Promise<InboxItemDto> {
+        // Read BEFORE the write: `inbox.item.state_changed` is recorded only
+        // for a real flip (opening an already-read item records nothing).
+        const before = await this.items.findOwned(id, userId);
+        if (!before) throw new NotFoundException(`Inbox item ${id} not found.`);
+        const wasUnread = !!before.unread;
         const changed = await this.items.setUnread(id, userId, unread);
         if (!changed) throw new NotFoundException(`Inbox item ${id} not found.`);
         if (!unread) await this.stampFirstViewed(id, userId);
+        if (wasUnread !== unread) {
+            await this.recordChanged(id, 'inbox.item.state_changed', ['unread'], {
+                unread: wasUnread,
+            });
+        }
         const row = await this.items.findOwned(id, userId);
         if (!row) throw new NotFoundException(`Inbox item ${id} not found.`);
         return toInboxItemDto(row);
@@ -233,9 +286,15 @@ export class InboxService implements InboxProducer {
         if (!before) throw new NotFoundException(`Inbox item ${id} not found.`);
         const dismissesParkedRun = isOpenFleetQuestion(before);
         const parkedRunId = before.agentRunId ?? null;
+        const previousStatus = before.status;
 
         const row = await this.items.setArchived(id, userId, archived);
         if (!row) throw new NotFoundException(`Inbox item ${id} not found.`);
+        if (row.status !== previousStatus) {
+            await this.recordChanged(id, 'inbox.item.state_changed', ['status'], {
+                status: previousStatus,
+            });
+        }
 
         if (parkedRunId) {
             if (archived && dismissesParkedRun) {
@@ -255,8 +314,25 @@ export class InboxService implements InboxProducer {
         const dismissesParkedRun = isOpenFleetQuestion(row);
         const parkedRunId = row.agentRunId ?? null;
 
+        // The tombstone (version bump + last snapshot) is taken BEFORE the
+        // row goes; `inbox.item.deleted` is recorded once it is gone.
+        const tombstone = this.domainEvents
+            ? await this.domainEvents
+                  .transaction((manager) =>
+                      this.domainEvents!.beforeDelete(manager, 'inbox_item', id),
+                  )
+                  .catch(() => null)
+            : null;
         const deleted = await this.items.deleteOwned(id, userId);
         if (!deleted) throw new NotFoundException(`Inbox item ${id} not found.`);
+        if (tombstone) {
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) => publisher.deleted(manager, tombstone, 'inbox.item.deleted'),
+                (message) => this.logger.warn(message),
+                `inbox.item.deleted for ${id}`,
+            );
+        }
 
         if (dismissesParkedRun && parkedRunId) {
             await this.setFleetRunParked(parkedRunId, false, `delete of item ${id}`);
@@ -352,6 +428,7 @@ export class InboxService implements InboxProducer {
             escalationId: input.escalationId,
             organizationId: input.organizationId ?? null,
         });
+        await this.recordCreated(row);
         await this.notifyCreated(row);
         this.logCreated(row);
     }
@@ -393,6 +470,7 @@ export class InboxService implements InboxProducer {
             proposalId: input.proposalId,
             organizationId: input.organizationId ?? null,
         });
+        await this.recordCreated(row);
         await this.notifyCreated(row);
         this.logCreated(row);
     }
@@ -411,6 +489,7 @@ export class InboxService implements InboxProducer {
             workId: input.workId ?? null,
             organizationId: input.organizationId ?? null,
         });
+        await this.recordCreated(row);
         // `notify: false` = this event already reached the human through
         // another producer; file the row, skip the second bell.
         if (input.notify !== false) {
@@ -552,6 +631,7 @@ export class InboxService implements InboxProducer {
             throw err;
         }
 
+        await this.recordAnswered(id, row.unread);
         const fresh = await this.items.findOwned(id, userId);
         if (!fresh) throw new NotFoundException(`Inbox item ${id} not found.`);
 
@@ -590,6 +670,7 @@ export class InboxService implements InboxProducer {
         await this.stampFirstViewed(row.id, row.userId);
 
         const handOff = await this.tryResumeLinkedRun(row, row.userId, note);
+        await this.recordAnswered(row.id, row.unread);
         const fresh = await this.items.findOwned(row.id, row.userId);
         if (fresh) {
             this.logAnswered(fresh, 'escalation-resolved', {
@@ -626,6 +707,7 @@ export class InboxService implements InboxProducer {
         const handOff = await this.tryResumeLinkedRun(row, row.userId, label, {
             parkedOnly: true,
         });
+        await this.recordAnswered(row.id, row.unread);
         const fresh = await this.items.findOwned(row.id, row.userId);
         if (fresh) {
             this.logAnswered(fresh, input.decision, {
@@ -634,6 +716,49 @@ export class InboxService implements InboxProducer {
                 decidedByUserId: input.decidedByUserId,
             });
         }
+    }
+
+    // ── domain events (EW-P3-1) ───────────────────────────────────
+
+    /** `inbox.item.created` at version 1, right after the row is filed. */
+    private async recordCreated(row: InboxItem): Promise<void> {
+        await recordAfterWrite(
+            this.domainEvents,
+            (publisher, manager) =>
+                publisher.created(manager, 'inbox_item', row.id, 'inbox.item.created'),
+            (message) => this.logger.warn(message),
+            `inbox.item.created for ${row.id}`,
+        );
+    }
+
+    /** A full-snapshot change of one item (bumps its version). */
+    private async recordChanged(
+        id: string,
+        type: 'inbox.item.answered' | 'inbox.item.state_changed',
+        changedFields: string[],
+        previous: Record<string, unknown>,
+    ): Promise<void> {
+        await recordAfterWrite(
+            this.domainEvents,
+            (publisher, manager) =>
+                publisher.changed(manager, 'inbox_item', id, type, { changedFields, previous }),
+            (message) => this.logger.warn(message),
+            `${type} for ${id}`,
+        );
+    }
+
+    /**
+     * `inbox.item.answered` — whichever door the answer came through (Inbox
+     * reply, escalation resolve, approval decide). Recorded once per answer:
+     * only the caller that won the `markAnswered` claim gets here.
+     */
+    private async recordAnswered(id: string, wasUnread: boolean): Promise<void> {
+        await this.recordChanged(
+            id,
+            'inbox.item.answered',
+            ['status', 'unread', 'answeredAt', 'answerText', 'answerOptionId'],
+            { status: 'open', unread: !!wasUnread },
+        );
     }
 
     // ── internals ─────────────────────────────────────────────────
@@ -695,6 +820,7 @@ export class InboxService implements InboxProducer {
             organizationId: ownedRun?.organizationId ?? null,
             ...(args.sourceMeta !== undefined ? { sourceMeta: args.sourceMeta } : {}),
         });
+        await this.recordCreated(row);
 
         let parked = false;
         if (ownedRun) {

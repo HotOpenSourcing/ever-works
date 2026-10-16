@@ -69,15 +69,25 @@ export interface HeartbeatCapableClient {
  * new field that is not in this list is a node that goes dark the moment
  * it talks to a platform older than itself.
  */
-const OPTIONAL_DESCRIPTION_FIELDS = [
-	'workerState',
-	'workerStateReason',
-	'minFreeDiskBytes',
-	'workspaceCount',
-	'workspaceBytes',
-	'lastReclaimAt',
-	'lastReclaimFreedBytes'
-] as const;
+const OPTIONAL_DESCRIPTION_FIELD_TIERS = [
+	// NEWEST first. Node lifecycle + remote node limits (self-build slices
+	// AR, AS). Tiered (review): `cliVersions` goes out on EVERY beat of a
+	// node with a pinned CLI, so an upgraded node talking to a platform that
+	// predates it would otherwise drop the worker state and housekeeping
+	// along with it — losing health signals that platform DOES understand,
+	// for the life of the process. Stripping the newest tier first keeps them.
+	['cliVersions', 'maxConcurrentJobs', 'maxCpuPercent', 'maxMemoryMb'],
+	// Fleet health signals (EW-776) and node housekeeping (EW-803).
+	[
+		'workerState',
+		'workerStateReason',
+		'minFreeDiskBytes',
+		'workspaceCount',
+		'workspaceBytes',
+		'lastReclaimAt',
+		'lastReclaimFreedBytes'
+	]
+] as const satisfies ReadonlyArray<ReadonlyArray<keyof NodeSelfDescription>>;
 
 export interface HeartbeatLoopOptions {
 	client: HeartbeatCapableClient;
@@ -97,6 +107,42 @@ export interface HeartbeatLoopOptions {
 	 * A throwing listener is swallowed: it can never fail a beat.
 	 */
 	onAccepted?: (response: HeartbeatResponse) => void;
+}
+
+/**
+ * Resolves `true` once the loop has had an ACCEPTED beat (state
+ * `connected`), at once when it already has. It resolves `false` once
+ * waiting is pointless: the loop reported `stopped`, or `shouldWait()` turned
+ * false (it is re-checked on every state change).
+ *
+ * The worker lanes start only after this (#2598 a for the desktop, #2628 for
+ * the CLI). An accepted beat's answer carries what must be in force before
+ * the first lease, namely the owner's limit ceiling (slice AS) and the version
+ * verdict (slice AR), and the lease API uses the node's `max` as sent.
+ * `start()` resolves after the first ATTEMPT whether or not it was accepted.
+ * `onAccepted`, which applies the answer, runs synchronously right after the
+ * `connected` state change, and the caller's continuation is a microtask after
+ * both.
+ */
+export function untilHeartbeatAccepted(
+	loop: Pick<HeartbeatLoop, 'getState' | 'onChange'>,
+	shouldWait: () => boolean = () => true
+): Promise<boolean> {
+	const verdict = (state: HeartbeatState): boolean | null => {
+		if (state.state === 'connected') return true;
+		if (state.state === 'stopped' || !shouldWait()) return false;
+		return null;
+	};
+	const now = verdict(loop.getState());
+	if (now !== null) return Promise.resolve(now);
+	return new Promise<boolean>((resolve) => {
+		const unsubscribe = loop.onChange((state) => {
+			const settled = verdict(state);
+			if (settled === null) return;
+			unsubscribe();
+			resolve(settled);
+		});
+	});
 }
 
 /**
@@ -125,13 +171,14 @@ export class HeartbeatLoop {
 	private running = false;
 	private inFlight: Promise<void> | null = null;
 	/**
-	 * Latched once this platform has proven it predates the worker-state
-	 * fields; from then on the beat carries liveness only. Process-scoped
-	 * on purpose — a platform upgrade is a restart-shaped event for the
-	 * node, and re-probing on every beat would mean one wasted round trip
-	 * per beat, forever, against an API that will never accept them.
+	 * How many optional-field TIERS (newest first) this platform has proven
+	 * it predates; from then on the beat leaves those tiers out. 0 = it
+	 * takes everything. Process-scoped on purpose — a platform upgrade is a
+	 * restart-shaped event for the node, and re-probing on every beat would
+	 * mean one wasted round trip per beat, forever, against an API that
+	 * will never accept them.
 	 */
-	private legacyDescription = false;
+	private strippedTiers = 0;
 	private state: HeartbeatState = {
 		state: 'idle',
 		lastHeartbeatAt: null,
@@ -242,25 +289,34 @@ export class HeartbeatLoop {
 	 */
 	private async beat(description: NodeSelfDescription): Promise<HeartbeatResponse> {
 		const credential = { nodeId: this.options.nodeId, secret: this.options.secret };
-		if (this.legacyDescription) {
-			return this.options.client.heartbeat({ ...credential, ...stripOptionalFields(description) });
-		}
-
+		let sent = stripTiers(description, this.strippedTiers);
 		try {
-			return await this.options.client.heartbeat({ ...credential, ...description });
+			return await this.options.client.heartbeat({ ...credential, ...sent });
 		} catch (error) {
-			if (!carriesOptionalFields(description) || !isFieldRejection(error)) {
-				throw error;
+			if (!isFieldRejection(error)) throw error;
+			// Peel the optional fields off one tier at a time, NEWEST first, and
+			// latch at the first shape the platform accepts. A tier this beat
+			// does not carry changes nothing and is skipped without a request.
+			let lastError: unknown = error;
+			for (let tiers = this.strippedTiers + 1; tiers <= OPTIONAL_DESCRIPTION_FIELD_TIERS.length; tiers += 1) {
+				const candidate = stripTiers(description, tiers);
+				if (Object.keys(candidate).length === Object.keys(sent).length) continue;
+				sent = candidate;
+				try {
+					const result = await this.options.client.heartbeat({ ...credential, ...candidate });
+					this.strippedTiers = tiers;
+					this.options.logger?.warn(
+						tiers >= OPTIONAL_DESCRIPTION_FIELD_TIERS.length
+							? 'Platform rejected the optional self-description fields (worker state, housekeeping); it predates them. Reporting liveness only until this node restarts.'
+							: 'Platform rejected the newest optional self-description fields (pinned CLI versions, enforced limits); it predates them. Still reporting worker state and housekeeping; the newer fields stay off until this node restarts.'
+					);
+					return result;
+				} catch (retryError) {
+					if (!isFieldRejection(retryError)) throw retryError;
+					lastError = retryError;
+				}
 			}
-			const result = await this.options.client.heartbeat({
-				...credential,
-				...stripOptionalFields(description)
-			});
-			this.legacyDescription = true;
-			this.options.logger?.warn(
-				'Platform rejected the optional self-description fields (worker state, housekeeping); it predates them. Reporting liveness only until this node restarts.'
-			);
-			return result;
+			throw lastError;
 		}
 	}
 
@@ -332,16 +388,13 @@ export class HeartbeatLoop {
 	}
 }
 
-/** True when this description carries a field an older API would refuse. */
-function carriesOptionalFields(description: NodeSelfDescription): boolean {
-	return OPTIONAL_DESCRIPTION_FIELDS.some((field) => description[field] !== undefined);
-}
-
-/** The same description with the droppable fields removed. */
-function stripOptionalFields(description: NodeSelfDescription): NodeSelfDescription {
-	const out = { ...description };
-	for (const field of OPTIONAL_DESCRIPTION_FIELDS) {
-		delete out[field];
+/** The same description with the newest `tiers` tiers of droppable fields removed (absent keys dropped too). */
+function stripTiers(description: NodeSelfDescription, tiers: number): NodeSelfDescription {
+	const out: NodeSelfDescription = {};
+	const dropped = new Set<string>(OPTIONAL_DESCRIPTION_FIELD_TIERS.slice(0, tiers).flat());
+	for (const [key, value] of Object.entries(description)) {
+		if (value === undefined || dropped.has(key)) continue;
+		(out as Record<string, unknown>)[key] = value;
 	}
 	return out;
 }

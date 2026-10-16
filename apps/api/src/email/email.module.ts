@@ -11,6 +11,7 @@ import { AuthModule } from '@src/auth';
 // listener) and the send-policy services the facade gate is bound to.
 import { EmailDraftsModule } from '@ever-works/agent/email';
 import { OrganizationsModule } from '../organizations/organizations.module';
+import { MailModule } from '../mail/mail.module';
 import { EmailController } from './email.controller';
 import { EmailService } from './email.service';
 import { EmailSendPolicyController } from './email-send-policy.controller';
@@ -45,6 +46,9 @@ import { EmailDraftReleaseCronService } from './email-draft-release-cron.service
         // Organization policy writes are authorized by the shared membership
         // check. OrganizationsModule imports nothing email-side — no cycle.
         OrganizationsModule,
+        // EW-P4-3 — MailService delivers the address confirmation link.
+        // MailModule imports only the mailer transport — no cycle.
+        MailModule,
     ],
     controllers: [EmailController, EmailSendPolicyController, AgentEmailAssignmentsController],
     providers: [

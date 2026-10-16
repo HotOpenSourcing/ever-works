@@ -37,7 +37,10 @@ export function createCommandRunner(): CommandRunner {
 						resolve({
 							code: typeof code === 'number' ? code : 1,
 							stdout: String(stdout),
-							stderr: String(stderr)
+							stderr: String(stderr),
+							// `execFile` sets `killed` when it terminated the child at
+							// `timeout`; what the child printed until then is partial.
+							timedOut: Boolean(error && (error as { killed?: boolean }).killed)
 						});
 					}
 				);
@@ -178,6 +181,21 @@ export function isExecutableFile(filePath: string): boolean {
 		return true;
 	} catch {
 		return false;
+	}
+}
+
+/**
+ * Node lifecycle (self-build slice AR) — the file stamp the model-CLI
+ * compatibility probe keys its cache on: modification time + size, so a CLI
+ * upgraded in place is re-probed on the very next ask. Null when the file
+ * cannot be stat'ed (the probe then falls back to a time-boxed cache).
+ */
+export async function statModelCliFile(filePath: string): Promise<{ mtimeMs: number; size: number } | null> {
+	try {
+		const stat = await fsp.stat(filePath);
+		return { mtimeMs: stat.mtimeMs, size: stat.size };
+	} catch {
+		return null;
 	}
 }
 

@@ -18,6 +18,7 @@ import {
 	enrollNodeWithCredentials,
 	loadConfig,
 	saveConfig,
+	statModelCliFile,
 	systemFetch,
 	type LogEntry,
 	type NodeConfig,
@@ -45,6 +46,7 @@ import {
 	toStatusView,
 	toWorkerStatusView
 } from './identity';
+import { startRuntimeInOrder } from './start-order';
 import { createTray } from './tray';
 
 /**
@@ -103,7 +105,10 @@ function bootstrap(): void {
 		// Backs the free-disk figure in the Fleet runner indicator.
 		// Optional by contract — an unreadable volume reports nothing
 		// rather than failing the heartbeat that carries everything else.
-		diskProbe: createDiskProbe()
+		diskProbe: createDiskProbe(),
+		// Node lifecycle (slice AR): the cache key of the model-CLI
+		// compatibility probe, so an upgraded CLI is re-probed at once.
+		statFile: statModelCliFile
 	};
 
 	const fs = createConfigFileSystem();
@@ -154,8 +159,14 @@ function bootstrap(): void {
 		});
 		workerStatus = toWorkerStatusView(created.worker?.getState());
 		runtime = created;
-		void created.loop.start();
-		void created.worker?.start();
+		// The worker leases only after a heartbeat has been ACCEPTED (#2598 a):
+		// that answer brings the saved limit ceiling and the version verdict,
+		// and both must be in force before the first lease.
+		void startRuntimeInOrder(created, () => runtime === created).catch((error: unknown) => {
+			logger.error(
+				`Could not start the worker: ${logger.redact(error instanceof Error ? error.message : String(error))}`
+			);
+		});
 	};
 
 	const disconnect = async (): Promise<void> => {

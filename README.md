@@ -238,7 +238,7 @@ Notes:
 
 ### Anonymous usage statistics
 
-A self-hosted installation sends a small, signed, anonymous report once a day — and on days 1–3 of a month one more, for the month that just closed — with counts, monthly totals and feature switches only, never a name, an address, a URL or any of your content — so the maintainers can see which versions and features are in use. Switch it off with `EVER_STATS_ENABLED=false` (in `.env.compose` with Docker Compose, in `apps/api/.env` when you run the API from source, or in the container environment) or in **Settings → Ever Platform**, where you can also see every byte that was sent. See [Anonymous usage statistics](docs/ever-platform/anonymous-statistics.md).
+Anonymous usage statistics are **off by default** for now: a self-hosted installation sends nothing unless you opt in. Switch them on with `EVER_STATS_ENABLED=true` (in `.env.compose` with Docker Compose, in `apps/api/.env` when you run the API from source, or in the container environment). Once on, the installation sends a small, signed, anonymous report once a day — and on days 1–3 of a month one more, for the month that just closed — with counts, monthly totals and feature switches only, never a name, an address, a URL or any of your content — so the maintainers can see which versions and features are in use. You can switch it off again with `EVER_STATS_ENABLED=false` or in **Settings → Ever Platform**, where you can also see every byte that was sent. See [Anonymous usage statistics](docs/ever-platform/anonymous-statistics.md).
 
 ## ☁️ One-Click Deploy
 
@@ -283,6 +283,13 @@ All other brand and product names are trademarks, registered trademarks, or serv
 - Please give us a :star: on Github, it **helps**!
 - You are more than welcome to submit feature requests in the [separate repo](https://github.com/ever-works/ever-works/issues).
 - Pull requests are always welcome! Please base pull requests against the _develop_ branch and follow the [contributing guide](.github/CONTRIBUTING.md).
+
+### Automated contributions
+
+Some pull requests in this repository are opened by Ever Works Fleet agents.
+They come from branches named `task/<slug>-<id>`, and their commits are authored as `<agent> <...@agents.ever.works>`.
+They target the _develop_ branch and are never merged automatically: they get the same review and CI as any other pull request.
+See the [Fleet documentation](https://docs.ever.works/docs/features/fleet) for more details.
 
 ## 💪 Thanks to our Contributors
 

@@ -34,7 +34,20 @@ import {
 
 /** Minimal command abstraction, mirroring `apps/desktop`'s `CommandRunner`. */
 export interface CommandRunner {
-	run(command: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }>;
+	run(
+		command: string,
+		args: string[]
+	): Promise<{
+		code: number | null;
+		stdout: string;
+		stderr: string;
+		/**
+		 * True when the runner killed the process at its own timeout, so
+		 * stdout/stderr may be cut short. Optional: a runner that cannot
+		 * tell leaves it unset.
+		 */
+		timedOut?: boolean;
+	}>;
 }
 
 /** Host facts the detector needs, snapshotted so tests can drive every branch. */
@@ -414,6 +427,14 @@ export type NodeSelfDescriptionPayload = NodeSelfDescription &
 export interface SelfDescriptionTelemetry {
 	/** Agent-CLI probe, e.g. `detectAgentCliVersion(runner)`. */
 	cliVersion?: () => Promise<string | null> | string | null;
+	/**
+	 * Node lifecycle (self-build slice AR) — the PINNED model-CLI versions,
+	 * one `"<provider> <version>"` entry per provider, via
+	 * `ModelCliCompatibilityProbe` + `describeCliVersions`. An array (even
+	 * an empty one) is sent; null or a throw leaves the field ABSENT, which
+	 * the server reads as "leave the stored list alone".
+	 */
+	cliVersions?: () => Promise<string[] | null> | string[] | null;
 	/** Free-disk probe for the node's workspace volume. */
 	diskFreeBytes?: () => Promise<number | null> | number | null;
 	/**
@@ -445,6 +466,16 @@ export interface SelfDescriptionTelemetry {
 	 * reports the floor alone.
 	 */
 	housekeeping?: () => Promise<NodeHousekeepingReport | null> | NodeHousekeepingReport | null;
+	/**
+	 * Remote node limits (self-build slice AS) — the limits the worker is
+	 * ENFORCING right now (`min(local flags, platform ceiling)`), via
+	 * `worker.resourceLimits`. Absent on a visibility-only node, which has no
+	 * worker and therefore no limits to report.
+	 */
+	limits?: () =>
+		| Promise<{ maxConcurrentJobs: number; maxCpuPercent: number | null; maxMemoryMb: number | null } | null>
+		| { maxConcurrentJobs: number; maxCpuPercent: number | null; maxMemoryMb: number | null }
+		| null;
 }
 
 /**
@@ -477,6 +508,14 @@ export async function describeSelf(
 	const cliVersion = await resolveTelemetry(telemetry.cliVersion);
 	if (typeof cliVersion === 'string' && cliVersion) {
 		description.cliVersion = cliVersion;
+	}
+	// Node lifecycle (slice AR). Copied as strings only, so a reporter bug
+	// can never put a non-string on a wire whose pipe would 400 the beat.
+	const cliVersions = await resolveTelemetry(telemetry.cliVersions);
+	if (Array.isArray(cliVersions)) {
+		description.cliVersions = cliVersions.filter(
+			(entry): entry is string => typeof entry === 'string' && entry.length > 0
+		);
 	}
 	const diskFreeBytes = await resolveTelemetry(telemetry.diskFreeBytes);
 	if (typeof diskFreeBytes === 'number' && Number.isFinite(diskFreeBytes) && diskFreeBytes >= 0) {
@@ -528,6 +567,17 @@ export async function describeSelf(
 				description.lastReclaimFreedBytes = housekeeping.lastReclaimFreedBytes;
 			}
 		}
+	}
+	// Remote node limits (slice AS). The set travels together, keyed on the
+	// concurrency (always a number); the CPU / memory pair go out as `null`
+	// when no ceiling is in force — the server reads that as "none", and an
+	// absent concurrency as "said nothing". Copied field by field, never
+	// spread, for the reason the housekeeping block above gives.
+	const limits = await resolveTelemetry(telemetry.limits);
+	if (limits && typeof limits.maxConcurrentJobs === 'number' && Number.isInteger(limits.maxConcurrentJobs)) {
+		description.maxConcurrentJobs = limits.maxConcurrentJobs;
+		description.maxCpuPercent = typeof limits.maxCpuPercent === 'number' ? limits.maxCpuPercent : null;
+		description.maxMemoryMb = typeof limits.maxMemoryMb === 'number' ? limits.maxMemoryMb : null;
 	}
 	return description;
 }

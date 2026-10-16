@@ -163,4 +163,14 @@ export class InboxItem {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    /**
+     * Aggregate version for event ordering and `ETag` (EW-P3-1, domain events
+     * `inbox.item.*`; same rule as tasks — `docs/specs/features/domain-events/spec.md` §4).
+     * Starts at 1 and is bumped by `bumpAggregateVersion` on every recorded
+     * change. A plain column on purpose, NOT `@VersionColumn` (which TypeORM
+     * would bump on every query-builder update, telemetry stamps included).
+     */
+    @Column({ type: 'int', default: 1 })
+    version: number;
 }
