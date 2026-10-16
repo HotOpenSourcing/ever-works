@@ -302,6 +302,62 @@ describe('TaskTransitionService.transitionSync', () => {
         expect(row.status).toBe(TaskStatus.TODO);
     });
 
+    it('reports every landed hop through onHop, in order, before the next hop', async () => {
+        const hops: Array<[TaskStatus, TaskStatus]> = [];
+        await svc.transitionSync(row, TaskStatus.DONE, {}, async (hop) => {
+            hops.push([hop.from, hop.to]);
+        });
+        expect(hops).toEqual([
+            [TaskStatus.BACKLOG, TaskStatus.TODO],
+            [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
+            [TaskStatus.IN_PROGRESS, TaskStatus.DONE],
+        ]);
+    });
+
+    it('a sync entry into in_review records the current review key as not owed (no reviewer run later)', async () => {
+        const agentReviews = {
+            probeAgentReviewPlan: jest.fn().mockResolvedValue({
+                enabled: true,
+                headSha: 'abc',
+                planKey: 'abc:fp',
+                needsReview: 1,
+                unclaimed: 1,
+            }),
+        };
+        const reviewSvc = new TaskTransitionService(
+            tasks,
+            blocks,
+            approvers,
+            assignees,
+            undefined,
+            dispatcher,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            agentReviews as never,
+        );
+        row = makeTask({ status: TaskStatus.IN_PROGRESS });
+        await reviewSvc.transitionSync(row, TaskStatus.IN_REVIEW);
+        const patch = tasks.casUpdateStatus.mock.calls[0][2];
+        expect(patch).toMatchObject({
+            status: TaskStatus.IN_REVIEW,
+            agentReviewPlanKey: 'abc:fp',
+            agentReviewPlanState: 'refused',
+            agentReviewPlanReason: 'sync-entry',
+        });
+
+        // An ordinary (non-sync) entry still clears the memory so the review is owed.
+        tasks.casUpdateStatus.mockClear();
+        row = makeTask({ status: TaskStatus.IN_PROGRESS });
+        await reviewSvc.transition(row, TaskStatus.IN_REVIEW);
+        const plain = tasks.casUpdateStatus.mock.calls[0][2];
+        expect(plain.agentReviewPlanKey).toBeNull();
+        expect(plain.agentReviewPlanState).toBeNull();
+    });
+
     it('a lost race on a hop is the ordinary 400, not a 409', async () => {
         tasks.casUpdateStatus.mockResolvedValueOnce(false);
         await expect(svc.transitionSync(row, TaskStatus.TODO)).rejects.toBeInstanceOf(

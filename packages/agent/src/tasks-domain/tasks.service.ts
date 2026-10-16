@@ -1669,18 +1669,16 @@ export class TasksService {
         ownershipScope?: OwnershipScope,
     ): Promise<SyncTransitionResult> {
         const task = await this.getOne(userId, id, ownershipScope);
-        const result = await this.transitions.transitionSync(task, to, opts);
-        let hopFrom = result.from;
-        for (const hop of result.path) {
-            await this.logActivity({
+        // One row per hop AS IT LANDS: a walk refused mid-way (a gate that
+        // closed under it) still leaves the history of the hops it took.
+        return this.transitions.transitionSync(task, to, opts, (hop) =>
+            this.logActivity({
                 userId,
                 taskId: id,
                 actionType: ActivityActionType.TASK_TRANSITIONED,
-                details: { from: hopFrom, to: hop, force: opts.force ?? false, mode: 'sync' },
-            });
-            hopFrom = hop;
-        }
-        return result;
+                details: { from: hop.from, to: hop.to, force: opts.force ?? false, mode: 'sync' },
+            }),
+        );
     }
 
     // ── Members ───────────────────────────────────────────────────

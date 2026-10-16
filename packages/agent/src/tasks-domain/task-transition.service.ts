@@ -342,6 +342,23 @@ export class TaskTransitionService {
         // token also makes any pre-entry attempt or snapshot stale.
         if (to === TaskStatus.IN_REVIEW) {
             Object.assign(patch, agentReviewPlanEntryReset(randomUUID()));
+            // EW-P1-6 / D9 — a SYNC entry starts no reviewer run, and must not
+            // leave one owed either: the PR-status reconcile plans any key the
+            // memory does not cover. Record the current key as deliberately not
+            // planned (`refused` / `sync-entry`), in this same compare-and-set,
+            // so the reconcile skips it. A new head or a changed approver set
+            // is a new key and plans as usual — that work is owed to the push,
+            // not to the integration.
+            if (opts.suppressAgentDispatch) {
+                const syncKey = await this.currentAgentReviewPlanKey(task);
+                if (syncKey) {
+                    Object.assign(patch, {
+                        agentReviewPlanKey: syncKey,
+                        agentReviewPlanState: 'refused',
+                        agentReviewPlanReason: 'sync-entry',
+                    });
+                }
+            }
         }
 
         // Atomic CAS on the source state: the UPDATE only lands while the row
@@ -490,6 +507,8 @@ export class TaskTransitionService {
         task: Task,
         to: TaskStatus,
         opts: TransitionOptions = {},
+        /** Called after EVERY hop that landed, before the next one is tried. */
+        onHop?: (hop: { from: TaskStatus; to: TaskStatus }) => Promise<void>,
     ): Promise<SyncTransitionResult> {
         const from = task.status;
         const path = shortestTransitionPath(from, to, ALLOWED);
@@ -523,9 +542,26 @@ export class TaskTransitionService {
                 }
                 throw err;
             }
+            await onHop?.({ from: walked.length > 0 ? walked[walked.length - 1] : from, to: hop });
             walked.push(hop);
         }
         return { task: current, from, path: walked };
+    }
+
+    /**
+     * The review-plan key the reconcile would plan for right now (head +
+     * agent-approver set), or `null` when the stage is off, there is no head,
+     * or the probe is unavailable. Ledger reads only; never throws.
+     */
+    private async currentAgentReviewPlanKey(task: Task): Promise<string | null> {
+        const reviews = this.agentReviews;
+        if (!reviews || typeof reviews.probeAgentReviewPlan !== 'function') return null;
+        try {
+            const probe = await reviews.probeAgentReviewPlan(task);
+            return probe?.enabled && probe.planKey ? probe.planKey : null;
+        } catch {
+            return null;
+        }
     }
 
     /** Pre-flight: refuse before any hop when a gate on the path is closed. */
