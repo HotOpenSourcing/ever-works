@@ -5,8 +5,8 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  * flow-api-keys-scopes-multistep.spec.ts
  *
  * THEME: the MULTI-STEP operational lifecycle of the `ew_live_…` API key — manual
- * ROTATION (there is no rotate endpoint, so rotation = create-new + revoke-old with a
- * zero-downtime overlap), the ONE-TIME-only plaintext (unrecoverable after create),
+ * ROTATION (create-new + revoke-old with a zero-downtime overlap) and, since EW-P1-2,
+ * the in-place `POST /:id/rotate` with a grace period, the ONE-TIME-only plaintext (unrecoverable after create),
  * the exact REDACTED list shape, SELF- and CROSS-key revocation performed *through* a
  * key's own owner-wide authority, selective `lastUsedAt` stamping, `createdAt` DESC
  * list ordering, and the secret-MUTATION rejection matrix (exact SHA-256 match is
@@ -25,7 +25,7 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  *   flow-api-keys-lifecycle-deep.spec.ts  MAX_KEYS_PER_USER=10 quota + name boundaries (100/101/
  *                                         non-string/empty) + duplicate names + future-expiry echo
  *                                         + userId mass-assign + fresh lastUsedAt:null + anon 401 +
- *                                         revoke 404-hardening + full-owner-rights (read + MINT)
+ *                                         revoke 404-hardening + owner rights (read; MINT refused since EW-P1-2)
  *   flow-api-key-scope-enforcement.spec.ts  no scope model (scope fields 400) + cross-owner cannot
  *                                         escalate + revoked→401 both slots + past-expiry reject +
  *                                         x-api-key vs Bearer PREFIX-gated precedence + no PATCH/PUT
@@ -39,8 +39,11 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  * PROBED CONTRACTS (exact, live):
  *   GET    /api/auth/api-keys/:id                 → 404 (NO per-key detail route exists — via Bearer
  *                                                    AND via x-api-key; the plaintext is unrecoverable).
- *   POST   /api/auth/api-keys/:id/rotate          → 404 (NO dedicated rotate endpoint; rotation is a
- *                                                    client-side create-new + revoke-old dance).
+ *   POST   /api/auth/api-keys/:id/rotate          → 200 since EW-P1-2 (session only): a NEW secret on
+ *                                                    the SAME id; the previous secret keeps working until
+ *                                                    `previousKeyGraceUntil` (default 24 h). Via an API key
+ *                                                    → 403 (minting/rotating is session-only). Before
+ *                                                    EW-P1-2 this route did not exist (404).
  *   GET    /api/auth/api-keys  (list)             → row keys EXACTLY
  *                                                    {id,name,prefix,expiresAt,lastUsedAt,isActive,createdAt}
  *                                                    — NO userId / hashedKey / key / tenantId / organizationId;
@@ -198,9 +201,10 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
     });
 
     // ---------------------------------------------------------------------------------------------
-    // 2. No dedicated rotate endpoint — rotation is a client-side dance, never a server route.
+    // 2. In-place rotation (EW-P1-2): POST /:id/rotate is session-only and keeps the key id; the
+    //    old secret keeps working through the grace period. There is still no id-less /rotate.
     // ---------------------------------------------------------------------------------------------
-    test('there is NO dedicated rotate endpoint: POST /:id/rotate and POST /rotate both 404 (via Bearer and x-api-key)', async ({
+    test('POST /:id/rotate rotates in place via a session (same id, old secret valid during grace), is 403 via x-api-key, and POST /rotate stays 404', async ({
         request,
     }) => {
         const owner = await registerUserViaAPI(request);
@@ -208,37 +212,47 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
             test.skip(true, 'api-keys surface absent in this driver');
             return;
         }
-        const created = await mint(request, owner.access_token, uniq('norotate'));
+        const created = await mint(request, owner.access_token, uniq('rotate-in-place'));
 
-        const rotateProbes: Array<{ label: string; url: string; headers: Record<string, string> }> =
-            [
-                {
-                    label: '/:id/rotate Bearer',
-                    url: `${KEYS}/${created.id}/rotate`,
-                    headers: authedHeaders(owner.access_token),
-                },
-                {
-                    label: '/:id/rotate x-api-key',
-                    url: `${KEYS}/${created.id}/rotate`,
-                    headers: { 'x-api-key': created.key },
-                },
-                {
-                    label: '/rotate Bearer',
-                    url: `${KEYS}/rotate`,
-                    headers: authedHeaders(owner.access_token),
-                },
-            ];
-        for (const { label, url, headers } of rotateProbes) {
-            const res = await request.post(url, {
-                headers: { ...headers, 'content-type': 'application/json' },
-                data: {},
-                failOnStatusCode: false,
-            });
-            expect(
-                [404, 405],
-                `${label} must not be a live rotate route; got ${res.status()}`,
-            ).toContain(res.status());
-            expect(res.status(), `${label} is never a 500`).not.toBe(500);
+        // A key cannot rotate keys — not even itself.
+        const viaKey = await request.post(`${KEYS}/${created.id}/rotate`, {
+            headers: { 'x-api-key': created.key, 'content-type': 'application/json' },
+            data: {},
+            failOnStatusCode: false,
+        });
+        expect(
+            viaKey.status(),
+            `rotate via x-api-key must be refused; got ${viaKey.status()}`,
+        ).toBe(403);
+
+        // There is no id-less rotate route.
+        const idless = await request.post(`${KEYS}/rotate`, {
+            headers: { ...authedHeaders(owner.access_token), 'content-type': 'application/json' },
+            data: {},
+            failOnStatusCode: false,
+        });
+        expect([404, 405], `POST /rotate is not a route; got ${idless.status()}`).toContain(
+            idless.status(),
+        );
+
+        // The owner's session rotates it: new secret, same id, a grace deadline in the future.
+        const rotated = await request.post(`${KEYS}/${created.id}/rotate`, {
+            headers: { ...authedHeaders(owner.access_token), 'content-type': 'application/json' },
+            data: {},
+            failOnStatusCode: false,
+        });
+        expect(rotated.status(), `rotate via session; got ${rotated.status()}`).toBe(200);
+        const body = await rotated.json();
+        expect(body.id).toBe(created.id);
+        expect(body.key).toMatch(/^ew_live_[0-9a-f]{64}$/);
+        expect(body.key).not.toBe(created.key);
+        expect(new Date(body.previousKeyGraceUntil).getTime()).toBeGreaterThan(Date.now());
+
+        // Both secrets authenticate as the same owner during the grace period.
+        for (const key of [created.key, body.key]) {
+            const who = await whoAmI(request, { 'x-api-key': key });
+            expect(who.status, 'old and new secret both work during grace').toBe(200);
+            expect(who.body.email).toBe(owner.user.email);
         }
     });
 
