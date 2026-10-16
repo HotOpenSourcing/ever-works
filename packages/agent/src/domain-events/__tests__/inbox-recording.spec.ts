@@ -115,9 +115,7 @@ describe('inbox recording points', () => {
         await inbox.setUnread(item.id, RECIPIENT, false);
         const recorded = await events();
         expect(recorded.length).toBeGreaterThan(0);
-        expect(recorded.map((event) => event.visibility)).toEqual(
-            recorded.map(() => 'private'),
-        );
+        expect(recorded.map((event) => event.visibility)).toEqual(recorded.map(() => 'private'));
     });
 
     it('every producer records created: escalation and approval mirrors too', async () => {
@@ -160,9 +158,15 @@ describe('inbox recording points', () => {
             ['inbox.item.state_changed', 3],
             ['inbox.item.state_changed', 4],
         ]);
-        expect(recorded[0]).toMatchObject({ changedFields: ['unread'], previous: { unread: true } });
+        expect(recorded[0]).toMatchObject({
+            changedFields: ['unread'],
+            previous: { unread: true },
+        });
         expect(recorded[0].data).toMatchObject({ unread: false });
-        expect(recorded[1]).toMatchObject({ changedFields: ['status'], previous: { status: 'open' } });
+        expect(recorded[1]).toMatchObject({
+            changedFields: ['status'],
+            previous: { status: 'open' },
+        });
         expect(recorded[1].data).toMatchObject({ status: 'archived' });
         expect(recorded[2]).toMatchObject({ previous: { status: 'archived' } });
         expect(recorded[2].data).toMatchObject({ status: 'open' });
