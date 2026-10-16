@@ -311,6 +311,10 @@ describe('FacadesModule + barrel re-exports', () => {
                     'buildOutboundHeaders',
                     'replyHeadersFor',
                     'threadingFieldsOf',
+                    // EW-P4-3 — the verified-sender rule (403 + its switch).
+                    'EMAIL_SENDER_VERIFICATION_REQUIRED_ENV',
+                    'EmailSenderNotVerifiedException',
+                    'emailSenderVerificationRequired',
                     'NotificationChannelFacadeError',
                     'NotificationChannelFacadeService',
                     'NOTIFICATION_CHANNEL_DELIVERY_DISPATCHER',
