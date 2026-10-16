@@ -12,6 +12,8 @@ import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
 import { IntegrationTaskSetsController } from './tasks-sets.controller';
 import { IntegrationTaskCommentsController } from './task-comments.controller';
+import { IntegrationBatchController } from './batch.controller';
+import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -43,6 +45,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTasksWriteController,
         IntegrationTaskSetsController,
         IntegrationTaskCommentsController,
+        IntegrationTeamsWriteController,
+        IntegrationBatchController,
     ],
     providers: [
         IntegrationOnlyGuard,

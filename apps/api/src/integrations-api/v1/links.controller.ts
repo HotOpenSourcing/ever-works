@@ -1,5 +1,20 @@
-import { Controller, Get, Query, UseFilters, UseGuards } from '@nestjs/common';
+import {
+    Body,
+    Controller,
+    Delete,
+    Get,
+    Headers,
+    HttpCode,
+    HttpStatus,
+    Param,
+    ParseUUIDPipe,
+    Put,
+    Query,
+    UseFilters,
+    UseGuards,
+} from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { IsOptional, IsString, IsUrl, Length, MaxLength } from 'class-validator';
 import {
     EXTERNAL_LINK_ENTITY_TYPES,
     type ExternalLinkEntityType,
@@ -7,6 +22,8 @@ import {
 import {
     ExternalRecordLinksService,
     type ExternalRecordLinkDto,
+    installationFromOrigin,
+    IntegrationResourcesService,
     toExternalRecordLinkDto,
 } from '@ever-works/agent/integrations-api';
 import { CurrentUser } from '../../auth/decorators/user.decorator';
@@ -22,10 +39,29 @@ import {
     validationFailed,
 } from './integration-request';
 
+/** `PutLink` (contract v1 requests.schema.json). */
+export class IntegrationPutLinkDto {
+    @IsString()
+    @Length(1, 200)
+    externalId!: string;
+
+    @IsOptional()
+    @IsUrl({ require_tld: false })
+    @MaxLength(2048)
+    externalUrl?: string | null;
+
+    @IsOptional()
+    @IsString()
+    @MaxLength(200)
+    installationId?: string | null;
+}
+
 /**
- * `GET /api/integrations/v1/links?entityType=&externalId=` — this source's
- * external record links in the `X-Scope-Slug` organization (contract v1 B.6).
- * `PUT` / `DELETE /links/:entityType/:entityId` ship with the write routes.
+ * External record links of this source in the `X-Scope-Slug` organization
+ * (contract v1 B.6): `GET /links?entityType=&externalId=`, and
+ * `PUT` / `DELETE /links/:entityType/:entityId`. `source` is the key's
+ * (`ever-gauzy` → `gauzy`); the installation is the body's `installationId`,
+ * else `X-Sync-Origin: <source>:<installationId>`.
  */
 @ApiTags('Integrations API v1')
 @Controller('api/integrations/v1')
@@ -35,6 +71,7 @@ export class IntegrationLinksController {
     constructor(
         private readonly links: ExternalRecordLinksService,
         private readonly scope: ScopeContextService,
+        private readonly resources: IntegrationResourcesService,
     ) {}
 
     @Get('links')
@@ -48,15 +85,7 @@ export class IntegrationLinksController {
         @Query('externalId') externalId?: string,
     ): Promise<{ data: ExternalRecordLinkDto[] }> {
         const principal = principalOf(user);
-        if (
-            entityType !== undefined &&
-            !(EXTERNAL_LINK_ENTITY_TYPES as readonly string[]).includes(entityType)
-        ) {
-            throw validationFailed(
-                'entityType',
-                `must be one of ${EXTERNAL_LINK_ENTITY_TYPES.join(', ')}`,
-            );
-        }
+        if (entityType !== undefined) assertEntityType(entityType);
         const rows = await this.links.list(
             {
                 organizationId: pinnedOrganizationOf(this.scope.getScope().organizationId),
@@ -69,4 +98,74 @@ export class IntegrationLinksController {
         );
         return { data: rows.map(toExternalRecordLinkDto) };
     }
+
+    @Put('links/:entityType/:entityId')
+    @RequireScopes('links:write')
+    @ApiOperation({ summary: "Set a record's link for this source (create or move it)" })
+    async put(
+        @CurrentUser() user: AuthenticatedUser,
+        @Param('entityType') entityType: string,
+        @Param('entityId', ParseUUIDPipe) entityId: string,
+        @Body() dto: IntegrationPutLinkDto,
+        @Headers('x-sync-origin') syncOrigin: string | undefined,
+    ): Promise<ExternalRecordLinkDto> {
+        const principal = principalOf(user);
+        const type = assertEntityType(entityType);
+        const organizationId = pinnedOrganizationOf(this.scope.getScope().organizationId);
+        const source = linkSourceOf(principal);
+        if (!(await this.resources.assertLinkTarget(type, organizationId, entityId, source))) {
+            throw validationFailed('entityType', `${type} records are not served by v1 yet`);
+        }
+        const row = await this.links.put(
+            {
+                organizationId,
+                tenantId: principal.tenantId,
+                source,
+                installationId: installationFromOrigin(dto.installationId, syncOrigin, source),
+                integrationKeyId: principal.keyId,
+            },
+            {
+                entityType: type,
+                entityId,
+                externalId: dto.externalId,
+                externalUrl: dto.externalUrl ?? null,
+            },
+        );
+        return toExternalRecordLinkDto(row);
+    }
+
+    @Delete('links/:entityType/:entityId')
+    @RequireScopes('links:write')
+    @HttpCode(HttpStatus.NO_CONTENT)
+    @ApiOperation({
+        summary:
+            "Remove a record's link for this source (every installation unless ?installationId=)",
+    })
+    async remove(
+        @CurrentUser() user: AuthenticatedUser,
+        @Param('entityType') entityType: string,
+        @Param('entityId', ParseUUIDPipe) entityId: string,
+        @Query('installationId') installationId?: string,
+    ): Promise<void> {
+        const principal = principalOf(user);
+        await this.links.remove(
+            {
+                organizationId: pinnedOrganizationOf(this.scope.getScope().organizationId),
+                source: linkSourceOf(principal),
+                ...(installationId ? { installationId } : {}),
+            },
+            assertEntityType(entityType),
+            entityId,
+        );
+    }
+}
+
+function assertEntityType(entityType: string): ExternalLinkEntityType {
+    if (!(EXTERNAL_LINK_ENTITY_TYPES as readonly string[]).includes(entityType)) {
+        throw validationFailed(
+            'entityType',
+            `must be one of ${EXTERNAL_LINK_ENTITY_TYPES.join(', ')}`,
+        );
+    }
+    return entityType as ExternalLinkEntityType;
 }

@@ -239,6 +239,8 @@ export enum AgentIdleBehavior {
 @Index('idx_agents_mission', ['missionId'])
 @Index('idx_agents_work', ['workId'])
 @Index('idx_agents_idea', ['ideaId'])
+// Integration API v1 keyset lists (migration 1795080300000).
+@Index('idx_agents_org_updated', ['organizationId', 'updatedAt', 'id'])
 export class Agent {
     @PrimaryGeneratedColumn('uuid')
     id: string;

@@ -197,6 +197,47 @@ export class IntegrationResourcesService {
         return dto;
     }
 
+    /**
+     * `PUT /links/:entityType/:entityId` — the record must be one the caller
+     * sees in the organization (`404 not_found` otherwise). Answers `false` for
+     * an entity type v1 does not serve yet (missions, goals, ideas, inbox, KB:
+     * P2/P3), which the route refuses as `validation_failed`.
+     */
+    async assertLinkTarget(
+        entityType: ExternalLinkEntityType,
+        organizationId: string,
+        entityId: string,
+        source: string,
+    ): Promise<boolean> {
+        switch (entityType) {
+            case 'task':
+            case 'team':
+            case 'agent':
+            case 'work':
+                await this.get(entityType, organizationId, entityId, source);
+                return true;
+            case 'member': {
+                const member = await this.dataSource
+                    .getRepository(OrganizationMember)
+                    .findOne({ where: { organizationId, userId: entityId } });
+                if (!member) throw notFound('member', entityId);
+                return true;
+            }
+            case 'task_comment': {
+                const comment = await this.dataSource
+                    .getRepository(TaskChatMessage)
+                    .findOne({ where: { id: entityId }, select: ['id', 'taskId'] });
+                if (!comment) throw notFound('task_comment', entityId);
+                await this.get('task', organizationId, comment.taskId, source).catch(() => {
+                    throw notFound('task_comment', entityId);
+                });
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
     private async withLinks(
         kind: ExternalLinkEntityType,
         organizationId: string,

@@ -244,6 +244,19 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     },
     'PATCH /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.updated'] },
     'DELETE /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.deleted'] },
+    // + `team.deleted` when a concurrent create won the externalRef.
+    'POST /api/integrations/v1/teams': { events: ['team.created', 'team.deleted'] },
+    'PATCH /api/integrations/v1/teams/:id': { events: ['team.updated'] },
+    // As the app's DELETE: the cascade re-records children, members and resources.
+    'DELETE /api/integrations/v1/teams/:id': {
+        events: ['team.deleted', 'team.updated', 'agent.updated', 'task.updated', 'work.updated'],
+    },
+    'PUT /api/integrations/v1/teams/:id/members': {
+        events: ['team.member.added', 'team.member.removed', 'agent.updated'],
+    },
+    'PUT /api/integrations/v1/teams/:id/resources': {
+        events: ['team.resource.added', 'team.resource.removed', 'task.updated', 'work.updated'],
+    },
 };
 
 /** The routes a list of events covers (for messages). */

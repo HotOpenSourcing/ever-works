@@ -113,6 +113,8 @@ export interface TaskLinkedPullRequest {
 // "open tasks for X", so status is always the second predicate.
 @Index('idx_tasks_team', ['teamId', 'status'])
 @Index('idx_tasks_agent', ['agentId', 'status'])
+// Integration API v1 keyset lists (migration 1795080300000).
+@Index('idx_tasks_org_updated', ['organizationId', 'updatedAt', 'id'])
 @Index('idx_tasks_goal', ['goalId', 'status'])
 @Index('idx_tasks_parent', ['parentTaskId'])
 @Index('idx_tasks_branch_state', ['workId', 'branchState'])
