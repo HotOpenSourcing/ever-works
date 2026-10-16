@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const sendEmailMock = vi.fn();
 
@@ -216,18 +216,100 @@ describe('PostmarkPlugin', () => {
 			).toThrow(/signature mismatch/);
 		});
 
-		it('accepts when no secret configured', () => {
-			expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).not.toThrow();
+		// EW-P4-3 — with no secret configured an inbound webhook is REFUSED
+		// (it used to be accepted with a warning: anyone who knew the public
+		// URL could inject mail). Only the explicit operator opt-out accepts it.
+		describe('with no secret configured', () => {
+			const savedSecret = process.env.POSTMARK_INBOUND_SECRET;
+			const savedOptOut = process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+
+			beforeEach(() => {
+				delete process.env.POSTMARK_INBOUND_SECRET;
+				delete process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+			});
+
+			afterEach(() => {
+				if (savedSecret === undefined) delete process.env.POSTMARK_INBOUND_SECRET;
+				else process.env.POSTMARK_INBOUND_SECRET = savedSecret;
+				if (savedOptOut === undefined) delete process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+				else process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = savedOptOut;
+			});
+
+			it('refuses an unsigned webhook', () => {
+				expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).toThrow(
+					/refusing an unsigned webhook/
+				);
+			});
+
+			it('refuses a webhook carrying an Authorization header it cannot check', () => {
+				expect(() =>
+					plugin.verifyWebhookSignature(
+						Buffer.from(''),
+						{ authorization: `Basic ${Buffer.from('postmark:guess').toString('base64')}` },
+						{ settings: {} }
+					)
+				).toThrow(/refusing an unsigned webhook/);
+			});
+
+			it.each(['TRUE', '1', 'yes', ' true', ''])(
+				'stays secure when EMAIL_INBOUND_ALLOW_UNSIGNED is %j (only the exact string "true" opts out)',
+				(value) => {
+					process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = value;
+					expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).toThrow(
+						/refusing an unsigned webhook/
+					);
+				}
+			);
+
+			it('accepts — and warns the operator — only with EMAIL_INBOUND_ALLOW_UNSIGNED=true', () => {
+				process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = 'true';
+				const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+				try {
+					expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).not.toThrow();
+					expect(warnSpy).toHaveBeenCalledTimes(1);
+					expect(warnSpy.mock.calls[0][0]).toMatch(/WITHOUT signature verification/);
+				} finally {
+					warnSpy.mockRestore();
+				}
+			});
+
+			it('verifies with the env secret when POSTMARK_INBOUND_SECRET is set', () => {
+				process.env.POSTMARK_INBOUND_SECRET = 'env-secret';
+				const good = `Basic ${Buffer.from('postmark:env-secret').toString('base64')}`;
+				expect(() =>
+					plugin.verifyWebhookSignature(Buffer.from(''), { authorization: good }, { settings: {} })
+				).not.toThrow();
+				expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).toThrow(
+					/missing or malformed Authorization header/
+				);
+			});
 		});
 
-		it('warns the operator when accepting an unsigned inbound webhook (no secret configured)', () => {
-			const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+		it('accepts a correctly signed webhook (Basic postmark:<secret>)', () => {
+			const good = `Basic ${Buffer.from('postmark:super-secret').toString('base64')}`;
+			expect(() =>
+				plugin.verifyWebhookSignature(
+					Buffer.from(''),
+					{ authorization: good },
+					{ settings: { inboundWebhookSecret: 'super-secret' } }
+				)
+			).not.toThrow();
+		});
+
+		it('the opt-out never weakens a configured secret: a missing signature still throws', () => {
+			const saved = process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+			process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = 'true';
 			try {
-				expect(() => plugin.verifyWebhookSignature(Buffer.from(''), {}, { settings: {} })).not.toThrow();
-				expect(warnSpy).toHaveBeenCalledTimes(1);
-				expect(warnSpy.mock.calls[0][0]).toMatch(/WITHOUT signature verification/);
+				expect(() =>
+					plugin.verifyWebhookSignature(
+						Buffer.from(''),
+						{},
+						{ settings: { inboundWebhookSecret: 'super-secret' } }
+					)
+				).toThrow(/missing or malformed Authorization header/);
 			} finally {
-				warnSpy.mockRestore();
+				if (saved === undefined) delete process.env.EMAIL_INBOUND_ALLOW_UNSIGNED;
+				else process.env.EMAIL_INBOUND_ALLOW_UNSIGNED = saved;
 			}
 		});
 

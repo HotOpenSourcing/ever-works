@@ -37,6 +37,19 @@ function resolveInboundSecret(options: EmailOptions): string | undefined {
 }
 
 /**
+ * Operator opt-out (EW-P4-3): accept inbound webhooks that carry no
+ * signature when no secret is configured. Off unless the env var is the
+ * exact string `'true'`, so a typo or an empty value stays secure. Meant for
+ * a local/dev stack with no public webhook URL — never for an environment
+ * a provider can reach.
+ */
+const EMAIL_INBOUND_ALLOW_UNSIGNED_ENV = 'EMAIL_INBOUND_ALLOW_UNSIGNED';
+
+function unsignedInboundAllowed(): boolean {
+	return process.env[EMAIL_INBOUND_ALLOW_UNSIGNED_ENV] === 'true';
+}
+
+/**
  * Extract the bare mailbox from a possibly display-name-wrapped RFC 2822
  * address (`"Name" <a@b>` → `a@b`). Returns the trimmed input when no
  * angle-bracket form is present.
@@ -187,16 +200,20 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 	verifyWebhookSignature(_rawBody: Buffer, headers: Readonly<Record<string, string>>, options: EmailOptions): void {
 		const expected = resolveInboundSecret(options);
 		if (!expected) {
-			// Security: signature verification is an operator opt-in (matches the
-			// mailgun plugin + the IEmailInboundPlugin contract, which only
-			// mandates throwing on MISMATCH). Accepting an unsigned inbound
-			// webhook means ANY caller who knows the public webhook URL can
-			// inject mail into a tenant's scope, so surface a loud operator
-			// warning to make the unsigned state visible in logs/alerting.
-			// (Flipping the default to reject-when-unsigned is a cross-cutting
-			// behavior change — tracked as a re-deferred finding.)
+			// Security (EW-P4-3): FAIL CLOSED. With no secret there is nothing to
+			// authenticate the caller against, and the route is public: accepting
+			// the webhook would let ANY caller who knows the URL inject mail into a
+			// tenant's scope (it used to be accepted with only a warning). The
+			// facade answers this throw with a 401, as for a mismatch.
+			if (!unsignedInboundAllowed()) {
+				throw new Error(
+					`Postmark inbound: no \`inboundWebhookSecret\`/POSTMARK_INBOUND_SECRET configured; refusing an unsigned webhook (${EMAIL_INBOUND_ALLOW_UNSIGNED_ENV}=true accepts it on a local stack only).`
+				);
+			}
+			// The operator opted out explicitly: accept, loudly, so the unsigned
+			// state stays visible in logs/alerting.
 			console.warn(
-				'[postmark] inbound webhook accepted WITHOUT signature verification: no `inboundWebhookSecret`/POSTMARK_INBOUND_SECRET configured. Configure a secret to authenticate inbound mail.'
+				`[postmark] inbound webhook accepted WITHOUT signature verification: no \`inboundWebhookSecret\`/POSTMARK_INBOUND_SECRET configured and ${EMAIL_INBOUND_ALLOW_UNSIGNED_ENV}=true. Configure a secret to authenticate inbound mail.`
 			);
 			return;
 		}
