@@ -56,6 +56,12 @@
       key without the scope); in-process listeners get them all. Until these routes landed they were recorded
       `private` (#2644).
 
+## P3 — Knowledge Base (EW-P3-2)
+
+- [x] **T25** `work_knowledge_documents.version` + `memory_folders.version` (`AddKbAggregateVersions1795130200000`),
+      `kb_document` / `kb_folder` snapshots, recording in `KnowledgeBaseService`, `KnowledgeLibraryService` and
+      `MemoryFoldersService` (`kb-recording.spec.ts`), coverage gate over the KB controllers.
+
 ## P4 — Agent email (EW-P4-2)
 
 - [x] **T26** `email_messages.updatedAt` + `version` (`AddEmailMessageSyncColumns1795130300000`), `email_message`

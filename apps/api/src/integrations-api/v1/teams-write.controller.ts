@@ -15,7 +15,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -63,28 +63,34 @@ import { IntegrationExternalRefDto } from './tasks-write.controller';
 
 /** `CreateTeam` (contract v1 requests.schema.json). */
 export class IntegrationCreateTeamDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     name!: string;
 
+    @ApiProperty({ required: false })
     @IsOptional()
     @Matches(/^[a-z0-9][a-z0-9-]{0,99}$/)
     slug?: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 5000 })
     @IsOptional()
     @IsString()
     @MaxLength(5000)
     description?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     parentTeamId?: string | null;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100 })
     @IsOptional()
     @IsString()
     @MaxLength(100)
     avatarIcon?: string | null;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
@@ -93,20 +99,24 @@ export class IntegrationCreateTeamDto {
 
 /** `UpdateTeam` (contract v1 requests.schema.json). */
 export class IntegrationUpdateTeamDto {
+    @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
     @IsOptional()
     @IsString()
     @Length(1, 200)
     name?: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 5000 })
     @IsOptional()
     @IsString()
     @MaxLength(5000)
     description?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     parentTeamId?: string | null;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100 })
     @IsOptional()
     @IsString()
     @MaxLength(100)
@@ -114,17 +124,21 @@ export class IntegrationUpdateTeamDto {
 }
 
 export class IntegrationTeamMemberRefDto {
+    @ApiProperty({ enum: ['user', 'agent'] })
     @IsIn(['user', 'agent'])
     memberType!: 'user' | 'agent';
 
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     memberId!: string;
 
+    @ApiProperty({ enum: ['lead', 'member'] })
     @IsIn(['lead', 'member'])
     role!: 'lead' | 'member';
 }
 
 export class PutTeamMembersDto {
+    @ApiProperty({ type: () => IntegrationTeamMemberRefDto, isArray: true, maxItems: 500 })
     @IsArray()
     @ArrayMaxSize(500)
     @ValidateNested({ each: true })
@@ -133,15 +147,20 @@ export class PutTeamMembersDto {
 }
 
 export class IntegrationTeamResourceRefDto {
+    @ApiProperty({
+        description: '`goal` arrives with EW-P1-3. Consumers must ignore types they do not sync.',
+    })
     @IsString()
     @MaxLength(32)
     resourceType!: string;
 
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     resourceId!: string;
 }
 
 export class PutTeamResourcesDto {
+    @ApiProperty({ type: () => IntegrationTeamResourceRefDto, isArray: true, maxItems: 5000 })
     @IsArray()
     @ArrayMaxSize(5000)
     @ValidateNested({ each: true })
@@ -226,40 +245,59 @@ export class IntegrationTeamsWriteController {
                     };
                 }
             }
-            const team = await this.teams.create(user.userId, organizationId, {
-                name: dto.name,
-                slug: dto.slug,
-                description: dto.description ?? null,
-                parentTeamId: dto.parentTeamId ?? null,
-                avatarIcon: dto.avatarIcon ?? null,
-            });
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'team',
-                        entityId: team.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.teams.remove(organizationId, team.id);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'team',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return {
-                                status: 200,
-                                body: await this.dto(organizationId, winner.entityId, source),
-                            };
-                        }
+            const externalRef = dto.externalRef;
+            let team: Awaited<ReturnType<TeamsService['create']>>;
+            try {
+                team = await this.teams.create(
+                    user.userId,
+                    organizationId,
+                    {
+                        name: dto.name,
+                        slug: dto.slug,
+                        description: dto.description ?? null,
+                        parentTeamId: dto.parentTeamId ?? null,
+                        avatarIcon: dto.avatarIcon ?? null,
+                    },
+                    // T17a — the team and its externalRef link commit together.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'team',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled
+                // back with its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'team',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return {
+                            status: 200,
+                            body: await this.dto(organizationId, winner.entityId, source),
+                        };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const created = await this.resources.get('team', organizationId, team.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);

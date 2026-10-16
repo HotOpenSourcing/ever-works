@@ -10,10 +10,12 @@ import { Agent } from '../entities/agent.entity';
 import { DomainEvent } from '../entities/domain-event.entity';
 import { EmailMessage } from '../entities/email-message.entity';
 import { InboxItem } from '../entities/inbox-item.entity';
+import { MemoryFolder } from '../entities/memory-folder.entity';
 import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
 import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
+import { WorkKnowledgeDocument } from '../entities/work-knowledge-document.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { Goal } from '../entities/goal.entity';
 import { getDomainEventContext, normalizeSyncOrigin } from './domain-event-context';
@@ -62,6 +64,8 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         inbox_item: InboxItem,
         idea: WorkProposal,
         goal: Goal,
+        kb_document: WorkKnowledgeDocument,
+        kb_folder: MemoryFolder,
         email_message: EmailMessage,
     };
 

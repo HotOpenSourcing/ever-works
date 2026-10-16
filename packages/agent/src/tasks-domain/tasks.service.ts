@@ -81,6 +81,17 @@ import {
     type OwnershipScope,
 } from '../database/ownership-scope';
 
+/**
+ * Options of {@link TasksService.create} (T17a). `withinCreate` runs right
+ * after the row is written, in the SAME transaction as the row and its
+ * `task.created` event (when domain events are wired): the integration API
+ * links the new task to its `externalRef` there, so the task and its link
+ * commit — or roll back — together. A throw undoes the create.
+ */
+export interface CreateTaskOptions {
+    readonly withinCreate?: (task: Task, manager?: EntityManager) => Promise<void>;
+}
+
 export interface CreateTaskInput {
     title: string;
     description?: string | null;
@@ -818,6 +829,7 @@ export class TasksService {
         userId: string,
         input: CreateTaskInput,
         ownershipScope?: OwnershipScope,
+        options: CreateTaskOptions = {},
     ): Promise<Task> {
         // Ownership is deliberately NOT exclusive. A Task may belong to a
         // Work and a Team and have been raised by a Mission at the same
@@ -893,8 +905,8 @@ export class TasksService {
         const extraRepos = await this.normalizeExtraRepos(userId, input.extraRepos);
 
         const created = await this.withTaskEvent(
-            (manager) =>
-                this.tasks.create(
+            async (manager) => {
+                const row = await this.tasks.create(
                     {
                         userId,
                         ...ownershipStamp(ownershipScope),
@@ -928,7 +940,12 @@ export class TasksService {
                         hiddenFromBoard: input.hiddenFromBoard ?? false,
                     },
                     ...managerArg(manager),
-                ),
+                );
+                // T17a — e.g. the integration API's externalRef link, in this
+                // transaction: a failure here rolls the task back.
+                if (options.withinCreate) await options.withinCreate(row, manager);
+                return row;
+            },
             (publisher, manager, row) =>
                 publisher.created(manager, 'task', row.id, 'task.created', {
                     actor:

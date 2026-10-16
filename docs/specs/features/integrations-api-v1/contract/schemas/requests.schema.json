@@ -381,6 +381,78 @@
 			"minProperties": 1,
 			"additionalProperties": false
 		},
+		"CreateKbDocument": {
+			"description": "POST /kb/documents (P3, EW-P3-2). Idempotency-Key required; externalRef de-duplicates (200 with the existing document). scope.type organization: scope.id must be the pinned organization and the writer an organization admin; scope.type work: a Work of the pinned organization the writer may edit. Every class is allowed at organization scope (only legal, style and seo are inherited into Works). folderId is checked before the write (404 for a folder outside the organization's library, nothing created); an organization document's path must be relative without '..' (400). A refusal by the app's rules answers 422 domain_rule (CR-7).",
+			"type": "object",
+			"required": ["scope", "path", "title", "class", "body"],
+			"properties": {
+				"scope": { "$ref": "resources/kb-document.schema.json#/$defs/KbScope" },
+				"folderId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"path": { "type": "string", "minLength": 1, "maxLength": 512 },
+				"title": { "type": "string", "minLength": 1, "maxLength": 255 },
+				"class": { "$ref": "resources/kb-document.schema.json#/properties/class" },
+				"body": { "type": "string", "maxLength": 1000000 },
+				"description": { "type": ["string", "null"], "maxLength": 4000 },
+				"tags": { "type": "array", "maxItems": 50, "items": { "type": "string", "maxLength": 100 } },
+				"categories": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "type": "string", "maxLength": 100 }
+				},
+				"language": { "type": "string", "minLength": 2, "maxLength": 8 },
+				"status": { "type": "string", "enum": ["draft", "active"] },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateKbDocument": {
+			"description": "PATCH /kb/documents/:id (P3). At least one field; If-Match optional (412 version_mismatch). A fully locked document answers 422 domain_rule, and so does a status on an archived document (restore it with /unarchive). Archive, restore, review and filing have their own routes.",
+			"type": "object",
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 255 },
+				"body": { "type": "string", "maxLength": 1000000 },
+				"description": { "type": ["string", "null"], "maxLength": 4000 },
+				"class": { "$ref": "resources/kb-document.schema.json#/properties/class" },
+				"tags": { "type": "array", "maxItems": 50, "items": { "type": "string", "maxLength": 100 } },
+				"categories": {
+					"type": "array",
+					"maxItems": 50,
+					"items": { "type": "string", "maxLength": 100 }
+				},
+				"language": { "type": "string", "minLength": 2, "maxLength": 8 },
+				"status": { "type": "string", "enum": ["draft", "active"] }
+			},
+			"minProperties": 1,
+			"additionalProperties": false
+		},
+		"MoveKbDocument": {
+			"description": "POST /kb/documents/:id/move (P3): file into an organization library folder, or folderId null = Unfiled. Never changes the revision.",
+			"type": "object",
+			"required": ["folderId"],
+			"properties": { "folderId": { "$ref": "common.schema.json#/$defs/NullableUuid" } },
+			"additionalProperties": false
+		},
+		"CreateKbFolder": {
+			"description": "POST /kb/folders (P3). Idempotency-Key required; externalRef de-duplicates. Organization admin only (422 domain_rule otherwise); sibling names are unique case-insensitively (409 conflict); depth and per-organization limits answer 422 domain_rule.",
+			"type": "object",
+			"required": ["name"],
+			"properties": {
+				"name": { "type": "string", "minLength": 1, "maxLength": 120 },
+				"parentId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateKbFolder": {
+			"description": "PATCH /kb/folders/:id (P3): rename and / or move (parentId null = top level). If-Match optional.",
+			"type": "object",
+			"properties": {
+				"name": { "type": "string", "minLength": 1, "maxLength": 120 },
+				"parentId": { "$ref": "common.schema.json#/$defs/NullableUuid" }
+			},
+			"minProperties": 1,
+			"additionalProperties": false
+		},
 		"InboundEmail": {
 			"description": "POST /email/inbound (P4, EW-P4-1; email:write, opt-in). Pushes an email a Gauzy mailbox received to an Ever Works agent of the pinned organization: stored as an inbound email_messages row on the agent's own inbound address and dispatched through the agent's inbound assignment exactly like provider mail (task-spawn or conversation; RFC threading joins an existing thread). Idempotency-Key required; a repeated Message-ID (same key and organization) answers 200 with the message already delivered. An agent without an active inbound assignment, or whose inbound address is not an address of the pinned organization, answers 422 domain_rule. Attachments are recorded with their url and never fetched (CR-11).",
 			"type": "object",

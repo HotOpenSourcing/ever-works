@@ -8,7 +8,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, IsArray, IsIn, IsUUID, ValidateNested } from 'class-validator';
 import {
@@ -28,6 +28,7 @@ import { linkSourceOf, pinnedOrganizationOf, principalOf } from './integration-r
 import { IntegrationPrincipalRefDto } from './tasks-write.controller';
 
 export class PutTaskAssigneesDto {
+    @ApiProperty({ type: () => IntegrationPrincipalRefDto, isArray: true, maxItems: 50 })
     @IsArray()
     @ArrayMaxSize(50)
     @ValidateNested({ each: true })
@@ -36,6 +37,7 @@ export class PutTaskAssigneesDto {
 }
 
 export class PutTaskWatchersDto {
+    @ApiProperty({ type: [String], format: 'uuid', maxItems: 200 })
     @IsArray()
     @ArrayMaxSize(200)
     @IsUUID('all', { each: true })
@@ -43,6 +45,7 @@ export class PutTaskWatchersDto {
 }
 
 export class PutTaskBlocksDto {
+    @ApiProperty({ type: [String], format: 'uuid', maxItems: 200 })
     @IsArray()
     @ArrayMaxSize(200)
     @IsUUID('all', { each: true })
@@ -50,14 +53,17 @@ export class PutTaskBlocksDto {
 }
 
 export class IntegrationRelationRefDto {
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     taskId!: string;
 
+    @ApiProperty({ enum: ['related', 'duplicates', 'follow-up'] })
     @IsIn(['related', 'duplicates', 'follow-up'])
     kind!: 'related' | 'duplicates' | 'follow-up';
 }
 
 export class PutTaskRelationsDto {
+    @ApiProperty({ type: () => IntegrationRelationRefDto, isArray: true, maxItems: 200 })
     @IsArray()
     @ArrayMaxSize(200)
     @ValidateNested({ each: true })
