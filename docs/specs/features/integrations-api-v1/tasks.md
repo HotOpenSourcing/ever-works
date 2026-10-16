@@ -87,7 +87,7 @@
       organization scope (inheritance into Works unchanged).
 - [x] **T31** `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `/accept`, `/archive`, `/unarchive`,
       `/move`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (`IntegrationKbController`) + coverage
-      gate entries for every KB controller. Contract CR-5 (`kb-document`, `kb-folder`, five request bodies).
+      gate entries for every KB controller. Contract CR-7 (`kb-document`, `kb-folder`, five request bodies).
 
 ## Status legend
 

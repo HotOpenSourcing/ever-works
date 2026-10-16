@@ -363,7 +363,7 @@
 			"additionalProperties": false
 		},
 		"CreateKbDocument": {
-			"description": "POST /kb/documents (P3, EW-P3-2). Idempotency-Key required; externalRef de-duplicates (200 with the existing document). scope.type organization: scope.id must be the pinned organization and the writer an organization admin; scope.type work: a Work of the pinned organization the writer may edit. Every class is allowed at organization scope (only legal, style and seo are inherited into Works). A refusal by the app's rules answers 422 domain_rule (CR-5).",
+			"description": "POST /kb/documents (P3, EW-P3-2). Idempotency-Key required; externalRef de-duplicates (200 with the existing document). scope.type organization: scope.id must be the pinned organization and the writer an organization admin; scope.type work: a Work of the pinned organization the writer may edit. Every class is allowed at organization scope (only legal, style and seo are inherited into Works). A refusal by the app's rules answers 422 domain_rule (CR-7).",
 			"type": "object",
 			"required": ["scope", "path", "title", "class", "body"],
 			"properties": {

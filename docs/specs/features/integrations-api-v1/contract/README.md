@@ -4,7 +4,7 @@ These files are the published, machine-readable half of the Ever Works integrati
 it under `/api/integrations/v1`, and Ever Gauzy codes against it (its mock Ever Works server and its tests load these
 files). The prose half is [`../spec.md`](../spec.md).
 
-**Contract version:** `v1-draft.5` (2026-10-17; draft.1 2026-10-15, then CR-2 to CR-5). Source of truth: the Gauzy ↔ Ever Works integration plan, document 03
+**Contract version:** `v1-draft.6` (2026-10-17; draft.1 2026-10-15, then CR-2 to CR-7). Source of truth: the Gauzy ↔ Ever Works integration plan, document 03
 Part B (private `ever-co/homelab` repo,
 `docs/superpowers/specs/2026-10-15-gauzy-ever-works-integration/03-events-sync-engine-and-contract.md`). Every change
 bumps the version there and gets a change-request (CR) row on that plan's `STATUS.md` board. A breaking change needs `/v2`.

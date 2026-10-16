@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ever.works/schemas/integrations/v1/resources/kb-document.schema.json",
 	"title": "Knowledge Base document DTO (P3, GET /kb/documents, GET /kb/documents/:id)",
-	"description": "One Knowledge Base document: Markdown with [[path]] wikilinks, owned by the organization library (scope organization) or by one Work of the organization (scope work), filed in a library folder or Unfiled. Also the data of kb.document.* events. Not a ResourceBase: it has no owner, visibility or teams of its own; it is readable by everyone who can read its organization or its Work. `revision` moves only on a real change to the title, description, tags, class or body and `normalizedContentHash` fingerprints the body; `version` moves on every recorded change and is the ETag. An event whose body is longer than 262144 UTF-8 bytes carries `body: null, bodyOmitted: true`; GET always carries the body (CR-5).",
+	"description": "One Knowledge Base document: Markdown with [[path]] wikilinks, owned by the organization library (scope organization) or by one Work of the organization (scope work), filed in a library folder or Unfiled. Also the data of kb.document.* events. Not a ResourceBase: it has no owner, visibility or teams of its own; it is readable by everyone who can read its organization or its Work. `revision` moves only on a real change to the title, description, tags, class or body and `normalizedContentHash` fingerprints the body; `version` moves on every recorded change and is the ETag. An event whose body is longer than 262144 UTF-8 bytes carries `body: null, bodyOmitted: true`; GET always carries the body (CR-7).",
 	"type": "object",
 	"required": [
 		"id",

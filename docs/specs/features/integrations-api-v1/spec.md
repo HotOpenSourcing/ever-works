@@ -248,7 +248,7 @@ webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.
 
-## 10. Knowledge Base (P3, EW-P3-2) — `v1-draft.5`, CR-5
+## 10. Knowledge Base (P3, EW-P3-2) — `v1-draft.6`, CR-7
 
 The integration sees the Knowledge Base the way the Knowledge library does:
 
