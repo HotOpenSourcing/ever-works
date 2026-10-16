@@ -542,10 +542,20 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 	}
 	const { loop, worker } = runtime;
 	const attendedWorker = runtime.attended?.worker ?? null;
+	// One line per ACCEPTED beat. The loop patches its state more than once per
+	// beat (`connected`, then the next attempt's delay) and every patch
+	// notifies, so keying on the state alone logged each beat twice. Keyed on
+	// the beat itself: each accepted beat stores a freshly parsed `node` and
+	// its own timestamp, and a later patch of the same beat changes neither.
+	// Not on the transition into `connected`: a tick that starts connected
+	// never passes through `connecting`, so that would drop this per-beat
+	// liveness line.
+	let lastLoggedBeat: { node: unknown; at: number | null } | null = null;
 	loop.onChange((state) => {
-		if (state.state === 'connected') {
-			deps.io.logger.info(`Heartbeat accepted — node ${config.nodeId} is online`);
-		}
+		if (state.state !== 'connected') return;
+		if (lastLoggedBeat && lastLoggedBeat.node === state.node && lastLoggedBeat.at === state.lastHeartbeatAt) return;
+		lastLoggedBeat = { node: state.node, at: state.lastHeartbeatAt };
+		deps.io.logger.info(`Heartbeat accepted — node ${config.nodeId} is online`);
 	});
 
 	deps.out(`Starting node ${config.nodeId} → ${config.apiUrl} (every ${config.heartbeatIntervalMs / 1000}s)`);
