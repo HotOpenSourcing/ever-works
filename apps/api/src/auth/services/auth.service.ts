@@ -221,6 +221,17 @@ export class AuthService {
         let user = linkedAccount
             ? await this.userRepository.findByIdForSocialAuth(linkedAccount.userId)
             : null;
+        if (linkedAccount && !user) {
+            // This provider account is bound to a local user we cannot load
+            // (`account.userId` has no foreign key). Falling through to the
+            // email match would update another user's profile, or create a
+            // second user, and only then fail the link upsert on the
+            // (provider, account id) unique index. Refuse before writing,
+            // as GitHub App onboarding does.
+            throw new ConflictException(
+                'This social account is linked to a local account that could not be loaded',
+            );
+        }
         if (!user) {
             user = await this.userRepository.findByEmailForSocialAuth(socialUser.email);
         }

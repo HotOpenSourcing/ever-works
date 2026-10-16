@@ -393,6 +393,28 @@ describe('AuthService', () => {
                     expect.objectContaining({ emailVerified: true }),
                 );
             });
+
+            it('refuses, writing nothing, when the linked local user cannot be loaded (dangling link)', async () => {
+                authAccountRepo.findProviderAccountByAccountId.mockResolvedValue({
+                    id: 'acc-gone',
+                    userId: 'u-gone',
+                } as any);
+                userRepo.findByIdForSocialAuth.mockResolvedValue(null);
+                userRepo.findByEmailForSocialAuth.mockResolvedValue({
+                    id: 'u-other',
+                    email: 'sa@b.co',
+                    isActive: true,
+                    emailVerified: true,
+                } as any);
+
+                await expect(service.validateSocialUser(socialUser() as any)).rejects.toThrow(
+                    ConflictException,
+                );
+                expect(userRepo.findByEmailForSocialAuth).not.toHaveBeenCalled();
+                expect(userRepo.create).not.toHaveBeenCalled();
+                expect(userRepo.updateForSocialAuth).not.toHaveBeenCalled();
+                expect(authAccountRepo.upsertProviderAccount).not.toHaveBeenCalled();
+            });
         });
 
         it('throws UnauthorizedException when account suspended', async () => {
