@@ -299,6 +299,8 @@ export const ROUTES = {
     // `/admin/*` pages do.
     DASHBOARD_SETTINGS_ADMIN_EVER_ID: '/settings/admin/ever-id',
     DASHBOARD_SETTINGS_API_KEYS: '/settings/api-keys',
+    // EW-P1-7 — Settings → Integrations → Ever Gauzy (manual connection card).
+    DASHBOARD_SETTINGS_INTEGRATIONS_EVER_GAUZY: '/settings/integrations/ever-gauzy',
     DASHBOARD_SETTINGS_DANGER_ZONE: '/settings/danger',
     DASHBOARD_SETTINGS_DATA: '/settings/data',
     DASHBOARD_SETTINGS_GITHUB_APP: '/settings/github-app',

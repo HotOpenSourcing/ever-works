@@ -84,7 +84,8 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus[]> = {
     in_review: ['in_progress', 'blocked', 'done', 'cancelled'],
     blocked: ['todo', 'in_progress', 'cancelled'],
     done: ['in_progress'],
-    cancelled: [],
+    // EW-P1-6 — a cancelled Task re-opens into the backlog or todo.
+    cancelled: ['backlog', 'todo'],
 };
 
 function formatDate(iso: string): string {
@@ -581,12 +582,19 @@ export function TaskDetailClient({
                                             className="shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm bg-surface-secondary dark:bg-surface-secondary-dark"
                                             aria-hidden
                                         >
-                                            {m.authorType === 'agent' ? '🤖' : '👤'}
+                                            {m.authorType === 'agent'
+                                                ? '🤖'
+                                                : m.authorType === 'integration'
+                                                  ? '🔗'
+                                                  : '👤'}
                                         </div>
                                         <div className="min-w-0 flex-1">
                                             <div className="flex items-center justify-between gap-2 text-[11px] text-text-muted">
                                                 <span className="font-mono">
-                                                    {m.authorId.slice(0, 8)}…
+                                                    {m.authorType === 'integration' &&
+                                                    m.externalAuthor?.name
+                                                        ? m.externalAuthor.name
+                                                        : `${m.authorId.slice(0, 8)}…`}
                                                 </span>
                                                 <span>
                                                     {new Date(m.createdAt).toLocaleString()}

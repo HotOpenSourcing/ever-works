@@ -266,3 +266,4 @@ export * from './ever-stats-lease.entity';
 export * from './domain-event.entity';
 export * from './domain-event-relay-state.entity';
 export * from './plugin-event-cursor.entity';
+export * from './_record-visibility';

@@ -22,6 +22,9 @@ export const INBOUND_EMAIL_WEBHOOK_PATH = '/api/email/inbound';
 
 export const DEFAULT_INBOUND_EMAIL_BODY_LIMIT = '25mb';
 
+/** {@link DEFAULT_INBOUND_EMAIL_BODY_LIMIT} in bytes. */
+export const DEFAULT_INBOUND_EMAIL_BODY_LIMIT_BYTES = 25 * 1024 * 1024;
+
 /** Hard ceiling for `INBOUND_EMAIL_BODY_LIMIT` (Postmark's own inbound cap is 35 MB). */
 export const MAX_INBOUND_EMAIL_BODY_LIMIT_BYTES = 50 * 1024 * 1024;
 
@@ -39,8 +42,11 @@ export function parseByteSize(value: string): number | null {
 }
 
 /**
- * The body limit for the inbound-email webhooks: `requested` when it is a
- * valid byte size within the ceiling, else the default (with a warning).
+ * The body limit for the inbound-email webhooks, in BYTES: the parsed
+ * `requested` size when it is valid and within the ceiling, else the default
+ * (with a warning). A number, not the raw text, so the parsers enforce exactly
+ * the size validated here — body-parser reads an unrecognised string such as
+ * `" 25mb "` (stray whitespace) as 25 bytes.
  */
 export function resolveInboundEmailBodyLimit(
     requested: string | undefined,
@@ -48,14 +54,14 @@ export function resolveInboundEmailBodyLimit(
         // eslint-disable-next-line no-console
         console.warn(message);
     },
-): string {
-    if (!requested) return DEFAULT_INBOUND_EMAIL_BODY_LIMIT;
+): number {
+    if (!requested?.trim()) return DEFAULT_INBOUND_EMAIL_BODY_LIMIT_BYTES;
     const parsed = parseByteSize(requested);
     if (parsed === null || parsed <= 0 || parsed > MAX_INBOUND_EMAIL_BODY_LIMIT_BYTES) {
         warn(
             `[bootstrap] INBOUND_EMAIL_BODY_LIMIT="${requested}" is invalid or exceeds the ${MAX_INBOUND_EMAIL_BODY_LIMIT_BYTES}-byte cap; falling back to ${DEFAULT_INBOUND_EMAIL_BODY_LIMIT}.`,
         );
-        return DEFAULT_INBOUND_EMAIL_BODY_LIMIT;
+        return DEFAULT_INBOUND_EMAIL_BODY_LIMIT_BYTES;
     }
-    return requested;
+    return Math.floor(parsed);
 }

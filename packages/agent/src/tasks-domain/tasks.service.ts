@@ -11,7 +11,13 @@ import { InjectRepository } from '@nestjs/typeorm';
 import type { EntityManager, Repository } from 'typeorm';
 import type { GateStatus, TaskAcceptanceCheck, TaskExtraRepo } from '@ever-works/contracts';
 import { normalizeTaskExtraRepos } from './task-extra-repos';
-import { Task, TaskPriority, TaskStatus, type TaskActorType } from '../entities/task.entity';
+import {
+    Task,
+    TaskPriority,
+    TaskStatus,
+    type TaskActorType,
+    type TaskAuthorType,
+} from '../entities/task.entity';
 import type { TaskApprover } from '../entities/task-approver.entity';
 import { Mission } from '../entities/mission.entity';
 import { Team } from '../entities/team.entity';
@@ -26,7 +32,11 @@ import {
     TaskRelationRepository,
     UserTaskCounterRepository,
 } from '../database/repositories/task-side.repositories';
-import { TaskTransitionService, type TransitionOptions } from './task-transition.service';
+import {
+    TaskTransitionService,
+    type TransitionOptions,
+    type SyncTransitionResult,
+} from './task-transition.service';
 import { approverDecisionCountsTowardDone, resolveCompletionGateHead } from './task-agent-review';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
@@ -81,7 +91,8 @@ export interface CreateTaskInput {
     agentId?: string | null;
     goalId?: string | null;
     parentTaskId?: string | null;
-    createdByType: TaskActorType;
+    /** EW-P1-2: `'integration'` (with the key id as `createdById`) for an integration write. */
+    createdByType: TaskAuthorType;
     createdById: string;
     /** Schedule mode "Scheduled": run once at this instant (must be in
      *  the future). Omitted/null = not scheduled. */
@@ -1676,6 +1687,33 @@ export class TasksService {
             details: { from, to, force: opts.force ?? false },
         });
         return result;
+    }
+
+    /**
+     * EW-P1-6 — sync transition: walk the shortest legal path to `to`, every
+     * hop gated, no agent work started (see
+     * `TaskTransitionService.transitionSync`). One `task_transitioned`
+     * activity row per hop, so the Task's history shows every status it
+     * passed through, exactly as if each move had been made by hand.
+     */
+    async syncTransition(
+        userId: string,
+        id: string,
+        to: TaskStatus,
+        opts: TransitionOptions = {},
+        ownershipScope?: OwnershipScope,
+    ): Promise<SyncTransitionResult> {
+        const task = await this.getOne(userId, id, ownershipScope);
+        // One row per hop AS IT LANDS: a walk refused mid-way (a gate that
+        // closed under it) still leaves the history of the hops it took.
+        return this.transitions.transitionSync(task, to, opts, (hop) =>
+            this.logActivity({
+                userId,
+                taskId: id,
+                actionType: ActivityActionType.TASK_TRANSITIONED,
+                details: { from: hop.from, to: hop.to, force: opts.force ?? false, mode: 'sync' },
+            }),
+        );
     }
 
     // ── Members ───────────────────────────────────────────────────

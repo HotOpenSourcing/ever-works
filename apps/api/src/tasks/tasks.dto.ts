@@ -421,6 +421,21 @@ export class TransitionTaskDto {
     @IsOptional()
     @IsBoolean()
     force?: boolean;
+
+    /**
+     * EW-P1-6 — `'sync'` walks the shortest legal path to `to`, one gated
+     * hop at a time, and starts no agent work; a closed gate answers
+     * `409 transition_blocked`. Omitted = today's single-edge move.
+     */
+    @ApiProperty({
+        required: false,
+        enum: ['sync'],
+        description:
+            "'sync' walks the shortest legal path to `to` (every hop gated, no agent run started); a closed gate answers 409 transition_blocked.",
+    })
+    @IsOptional()
+    @IsIn(['sync'])
+    mode?: 'sync';
 }
 
 export class AddAssigneeDto {
