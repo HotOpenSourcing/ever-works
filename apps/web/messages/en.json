@@ -2401,6 +2401,11 @@
                 "priority": "Priority",
                 "labels": "Labels",
                 "labelsPlaceholder": "comma-separated",
+                "dueDate": "Due date",
+                "startDate": "Start date",
+                "estimateMinutes": "Estimate (minutes)",
+                "errorStartAfterDue": "The start date must not be after the due date.",
+                "errorEstimate": "The estimate must be a whole number of minutes between 0 and 525600.",
                 "labelsHint": "Separate multiple labels with commas.",
                 "labelsAutoHint": "Derived from the title until you edit it. Separate multiple labels with commas.",
                 "organize": "Organize",
@@ -2710,6 +2715,20 @@
                     "typecheck": "Type check",
                     "custom": "Custom"
                 }
+            },
+            "planning": {
+                "section": "Planning",
+                "hint": "When the Task is due and how long it should take. Planning only: nothing runs at these times.",
+                "dueAt": "Due",
+                "startAt": "Start",
+                "estimateMinutes": "Estimate (minutes)",
+                "save": "Save",
+                "saved": "Planning saved",
+                "saveError": "Could not save the planning",
+                "errorStartAfterDue": "The start date must not be after the due date.",
+                "errorEstimate": "The estimate must be a whole number of minutes between 0 and 525600.",
+                "due": "Due {date}",
+                "overdue": "Overdue · {date}"
             },
             "schedule": {
                 "section": "Schedule",

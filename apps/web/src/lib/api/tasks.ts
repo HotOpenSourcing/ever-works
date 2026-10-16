@@ -225,6 +225,10 @@ export interface Task {
     parentRecurringTaskId: string | null;
     /** Schedule mode "Scheduled" — run once at this instant. */
     scheduledAt?: string | null;
+    /** EW-P2-3 — planning dates (ISO) + estimate in whole minutes. */
+    dueAt?: string | null;
+    startAt?: string | null;
+    estimateMinutes?: number | null;
     /** Set once the dispatcher claimed + fired the one-shot. */
     scheduleClaimedAt?: string | null;
     // Wave 2 M7 — worktree-per-Task isolation surface. All null when the
@@ -456,6 +460,10 @@ export const tasksAPI = {
         parentTaskId?: string | null;
         requireAllApprovers?: boolean;
         isolationMode?: TaskIsolationMode | null;
+        /** EW-P2-3 — planning dates (ISO) + estimate in whole minutes. */
+        dueAt?: string | null;
+        startAt?: string | null;
+        estimateMinutes?: number | null;
         acceptanceChecks?: TaskAcceptanceCheck[] | null;
         maxGateAttempts?: number | null;
         /**
@@ -492,6 +500,9 @@ export const tasksAPI = {
                 | 'ideaId'
                 | 'agentId'
                 | 'extraRepos'
+                | 'dueAt'
+                | 'startAt'
+                | 'estimateMinutes'
             >
         >,
     ) {

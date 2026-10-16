@@ -25,6 +25,10 @@ const TASK_COLUMN_TO_DTO_FIELD: Readonly<Partial<Record<keyof Task, string>>> = 
     completedAt: 'completedAt',
     hiddenFromBoard: 'hiddenFromBoard',
     isRecurring: 'isRecurringTemplate',
+    // EW-P2-3 — planning dates + estimate (contract v1 B.6, P2 fields).
+    dueAt: 'dueAt',
+    startAt: 'startAt',
+    estimateMinutes: 'estimateMinutes',
 };
 
 const toEventValue = (value: unknown): unknown =>

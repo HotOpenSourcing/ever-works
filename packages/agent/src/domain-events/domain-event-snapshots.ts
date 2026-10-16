@@ -156,6 +156,13 @@ export async function buildTaskSnapshot(
         })),
         startedAt: iso(task.startedAt),
         completedAt: iso(task.completedAt),
+        // EW-P2-3 — planning dates + estimate.
+        dueAt: iso(task.dueAt),
+        startAt: iso(task.startAt),
+        estimateMinutes:
+            task.estimateMinutes === null || task.estimateMinutes === undefined
+                ? null
+                : Number(task.estimateMinutes),
         isRecurringTemplate: !!task.isRecurring,
         hiddenFromBoard: !!task.hiddenFromBoard,
         runtime: {
