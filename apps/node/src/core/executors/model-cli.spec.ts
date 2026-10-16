@@ -860,6 +860,26 @@ describe('readCodexUserSettings / codexUserSettings (control 16)', () => {
 		});
 	});
 
+	it('a triple quote in a COMMENT opens no multiline string, so later settings still count (review)', () => {
+		const config = [
+			'# Instructions use """ blocks',
+			'model = "gpt-6-astra"',
+			'[windows]',
+			'sandbox = "elevated"'
+		].join('\n');
+		expect(readCodexUserSettings(config)).toEqual({ model: 'gpt-6-astra', windowsSandbox: 'elevated' });
+	});
+
+	it('a triple quote MID-value opens no multiline string either', () => {
+		const config = ['title = \'a """ b\'', 'model = "gpt-6-astra"'].join('\n');
+		expect(readCodexUserSettings(config)).toEqual({ model: 'gpt-6-astra' });
+	});
+
+	it('a multiline value under a quoted key with spaces is still skipped', () => {
+		const config = ['"my notes" = """', 'model = "gpt-4"', '"""', 'model = "gpt-6-astra"'].join('\n');
+		expect(readCodexUserSettings(config)).toEqual({ model: 'gpt-6-astra' });
+	});
+
 	it('parses table headers by position, so a pathological header line stays cheap and unrecognised (CodeQL)', () => {
 		const hostile = '[' + '\t'.repeat(50_000) + 'Z';
 		expect(readCodexUserSettings(`${hostile}\nmodel = "x"`)).toEqual({});

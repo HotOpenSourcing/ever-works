@@ -145,6 +145,13 @@ const TOML_STRING_ASSIGNMENT = /^([A-Za-z0-9_-]+)[ \t]*=[ \t]*(?:"([^"\\]*)"|'([
 const TOML_MULTILINE_DELIMITERS = ['"""', "'''"] as const;
 
 /**
+ * An assignment whose VALUE starts with a multiline delimiter. The key is
+ * everything before the first `=` with no `#` in it, so quoted keys with
+ * spaces count and a comment never does. Linear: the class excludes `=`.
+ */
+const TOML_MULTILINE_VALUE_START = /^[^=#]*=[ \t]*("""|''')/;
+
+/**
  * The {@link CodexUserSettings} in a Codex `config.toml`, read with a
  * deliberately tiny scanner: only plain string assignments to the three keys,
  * in the top-level table (`model`, `model_reasoning_effort`) or in `[windows]`
@@ -168,16 +175,18 @@ export function readCodexUserSettings(configToml: string | null | undefined): Co
 			continue;
 		}
 		const line = raw.trim();
-		// A multiline string that opens on this line without closing on it:
-		// everything up to its closing delimiter is string content.
-		for (const delimiter of TOML_MULTILINE_DELIMITERS) {
-			const first = line.indexOf(delimiter);
-			if (first !== -1 && line.indexOf(delimiter, first + delimiter.length) === -1) {
+		// A multiline string opens only where a VALUE starts with its delimiter
+		// (`key = """…`) and does not close on the same line: everything up to
+		// its closing delimiter is then string content. A delimiter anywhere
+		// else (a comment, mid-value) opens nothing (review on #2635).
+		const opening = TOML_MULTILINE_VALUE_START.exec(line);
+		if (opening) {
+			const delimiter = opening[1] as (typeof TOML_MULTILINE_DELIMITERS)[number];
+			if (!line.slice(opening[0].length).includes(delimiter)) {
 				openMultiline = delimiter;
-				break;
+				continue;
 			}
 		}
-		if (openMultiline !== null) continue;
 		if (line.startsWith('[')) {
 			if (line.startsWith('[[')) {
 				table = '\u0000array';
