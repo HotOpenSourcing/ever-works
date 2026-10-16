@@ -43,6 +43,7 @@ const CONTROLLER_FILES: readonly string[] = [
     // P2 resources (EW-P2-1 ideas).
     'integrations-api/v1/ideas.controller.ts',
     'integrations-api/v1/inbox.controller.ts',
+    'integrations-api/v1/email.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([
