@@ -482,7 +482,24 @@ export class TasksService {
         }
         let runsById = new Map<string, TaskRunEmbed>();
         try {
-            const runs = await this.agentRuns.findByIds(runIds, userId, ownershipScope);
+            // Record visibility (EW-P1-3): a shared row's run belongs to the Task's
+            // owner, so each run is loaded under the owner of the row that points at
+            // it — never under client input, and only for rows the caller may read.
+            const runIdsByOwner = new Map<string, string[]>();
+            for (const row of rows) {
+                if (!row.latestRunId) continue;
+                const ids = runIdsByOwner.get(row.userId) ?? [];
+                if (!ids.includes(row.latestRunId)) ids.push(row.latestRunId);
+                runIdsByOwner.set(row.userId, ids);
+            }
+            const agentRuns = this.agentRuns;
+            const runs = (
+                await Promise.all(
+                    [...runIdsByOwner].map(([ownerId, ids]) =>
+                        agentRuns.findByIds(ids, ownerId, ownershipScope),
+                    ),
+                )
+            ).flat();
             runsById = new Map(
                 runs.map((run) => [
                     run.id,
