@@ -16,7 +16,9 @@ export function etagFor(version: number): string {
  * `*` (no precondition), `undefined` when it is present but not a version this
  * API issued (the caller answers `400 validation_failed`).
  */
-export function parseIfMatch(header: string | string[] | undefined | null): number | null | undefined {
+export function parseIfMatch(
+    header: string | string[] | undefined | null,
+): number | null | undefined {
     const raw = Array.isArray(header) ? header[0] : header;
     if (raw === undefined || raw === null) return null;
     const value = raw.trim();

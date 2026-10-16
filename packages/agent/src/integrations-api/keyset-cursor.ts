@@ -67,7 +67,9 @@ export function decodeKeysetCursor(cursor: string): KeysetPosition {
 /** 1–500; a missing or non-finite limit is the default. */
 export function keysetLimit(limit: number | null | undefined): number {
     const requested =
-        typeof limit === 'number' && Number.isFinite(limit) ? Math.trunc(limit) : KEYSET_DEFAULT_LIMIT;
+        typeof limit === 'number' && Number.isFinite(limit)
+            ? Math.trunc(limit)
+            : KEYSET_DEFAULT_LIMIT;
     return Math.min(Math.max(requested, 1), KEYSET_MAX_LIMIT);
 }
 
@@ -99,7 +101,9 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
                         new Brackets((tie) => {
                             tie.where(`${alias}.updatedAt = :keysetAfterUpdatedAt`, {
                                 keysetAfterUpdatedAt: after.updatedAt,
-                            }).andWhere(`${alias}.id > :keysetAfterId`, { keysetAfterId: after.id });
+                            }).andWhere(`${alias}.id > :keysetAfterId`, {
+                                keysetAfterId: after.id,
+                            });
                         }),
                     );
             }),
@@ -115,7 +119,8 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
     const last = data[data.length - 1];
     return {
         data,
-        nextCursor: hasMore && last ? encodeKeysetCursor({ updatedAt: last.updatedAt, id: last.id }) : null,
+        nextCursor:
+            hasMore && last ? encodeKeysetCursor({ updatedAt: last.updatedAt, id: last.id }) : null,
         hasMore,
     };
 }

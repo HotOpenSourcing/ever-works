@@ -9,14 +9,18 @@ describe('CreateIntegrationApiFoundation1795080200000', () => {
     let dataSource: DataSource;
     const migration = new CreateIntegrationApiFoundation1795080200000();
 
-    const columns = async (table: string): Promise<Array<{ name: string; dflt_value: string | null }>> =>
+    const columns = async (
+        table: string,
+    ): Promise<Array<{ name: string; dflt_value: string | null }>> =>
         dataSource.query(`PRAGMA table_info("${table}")`);
     const indexes = async (table: string): Promise<Array<{ name: string; unique: number }>> =>
         dataSource.query(`PRAGMA index_list("${table}")`);
     const tables = async (): Promise<string[]> =>
-        ((await dataSource.query(`SELECT name FROM sqlite_master WHERE type = 'table'`)) as Array<{ name: string }>).map(
-            (row) => row.name,
-        );
+        (
+            (await dataSource.query(
+                `SELECT name FROM sqlite_master WHERE type = 'table'`,
+            )) as Array<{ name: string }>
+        ).map((row) => row.name);
     const run = async (direction: 'up' | 'down') => {
         const runner = dataSource.createQueryRunner();
         try {
@@ -27,7 +31,12 @@ describe('CreateIntegrationApiFoundation1795080200000', () => {
     };
 
     beforeEach(async () => {
-        dataSource = new DataSource({ type: 'better-sqlite3', database: ':memory:', entities: [], synchronize: false });
+        dataSource = new DataSource({
+            type: 'better-sqlite3',
+            database: ':memory:',
+            entities: [],
+            synchronize: false,
+        });
         await dataSource.initialize();
     });
 
@@ -54,9 +63,14 @@ describe('CreateIntegrationApiFoundation1795080200000', () => {
                 'updatedAt',
             ]),
         );
-        const unique = (await indexes('external_record_links')).filter((i) => i.unique === 1).map((i) => i.name);
+        const unique = (await indexes('external_record_links'))
+            .filter((i) => i.unique === 1)
+            .map((i) => i.name);
         expect(unique).toEqual(
-            expect.arrayContaining(['uq_external_record_links_external', 'uq_external_record_links_entity']),
+            expect.arrayContaining([
+                'uq_external_record_links_external',
+                'uq_external_record_links_entity',
+            ]),
         );
         const insert = (id: string, entityId: string, externalId: string) =>
             dataSource.query(
@@ -64,7 +78,9 @@ describe('CreateIntegrationApiFoundation1795080200000', () => {
                 [id, entityId, externalId],
             );
         await insert('l-1', 'e-1', 'x-1');
-        const [row] = await dataSource.query(`SELECT "installationKey" FROM "external_record_links"`);
+        const [row] = await dataSource.query(
+            `SELECT "installationKey" FROM "external_record_links"`,
+        );
         expect(row).toEqual({ installationKey: '' });
         // No installation still collides — '' is a value, NULL would not be.
         await expect(insert('l-2', 'e-2', 'x-1')).rejects.toThrow(/UNIQUE/i);

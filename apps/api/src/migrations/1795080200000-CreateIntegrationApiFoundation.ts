@@ -59,7 +59,13 @@ export class CreateIntegrationApiFoundation1795080200000 implements MigrationInt
             'external_record_links',
             new TableIndex({
                 name: 'uq_external_record_links_external',
-                columnNames: ['organizationId', 'source', 'installationKey', 'entityType', 'externalId'],
+                columnNames: [
+                    'organizationId',
+                    'source',
+                    'installationKey',
+                    'entityType',
+                    'externalId',
+                ],
                 isUnique: true,
             }),
         );
@@ -68,7 +74,13 @@ export class CreateIntegrationApiFoundation1795080200000 implements MigrationInt
             'external_record_links',
             new TableIndex({
                 name: 'uq_external_record_links_entity',
-                columnNames: ['organizationId', 'source', 'installationKey', 'entityType', 'entityId'],
+                columnNames: [
+                    'organizationId',
+                    'source',
+                    'installationKey',
+                    'entityType',
+                    'entityId',
+                ],
                 isUnique: true,
             }),
         );
@@ -98,7 +110,11 @@ export class CreateIntegrationApiFoundation1795080200000 implements MigrationInt
                         { name: 'requestHash', type: 'varchar', length: '64' },
                         { name: 'state', type: 'varchar', length: '16', default: "'in_progress'" },
                         { name: 'responseStatus', type: 'int', isNullable: true },
-                        { name: 'responseBody', type: isMysql ? 'longtext' : 'text', isNullable: true },
+                        {
+                            name: 'responseBody',
+                            type: isMysql ? 'longtext' : 'text',
+                            isNullable: true,
+                        },
                         { name: 'createdAt', type: 'timestamp', default: 'CURRENT_TIMESTAMP' },
                         { name: 'expiresAt', type: 'bigint' },
                     ],

@@ -65,7 +65,12 @@ export class IntegrationIdempotencyService {
         work: () => Promise<{ status: number; body: unknown }>,
     ): Promise<IdempotentResponse> {
         const now = input.now ?? new Date();
-        const claim = await this.claim(input.integrationKeyId, input.idempotencyKey, input.requestHash, now);
+        const claim = await this.claim(
+            input.integrationKeyId,
+            input.idempotencyKey,
+            input.requestHash,
+            now,
+        );
         if (claim.kind === 'replay') {
             return { status: claim.status, body: claim.body, replayed: true };
         }
@@ -111,7 +116,9 @@ export class IntegrationIdempotencyService {
         now: Date,
     ): Promise<{ kind: 'new'; id: string } | { kind: 'replay'; status: number; body: unknown }> {
         for (let attempt = 0; attempt < 2; attempt++) {
-            const existing = await this.repo.findOne({ where: { integrationKeyId, idempotencyKey } });
+            const existing = await this.repo.findOne({
+                where: { integrationKeyId, idempotencyKey },
+            });
             if (existing) {
                 if (existing.expiresAt.getTime() <= now.getTime()) {
                     // Past its window: forget it and claim afresh.

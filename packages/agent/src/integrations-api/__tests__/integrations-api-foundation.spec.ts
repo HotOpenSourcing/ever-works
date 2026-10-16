@@ -26,7 +26,12 @@ import {
     idempotencyRequestHash,
     IntegrationIdempotencyService,
 } from '../integration-idempotency.service';
-import { decodeKeysetCursor, encodeKeysetCursor, keysetLimit, readKeysetPage } from '../keyset-cursor';
+import {
+    decodeKeysetCursor,
+    encodeKeysetCursor,
+    keysetLimit,
+    readKeysetPage,
+} from '../keyset-cursor';
 
 /**
  * Integration API v1 building blocks (EW-P1-4) on SQLite: external record
@@ -55,7 +60,12 @@ describe('integration API v1 foundation', () => {
     });
 
     describe('external record links', () => {
-        const scope = { organizationId: ORG_A, tenantId: TENANT, source: 'gauzy', installationId: 'conn-1' };
+        const scope = {
+            organizationId: ORG_A,
+            tenantId: TENANT,
+            source: 'gauzy',
+            installationId: 'conn-1',
+        };
 
         it('links a record and finds it back from the external side', async () => {
             const taskId = randomUUID();
@@ -77,8 +87,12 @@ describe('integration API v1 foundation', () => {
                 externalUrl: 'https://app.gauzy.co/#/tasks/g-1',
             });
             // Another installation or organization is another namespace.
-            expect(await links.findByExternal({ ...scope, installationId: 'conn-2' }, 'task', 'g-1')).toBeNull();
-            expect(await links.findByExternal({ ...scope, organizationId: ORG_B }, 'task', 'g-1')).toBeNull();
+            expect(
+                await links.findByExternal({ ...scope, installationId: 'conn-2' }, 'task', 'g-1'),
+            ).toBeNull();
+            expect(
+                await links.findByExternal({ ...scope, organizationId: ORG_B }, 'task', 'g-1'),
+            ).toBeNull();
         });
 
         it('is unique on both sides, per organization, source and installation', async () => {
@@ -86,7 +100,11 @@ describe('integration API v1 foundation', () => {
             await links.create(scope, { entityType: 'task', entityId: a, externalId: 'g-1' });
             await expect(
                 links.create(scope, { entityType: 'task', entityId: b, externalId: 'g-1' }),
-            ).rejects.toMatchObject({ name: 'DuplicateExternalRefError', side: 'external', existingEntityId: a });
+            ).rejects.toMatchObject({
+                name: 'DuplicateExternalRefError',
+                side: 'external',
+                existingEntityId: a,
+            });
             await expect(
                 links.create(scope, { entityType: 'task', entityId: a, externalId: 'g-2' }),
             ).rejects.toBeInstanceOf(DuplicateExternalRefError);
@@ -94,16 +112,28 @@ describe('integration API v1 foundation', () => {
             const none = { ...scope, installationId: null };
             await links.create(none, { entityType: 'task', entityId: b, externalId: 'g-1' });
             await expect(
-                links.create(none, { entityType: 'task', entityId: randomUUID(), externalId: 'g-1' }),
+                links.create(none, {
+                    entityType: 'task',
+                    entityId: randomUUID(),
+                    externalId: 'g-1',
+                }),
             ).rejects.toBeInstanceOf(DuplicateExternalRefError);
-            const [row] = await links.list({ organizationId: ORG_A, source: 'gauzy' }, { entityId: b });
+            const [row] = await links.list(
+                { organizationId: ORG_A, source: 'gauzy' },
+                { entityId: b },
+            );
             expect(toExternalRecordLinkDto(row).installationId).toBeNull();
         });
 
         it('PUT sets or moves a record link; DELETE removes it', async () => {
             const taskId = randomUUID();
             await links.put(scope, { entityType: 'task', entityId: taskId, externalId: 'g-1' });
-            await links.put(scope, { entityType: 'task', entityId: taskId, externalId: 'g-9', externalUrl: null });
+            await links.put(scope, {
+                entityType: 'task',
+                entityId: taskId,
+                externalId: 'g-9',
+                externalUrl: null,
+            });
             expect((await links.findByExternal(scope, 'task', 'g-9'))?.entityId).toBe(taskId);
             expect(await links.findByExternal(scope, 'task', 'g-1')).toBeNull();
             expect(await links.remove(scope, 'task', taskId)).toBe(1);
@@ -113,10 +143,21 @@ describe('integration API v1 foundation', () => {
         it('groups externalLinks of a page of records for the caller source', async () => {
             const [a, b] = [randomUUID(), randomUUID()];
             await links.create(scope, { entityType: 'task', entityId: a, externalId: 'g-1' });
-            await links.create({ ...scope, installationId: 'conn-2' }, { entityType: 'task', entityId: a, externalId: 'g-1' });
-            await links.create({ ...scope, source: 'jira' }, { entityType: 'task', entityId: b, externalId: 'J-1' });
+            await links.create(
+                { ...scope, installationId: 'conn-2' },
+                { entityType: 'task', entityId: a, externalId: 'g-1' },
+            );
+            await links.create(
+                { ...scope, source: 'jira' },
+                { entityType: 'task', entityId: b, externalId: 'J-1' },
+            );
             const byEntity = await links.linksFor('task', [a, b], 'gauzy');
-            expect(byEntity.get(a)?.map((link) => link.installationId).sort()).toEqual(['conn-1', 'conn-2']);
+            expect(
+                byEntity
+                    .get(a)
+                    ?.map((link) => link.installationId)
+                    .sort(),
+            ).toEqual(['conn-1', 'conn-2']);
             expect(byEntity.has(b)).toBe(false);
         });
 
@@ -134,13 +175,22 @@ describe('integration API v1 foundation', () => {
 
         it('runs once and replays the stored response for the same request', async () => {
             const work = jest.fn().mockResolvedValue({ status: 201, body: { id: 't-1' } });
-            const first = await idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash }, work);
-            const second = await idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash }, work);
+            const first = await idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
+                work,
+            );
+            const second = await idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
+                work,
+            );
             expect(first).toEqual({ status: 201, body: { id: 't-1' }, replayed: false });
             expect(second).toEqual({ status: 201, body: { id: 't-1' }, replayed: true });
             expect(work).toHaveBeenCalledTimes(1);
             // Keys are per integration key.
-            await idempotency.run({ integrationKeyId: randomUUID(), idempotencyKey: 'k-1', requestHash: hash }, work);
+            await idempotency.run(
+                { integrationKeyId: randomUUID(), idempotencyKey: 'k-1', requestHash: hash },
+                work,
+            );
             expect(work).toHaveBeenCalledTimes(2);
         });
 
@@ -149,20 +199,30 @@ describe('integration API v1 foundation', () => {
                 { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
                 async () => ({ status: 201, body: {} }),
             );
-            const other = idempotencyRequestHash('POST', '/api/integrations/v1/tasks', { title: 'y' });
+            const other = idempotencyRequestHash('POST', '/api/integrations/v1/tasks', {
+                title: 'y',
+            });
             await expect(
-                idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: other }, async () => ({ status: 201, body: {} })),
+                idempotency.run(
+                    { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: other },
+                    async () => ({ status: 201, body: {} }),
+                ),
             ).rejects.toMatchObject({ reason: 'request_mismatch' });
 
             let release!: () => void;
-            const slow = idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-2', requestHash: hash }, () =>
-                new Promise((resolve) => {
-                    release = () => resolve({ status: 201, body: { id: 'slow' } });
-                }),
+            const slow = idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-2', requestHash: hash },
+                () =>
+                    new Promise((resolve) => {
+                        release = () => resolve({ status: 201, body: { id: 'slow' } });
+                    }),
             );
             await new Promise((resolve) => setTimeout(resolve, 20));
             await expect(
-                idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-2', requestHash: hash }, async () => ({ status: 201, body: {} })),
+                idempotency.run(
+                    { integrationKeyId: KEY, idempotencyKey: 'k-2', requestHash: hash },
+                    async () => ({ status: 201, body: {} }),
+                ),
             ).rejects.toBeInstanceOf(IdempotencyConflictError);
             release();
             await expect(slow).resolves.toMatchObject({ body: { id: 'slow' } });
@@ -170,12 +230,21 @@ describe('integration API v1 foundation', () => {
 
         it('releases the key when the work throws or answers 5xx, so a retry can succeed', async () => {
             await expect(
-                idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash }, async () => {
-                    throw new Error('boom');
-                }),
+                idempotency.run(
+                    { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
+                    async () => {
+                        throw new Error('boom');
+                    },
+                ),
             ).rejects.toThrow('boom');
-            await idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash }, async () => ({ status: 503, body: {} }));
-            const ok = await idempotency.run({ integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash }, async () => ({ status: 201, body: { id: 'ok' } }));
+            await idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
+                async () => ({ status: 503, body: {} }),
+            );
+            const ok = await idempotency.run(
+                { integrationKeyId: KEY, idempotencyKey: 'k-1', requestHash: hash },
+                async () => ({ status: 201, body: { id: 'ok' } }),
+            );
             expect(ok).toEqual({ status: 201, body: { id: 'ok' }, replayed: false });
         });
 
@@ -214,7 +283,13 @@ describe('integration API v1 foundation', () => {
 
         it('pages by (updatedAt, id) losslessly, ties included', async () => {
             const at = (s: number) => new Date(Date.UTC(2026, 9, 16, 5, 0, s));
-            const ids = ['00000000-0000-4000-8000-00000000000a', '00000000-0000-4000-8000-00000000000b', '00000000-0000-4000-8000-00000000000c', '00000000-0000-4000-8000-00000000000d', '00000000-0000-4000-8000-00000000000e'];
+            const ids = [
+                '00000000-0000-4000-8000-00000000000a',
+                '00000000-0000-4000-8000-00000000000b',
+                '00000000-0000-4000-8000-00000000000c',
+                '00000000-0000-4000-8000-00000000000d',
+                '00000000-0000-4000-8000-00000000000e',
+            ];
             const times = [at(1), at(2), at(2), at(2), at(3)];
             for (let i = 0; i < ids.length; i++) {
                 await dataSource.getRepository(Team).insert({
@@ -234,7 +309,10 @@ describe('integration API v1 foundation', () => {
             let pages = 0;
             do {
                 const page = await readKeysetPage(
-                    dataSource.getRepository(Team).createQueryBuilder('team').where('team.organizationId = :org', { org: ORG_A }),
+                    dataSource
+                        .getRepository(Team)
+                        .createQueryBuilder('team')
+                        .where('team.organizationId = :org', { org: ORG_A }),
                     'team',
                     { cursor, limit: 2 },
                 );

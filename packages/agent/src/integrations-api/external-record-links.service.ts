@@ -121,7 +121,11 @@ export class ExternalRecordLinksService {
     /** `GET /links?entityType=&externalId=` — this source's links in the organization. */
     list(
         scope: Pick<LinkScope, 'organizationId' | 'source'>,
-        filter: { entityType?: ExternalLinkEntityType; externalId?: string; entityId?: string } = {},
+        filter: {
+            entityType?: ExternalLinkEntityType;
+            externalId?: string;
+            entityId?: string;
+        } = {},
     ): Promise<ExternalRecordLink[]> {
         return this.repo().find({
             where: {
@@ -198,7 +202,11 @@ export class ExternalRecordLinksService {
      * Throws {@link DuplicateExternalRefError} when the external record is
      * already linked to another Ever Works record.
      */
-    async put(scope: LinkScope, target: LinkTarget, manager?: EntityManager): Promise<ExternalRecordLink> {
+    async put(
+        scope: LinkScope,
+        target: LinkTarget,
+        manager?: EntityManager,
+    ): Promise<ExternalRecordLink> {
         const repo = this.repo(manager);
         const installationKey = toInstallationKey(scope.installationId);
         const existing = await repo.findOne({
@@ -276,7 +284,11 @@ export class ExternalRecordLinksService {
             },
         });
         if (byExternal) {
-            return new DuplicateExternalRefError('external', byExternal.entityId, byExternal.externalId);
+            return new DuplicateExternalRefError(
+                'external',
+                byExternal.entityId,
+                byExternal.externalId,
+            );
         }
         const byEntity = await repo.findOne({
             where: {
