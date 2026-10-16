@@ -362,6 +362,11 @@ export class EmailController {
                 bodyText: message.bodyText,
                 bodyHtml: message.bodyHtml,
                 receivedAt: message.receivedAt,
+                // EW-P4-3 — RFC threading ids (bare), for the dispatcher to
+                // join the thread a reply belongs to.
+                messageIdHeader: message.messageIdHeader,
+                inReplyTo: message.inReplyTo,
+                references: message.references ? [...message.references] : undefined,
             });
         }
 

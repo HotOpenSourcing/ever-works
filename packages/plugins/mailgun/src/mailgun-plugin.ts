@@ -12,7 +12,7 @@ import type {
 	PluginCategory,
 	JsonSchema
 } from '@ever-works/plugin';
-import { PLUGIN_CAPABILITIES } from '@ever-works/plugin';
+import { PLUGIN_CAPABILITIES, normalizeMessageId, parseMessageIdList } from '@ever-works/plugin';
 
 function resolveApiKey(options: EmailOptions): string {
 	const fromSettings = options.settings?.apiKey;
@@ -183,6 +183,8 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 		// Mailgun custom variables (`v:<name>`) carry our attribution metadata.
 		const customVars: Record<string, string> = {};
 		for (const [k, v] of Object.entries(input.metadata ?? {})) customVars[`v:${k}`] = v;
+		// EW-P4-3 — RFC threading headers travel as `h:<Name>` parameters.
+		for (const [k, v] of Object.entries(input.headers ?? {})) customVars[`h:${k}`] = v;
 
 		let id: string;
 		try {
@@ -292,6 +294,39 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 		const recipient = str('recipient') ?? str('To') ?? '';
 		const messageId = (str('Message-Id') ?? str('message-id') ?? `mailgun-${Date.now()}`).replace(/^<|>$/g, '');
 		const tsSeconds = Number(str('timestamp'));
+		// EW-P4-3 — RFC threading headers. A Mailgun route forwards each
+		// header as a field of its own name, and all of them in
+		// `message-headers` (a JSON list of [name, value] pairs).
+		const header = (name: string): string | undefined => {
+			for (const [key, value] of Object.entries(body)) {
+				if (key.toLowerCase() === name && typeof value === 'string') return value;
+			}
+			const raw = body['message-headers'];
+			let pairs: unknown = raw;
+			if (typeof raw === 'string') {
+				try {
+					pairs = JSON.parse(raw);
+				} catch {
+					pairs = null;
+				}
+			}
+			if (Array.isArray(pairs)) {
+				for (const pair of pairs) {
+					if (
+						Array.isArray(pair) &&
+						typeof pair[0] === 'string' &&
+						typeof pair[1] === 'string' &&
+						pair[0].toLowerCase() === name
+					) {
+						return pair[1];
+					}
+				}
+			}
+			return undefined;
+		};
+		const messageIdHeader = normalizeMessageId(header('message-id'));
+		const inReplyTo = parseMessageIdList(header('in-reply-to'))[0];
+		const references = parseMessageIdList(header('references'));
 		return {
 			provider: this.id,
 			providerMessageId: messageId,
@@ -305,7 +340,10 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 			metadata: {
 				recipient,
 				signatureVerified: Boolean(resolveSigningKey(_options))
-			}
+			},
+			...(messageIdHeader ? { messageIdHeader } : {}),
+			...(inReplyTo ? { inReplyTo } : {}),
+			...(references.length > 0 ? { references } : {})
 		};
 	}
 }
