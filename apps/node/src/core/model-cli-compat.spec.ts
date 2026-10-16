@@ -41,6 +41,9 @@ Options:
   --strict-mcp-config               Only use MCP servers from --mcp-config
   --allowedTools, --allowed-tools <tools...>  Comma or space-separated list of tool names to allow
   --dangerously-skip-permissions    Bypass all permission checks
+  --verbose                         Override verbose mode setting from config
+  -r, --resume [value]              Resume a conversation by session ID
+  --fork-session                    When resuming, create a new session ID instead of reusing the original
   -h, --help                        Display help for command
 `;
 
@@ -122,6 +125,18 @@ describe('judgeModelCliHelp', () => {
 		expect(isModelCliCompatible(compat)).toBe(false);
 		expect(compat.missingRequiredFlags).toEqual(['--strict-mcp-config']);
 		expect(compat.missingConditionalFlags).toEqual([]);
+	});
+
+	it('names the stream / session-continuity flags a build lacks as CONDITIONAL (handover item 18)', () => {
+		// `--verbose` rides every run that records evidence (stream-json needs it);
+		// `--resume` / `--fork-session` ride only a continued session (slice AU).
+		const help = CLAUDE_HELP.split('\n')
+			.filter((line) => !line.includes('--fork-session') && !line.includes('--verbose'))
+			.join('\n');
+		const compat = judgeModelCliHelp('claude-code', '/bin/claude', '9.0.0', help);
+		expect(isModelCliCompatible(compat)).toBe(true);
+		expect(compat.missingRequiredFlags).toEqual([]);
+		expect(compat.missingConditionalFlags).toEqual(['--verbose', '--fork-session']);
 	});
 
 	it('an UNRECOGNISED help text is "could not tell", never "supports nothing"', () => {
