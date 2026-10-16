@@ -15,6 +15,8 @@ import { IntegrationTaskSetsController } from './tasks-sets.controller';
 import { IntegrationTaskCommentsController } from './task-comments.controller';
 import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
+import { IntegrationWebhooksController } from './webhooks.controller';
+import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -38,6 +40,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         AgentTeamsModule,
         // `visibility` on task writes (EW-P1-3).
         RecordVisibilityModule,
+        // Key-owned webhook subscriptions (EW-P1-5).
+        WebhooksModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -50,6 +54,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTaskCommentsController,
         IntegrationTeamsWriteController,
         IntegrationBatchController,
+        IntegrationWebhooksController,
     ],
     providers: [
         IntegrationOnlyGuard,
