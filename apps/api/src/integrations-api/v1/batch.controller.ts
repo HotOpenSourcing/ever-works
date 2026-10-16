@@ -9,7 +9,7 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -45,23 +45,37 @@ const OUTER_HEADERS = [
 const OPERATION_TIMEOUT_MS = 60_000;
 
 export class IntegrationBatchOperationDto {
+    @ApiProperty({ enum: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE'] })
     @IsIn(BATCH_METHODS)
     method!: (typeof BATCH_METHODS)[number];
 
+    @ApiProperty({ description: 'Relative to /api/integrations/v1, e.g. /tasks/<id>.' })
     @IsString()
     @MaxLength(2048)
     path!: string;
 
+    @ApiProperty({
+        required: false,
+        description:
+            'Per-operation Idempotency-Key, If-Match, X-Act-As-User. Auth and X-Scope-Slug come from the outer request.',
+    })
     @IsOptional()
     @IsObject()
     headers?: Record<string, string>;
 
+    @ApiProperty({ required: false })
     @IsOptional()
     body?: unknown;
 }
 
 /** `Batch` (contract v1 requests.schema.json). */
 export class IntegrationBatchDto {
+    @ApiProperty({
+        type: () => IntegrationBatchOperationDto,
+        isArray: true,
+        minItems: 1,
+        maxItems: 100,
+    })
     @IsArray()
     @ArrayMinSize(1)
     @ArrayMaxSize(BATCH_MAX_OPERATIONS)

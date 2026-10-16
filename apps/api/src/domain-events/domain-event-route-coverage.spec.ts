@@ -35,6 +35,12 @@ const CONTROLLER_FILES: readonly string[] = [
     'inbox/inbox.controller.ts',
     'escalations/escalations.controller.ts',
     'agent-approvals/agent-approvals.controller.ts',
+    // Knowledge Base (EW-P3-2): documents, the organization library and its folders.
+    'works/kb.controller.ts',
+    'works/org-kb.controller.ts',
+    'knowledge-library/knowledge-library.controller.ts',
+    'memory-files/memory-files.controller.ts',
+    'works/org-memory.controller.ts',
     // Integration API v1 (EW-P1-4) — writes delegate to the same services.
     'integrations-api/v1/tasks-write.controller.ts',
     'integrations-api/v1/tasks-sets.controller.ts',
@@ -43,6 +49,7 @@ const CONTROLLER_FILES: readonly string[] = [
     // P2 resources (EW-P2-1 ideas).
     'integrations-api/v1/ideas.controller.ts',
     'integrations-api/v1/inbox.controller.ts',
+    'integrations-api/v1/kb.controller.ts',
     'integrations-api/v1/email.controller.ts',
 ];
 

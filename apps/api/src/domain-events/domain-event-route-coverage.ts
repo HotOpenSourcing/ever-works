@@ -174,6 +174,69 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'DELETE /api/works/:workId/members/:memberId': { events: ['work.member.removed'] },
     'POST /api/works/:workId/members/leave': { events: ['work.member.removed'] },
 
+    // ── Knowledge Base (`api/works/:id/kb`, `api/organizations/:orgId/kb`,
+    //    `api/knowledge`, `api/memory`, EW-P3-2) ──────────────────────────────
+    'POST /api/works/:id/kb/documents': { events: ['kb.document.created'] },
+    'PATCH /api/works/:id/kb/documents/:docId': { events: ['kb.document.updated'] },
+    'DELETE /api/works/:id/kb/documents/:docId': { events: ['kb.document.deleted'] },
+    'POST /api/works/:id/kb/documents/:docId/lock': { events: ['kb.document.updated'] },
+    'POST /api/works/:id/kb/documents/:docId/unlock': { events: ['kb.document.updated'] },
+    'POST /api/works/:id/kb/documents/:docId/restore': { events: ['kb.document.updated'] },
+    // Accepting a proposed decision is also the review; a supersede updates the survivor.
+    'POST /api/works/:id/kb/documents/:docId/decision-status': {
+        events: ['kb.document.updated', 'kb.document.review_changed'],
+    },
+    'POST /api/works/:id/kb/documents/:docId/accept': { events: ['kb.document.review_changed'] },
+    'POST /api/works/:id/kb/documents/:docId/archive': { events: ['kb.document.archived'] },
+    'POST /api/works/:id/kb/documents/:docId/unarchive': { events: ['kb.document.unarchived'] },
+    'POST /api/works/:id/kb/tags': {
+        exempt: 'The tag catalog of a Work; a document records its own tags when it is edited.',
+    },
+    'PATCH /api/works/:id/kb/tags/:tagId': {
+        exempt: 'The tag catalog of a Work; a document records its own tags when it is edited.',
+    },
+    'DELETE /api/works/:id/kb/tags/:tagId': {
+        exempt: 'The tag catalog of a Work; a document records its own tags when it is edited.',
+    },
+    // The document an upload's extraction files (KnowledgeBaseService.createDocument).
+    'POST /api/works/:id/kb/uploads': { events: ['kb.document.created'] },
+    'POST /api/works/:id/kb/uploads/:uploadId/retry-extraction': {
+        events: ['kb.document.created'],
+    },
+    'POST /api/organizations/:orgId/kb/documents': { events: ['kb.document.created'] },
+    'PATCH /api/knowledge/documents/file': { events: ['kb.document.moved'] },
+    'POST /api/knowledge/documents/:docId/archive': { events: ['kb.document.archived'] },
+    'POST /api/knowledge/documents/:docId/unarchive': { events: ['kb.document.unarchived'] },
+    // Organization library folders record `kb.folder.*`; a person's own Memory folders nothing.
+    'POST /api/memory/files/folders': { events: ['kb.folder.created'] },
+    'PATCH /api/memory/files/folders/:id': { events: ['kb.folder.updated'] },
+    // + `kb.document.moved` for every document the delete unfiles.
+    'DELETE /api/memory/files/folders/:id': {
+        events: ['kb.folder.deleted', 'kb.document.moved'],
+    },
+    'POST /api/memory/files/upload': {
+        exempt: "A person's own Memory file (user_uploads), not a Knowledge Base document.",
+    },
+    'POST /api/memory/files/folders/:id/sync': {
+        exempt: 'Configures a GitHub sync target of a folder; nothing the KB DTO carries changes.',
+    },
+    'PATCH /api/memory/files/move': {
+        exempt: "Moves a person's own Memory files between folders, not Knowledge Base documents.",
+    },
+    'DELETE /api/memory/files/:id': {
+        exempt: "Deletes a person's own Memory file, not a Knowledge Base document.",
+    },
+    // The synthesis documents a consolidation run files (createOrgDocument).
+    'POST /api/memory/consolidate': { events: ['kb.document.created'] },
+    // The organization document an upload's extraction files (createOrgDocument).
+    'POST /api/memory/uploads': { events: ['kb.document.created'] },
+    'POST /api/memory/uploads/from-attachments': { events: ['kb.document.created'] },
+    'PUT /api/memory/consolidation/settings': {
+        exempt: 'The consolidation schedule of an organization; no document changes.',
+    },
+    'POST /api/memory/review/:docId/accept': { events: ['kb.document.review_changed'] },
+    'POST /api/memory/review/:docId/reject': { events: ['kb.document.archived'] },
+
     // ── Ideas (`api/me/work-proposals`, EW-P2-1) ─────────────────────────────
     // Recorded by `WorkProposalRepository`, the write path every Idea change takes.
     'POST /api/me/work-proposals': { events: ['idea.created'] },
@@ -343,6 +406,26 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     },
     'POST /api/integrations/v1/ideas/:id/dismiss': { events: ['idea.status_changed'] },
     'POST /api/integrations/v1/ideas/:id/restore': { events: ['idea.status_changed'] },
+    // Integration API v1 Knowledge Base (EW-P3-2): the same services as the app's routes.
+    // + `kb.document.moved` when the create files the document into a folder.
+    'POST /api/integrations/v1/kb/documents': {
+        events: ['kb.document.created', 'kb.document.moved'],
+    },
+    'PATCH /api/integrations/v1/kb/documents/:id': { events: ['kb.document.updated'] },
+    'DELETE /api/integrations/v1/kb/documents/:id': { events: ['kb.document.deleted'] },
+    'POST /api/integrations/v1/kb/documents/:id/accept': {
+        events: ['kb.document.review_changed'],
+    },
+    'POST /api/integrations/v1/kb/documents/:id/archive': { events: ['kb.document.archived'] },
+    'POST /api/integrations/v1/kb/documents/:id/unarchive': {
+        events: ['kb.document.unarchived'],
+    },
+    'POST /api/integrations/v1/kb/documents/:id/move': { events: ['kb.document.moved'] },
+    'POST /api/integrations/v1/kb/folders': { events: ['kb.folder.created'] },
+    'PATCH /api/integrations/v1/kb/folders/:id': { events: ['kb.folder.updated'] },
+    'DELETE /api/integrations/v1/kb/folders/:id': {
+        events: ['kb.folder.deleted', 'kb.document.moved'],
+    },
 };
 
 /** The routes a list of events covers (for messages). */
