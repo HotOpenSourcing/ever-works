@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.8`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2), Missions (EW-P2-5) and organization create (EW-P2-6) served
+**Status**: `Draft` — contract `v1-draft.13`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2), Missions (EW-P2-5) and organization create (EW-P2-6), P3 inbox, P4 email
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -200,9 +200,9 @@ visibility is derived (`team` when it sits on a team).
 | Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works`                                                                                                                                         | `missions:*`   | P2                                                                                                                      |
 | Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}` (§6.4)                                                                            | `goals:*`      | [goal](./contract/schemas/resources/goal.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateGoal` |
 | Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea` |
-| Inbox (P3)    | `GET /inbox/items`, `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` (act-as = the recipient; returns `{routed, restart}`), `PATCH /inbox/items/:id/state {unread?, archived?}`                                                                                                                | `inbox:*`      | P3                                                                                                                      |
+| Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
 | KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST`/`PATCH`/`DELETE /kb/folders`                                                                                                                                              | `kb:*`         | P3                                                                                                                      |
-| Email (P4)    | `GET /email/messages?updatedSince=&agentId=`, `POST /email/inbound`                                                                                                                                                                                                                                                    | `email:*`      | P4                                                                                                                      |
+| Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                           |
 
 Request bodies for the P1 writes: [`contract/schemas/requests.schema.json`](./contract/schemas/requests.schema.json).
 PUT-set routes take an object (`{members:[…]}`, `{resources:[…]}`, `{assignees:[…]}`, `{userIds:[…]}`,
@@ -297,21 +297,25 @@ routes call the same `MissionsService` (and `GoalsService` for the Goal links) a
 - **Reads:** every `team` / `organization` Mission of the pinned organization, in every status. The
   [mission DTO](./contract/schemas/resources/mission.schema.json) embeds `goals [{goalId, isPrimary}]` (the primary
   first), `works [{workId, relation}]`, and the EW-only `type`, `schedule`, `autoBuildWorks` (read-only).
-- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, teamIds?,
-visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always `status='paused'`,
-  `type='one-shot'`, no schedule, no auto-build (D9: only a person resumes a Mission in Ever Works, which is what
-  starts its ticks). A title is required (no generated title). `teamIds` + D11 apply in the create's transaction.
+- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, type?,
+schedule?, teamIds?, visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always
+  `status='paused'` with no auto-build (D9: only a person resumes a Mission in Ever Works, which is what starts its
+  ticks); `type` defaults to `one-shot`, a `scheduled` one needs `schedule`. A title is required (no generated title).
+  `teamIds` + D11 apply in the create's transaction.
 - **`PATCH /missions/:id`** ([`UpdateMission`](./contract/schemas/requests.schema.json)): title, description,
   `teamIds`, `visibility`, and `status`: `paused` pauses an active Mission, `completed` (+ `outcome`) completes an
-  active or paused one. `status: active` answers `422 domain_rule`; the status already reached is a no-op; any other
-  move (e.g. from `failed`) is `422`. `If-Match` optional, re-checked at the version bump.
-- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary, no repeats) and **`PUT
-/missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change records
-  `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
-  `mission.work.linked` / `unlinked`. Linked Goals and Works must be the caller's (404). Both answer the Mission DTO;
+  active or paused one, `failed` fails an active or paused one (its ticks stop; a person can resume it). `status:
+active` answers `422 domain_rule`; the status already reached is a no-op; any other move is `422`. `If-Match`
+  optional, re-checked at the version bump.
+- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary — else `422 domain_rule` —,
+  no repeats) and **`PUT /missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change
+  records `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
+  `mission.work.linked` / `unlinked`. Every newly linked Goal or Work must be the caller's (404, checked before the
+  first change); a link to a Goal outside the caller's scope is neither shown nor touched. Both answer the Mission DTO;
   `If-Match` is a pre-check (the sets are not one transaction, T17a).
 - **`DELETE /missions/:id`**: the `mission.deleted` tombstone; its Ideas and clones are kept (their back-links are
-  cleared).
+  cleared), and in the same transaction each linked Goal records `goal.updated`, each Idea `idea.updated` and each
+  clone `mission.updated`.
 - **Never here:** resume, run-now, clone (D9).
 - **Events:** `mission.created` (also for a clone, with `idea.created` for each Idea it copies), `mission.updated`
   (fields, Teams), `mission.status_changed` (`previous.status`; also a fatal tick's `failed`), `mission.deleted`,
@@ -324,16 +328,21 @@ visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-dupli
 - **`POST /organizations`** ([`CreateOrganization`](./contract/schemas/requests.schema.json) `{displayName, slug?,
 legalName?, countryCode?}`, scope `org:write` — opt-in, not in the Ever Gauzy preset; `Idempotency-Key` required; no
   `X-Scope-Slug`): creates an Organization in the key's Tenant, owned by the Tenant owner like every Organization of
-  the Tenant, and **pins it to the calling key** (at most 50 pins, `400` beyond). A key created by an Organization
-  admin also makes its creator an `admin` of the new Organization. Answers `201` with the organization DTO and records
+  the Tenant, and **pins it to the calling key** (at most 50 pins: a full key answers `400` before anything is
+  written; concurrent creates through one key keep every pin). A key created by an Organization admin also makes its
+  creator an `admin` of the new Organization, and creates only while that creator still administers an Organization
+  of the Tenant (`422 domain_rule`, `details.reason: 'creator_not_admin'`). Answers `201` with the organization DTO and records
   `organization.created` (new in the catalog; also recorded when a person creates an Organization in the app).
 - **Member roles:** `owner` (the Tenant owner, a member of every Organization by construction), `admin`, `member`
   (every existing roster row). Only the Tenant owner promotes or demotes (`PATCH
 /api/organizations/:orgId/members/:userId {role: admin|member}` in the app, `organization.member.updated`); invitations
   always create `member`s. Today `admin` grants exactly one thing: **creating integration keys** pinned to the
   Organizations the admin administers. Such a key acts as its creator, and its usable pins are re-read on every
-  request, so a demoted or removed admin's key loses those pins at once (`403 org_not_pinned`). The Tenant owner sees
-  and may revoke every key of the Tenant; an admin sees their own.
+  request and before every webhook send, so a demoted or removed admin's key loses those pins at once (`403
+  org_not_pinned`; with no pin left the key no longer authenticates, `401`, and its webhooks pause). Its
+  `X-Act-As-User` may name only its creator or a plain `member` of the pinned Organization — never the Tenant owner or
+  another admin (`403 act_as_forbidden`). The Tenant owner sees and may revoke every key of the Tenant; an admin sees
+  their own.
 - **`displayName`:** members now carry the optional `users.displayName` (null when the person set none; fall back to
   `username`). Profile fields are copied once by the consumer (plan 01 §3): changing them records no event.
 
@@ -364,6 +373,41 @@ webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.
 
+## 9. Inbox (P3, EW-P3-1) — `v1-draft.4`, CR-4
+
+An inbox item is **one human's message** (its recipient): a question an agent run asked, an approval request, an
+escalation mirror or a system notice ([`inbox-item`](./contract/schemas/resources/inbox-item.schema.json)). It is not
+an organization resource, so it has no `visibility`, owner, teams or `externalLinks`; the consumer keys it by its Ever
+Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
+
+- **Reads** (`inbox:read`): `GET /inbox/items` lists every recipient's messages in the pinned organization, ordered by
+  `(updatedAt, id)` like every v1 list. Filters: `recipientUserId`, `status` and `kind` (comma-separated or repeated,
+  closed vocabularies; anything else is `400`), `updatedSince`, `cursor`, `limit`. Without `status`, archived messages
+  are left out unless `includeArchived=true`. A message outside any organization (personal scope) is never served, and
+  one of another organization answers `404`. `GET /inbox/items/:id` carries `ETag: "<version>"`.
+- **Writes act as the recipient only** (`inbox:write`): `X-Act-As-User` must name the item's `recipientUserId`, or the
+  write answers `403 act_as_forbidden` (`details.reason: not_the_recipient`). The integration key's own identity, or
+  another member, never answers somebody's message.
+- `POST /inbox/items/:id/reply` [`InboxReply`](./contract/schemas/requests.schema.json) goes through the app's own Inbox
+  reply, so it does exactly what the recipient answering in Ever Works does: a question steers the live run or resumes
+  the parked one, an approval decides its proposal, an escalation resolves. It answers
+  [`{item, routed, restart, runId?}`](./contract/schemas/resources/inbox-reply-result.schema.json). An item already
+  answered or archived answers `409 conflict`; a lost race answers `200` with `routed: "already-decided"` and the
+  winning answer. `Idempotency-Key` is optional (a reply creates nothing); with one, a retry replays the first answer.
+  The resumed run is the recipient's own decision on their own run, not autonomous spend the integration starts (D9).
+- `PATCH /inbox/items/:id/state` [`InboxStateChange`](./contract/schemas/requests.schema.json) `{unread?, archived?}`
+  (at least one): read / unread, archive / restore (an answered item comes back `answered`, else `open`). Archiving an
+  OPEN fleet question releases the run parked on it, as in the app. `If-Match` is optional (`412`); it is checked
+  against the version read at the start of the request. Answers the item DTO and its `ETag`.
+- **Who receives the events.** `inbox.item.*` are recipient-scoped (one person's messages): the feed serves them only
+  to a key that holds `inbox:read` on top of `events:read`, and webhooks v2 deliver them only to a subscription owned
+  by such a key, never to a user-owned subscription (another member would otherwise receive somebody else's messages).
+  The outbox records them `visibility: recipient`. The same rule will cover `email.*` with `email:read` (P4).
+- **Events** (`inbox.item.*`, `data` = the same DTO): `created` from every producer, `answered` once per answer whichever
+  door it came through (Inbox reply, escalation resolve, approval decide), `state_changed` for a real read / archive
+  flip (also when a reply whose routing failed leaves the item read), `deleted` with the last snapshot. `webUrl` is the
+  Inbox deep link `/inbox?id=<id>`.
+
 ## 10. Changes in `v1-draft.5` (CR-5, EW-P2-1 Ideas)
 
 Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
@@ -373,27 +417,86 @@ served link entity type; dismiss / restore are idempotent and answer `422 domain
 as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
 are recorded on the same board.
 
-## 11. Changes in `v1-draft.6` (CR-6, EW-P2-2 Goals)
+## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — `v1-draft.10`, CR-11
 
-Additive. Recorded as CR-6 on the plan's STATUS board: the Goals routes of §6.4 are served; the
+An agent email ([`email-message`](./contract/schemas/resources/email-message.schema.json)) is mail an Ever Works agent
+received (`inbound`) or sent / drafted (`outbound`), in its owner's mailbox. Like the Inbox it is **recipient-scoped**:
+
+- `GET` needs `email:read`.
+- The `email.message.*` events are served by the feed only to a key that also holds `email:read`.
+- Webhooks v2 deliver them only to a subscription owned by such a key, never to a user-owned subscription.
+
+Bcc, provider metadata, approval bookkeeping and failure reasons are never exposed.
+
+**Reads.** `GET /email/messages` lists the pinned organization's agent mail.
+
+- Filters: `agentId`, `direction=inbound|outbound`, `status` (the lifecycle vocabulary).
+- Supports `updatedSince` and keyset paging by `(updatedAt, id)`.
+- `updatedAt` moves on every write, so status and delivery changes are caught.
+- `GET /email/messages/:id` answers with an `ETag`.
+
+**`POST /email/inbound`** ([`InboundEmail`](./contract/schemas/requests.schema.json); `email:write`, an opt-in scope
+outside the Ever Gauzy preset) pushes an email a Gauzy mailbox received to an Ever Works agent of the pinned
+organization:
+
+1. The message is stored as `email_messages(direction=inbound)` on the **agent's own inbound address**: its first
+   inbound assignment, the same choice the provider path makes.
+2. It goes through the **same dispatcher as provider mail**:
+    - the assignment's mode decides between task-spawn and conversation;
+    - `In-Reply-To` / `References` join an existing thread.
+3. It answers [`{message, dispatch}`](./contract/schemas/resources/email-inbound-result.schema.json) with `201`.
+
+Edge cases:
+
+- **No inbound assignment.** An agent without an active inbound assignment answers `422 domain_rule`. Its owner opts in
+  by giving it one; that is also what starts any agent work on the mail.
+- **Address of another organization.** The stored message takes its address's organization, so an inbound address of
+  another organization, or of none, answers `422 domain_rule`: its mail would be invisible to the key.
+- **Repeated push.** `Idempotency-Key` is required. A push repeated with the same Message-ID into the same organization
+  answers `200` with the message already delivered. The de-duplication key is per integration key **and** pinned
+  organization, so one key pushing the same mail into two organizations delivers it to each.
+- **Attachments.** They are recorded with their `url` and **never fetched**: Ever Works makes no request to a
+  caller-supplied URL.
+
+**Events** (`data` = the same DTO):
+
+| Event                          | When                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `email.message.received`       | An inbound message is stored.                                                                        |
+| `email.message.sent`           | An outbound message reaches `sent`.                                                                  |
+| `email.message.status_changed` | Any other change: a draft filed, `sending`, `failed`, `discarded`, a delivery status, the Task link. |
+
+`changedFields` names DTO fields (`to`, `text`, `messageId` …) and lists only what the write really changed; a write
+that changes nothing the DTO shows (Bcc, provider bookkeeping, metadata) records no event and keeps `version`.
+
+An event whose text + HTML exceed 262144 UTF-8 bytes carries `text: null, html: null, bodyOmitted: true`. A message
+outside any organization records none.
+
+## 12. Changes in `v1-draft.11` (CR-9, EW-P2-2 Goals)
+
+Additive. Recorded as CR-9 on the plan's STATUS board: the Goals routes of §6.4 are served; the
 [goal DTO](./contract/schemas/resources/goal.schema.json) is the `data` of every `goal.*` event (catalog rows filled);
 request bodies `CreateGoal`, `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; integrations write only the
 external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.progress_changed` is throttled to one
 per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
 read-only runtime.
 
-## 12. Changes in `v1-draft.7` (CR-7, EW-P2-5 Missions)
+## 13. Changes in `v1-draft.12` (CR-8, EW-P2-5 Missions)
 
-Additive. Recorded as CR-7 on the plan's STATUS board: the Missions routes of §6.5 are served; the
+Additive. Answers the Gauzy request CR-8 on the plan's STATUS board: the Missions routes of §6.5 are served; the
 [mission DTO](./contract/schemas/resources/mission.schema.json) is the `data` of `mission.created` / `updated` /
 `status_changed` / `deleted`, and `MissionGoalLinkEvent` / `MissionWorkLinkEvent` of the link events, which the catalog
 now marks `child: goal` / `child: work`; the Goal DTO's `missionIds` / `primaryMissionId` change records `goal.updated`;
 request bodies `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; `mission` is a served link
-entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap).
+entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap). As the request asked:
+`CreateMission` takes `type` / `schedule` (still created `paused`, so a `scheduled` Mission ticks only once a person
+resumes it), `PATCH {status: 'failed'}` fails an active or paused Mission, and a second primary Goal is
+`422 domain_rule`. A Mission delete also records what its cascade changes (`goal.updated`, `idea.updated`,
+`mission.updated`).
 
-## 13. Changes in `v1-draft.8` (CR-8, EW-P2-6 organizations and members)
+## 14. Changes in `v1-draft.13` (CR-10, EW-P2-6 organizations and members)
 
-Additive. Recorded as CR-8 on the plan's STATUS board: `POST /organizations` (`org:write`, §6.6) with the new catalog
+Additive. Recorded as CR-10 on the plan's STATUS board: `POST /organizations` (`org:write`, §6.6) with the new catalog
 type `organization.created` (`data` = the organization DTO); member `role` values `owner` / `admin` / `member`
 (`admin` may create integration keys for the Organizations it administers; such a key's usable pins follow the
 creator's current roles); member `displayName` from `users.displayName`; request body `CreateOrganization`.

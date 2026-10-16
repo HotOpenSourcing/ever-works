@@ -106,6 +106,23 @@ export class IntegrationOrganizationsWriteController {
             if (!tenant?.ownerUserId) {
                 throw domainRule('The key has no workspace to create the organization in.');
             }
+            if (principal.ownerUserId !== tenant.ownerUserId) {
+                // An admin's key creates only while its creator still administers an
+                // Organization of the Tenant (a demoted admin cannot regain the role).
+                const administered = await this.members.listAdministeredOrganizationIds(
+                    principal.ownerUserId,
+                    tenant.id,
+                );
+                if (administered.length === 0) {
+                    throw domainRule(
+                        'The creator of this key no longer administers an organization of the workspace.',
+                        { reason: 'creator_not_admin' },
+                    );
+                }
+            }
+            // Before anything is written: a key with no pin left answers 400 here rather
+            // than after an orphan Organization was created.
+            await this.keys.assertPinCapacity(principal.keyId);
             const organization = await this.organizations.createOrganization(
                 tenant.ownerUserId,
                 dto.displayName,

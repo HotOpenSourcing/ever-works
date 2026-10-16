@@ -1,6 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { matchesAnyDomainEventPattern, type DomainEventEnvelope } from '@ever-works/contracts';
+import {
+    matchesAnyDomainEventPattern,
+    RECIPIENT_EVENT_VISIBILITY,
+    recipientScopeForEventType,
+    type DomainEventEnvelope,
+} from '@ever-works/contracts';
 import { DataSource } from 'typeorm';
 import { DomainEvent } from '../entities/domain-event.entity';
 import {
@@ -21,6 +26,13 @@ export interface DomainEventFeedQuery {
     readonly types?: readonly string[];
     /** Origin tags to leave out (the caller's own writes). */
     readonly excludeOrigins?: readonly string[];
+    /**
+     * The caller's granted scopes. Events of a recipient-scoped domain (one
+     * person's messages: `inbox.*`, `email.*`) are served only when the
+     * domain's read scope is among them (`recipientScopeForEventType`); absent
+     * = none of those events.
+     */
+    readonly grantedScopes?: readonly string[];
 }
 
 export interface DomainEventFeedPage {
@@ -57,6 +69,8 @@ const MAX_SCAN = 5000;
  *  - never personal scope (`organizationId` null);
  *  - never events of aggregates that were `private` at event time, EXCEPT
  *    `*.visibility_changed` to private (id-only data);
+ *  - events of a recipient-scoped domain (`inbox.*`, `email.*`: one person's
+ *    messages) only with that domain's read scope in `grantedScopes`;
  *  - `excludeOrigins` drops the caller's own writes (loop guard);
  *  - opt-in types (`task.runtime_updated`) only when named exactly;
  *  - `after` below the retention floor → {@link DomainEventCursorExpiredError}.
@@ -99,6 +113,7 @@ export class DomainEventFeedService {
 
         const types = query.types?.filter((type) => type.length > 0) ?? [];
         const excluded = new Set(query.excludeOrigins ?? []);
+        const granted = new Set(query.grantedScopes ?? []);
         const events: DomainEventEnvelope[] = [];
         let cursor = after;
         let scanned = 0;
@@ -113,7 +128,7 @@ export class DomainEventFeedService {
             for (const row of rows) {
                 cursor = seqToBigInt(row.seq);
                 scanned += 1;
-                if (this.accepts(row, types, excluded)) {
+                if (this.accepts(row, types, excluded, granted)) {
                     events.push(toDomainEventEnvelope(row));
                     if (events.length >= limit) break;
                 }
@@ -157,8 +172,20 @@ export class DomainEventFeedService {
         row: DomainEvent,
         types: readonly string[],
         excluded: ReadonlySet<string>,
+        granted: ReadonlySet<string>,
     ): boolean {
         if (row.originTag && excluded.has(row.originTag)) return false;
+        // One person's messages (inbox, email): only with the domain's read
+        // scope, whatever the row's visibility; a `recipient` row of a domain
+        // with no such scope is never served.
+        const recipientScope = recipientScopeForEventType(row.type);
+        if (
+            recipientScope
+                ? !granted.has(recipientScope)
+                : row.visibility === RECIPIENT_EVENT_VISIBILITY
+        ) {
+            return false;
+        }
         const isPrivateNotice =
             row.type.endsWith('.visibility_changed') && row.visibility === 'private';
         if (row.visibility === 'private' && !isPrivateNotice) return false;

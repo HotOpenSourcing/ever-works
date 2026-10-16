@@ -42,6 +42,9 @@ describe('IntegrationMissionsController', () => {
         const goalService = {
             linkToMission: jest.fn().mockResolvedValue({}),
             unlinkFromMission: jest.fn().mockResolvedValue({ deleted: true }),
+            // The links whose Goal is visible in scope (PUT goals builds its diff from it).
+            listForMission: jest.fn().mockResolvedValue(goals),
+            getForUser: jest.fn(async (_user: string, goalId: string) => ({ id: goalId })),
         };
         const visibility = { setTeams: jest.fn(), setVisibility: jest.fn() };
         const links = {
@@ -182,7 +185,41 @@ describe('IntegrationMissionsController', () => {
                 undefined,
                 res(),
             ),
-        ).rejects.toMatchObject({ status: 400 });
+        ).rejects.toMatchObject({ status: 422 });
+    });
+
+    it('PUT goals 404s on a foreign Goal before it unlinks or links anything', async () => {
+        const { controller, goalService } = setup('paused', [
+            { goalId: 'goal-old', isPrimary: true },
+        ]);
+        goalService.getForUser.mockImplementation(async (_user: string, goalId: string) => {
+            if (goalId === 'goal-foreign') {
+                throw Object.assign(new Error('Goal not found'), { status: 404 });
+            }
+            return { id: goalId };
+        });
+        await expect(
+            controller.putGoals(
+                user,
+                'mission-1',
+                { goals: [{ goalId: 'goal-foreign', isPrimary: true }] },
+                undefined,
+                res(),
+            ),
+        ).rejects.toMatchObject({ status: 404 });
+        expect(goalService.unlinkFromMission).not.toHaveBeenCalled();
+        expect(goalService.linkToMission).not.toHaveBeenCalled();
+    });
+
+    it('PATCH fails an active Mission through fail()', async () => {
+        const { controller, missions } = setup('active');
+        (missions as unknown as { fail: jest.Mock }).fail = jest.fn().mockResolvedValue({});
+        await controller.update(user, 'mission-1', { status: 'failed' }, undefined, res());
+        expect((missions as unknown as { fail: jest.Mock }).fail).toHaveBeenCalledWith(
+            'owner-1',
+            'mission-1',
+            expect.anything(),
+        );
     });
 
     it('PUT works delegates the full set to setWorks', async () => {

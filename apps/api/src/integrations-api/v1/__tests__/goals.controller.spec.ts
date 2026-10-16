@@ -175,6 +175,47 @@ describe('IntegrationGoalsController', () => {
         ]);
     });
 
+    it('PUT criteria refuses a criterion that inherits the Goal provider source (D9)', async () => {
+        const { controller, goals } = setup();
+        goals.getForUser.mockResolvedValue({
+            id: 'goal-1',
+            metricSource: { pluginId: 'stripe', metricId: 'income' },
+        });
+        await expect(
+            controller.putCriteria(
+                user,
+                'goal-1',
+                {
+                    criteria: [
+                        { id: 'kr', name: 'Revenue', weight: 1, target: 10, direction: 'gte' },
+                    ],
+                },
+                undefined,
+                res(),
+            ),
+        ).rejects.toMatchObject({ status: 422 });
+        expect(goals.update).not.toHaveBeenCalled();
+    });
+
+    it('PATCH checks every Team before it writes anything', async () => {
+        const { controller, goals, visibility, resources } = setup();
+        resources.get.mockImplementation(async (kind: string, _org: string, id: string) => {
+            if (kind === 'team') throw Object.assign(new Error('Not found'), { status: 404 });
+            return { dto: { id, version: 1 } } as never;
+        });
+        await expect(
+            controller.update(
+                user,
+                'goal-1',
+                { title: 'Renamed', teamIds: ['foreign-team'] } as never,
+                undefined,
+                res(),
+            ),
+        ).rejects.toMatchObject({ status: 404 });
+        expect(goals.update).not.toHaveBeenCalled();
+        expect(visibility.setTeams).not.toHaveBeenCalled();
+    });
+
     it('a sample is recorded through recordExternalSample and answers the Goal', async () => {
         const { controller, goals } = setup();
         const response = res();

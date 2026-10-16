@@ -34,12 +34,16 @@ describe('IntegrationOrganizationsWriteController', () => {
         const organizations = {
             createOrganization: jest.fn().mockResolvedValue({ id: 'org-new' }),
         };
-        const keys = { addPin: jest.fn().mockResolvedValue(['org-a', 'org-new']) };
+        const keys = {
+            addPin: jest.fn().mockResolvedValue(['org-a', 'org-new']),
+            assertPinCapacity: jest.fn().mockResolvedValue(undefined),
+        };
         const tenants = {
             findById: jest.fn().mockResolvedValue({ id: 'tenant-1', ownerUserId: 'owner-1' }),
         };
         const members = {
             findByOrgAndUser: jest.fn().mockResolvedValue(null),
+            listAdministeredOrganizationIds: jest.fn().mockResolvedValue(['org-a']),
             create: jest.fn(async (row: Record<string, unknown>) => ({ ...row, id: 'm-1' })),
         };
         const idempotency = {
@@ -101,5 +105,29 @@ describe('IntegrationOrganizationsWriteController', () => {
                 role: 'admin',
             }),
         );
+    });
+
+    it('writes nothing when the key has no pin left (400 before the create)', async () => {
+        const { controller, organizations, keys, members } = setup();
+        keys.assertPinCapacity.mockRejectedValue(
+            Object.assign(new Error('A key may be pinned to at most 50 organizations'), {
+                status: 400,
+            }),
+        );
+        await expect(
+            controller.create(user('owner-1'), { displayName: 'Acme EU' }, req(), res()),
+        ).rejects.toMatchObject({ status: 400 });
+        expect(organizations.createOrganization).not.toHaveBeenCalled();
+        expect(members.create).not.toHaveBeenCalled();
+        expect(keys.addPin).not.toHaveBeenCalled();
+    });
+
+    it("a demoted admin's key cannot create an Organization (and so regain the role)", async () => {
+        const { controller, organizations, members } = setup();
+        members.listAdministeredOrganizationIds.mockResolvedValue([]);
+        await expect(
+            controller.create(user('admin-1'), { displayName: 'Acme EU' }, req(), res()),
+        ).rejects.toMatchObject({ status: 422 });
+        expect(organizations.createOrganization).not.toHaveBeenCalled();
     });
 });

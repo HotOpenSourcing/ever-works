@@ -276,6 +276,51 @@ describe('mission recording points', () => {
         expectValid(deleted!);
     });
 
+    it('delete also records goal.updated / idea.updated for the records its cascade changes', async () => {
+        const mission = await external();
+        const goal = await goals.createExternal(
+            OWNER,
+            {
+                title: 'Grow',
+                metricSource: { pluginId: 'external', metricId: 'value' },
+                comparator: 'gte',
+                targetValue: 10,
+                unit: 'deals',
+                window: 'point',
+            },
+            scope,
+        );
+        await goals.linkToMission(OWNER, mission.id, goal.id, true, scope);
+        const idea = await dataSource.getRepository(WorkProposal).save(
+            dataSource.getRepository(WorkProposal).create({
+                userId: OWNER,
+                tenantId: TENANT,
+                organizationId: ORG_A,
+                missionId: mission.id,
+                title: 'Self-serve onboarding',
+                description: 'An Idea of the deleted Mission.',
+                slugSuggestion: 'onboarding',
+                suggestedCategories: [],
+                suggestedFields: [],
+                recommendedPlugins: [],
+                reasoning: 'test',
+                source: WorkProposalSource.MISSION,
+                status: WorkProposalStatus.PENDING,
+            }),
+        );
+        await resetDomainEventsTables(dataSource);
+        await missions.delete(OWNER, mission.id, scope);
+        // The helper's SQLite runs with foreign keys OFF, so only the recording is pinned
+        // here (the cascade itself is the migrations' ON DELETE rules).
+        const recorded = await events();
+        expect(recorded.map((event) => [event.type, event.aggregateId])).toEqual([
+            ['mission.deleted', mission.id],
+            ['goal.updated', goal.id],
+            ['idea.updated', idea.id],
+        ]);
+        for (const event of recorded) expectValid(event);
+    });
+
     it('a clone records mission.created and idea.created for every Idea it copies', async () => {
         const source = await external();
         await dataSource.getRepository(WorkProposal).save(

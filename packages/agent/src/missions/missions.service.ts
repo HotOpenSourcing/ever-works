@@ -14,7 +14,7 @@ import {
     DomainEventPublisher,
     recordAfterWrite,
 } from '../domain-events/domain-event-publisher.service';
-import { MissionWork } from '../entities/mission-work.entity';
+import { withoutAggregateVersion } from '../domain-events/domain-event-context';
 import {
     Mission,
     MissionOutcome,
@@ -25,6 +25,8 @@ import {
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
 import { MissionAttachment } from '../entities/mission-attachment.entity';
+import { MissionGoal } from '../entities/mission-goal.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
 import { UserUpload } from '../entities/user-upload.entity';
 import { MissionAttachmentRepository } from '../database/repositories/attachment.repositories';
 import {
@@ -420,7 +422,8 @@ export class MissionsService {
      * EW-P2-5 — create a Mission for an integration (contract v1 B.6 `POST /missions`,
      * plan D3b: a Gauzy Strategic Initiative). Always `paused` (D9: only a person
      * resumes a Mission in Ever Works, which is what starts its ticks), never
-     * auto-building Works, no schedule or guardrails (EW-only settings), and a title is
+     * auto-building Works, no guardrails (an EW-only setting; a `scheduled` Mission keeps
+     * its cron but ticks only once resumed), and a title is
      * required (no AI titler call). `teamIds` and D11 apply in the create's
      * transaction, with `mission.created`.
      */
@@ -429,6 +432,8 @@ export class MissionsService {
         input: {
             title: string;
             description: string;
+            type?: MissionType.ONE_SHOT | MissionType.SCHEDULED | 'one-shot' | 'scheduled';
+            schedule?: string | null;
             teamIds?: string[];
             visibility?: 'team' | 'organization';
             createdBy?: { type: 'user' | 'agent' | 'integration'; id: string };
@@ -448,8 +453,8 @@ export class MissionsService {
             {
                 title: input.title,
                 description: input.description,
-                type: MissionType.ONE_SHOT,
-                schedule: null,
+                type: input.type === 'scheduled' ? MissionType.SCHEDULED : MissionType.ONE_SHOT,
+                schedule: input.type === 'scheduled' ? (input.schedule ?? null) : null,
                 autoBuildWorks: false,
                 status: MissionStatus.PAUSED,
                 teamIds: input.teamIds,
@@ -474,12 +479,29 @@ export class MissionsService {
         await this.findOrThrow(userId, missionId, scope);
         const wanted = new Map(links.map((link) => [`${link.workId}:${link.relation}`, link]));
         const current = await this.listWorks(userId, missionId, scope);
+        const present = new Set(current.map((row) => `${row.workId}:${row.relation}`));
+        // Every new Work must be the caller's (404) BEFORE the first detach, so a foreign
+        // Work never leaves a half-replaced set behind.
+        if (this.worksRepo) {
+            for (const [key, link] of wanted) {
+                if (present.has(key)) continue;
+                const work = await this.worksRepo.findOne({
+                    where: scope
+                        ? ownershipWhere<Work>(userId, scope).map((branch) => ({
+                              ...branch,
+                              id: link.workId,
+                          }))
+                        : { id: link.workId, userId },
+                    select: { id: true },
+                });
+                if (!work) throw new NotFoundException(`Work not found`);
+            }
+        }
         for (const row of current) {
             if (!wanted.has(`${row.workId}:${row.relation}`)) {
                 await this.detachWork(userId, missionId, row.workId, row.relation, scope);
             }
         }
-        const present = new Set(current.map((row) => `${row.workId}:${row.relation}`));
         for (const [key, link] of wanted) {
             if (present.has(key)) continue;
             await this.attachWork(userId, missionId, link.workId, link.relation, scope);
@@ -563,6 +585,23 @@ export class MissionsService {
         return dto;
     }
 
+    /**
+     * EW-P2-5 — ACTIVE | PAUSED → FAILED for an integration (contract v1 `PATCH
+     * /missions/:id {status: 'failed'}`, Gauzy CR-8): the same stop a fatal tick makes.
+     * Revivable: `resume` accepts FAILED.
+     */
+    async fail(userId: string, missionId: string, scope?: OwnershipScope): Promise<MissionDto> {
+        return this.transition(
+            userId,
+            missionId,
+            COMPLETABLE_STATUSES,
+            MissionStatus.FAILED,
+            'fail',
+            undefined,
+            scope,
+        );
+    }
+
     async resume(userId: string, missionId: string, scope?: OwnershipScope): Promise<MissionDto> {
         const dto = await this.transition(
             userId,
@@ -642,9 +681,45 @@ export class MissionsService {
             // `mission.deleted` carries the last snapshot (version claimed first, under the
             // row lock) in the delete's own transaction.
             await publisher.transaction(async (manager) => {
+                // The delete cascades: its Goal links go (ON DELETE CASCADE) and its Ideas'
+                // `missionId` / clones' `sourceMissionId` are cleared (SET NULL). Read them
+                // first so each changed record also records its update (no stale links).
+                const goalIds = (
+                    await manager.getRepository(MissionGoal).find({
+                        where: { missionId },
+                        select: { goalId: true },
+                    })
+                ).map((row) => row.goalId);
+                const ideaIds = (
+                    await manager.getRepository(WorkProposal).find({
+                        where: { missionId },
+                        select: { id: true },
+                    })
+                ).map((row) => row.id);
+                const cloneIds = (
+                    await manager.getRepository(Mission).find({
+                        where: { sourceMissionId: missionId },
+                        select: { id: true },
+                    })
+                ).map((row) => row.id);
                 const tombstone = await publisher.beforeDelete(manager, 'mission', missionId);
                 await manager.getRepository(Mission).delete({ id: missionId });
                 await publisher.deleted(manager, tombstone, 'mission.deleted');
+                for (const goalId of new Set(goalIds)) {
+                    await publisher.changed(manager, 'goal', goalId, 'goal.updated', {
+                        changedFields: ['missionIds', 'primaryMissionId'],
+                    });
+                }
+                for (const ideaId of ideaIds) {
+                    await publisher.changed(manager, 'idea', ideaId, 'idea.updated', {
+                        changedFields: ['missionId'],
+                    });
+                }
+                for (const cloneId of cloneIds) {
+                    await publisher.changed(manager, 'mission', cloneId, 'mission.updated', {
+                        changedFields: ['sourceMissionId'],
+                    });
+                }
             });
         } else {
             await this.missions.remove(existing);
@@ -867,11 +942,8 @@ export class MissionsService {
         if (!work) {
             throw new NotFoundException(`Work not found`);
         }
-        const existed = await this.missions.manager
-            .getRepository(MissionWork)
-            .exist({ where: { missionId, workId, relation } });
-        await this.missionWorks.attach({ missionId, workId, userId, relation });
-        if (!existed) {
+        const inserted = await this.missionWorks.attach({ missionId, workId, userId, relation });
+        if (inserted !== false) {
             // EW-P2-5 — `mission.work.linked` (child: the link; aggregate: the Mission).
             await recordAfterWrite(
                 this.domainEvents,
@@ -988,7 +1060,7 @@ export class MissionsService {
         const existing = await this.findOrThrow(userId, missionId, scope);
         if (!allowedFrom.includes(existing.status)) {
             throw new BadRequestException(
-                `Mission cannot be ${verb}d from status "${existing.status}". Allowed: ${allowedFrom.join(', ')}.`,
+                `Mission cannot be ${verb.endsWith('e') ? `${verb}d` : `${verb}ed`} from status "${existing.status}". Allowed: ${allowedFrom.join(', ')}.`,
             );
         }
         const statusBefore = existing.status;
@@ -1023,9 +1095,9 @@ export class MissionsService {
         ) => Promise<unknown>,
     ): Promise<Mission> {
         const publisher = this.domainEvents;
-        if (!publisher) return this.missions.save(mission);
+        if (!publisher) return this.missions.save(withoutAggregateVersion(mission));
         return publisher.transaction(async (manager) => {
-            const row = await manager.getRepository(Mission).save(mission);
+            const row = await manager.getRepository(Mission).save(withoutAggregateVersion(mission));
             await record(publisher, manager, row);
             return row;
         });

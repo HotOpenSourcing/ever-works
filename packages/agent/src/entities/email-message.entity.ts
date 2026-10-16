@@ -6,6 +6,7 @@ import {
     JoinColumn,
     ManyToOne,
     PrimaryGeneratedColumn,
+    UpdateDateColumn,
 } from 'typeorm';
 import { User } from './user.entity';
 import { TenantEmailAddress } from './tenant-email-address.entity';
@@ -76,6 +77,9 @@ export interface EmailMessageAttachmentRecord {
 // EW-P4-3 — RFC threading: "which of this owner's messages has Message-ID X?"
 // is asked for every id of an inbound reply's In-Reply-To / References.
 @Index('idx_email_messages_user_message_id_header', ['userId', 'messageIdHeader'])
+// EW-P4-2 — the integration list `GET /api/integrations/v1/email/messages`: one
+// organization's messages ordered by `(updatedAt, id)` (migration 1795130300000).
+@Index('idx_email_messages_org_updated', ['organizationId', 'updatedAt', 'id'])
 export class EmailMessage {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -219,4 +223,22 @@ export class EmailMessage {
 
     @CreateDateColumn()
     createdAt: Date;
+
+    /**
+     * EW-P4-2 — moves on every write to the row (status, delivery status, the
+     * Task link), so `GET /api/integrations/v1/email/messages?updatedSince=`
+     * catches every change. Existing rows start at their `createdAt`
+     * (migration 1795130300000).
+     */
+    @UpdateDateColumn()
+    updatedAt: Date;
+
+    /**
+     * EW-P4-2 — aggregate version of `email.message.*` domain events and the
+     * `ETag` of `GET /api/integrations/v1/email/messages/:id`; bumped by
+     * `bumpAggregateVersion` on every recorded change. A plain column, NOT
+     * `@VersionColumn`.
+     */
+    @Column({ type: 'int', default: 1 })
+    version: number;
 }

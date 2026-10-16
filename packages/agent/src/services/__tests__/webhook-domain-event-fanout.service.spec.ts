@@ -20,7 +20,9 @@ import {
 } from '../../domain-events/__tests__/domain-events.test-helpers';
 import { ApiKey } from '../../entities/api-key.entity';
 import { Organization } from '../../entities/organization.entity';
+import { OrganizationMember } from '../../entities/organization-member.entity';
 import { PluginEventCursor } from '../../entities/plugin-event-cursor.entity';
+import { Tenant } from '../../entities/tenant.entity';
 import { User } from '../../entities/user.entity';
 import { WebhookDelivery } from '../../entities/webhook-delivery.entity';
 import { WebhookSubscription } from '../../entities/webhook-subscription.entity';
@@ -308,6 +310,116 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(await fanout.catchUp()).toBe(1);
         expect((await deliveries()).map((row) => row.subscriptionId)).toEqual([pinned.id]);
         expect((await subscriptions.findById(personal.id))?.status).toBe('disabled');
+    });
+
+    it("an admin's key receives only in the organizations its creator still administers (EW-P2-6)", async () => {
+        const admin = randomUUID();
+        await dataSource.getRepository(Tenant).insert({
+            id: TENANT,
+            ownerUserId: OWNER,
+            slug: `t-${TENANT.slice(0, 6)}`,
+            displayName: 'Tenant',
+        } as unknown as Tenant);
+        await dataSource.getRepository(User).insert({
+            id: admin,
+            username: 'admin',
+            slug: `admin-${admin.slice(0, 6)}`,
+            tenantId: TENANT,
+            isActive: true,
+        } as unknown as User);
+        const keyId = randomUUID();
+        await dataSource.getRepository(ApiKey).insert({
+            id: keyId,
+            userId: admin,
+            tenantId: TENANT,
+            name: 'gauzy',
+            hashedKey: `h-${keyId}`,
+            prefix: 'ew_int_x',
+            isActive: true,
+            kind: 'integration',
+            organizationIds: [ORG_A],
+        } as unknown as ApiKey);
+        const sub = await subscribe({ ownerType: 'integration_key', ownerId: keyId });
+        const access = new WebhookOwnerAccessService(dataSource);
+        try {
+            // Not (or no longer) an admin of ORG_A: nothing is sent, but the
+            // subscription is not disabled (a re-promotion restores it).
+            expect(await access.canReceive(sub, ORG_A)).toEqual({ allowed: false, disable: false });
+            await dataSource.getRepository(OrganizationMember).insert({
+                organizationId: ORG_A,
+                tenantId: TENANT,
+                userId: admin,
+                role: 'admin',
+                invitedById: OWNER,
+                invitationId: null,
+                joinedAt: new Date(),
+            } as unknown as OrganizationMember);
+            expect(await access.canReceive(sub, ORG_A)).toEqual({ allowed: true, disable: false });
+        } finally {
+            await dataSource.query('DELETE FROM "organization_members"');
+            await dataSource.query('DELETE FROM "tenants"');
+        }
+    });
+
+    it('delivers inbox events only to an integration key holding inbox:read, never to a user-owned subscription', async () => {
+        await fanout.catchUp();
+        const insertKey = async (scopes: string[]) => {
+            const id = randomUUID();
+            await dataSource.getRepository(ApiKey).insert({
+                id,
+                userId: OWNER,
+                name: 'gauzy',
+                hashedKey: `h-${id}`,
+                prefix: 'ew_int_x',
+                isActive: true,
+                kind: 'integration',
+                organizationIds: [ORG_A],
+                scopes,
+            } as unknown as ApiKey);
+            return id;
+        };
+        const withInbox = await subscribe({
+            events: ['inbox.*', 'task.*'],
+            ownerType: 'integration_key',
+            ownerId: await insertKey(['events:read', 'webhooks:manage', 'inbox:read']),
+        });
+        const withoutInbox = await subscribe({
+            events: ['inbox.*', 'task.*'],
+            ownerType: 'integration_key',
+            ownerId: await insertKey(['events:read', 'webhooks:manage', 'tasks:read']),
+        });
+        const userOwned = await subscribe({ events: ['inbox.*', 'task.*'] });
+        const itemId = randomUUID();
+        await record({
+            type: 'inbox.item.answered',
+            aggregate: { type: 'inbox_item', id: itemId, version: 2 },
+            data: { id: itemId, recipientUserId: OWNER, status: 'answered' },
+            visibility: 'recipient',
+        });
+        await record();
+        await dispatch();
+        await fanout.catchUp();
+        const rows = (await deliveries()).map((row) => [row.subscriptionId, row.event]);
+        expect(rows.filter(([, event]) => event === 'inbox.item.answered')).toEqual([
+            [withInbox.id, 'inbox.item.answered'],
+        ]);
+        // Ordinary organization events still reach every matching subscription.
+        expect(
+            rows
+                .filter(([, event]) => event === 'task.updated')
+                .map(([id]) => id)
+                .sort(),
+        ).toEqual([withInbox.id, withoutInbox.id, userOwned.id].sort());
+
+        // The send-time re-check applies the same rule (a queued or retried
+        // delivery is not sent after the key lost the scope).
+        const access = new WebhookOwnerAccessService(dataSource);
+        const verdict = async (id: string, type: string) =>
+            (await access.canReceive((await subscriptions.findById(id))!, ORG_A, type)).allowed;
+        expect(await verdict(withInbox.id, 'inbox.item.answered')).toBe(true);
+        expect(await verdict(withoutInbox.id, 'inbox.item.answered')).toBe(false);
+        expect(await verdict(userOwned.id, 'inbox.item.answered')).toBe(false);
+        expect(await verdict(withoutInbox.id, 'task.updated')).toBe(true);
     });
 
     it('ignores v1 subscriptions and paused v2 ones', async () => {
