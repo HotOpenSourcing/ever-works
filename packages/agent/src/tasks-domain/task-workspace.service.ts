@@ -1,5 +1,6 @@
 import { forwardRef, Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import * as yaml from 'yaml';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
 import type {
     FleetRunEnvFileRef,
     FleetTaskWorkspaceMountSpec,
@@ -231,6 +232,10 @@ export class TaskWorkspaceService {
         @Optional()
         @Inject(APP_WORK_CHANGE_GATE)
         private readonly appChangeGate?: AppWorkChangeGate,
+        // Domain events (EW-P1-1 B2) — discarding a branch clears the PR link
+        // the integration DTO shows (`runtime.prUrl`): `task.runtime_updated`.
+        // Appended LAST + @Optional (positional-spec arity rule).
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -2772,6 +2777,21 @@ export class TaskWorkspaceService {
             // fence stays shut either way.
             linkedPullRequests: survivingMounts.length > 0 ? survivingMounts : null,
         });
+        if (task.prUrl && this.domainEvents) {
+            const publisher = this.domainEvents;
+            await publisher
+                .transaction((manager) =>
+                    publisher.runtime(manager, task.id, {
+                        changedFields: ['runtime'],
+                        previous: { runtime: { prUrl: task.prUrl } },
+                    }),
+                )
+                .catch((err) =>
+                    this.logger.warn(
+                        `Could not record task.runtime_updated for ${task.id}: ${err}`,
+                    ),
+                );
+        }
     }
 
     /**

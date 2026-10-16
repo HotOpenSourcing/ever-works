@@ -20,14 +20,15 @@
 
 ## B2 — Recording points
 
-- [ ] **T12** DTO snapshot builders.
-- [ ] **T13** Task recording points (incl. edges, chat) + `version`/`updatedAt` bumps.
-- [ ] **T14** `task.runtime_updated` for PR/CI/run writers.
-- [ ] **T15** Team recording points (incl. members, resources).
-- [ ] **T16** Organization and roster recording points.
-- [ ] **T17** Agent recording points.
-- [ ] **T18** Work recording points (incl. members).
-- [ ] **T19** Event-coverage contract test.
+- [x] **T12** DTO snapshot builders (`domain-event-snapshots.ts`) + `DomainEventPublisher` (`created`, `changed`, `child`,
+      `beforeDelete`/`deleted`, `runtime`, `recordAfterWrite`).
+- [x] **T13** Task recording points (incl. edges, chat, templates) + `version`/`updatedAt` bumps (`task-recording.spec.ts`).
+- [x] **T14** `task.runtime_updated` for PR/CI/run writers (run denorm, PR status, discard branch).
+- [x] **T15** Team recording points (incl. members, resources) (`team-recording.spec.ts`).
+- [x] **T16** Organization and roster recording points (invitation accept/remove, organization fields).
+- [x] **T17** Agent recording points (`agent-recording.spec.ts`; import is a follow-up, spec §3).
+- [x] **T18** Work recording points (incl. members) (`work-recording.spec.ts`; claim-accept member is a follow-up).
+- [x] **T19** Event-coverage contract test (`apps/api/src/domain-events/domain-event-route-coverage.spec.ts`).
 
 ## Status legend
 

@@ -8,10 +8,16 @@ import {
 } from '@nestjs/common';
 import type { TaskIsolationMode } from './task-isolation';
 import { InjectRepository } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import type { EntityManager, Repository } from 'typeorm';
 import type { GateStatus, TaskAcceptanceCheck, TaskExtraRepo } from '@ever-works/contracts';
 import { normalizeTaskExtraRepos } from './task-extra-repos';
-import { Task, TaskPriority, TaskStatus, type TaskActorType } from '../entities/task.entity';
+import {
+    Task,
+    TaskPriority,
+    TaskStatus,
+    type TaskActorType,
+    type TaskAuthorType,
+} from '../entities/task.entity';
 import type { TaskApprover } from '../entities/task-approver.entity';
 import { Mission } from '../entities/mission.entity';
 import { Team } from '../entities/team.entity';
@@ -52,6 +58,8 @@ import { OrganizationMemberRepository } from '../database/repositories/organizat
 import { TenantRepository } from '../database/repositories/tenant.repository';
 import type { AgentRunStatus } from '../entities/agent-run.entity';
 import { TaskNotificationService } from './task-notification.service';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import { describeTaskPatchIn } from '../domain-events/domain-event-task-fields';
 import { WorkKnowledgeUploadRepository } from '../database/repositories/work-knowledge-upload.repository';
 import { WorkRepository } from '../database/repositories/work.repository';
 import { RepoConnectionRepository } from '../database/repositories/repo-connection.repository';
@@ -79,7 +87,8 @@ export interface CreateTaskInput {
     agentId?: string | null;
     goalId?: string | null;
     parentTaskId?: string | null;
-    createdByType: TaskActorType;
+    /** EW-P1-2: `'integration'` (with the key id as `createdById`) for an integration write. */
+    createdByType: TaskAuthorType;
     createdById: string;
     /** Schedule mode "Scheduled": run once at this instant (must be in
      *  the future). Omitted/null = not scheduled. */
@@ -353,6 +362,11 @@ export class TasksService {
         // `withRunNowClaim`). Appended LAST + @Optional per the
         // positional-spec arity rule.
         @Optional() private readonly runNowLock?: DistributedTaskLockService,
+        // Domain events (EW-P1-1 B2) — records `task.*` events in the same
+        // transaction as each write (`withTaskEvent`). Appended LAST +
+        // @Optional per the positional-spec arity rule; absent, every write
+        // runs exactly as before and records nothing.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /** Per-process run-now claims, used only when `runNowLock` is unbound. */
@@ -734,35 +748,49 @@ export class TasksService {
 
         const nextNumber = await this.counter.nextSlug(userId);
         const slug = `T-${nextNumber}`;
+        const extraRepos = await this.normalizeExtraRepos(userId, input.extraRepos);
 
-        const created = await this.tasks.create({
-            userId,
-            ...ownershipStamp(ownershipScope),
-            slug,
-            title: input.title.trim(),
-            description: input.description ?? null,
-            status: input.status ?? TaskStatus.BACKLOG,
-            priority: input.priority ?? TaskPriority.P3,
-            labels: input.labels ?? null,
-            isolationMode: input.isolationMode ?? null,
-            missionId: input.missionId ?? null,
-            ideaId: input.ideaId ?? null,
-            workId: input.workId ?? null,
-            teamId: input.teamId ?? null,
-            agentId: input.agentId ?? null,
-            goalId: input.goalId ?? null,
-            parentTaskId: input.parentTaskId ?? null,
-            createdByType: input.createdByType,
-            createdById: input.createdById,
-            requireAllApprovers: input.requireAllApprovers ?? true,
-            acceptanceChecks: input.acceptanceChecks ?? null,
-            maxGateAttempts: input.maxGateAttempts ?? null,
-            extraRepos: await this.normalizeExtraRepos(userId, input.extraRepos),
-            delegationDepth: input.delegationDepth ?? null,
-            scheduledAt: input.scheduledAt ?? null,
-            scheduleClaimedAt: null,
-            hiddenFromBoard: input.hiddenFromBoard ?? false,
-        });
+        const created = await this.withTaskEvent(
+            (manager) =>
+                this.tasks.create(
+                    {
+                        userId,
+                        ...ownershipStamp(ownershipScope),
+                        slug,
+                        title: input.title.trim(),
+                        description: input.description ?? null,
+                        status: input.status ?? TaskStatus.BACKLOG,
+                        priority: input.priority ?? TaskPriority.P3,
+                        labels: input.labels ?? null,
+                        isolationMode: input.isolationMode ?? null,
+                        missionId: input.missionId ?? null,
+                        ideaId: input.ideaId ?? null,
+                        workId: input.workId ?? null,
+                        teamId: input.teamId ?? null,
+                        agentId: input.agentId ?? null,
+                        goalId: input.goalId ?? null,
+                        parentTaskId: input.parentTaskId ?? null,
+                        createdByType: input.createdByType,
+                        createdById: input.createdById,
+                        requireAllApprovers: input.requireAllApprovers ?? true,
+                        acceptanceChecks: input.acceptanceChecks ?? null,
+                        maxGateAttempts: input.maxGateAttempts ?? null,
+                        extraRepos,
+                        delegationDepth: input.delegationDepth ?? null,
+                        scheduledAt: input.scheduledAt ?? null,
+                        scheduleClaimedAt: null,
+                        hiddenFromBoard: input.hiddenFromBoard ?? false,
+                    },
+                    ...managerArg(manager),
+                ),
+            (publisher, manager, row) =>
+                publisher.created(manager, 'task', row.id, 'task.created', {
+                    actor:
+                        input.createdByType === 'agent'
+                            ? { type: 'agent', id: input.createdById, label: null }
+                            : undefined,
+                }),
+        );
 
         await this.logActivity({
             userId,
@@ -936,7 +964,7 @@ export class TasksService {
             }
         }
 
-        await this.tasks.updateById(id, patch);
+        await this.updateTaskRow(id, patch, task);
         const refreshed = await this.getOne(userId, id, ownershipScope);
         await this.logActivity({
             userId,
@@ -953,7 +981,17 @@ export class TasksService {
         ownershipScope?: OwnershipScope,
     ): Promise<{ deleted: true }> {
         const task = await this.getOne(userId, id, ownershipScope);
-        await this.tasks.deleteById(id);
+        await this.withTaskEvent(
+            async (manager) => {
+                const tombstone = manager
+                    ? await this.domainEvents?.beforeDelete(manager, 'task', id)
+                    : null;
+                await this.tasks.deleteById(id, ...managerArg(manager));
+                return tombstone ?? null;
+            },
+            (publisher, manager, tombstone) =>
+                publisher.deleted(manager, tombstone, 'task.deleted'),
+        );
         await this.logActivity({
             userId,
             taskId: id,
@@ -1025,7 +1063,7 @@ export class TasksService {
             );
         }
 
-        await this.tasks.updateById(id, {
+        await this.updateTaskRow(id, {
             isRecurring: true,
             recurrenceRule: input.recurrenceRule ?? null,
             recurrenceCron: input.recurrenceCron ?? null,
@@ -1060,7 +1098,7 @@ export class TasksService {
         if (current?.recurrencePausedAt) {
             patch.recurrencePausedAt = null;
         }
-        await this.tasks.updateById(id, patch);
+        await this.updateTaskRow(id, patch);
         return this.getOne(userId, id, ownershipScope);
     }
 
@@ -1096,7 +1134,7 @@ export class TasksService {
     ): Promise<Task> {
         const task = await this.getRecurringTemplate(userId, id, ownershipScope);
         if (!task.recurrencePausedAt) {
-            await this.tasks.updateById(id, { recurrencePausedAt: new Date() });
+            await this.updateTaskRow(id, { recurrencePausedAt: new Date() });
         }
         return this.getOne(userId, id, ownershipScope);
     }
@@ -1127,7 +1165,7 @@ export class TasksService {
                     recurrenceOccurredCount: task.recurrenceOccurredCount ?? 0,
                 });
             }
-            await this.tasks.updateById(id, patch);
+            await this.updateTaskRow(id, patch);
         }
         return this.getOne(userId, id, ownershipScope);
     }
@@ -1299,6 +1337,10 @@ export class TasksService {
         } catch (err) {
             this.logger.warn(`Run-now: assignee lookup failed for ${template.id}: ${err}`);
         }
+        // Recorded once the copied assignees are in place, so the snapshot
+        // carries them (the copies swallow their own failures, which a single
+        // transaction could not).
+        await this.recordTaskEventAfter(instance.id, 'task.created');
 
         const runs: RecurringRunNowResult['runs'] = [];
         for (const agentId of agentIds) {
@@ -1350,7 +1392,7 @@ export class TasksService {
                 'This Task is a recurring template — stop the recurrence before scheduling a one-shot run.',
             );
         }
-        await this.tasks.updateById(id, { scheduledAt: runAt, scheduleClaimedAt: null });
+        await this.updateTaskRow(id, { scheduledAt: runAt, scheduleClaimedAt: null });
         await this.logActivity({
             userId,
             taskId: id,
@@ -1367,7 +1409,7 @@ export class TasksService {
         ownershipScope?: OwnershipScope,
     ): Promise<Task> {
         await this.getOne(userId, id, ownershipScope);
-        await this.tasks.updateById(id, { scheduledAt: null, scheduleClaimedAt: null });
+        await this.updateTaskRow(id, { scheduledAt: null, scheduleClaimedAt: null });
         await this.logActivity({
             userId,
             taskId: id,
@@ -1652,6 +1694,65 @@ export class TasksService {
      * reviewer / approver / relation adds (which previously 500'd on a duplicate)
      * share one tested path.
      */
+    /**
+     * Domain events (EW-P1-1 B2): run `write` and record its event in ONE
+     * transaction when the publisher is wired, so the change and its outbox
+     * row commit (or roll back) together; exactly today's path otherwise.
+     */
+    private async withTaskEvent<T>(
+        write: (manager?: EntityManager) => Promise<T>,
+        record: (
+            publisher: DomainEventPublisher,
+            manager: EntityManager,
+            result: T,
+        ) => Promise<unknown>,
+    ): Promise<T> {
+        const publisher = this.domainEvents;
+        if (!publisher) return write(undefined);
+        return publisher.transaction(async (manager) => {
+            const result = await write(manager);
+            await record(publisher, manager, result);
+            return result;
+        });
+    }
+
+    /** `updateById` + `task.updated` (changed fields described against `before`). */
+    private async updateTaskRow(id: string, patch: Partial<Task>, before?: Task): Promise<void> {
+        await this.withTaskEvent(
+            (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
+            async (publisher, manager) => {
+                await publisher.changed(
+                    manager,
+                    'task',
+                    id,
+                    'task.updated',
+                    await describeTaskPatchIn(manager, id, patch, before),
+                );
+            },
+        );
+    }
+
+    /**
+     * Record a full-snapshot task event in its own transaction, AFTER a write
+     * that could not join one (a multi-step create whose later steps swallow
+     * their own failures). Best-effort: a failure is logged, never thrown.
+     */
+    private async recordTaskEventAfter(taskId: string, type: string): Promise<void> {
+        const publisher = this.domainEvents;
+        if (!publisher) return;
+        try {
+            await publisher.transaction(async (manager) => {
+                if (type.endsWith('.created')) {
+                    await publisher.created(manager, 'task', taskId, type);
+                } else {
+                    await publisher.changed(manager, 'task', taskId, type);
+                }
+            });
+        } catch (err) {
+            this.logger.warn(`Could not record ${type} for task ${taskId}: ${err}`);
+        }
+    }
+
     private async insertOrConflict<T>(op: () => Promise<T>, conflictMessage: string): Promise<T> {
         try {
             return await op();
@@ -1675,7 +1776,25 @@ export class TasksService {
         // Review-fix I4: validate the actor exists / belongs to user.
         await this.assertActorIsValid(userId, assigneeType, assigneeId, task);
         const row = await this.insertOrConflict(
-            () => this.assignees.add(taskId, assigneeType, assigneeId),
+            () =>
+                this.withTaskEvent(
+                    (manager) =>
+                        this.assignees.add(
+                            taskId,
+                            assigneeType,
+                            assigneeId,
+                            ...managerArg(manager),
+                        ),
+                    (publisher, manager, added) =>
+                        publisher.child(
+                            manager,
+                            'task',
+                            taskId,
+                            'task.assignee.added',
+                            { taskId, type: added.assigneeType, id: added.assigneeId },
+                            { changedFields: ['assignees'] },
+                        ),
+                ),
             `Task ${taskId} already has assignee ${assigneeId}.`,
         );
         await this.logActivity({
@@ -1712,7 +1831,23 @@ export class TasksService {
         ownershipScope?: OwnershipScope,
     ) {
         await this.getOne(userId, taskId, ownershipScope);
-        const removed = await this.assignees.removeForTask(taskId, assigneeId);
+        const existing = this.domainEvents
+            ? (await this.assignees.findByTaskId(taskId)).find((row) => row.id === assigneeId)
+            : undefined;
+        const removed = await this.withTaskEvent(
+            (manager) => this.assignees.removeForTask(taskId, assigneeId, ...managerArg(manager)),
+            async (publisher, manager, gone) => {
+                if (!gone || !existing) return;
+                await publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.assignee.removed',
+                    { taskId, type: existing.assigneeType, id: existing.assigneeId, deleted: true },
+                    { changedFields: ['assignees'] },
+                );
+            },
+        );
         if (!removed) {
             throw new NotFoundException(`Assignee ${assigneeId} not found.`);
         }
@@ -1736,7 +1871,20 @@ export class TasksService {
         // Review-fix I4: validate the actor exists / belongs to user.
         await this.assertActorIsValid(userId, reviewerType, reviewerId, task);
         return this.insertOrConflict(
-            () => this.reviewers.add(taskId, reviewerType, reviewerId),
+            () =>
+                this.withTaskEvent(
+                    (manager) =>
+                        this.reviewers.add(
+                            taskId,
+                            reviewerType,
+                            reviewerId,
+                            ...managerArg(manager),
+                        ),
+                    (publisher, manager) =>
+                        publisher.changed(manager, 'task', taskId, 'task.updated', {
+                            changedFields: ['reviewers'],
+                        }),
+                ),
             `Task ${taskId} already has reviewer ${reviewerId}.`,
         );
     }
@@ -1752,7 +1900,20 @@ export class TasksService {
         // Review-fix I4: validate the actor exists / belongs to user.
         await this.assertActorIsValid(userId, approverType, approverId, task);
         return this.insertOrConflict(
-            () => this.approvers.add(taskId, approverType, approverId),
+            () =>
+                this.withTaskEvent(
+                    (manager) =>
+                        this.approvers.add(
+                            taskId,
+                            approverType,
+                            approverId,
+                            ...managerArg(manager),
+                        ),
+                    (publisher, manager) =>
+                        publisher.changed(manager, 'task', taskId, 'task.updated', {
+                            changedFields: ['approvers'],
+                        }),
+                ),
             `Task ${taskId} already has approver ${approverId}.`,
         );
     }
@@ -1776,7 +1937,18 @@ export class TasksService {
         // surfaces as 409 instead of 500.
         let row;
         try {
-            row = await this.blocks.add(taskId, blockedByTaskId);
+            row = await this.withTaskEvent(
+                (manager) => this.blocks.add(taskId, blockedByTaskId, ...managerArg(manager)),
+                (publisher, manager) =>
+                    publisher.child(
+                        manager,
+                        'task',
+                        taskId,
+                        'task.block.added',
+                        { taskId, blockedByTaskId },
+                        { changedFields: ['blockedBy'] },
+                    ),
+            );
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             if (/unique|duplicate|UNIQUE/i.test(message)) {
@@ -1802,7 +1974,23 @@ export class TasksService {
         ownershipScope?: OwnershipScope,
     ) {
         await this.getOne(userId, taskId, ownershipScope);
-        const removed = await this.blocks.removeForTask(taskId, blockId);
+        const existingBlock = this.domainEvents
+            ? (await this.blocks.findByTaskId(taskId)).find((row) => row.id === blockId)
+            : undefined;
+        const removed = await this.withTaskEvent(
+            (manager) => this.blocks.removeForTask(taskId, blockId, ...managerArg(manager)),
+            async (publisher, manager, gone) => {
+                if (!gone || !existingBlock) return;
+                await publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.block.removed',
+                    { taskId, blockedByTaskId: existingBlock.blockedByTaskId, deleted: true },
+                    { changedFields: ['blockedBy'] },
+                );
+            },
+        );
         if (!removed) {
             throw new NotFoundException(`Blocker ${blockId} not found.`);
         }
@@ -1838,7 +2026,20 @@ export class TasksService {
         // a second relation on the same ordered pair (even with a different kind)
         // collides — surface that as 409, not an unmapped 500.
         return this.insertOrConflict(
-            () => this.relations.add(taskId, relatedTaskId, kind),
+            () =>
+                this.withTaskEvent(
+                    (manager) =>
+                        this.relations.add(taskId, relatedTaskId, kind, ...managerArg(manager)),
+                    (publisher, manager) =>
+                        publisher.child(
+                            manager,
+                            'task',
+                            taskId,
+                            'task.relation.added',
+                            { taskId, relatedTaskId, kind },
+                            { changedFields: ['relations'] },
+                        ),
+                ),
             `Task ${taskId} already has a relation to ${relatedTaskId}.`,
         );
     }
@@ -1886,8 +2087,20 @@ export class TasksService {
         if (!upload) {
             throw new BadRequestException(`Upload ${uploadId} not found for this Task's Work.`);
         }
+        const attachments = this.attachments;
         try {
-            return await this.attachments.add(taskId, uploadId, role);
+            return await this.withTaskEvent(
+                (manager) => attachments.add(taskId, uploadId, role, ...managerArg(manager)),
+                (publisher, manager) =>
+                    publisher.child(
+                        manager,
+                        'task',
+                        taskId,
+                        'task.attachment.added',
+                        { taskId, uploadId, role },
+                        { changedFields: ['attachments'] },
+                    ),
+            );
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
             if (/unique|duplicate|UNIQUE/i.test(message)) {
@@ -1910,7 +2123,29 @@ export class TasksService {
         if (!this.attachments) {
             throw new BadRequestException('Attachment repository not wired in this context.');
         }
-        const removed = await this.attachments.removeForTask(taskId, attachmentId);
+        const attachments = this.attachments;
+        const existingAttachment = this.domainEvents
+            ? (await attachments.findByTaskId(taskId)).find((row) => row.id === attachmentId)
+            : undefined;
+        const removed = await this.withTaskEvent(
+            (manager) => attachments.removeForTask(taskId, attachmentId, ...managerArg(manager)),
+            async (publisher, manager, gone) => {
+                if (!gone || !existingAttachment) return;
+                await publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.attachment.removed',
+                    {
+                        taskId,
+                        uploadId: existingAttachment.uploadId,
+                        role: existingAttachment.role,
+                        deleted: true,
+                    },
+                    { changedFields: ['attachments'] },
+                );
+            },
+        );
         if (!removed) {
             throw new NotFoundException(`Attachment ${attachmentId} not found.`);
         }
@@ -2076,4 +2311,13 @@ export class TasksService {
             this.logger.warn(`Failed to log activity ${args.actionType}: ${err}`);
         }
     }
+}
+
+/**
+ * The trailing `EntityManager` argument of a repository write, present only
+ * when there is one — so a graph without domain events calls each repository
+ * method with exactly the arguments it always did.
+ */
+function managerArg(manager?: EntityManager): [] | [EntityManager] {
+    return manager ? [manager] : [];
 }

@@ -39,7 +39,14 @@ export * from './task-extra-repos';
 export * from './repo-declared-commands';
 export * from './task-notification.service';
 export * from './task-templates.service';
-export { Task, TaskPriority, TaskStatus, type TaskActorType } from '../entities/task.entity';
+export {
+    Task,
+    TaskPriority,
+    TaskStatus,
+    type TaskActorType,
+    type TaskAuthorType,
+    type TaskExternalAuthor,
+} from '../entities/task.entity';
 export { TaskAssignee } from '../entities/task-assignee.entity';
 export { TaskReviewer, type TaskReviewState } from '../entities/task-reviewer.entity';
 export { TaskApprover, type TaskApprovalState } from '../entities/task-approver.entity';
