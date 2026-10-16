@@ -30,6 +30,8 @@ const CONTROLLER_FILES: readonly string[] = [
     'agents/agent-collaborators.controller.ts',
     'works/members.controller.ts',
     'works/works.controller.ts',
+    // Integration API v1 (EW-P1-4) — writes delegate to the same services.
+    'integrations-api/v1/tasks-write.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([

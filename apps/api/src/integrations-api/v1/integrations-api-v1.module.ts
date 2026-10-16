@@ -2,11 +2,14 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
+import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
+import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
+import { IntegrationTasksWriteController } from './tasks-write.controller';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -20,13 +23,22 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
  * links, batch) are EW-P1-4 and land in this module.
  */
 @Module({
-    imports: [DatabaseModule, DomainEventsModule, IntegrationsApiFoundationModule],
+    imports: [
+        DatabaseModule,
+        DomainEventsModule,
+        IntegrationsApiFoundationModule,
+        // The domain services the write routes delegate to (the app's own rules,
+        // events and notifications).
+        TasksDomainModule,
+        AgentTeamsModule,
+    ],
     controllers: [
         IntegrationWhoamiController,
         // EW-P1-4 — the change feed and the P1 resource reads.
         IntegrationEventsController,
         IntegrationResourcesController,
         IntegrationLinksController,
+        IntegrationTasksWriteController,
     ],
     providers: [
         IntegrationOnlyGuard,

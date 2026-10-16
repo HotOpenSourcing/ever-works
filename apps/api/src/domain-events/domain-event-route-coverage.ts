@@ -216,6 +216,16 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/works/:id/comparisons/generate': { exempt: WORK_CONTENT },
     'POST /api/works/:id/comparisons/generate-manual': { exempt: WORK_CONTENT },
     'DELETE /api/works/:id/comparisons/:slug': { exempt: WORK_CONTENT },
+
+    // ── Integration API v1 (`api/integrations/v1`, EW-P1-4) ───────────────────
+    'POST /api/integrations/v1/tasks': {
+        // + extra teamIds as team resources, assignees as edges.
+        events: ['task.created', 'team.resource.added', 'task.updated', 'task.assignee.added'],
+    },
+    'PATCH /api/integrations/v1/tasks/:id': {
+        events: ['task.updated', 'team.resource.added', 'team.resource.removed'],
+    },
+    'DELETE /api/integrations/v1/tasks/:id': { events: ['task.deleted'] },
 };
 
 /** The routes a list of events covers (for messages). */
