@@ -84,9 +84,19 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
     query: KeysetQuery,
 ): Promise<KeysetPage<T>> {
     const limit = keysetLimit(query.limit);
+    // better-sqlite3 stores timestamps as text, written both with and without
+    // milliseconds (`datetime('now')` defaults vs TypeORM's own writes), and a
+    // Date parameter binds with them: compare one normalized form there, or
+    // rows of the same second compare unequal and a page boundary drops them.
+    const driver = String(qb.connection.options.type);
+    const isSqlite = driver === 'better-sqlite3' || driver === 'sqlite' || driver === 'sqljs';
+    const updatedAt = isSqlite
+        ? `strftime('%Y-%m-%d %H:%M:%f', ${alias}.updatedAt)`
+        : `${alias}.updatedAt`;
+    const param = (value: Date): Date | string => (isSqlite ? sqliteTimestamp(value) : value);
     if (query.updatedSince) {
-        qb.andWhere(`${alias}.updatedAt >= :keysetUpdatedSince`, {
-            keysetUpdatedSince: query.updatedSince,
+        qb.andWhere(`${updatedAt} >= :keysetUpdatedSince`, {
+            keysetUpdatedSince: param(query.updatedSince),
         });
     }
     if (query.cursor) {
@@ -94,13 +104,13 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
         qb.andWhere(
             new Brackets((where) => {
                 where
-                    .where(`${alias}.updatedAt > :keysetAfterUpdatedAt`, {
-                        keysetAfterUpdatedAt: after.updatedAt,
+                    .where(`${updatedAt} > :keysetAfterUpdatedAt`, {
+                        keysetAfterUpdatedAt: param(after.updatedAt),
                     })
                     .orWhere(
                         new Brackets((tie) => {
-                            tie.where(`${alias}.updatedAt = :keysetAfterUpdatedAt`, {
-                                keysetAfterUpdatedAt: after.updatedAt,
+                            tie.where(`${updatedAt} = :keysetAfterUpdatedAt`, {
+                                keysetAfterUpdatedAt: param(after.updatedAt),
                             }).andWhere(`${alias}.id > :keysetAfterId`, {
                                 keysetAfterId: after.id,
                             });
@@ -110,9 +120,9 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
         );
     }
     const rows = await qb
-        .orderBy(`${alias}.updatedAt`, 'ASC')
+        .orderBy(updatedAt, 'ASC')
         .addOrderBy(`${alias}.id`, 'ASC')
-        .take(limit + 1)
+        .limit(limit + 1)
         .getMany();
     const hasMore = rows.length > limit;
     const data = hasMore ? rows.slice(0, limit) : rows;
@@ -123,4 +133,9 @@ export async function readKeysetPage<T extends ObjectLiteral & { updatedAt: Date
             hasMore && last ? encodeKeysetCursor({ updatedAt: last.updatedAt, id: last.id }) : null,
         hasMore,
     };
+}
+
+/** `YYYY-MM-DD HH:MM:SS.SSS` (UTC), the form `strftime('%Y-%m-%d %H:%M:%f')` answers. */
+function sqliteTimestamp(value: Date): string {
+    return value.toISOString().replace('T', ' ').replace('Z', '');
 }
