@@ -54,6 +54,7 @@ import { WorkAgentModule } from './work-agent/work-agent.module';
 import { AppLauncherModule } from './app-launcher/app-launcher.module';
 import { MissionsModule } from './missions/missions.module';
 import { GoalsModule } from './goals/goals.module';
+import { RecordVisibilityApiModule } from './record-visibility/record-visibility.module';
 import { AgentsModule } from './agents/agents.module';
 import { RunsModule } from './runs/runs.module';
 import { ModelRoutingApiModule } from './model-routing/model-routing.module';
@@ -232,6 +233,8 @@ import { DatabaseModule } from '@ever-works/agent/database';
         // lifecycle + evaluate-now on /api/me/goals; Mission link
         // endpoints live on the MissionsController.
         GoalsModule,
+        // Record visibility (EW-P1-3) — /api/record-visibility.
+        RecordVisibilityApiModule,
         // Agents/Skills/Tasks (PR #1017 specs) — Phase 3: AgentsService
         // + AgentsController. Heartbeat dispatcher + run service land in
         // Phase 6/7.

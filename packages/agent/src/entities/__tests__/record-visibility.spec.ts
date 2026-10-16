@@ -120,6 +120,10 @@ describe('record visibility columns (EW-P1-3)', () => {
     it('the subscriber is registered with every DataSource built from databaseConfig()', () => {
         const options = databaseConfig() as { subscribers?: unknown[] };
         expect(options.subscribers).toContain(RecordVisibilitySubscriber);
+        // TypeORM instantiates a listed subscriber ONLY when it carries @EventSubscriber().
+        expect(
+            getMetadataArgsStorage().filterSubscribers([RecordVisibilitySubscriber]),
+        ).toHaveLength(1);
     });
 
     it('hasVisibilityColumns needs both columns', () => {

@@ -1,0 +1,429 @@
+import {
+    BadRequestException,
+    Injectable,
+    Logger,
+    NotFoundException,
+    Optional,
+    UnprocessableEntityException,
+} from '@nestjs/common';
+import { InjectDataSource } from '@nestjs/typeorm';
+import { DataSource, In, type EntityManager, type EntityTarget, type ObjectLiteral } from 'typeorm';
+import {
+    automaticRecordVisibility,
+    isRecordVisibility,
+    type RecordVisibility,
+    type VisibilityAggregate,
+} from '@ever-works/contracts';
+import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
+import { Mission } from '../entities/mission.entity';
+import { Task } from '../entities/task.entity';
+import { Team } from '../entities/team.entity';
+import { TeamMember } from '../entities/team-member.entity';
+import { TeamResource } from '../entities/team-resource.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
+import { DomainEventRecorder } from '../domain-events/domain-event-recorder.service';
+import { VISIBILITY_AGGREGATE_SHAPES } from './record-access.types';
+
+/** A hand-picked visibility, or `automatic` to hand the choice back to D11. */
+export type VisibilityChoice = RecordVisibility | 'automatic';
+
+export const VISIBILITY_CHOICES: readonly VisibilityChoice[] = [
+    'automatic',
+    'private',
+    'team',
+    'organization',
+];
+
+export function isVisibilityChoice(value: unknown): value is VisibilityChoice {
+    return value === 'automatic' || isRecordVisibility(value);
+}
+
+/** The row columns this service reads and writes. */
+interface VisibilityRecord {
+    id: string;
+    userId: string;
+    tenantId?: string | null;
+    organizationId?: string | null;
+    visibility: RecordVisibility;
+    visibilityExplicit: boolean;
+    teamId?: string | null;
+}
+
+export interface VisibilityState {
+    visibility: RecordVisibility;
+    visibilityExplicit: boolean;
+    /** The record's Teams: `teamId` (tasks) first, then `team_resources` / agent memberships. */
+    teamIds: string[];
+}
+
+const ENTITY_OF: Record<VisibilityAggregate, EntityTarget<ObjectLiteral>> = {
+    task: Task,
+    goal: Goal,
+    mission: Mission,
+    idea: WorkProposal,
+    agent: Agent,
+};
+
+/**
+ * Aggregates whose `visibility_changed` is recorded today: the P1 aggregates that carry a
+ * `version` column (EW-P1-1). Goals, missions and ideas join with their P2 recording
+ * points, once they carry a `version` (see {@link RecordVisibilityService.recordChange}).
+ */
+const RECORDED_AGGREGATES: ReadonlySet<VisibilityAggregate> = new Set(['task', 'agent']);
+
+/** Thrown for an integration write of `private` (contract: `422 domain_rule`). */
+export class PrivateVisibilityForbiddenError extends UnprocessableEntityException {
+    constructor() {
+        super({
+            error: {
+                code: 'domain_rule',
+                message:
+                    'An integration may set team or organization only: a private record would disappear from its own view.',
+                details: { field: 'visibility' },
+            },
+        });
+    }
+}
+
+/**
+ * Record visibility writes (EW-P1-3, `docs/specs/features/record-visibility/spec.md` §5):
+ *
+ *   - **By hand** ({@link setVisibility}): the owner picks `private` / `team` /
+ *     `organization` (sets `visibilityExplicit`) or `automatic` (clears it and applies
+ *     D11 again).
+ *   - **Automatic** ({@link recomputeAutomatic}): while `visibilityExplicit` is false, an
+ *     org row's first Team narrows `organization` → `team` and its last Team leaving
+ *     widens `team` → `organization`. A hand-picked value never changes on its own, and
+ *     `private` is only ever set by hand.
+ *   - **Integration** ({@link assertIntegrationVisibility}, {@link setTeams}): `team` /
+ *     `organization` only (`422 domain_rule` for `private`); `teamIds[]` is stored as
+ *     `teamId` (first, tasks) plus `team_resources` (the rest).
+ *
+ * Every change records `<aggregate>.visibility_changed` through the domain-event
+ * recorder in the same transaction (tasks and agents today). A change TO `private`
+ * carries only `{id, visibility:'private'}`.
+ *
+ * Callers authorize first: only the owner (and the existing role rules) may change a
+ * record's visibility.
+ */
+@Injectable()
+export class RecordVisibilityService {
+    private readonly logger = new Logger(RecordVisibilityService.name);
+
+    constructor(
+        @InjectDataSource() private readonly dataSource: DataSource,
+        @Optional() private readonly recorder?: DomainEventRecorder,
+    ) {}
+
+    /** The record's visibility, explicit flag and Teams (`null` when missing). */
+    async getState(aggregate: VisibilityAggregate, id: string): Promise<VisibilityState | null> {
+        const row = await this.load(this.dataSource.manager, aggregate, id);
+        if (!row) return null;
+        return {
+            visibility: row.visibility,
+            visibilityExplicit: row.visibilityExplicit,
+            teamIds: await this.teamIdsOf(this.dataSource.manager, aggregate, row),
+        };
+    }
+
+    /**
+     * The owner chooses a visibility by hand, or `automatic`. A personal-scope record
+     * has no Organization to share with: it only takes `private` / `automatic`.
+     */
+    async setVisibility(
+        aggregate: VisibilityAggregate,
+        id: string,
+        choice: VisibilityChoice,
+    ): Promise<VisibilityState | null> {
+        if (!isVisibilityChoice(choice)) {
+            throw new BadRequestException(
+                `visibility must be one of: ${VISIBILITY_CHOICES.join(', ')}`,
+            );
+        }
+        return this.dataSource.transaction(async (manager) => {
+            const row = await this.load(manager, aggregate, id);
+            if (!row) return null;
+            if (!row.organizationId && choice !== 'private' && choice !== 'automatic') {
+                throw new BadRequestException(
+                    'A personal record cannot be shared: move it into an Organization first.',
+                );
+            }
+            const teamIds = await this.teamIdsOf(manager, aggregate, row);
+            const next =
+                choice === 'automatic'
+                    ? {
+                          visibility: automaticRecordVisibility({
+                              organizationId: row.organizationId,
+                              hasTeam: teamIds.length > 0,
+                          }),
+                          visibilityExplicit: false,
+                      }
+                    : { visibility: choice, visibilityExplicit: true };
+            await this.apply(manager, aggregate, row, next, teamIds);
+            return { ...next, teamIds };
+        });
+    }
+
+    /**
+     * Re-apply D11 after a Team change (a Team attached or detached, a task's `teamId`
+     * set or cleared, an agent added to or removed from a Team, a Team deleted). A no-op
+     * for a hand-picked visibility and for a personal record. Never throws: a missed
+     * automatic change must not fail the Team write that triggered it.
+     */
+    async recomputeAutomatic(aggregate: VisibilityAggregate, id: string): Promise<void> {
+        try {
+            await this.dataSource.transaction(async (manager) => {
+                const row = await this.load(manager, aggregate, id);
+                if (!row || row.visibilityExplicit || !row.organizationId) return;
+                const teamIds = await this.teamIdsOf(manager, aggregate, row);
+                const visibility = automaticRecordVisibility({
+                    organizationId: row.organizationId,
+                    hasTeam: teamIds.length > 0,
+                });
+                if (visibility === row.visibility) return;
+                await this.apply(
+                    manager,
+                    aggregate,
+                    row,
+                    { visibility, visibilityExplicit: false },
+                    teamIds,
+                );
+            });
+        } catch (error) {
+            this.logger.warn(
+                `Automatic visibility for ${aggregate} ${id} failed: ${(error as Error).message}`,
+            );
+        }
+    }
+
+    /** {@link recomputeAutomatic} for every record of a Team (before it is deleted). */
+    async recordsOfTeam(
+        teamId: string,
+    ): Promise<Array<{ aggregate: VisibilityAggregate; id: string }>> {
+        const manager = this.dataSource.manager;
+        const out: Array<{ aggregate: VisibilityAggregate; id: string }> = [];
+        const resources = await manager.getRepository(TeamResource).find({ where: { teamId } });
+        for (const resource of resources) {
+            const aggregate = this.aggregateOfResourceType(resource.resourceType);
+            if (aggregate) out.push({ aggregate, id: resource.resourceId });
+        }
+        const tasks = await manager
+            .getRepository(Task)
+            .find({ where: { teamId }, select: { id: true } });
+        out.push(...tasks.map((task) => ({ aggregate: 'task' as const, id: task.id })));
+        const agents = await manager
+            .getRepository(TeamMember)
+            .find({ where: { teamId, memberType: 'agent' } });
+        out.push(...agents.map((member) => ({ aggregate: 'agent' as const, id: member.memberId })));
+        return out;
+    }
+
+    /** Integration writes may set `team` or `organization` only (contract B.1). */
+    static assertIntegrationVisibility(value: unknown): asserts value is 'team' | 'organization' {
+        if (value === 'private') throw new PrivateVisibilityForbiddenError();
+        if (value !== 'team' && value !== 'organization') {
+            throw new BadRequestException('visibility must be team or organization');
+        }
+    }
+
+    /**
+     * Replace a record's Teams with `teamIds` (integration `teamIds[]`, the goal form):
+     * for a task the first id is `teamId` and the rest are `team_resources`; for the
+     * other aggregates every id is a `team_resources` row (agents: `team_members` stay
+     * the Teams' own business and are left alone). Every Team must belong to the record's
+     * Organization (404 otherwise). Then D11 is re-applied.
+     */
+    async setTeams(
+        aggregate: VisibilityAggregate,
+        id: string,
+        teamIds: readonly string[],
+        addedById: string | null,
+    ): Promise<VisibilityState | null> {
+        const unique = [...new Set(teamIds)];
+        const state = await this.dataSource.transaction(async (manager) => {
+            const row = await this.load(manager, aggregate, id);
+            if (!row) return null;
+            if (unique.length > 0) {
+                if (!row.organizationId) {
+                    throw new BadRequestException(
+                        'A personal record cannot sit on a Team: move it into an Organization first.',
+                    );
+                }
+                const teams = await manager.getRepository(Team).find({
+                    where: { id: In(unique), organizationId: row.organizationId },
+                    select: { id: true },
+                });
+                if (teams.length !== unique.length) {
+                    // 404-not-403: a foreign and a missing Team read the same.
+                    throw new NotFoundException('Team not found');
+                }
+            }
+            const shape = VISIBILITY_AGGREGATE_SHAPES[aggregate];
+            let resourceTeamIds = unique;
+            if (shape.teamColumn) {
+                const first = unique[0] ?? null;
+                await manager
+                    .getRepository(ENTITY_OF[aggregate])
+                    .update({ id }, { [shape.teamColumn]: first });
+                row.teamId = first;
+                resourceTeamIds = unique.slice(1);
+            }
+            const resources = manager.getRepository(TeamResource);
+            const existing = await resources.find({
+                where: {
+                    resourceType: shape.teamResourceType as TeamResource['resourceType'],
+                    resourceId: id,
+                },
+            });
+            const keep = new Set(resourceTeamIds);
+            const stale = existing.filter((resource) => !keep.has(resource.teamId));
+            if (stale.length > 0) {
+                await resources.delete({ id: In(stale.map((resource) => resource.id)) });
+            }
+            const present = new Set(existing.map((resource) => resource.teamId));
+            for (const teamId of resourceTeamIds) {
+                if (present.has(teamId)) continue;
+                await resources.save(
+                    resources.create({
+                        teamId,
+                        resourceType: shape.teamResourceType as TeamResource['resourceType'],
+                        resourceId: id,
+                        addedById,
+                        tenantId: row.tenantId ?? null,
+                        organizationId: row.organizationId ?? null,
+                        createdAt: new Date(),
+                    }),
+                );
+            }
+            const teams = await this.teamIdsOf(manager, aggregate, row);
+            return { row, teams };
+        });
+        if (!state) return null;
+        await this.recomputeAutomatic(aggregate, id);
+        return this.getState(aggregate, id);
+    }
+
+    // ── internals ─────────────────────────────────────────────────────
+
+    private async load(
+        manager: EntityManager,
+        aggregate: VisibilityAggregate,
+        id: string,
+    ): Promise<VisibilityRecord | null> {
+        const row = await manager.getRepository(ENTITY_OF[aggregate]).findOne({ where: { id } });
+        return (row as VisibilityRecord | null) ?? null;
+    }
+
+    /** `teamId` (tasks) first, then the `team_resources` rows, then agent memberships. */
+    private async teamIdsOf(
+        manager: EntityManager,
+        aggregate: VisibilityAggregate,
+        row: VisibilityRecord,
+    ): Promise<string[]> {
+        const shape = VISIBILITY_AGGREGATE_SHAPES[aggregate];
+        const ids: string[] = [];
+        if (shape.teamColumn && row.teamId) ids.push(row.teamId);
+        const resources = await manager.getRepository(TeamResource).find({
+            where: {
+                resourceType: shape.teamResourceType as TeamResource['resourceType'],
+                resourceId: row.id,
+            },
+            order: { createdAt: 'ASC' },
+        });
+        ids.push(...resources.map((resource) => resource.teamId));
+        if (shape.teamMemberType) {
+            const memberships = await manager.getRepository(TeamMember).find({
+                where: {
+                    memberType: shape.teamMemberType as TeamMember['memberType'],
+                    memberId: row.id,
+                },
+            });
+            ids.push(...memberships.map((member) => member.teamId));
+        }
+        return [...new Set(ids)];
+    }
+
+    private async apply(
+        manager: EntityManager,
+        aggregate: VisibilityAggregate,
+        row: VisibilityRecord,
+        next: { visibility: RecordVisibility; visibilityExplicit: boolean },
+        teamIds: string[],
+    ): Promise<void> {
+        if (
+            next.visibility === row.visibility &&
+            next.visibilityExplicit === row.visibilityExplicit
+        ) {
+            return;
+        }
+        await manager
+            .getRepository(ENTITY_OF[aggregate])
+            .update(
+                { id: row.id },
+                { visibility: next.visibility, visibilityExplicit: next.visibilityExplicit },
+            );
+        if (next.visibility !== row.visibility) {
+            await this.recordChange(manager, aggregate, row, next, teamIds);
+        }
+    }
+
+    /**
+     * `<aggregate>.visibility_changed` (contract B.4). To `private`: `{id, visibility}`
+     * only, so consumers stop syncing without seeing the content. To `team` /
+     * `organization`: id, visibility, version, the explicit flag and the Teams.
+     *
+     * HOOK (EW-P1-1 B2 / EW-P2): the full integration DTO for a team / organization
+     * change arrives with the B2 snapshot builders; goals, missions and ideas record
+     * once they carry a `version` column (their P2 recording points).
+     */
+    private async recordChange(
+        manager: EntityManager,
+        aggregate: VisibilityAggregate,
+        row: VisibilityRecord,
+        next: { visibility: RecordVisibility; visibilityExplicit: boolean },
+        teamIds: string[],
+    ): Promise<void> {
+        if (!this.recorder || !RECORDED_AGGREGATES.has(aggregate) || !row.organizationId) return;
+        const aggregateType = aggregate as 'task' | 'agent';
+        const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, row.id);
+        const data: Record<string, unknown> =
+            next.visibility === 'private'
+                ? { id: row.id, visibility: 'private' }
+                : {
+                      id: row.id,
+                      organizationId: row.organizationId,
+                      visibility: next.visibility,
+                      visibilityExplicit: next.visibilityExplicit,
+                      version,
+                      teamIds,
+                  };
+        await this.recorder.record(manager, {
+            type: `${aggregate}.visibility_changed`,
+            tenantId: row.tenantId ?? null,
+            organizationId: row.organizationId,
+            aggregate: { type: aggregateType, id: row.id, version },
+            data,
+            changedFields: ['visibility'],
+            previous: { visibility: row.visibility },
+            visibility: next.visibility,
+        });
+    }
+
+    private aggregateOfResourceType(resourceType: string): VisibilityAggregate | null {
+        switch (resourceType) {
+            case 'task':
+                return 'task';
+            case 'goal':
+                return 'goal';
+            case 'mission':
+                return 'mission';
+            case 'idea':
+                return 'idea';
+            case 'agent':
+                return 'agent';
+            default:
+                return null;
+        }
+    }
+}

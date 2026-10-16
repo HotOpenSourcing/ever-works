@@ -2,8 +2,10 @@ import {
     ConflictException,
     Injectable,
     NotFoundException,
+    Optional,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
@@ -46,6 +48,10 @@ export class TeamsService {
         private readonly organizations: Repository<Organization>,
         @InjectRepository(User)
         private readonly users: Repository<User>,
+        // Record visibility (EW-P1-3) — automatic Team ↔ Organization scope when an
+        // agent joins or leaves a Team, or a Team is deleted. @Optional(): absent
+        // means no automatic change (today's behaviour).
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     async list(orgId: string): Promise<Team[]> {
@@ -134,6 +140,10 @@ export class TeamsService {
      */
     async remove(orgId: string, teamId: string): Promise<void> {
         const team = await this.getOrThrow(orgId, teamId);
+        // Record visibility (EW-P1-3): the Team's records lose it with the delete
+        // (team_resources / team_members cascade, tasks.teamId is SET NULL), so
+        // collect them first and widen the ones left with no Team afterwards.
+        const affected = this.visibility ? await this.visibility.recordsOfTeam(teamId) : [];
         await this.teams.manager.transaction(async (em) => {
             await em
                 .getRepository(Team)
@@ -143,6 +153,9 @@ export class TeamsService {
                 );
             await em.getRepository(Team).delete({ id: teamId });
         });
+        for (const record of affected) {
+            await this.visibility?.recomputeAutomatic(record.aggregate, record.id);
+        }
     }
 
     // ── Roster ──
@@ -244,6 +257,9 @@ export class TeamsService {
 
         try {
             const saved = await this.members.save(row);
+            if (input.memberType === 'agent') {
+                await this.visibility?.recomputeAutomatic('agent', input.memberId);
+            }
             const [view] = await this.resolveMemberViews([saved]);
             return view;
         } catch (error) {
@@ -264,6 +280,9 @@ export class TeamsService {
         const result = await this.members.delete({ teamId, memberType, memberId });
         if (!result.affected) {
             throw new NotFoundException('Team member not found');
+        }
+        if (memberType === 'agent') {
+            await this.visibility?.recomputeAutomatic('agent', memberId);
         }
     }
 

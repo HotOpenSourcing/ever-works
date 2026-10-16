@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RecordVisibilityModule } from '../record-visibility/record-visibility.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Agent } from '../entities/agent.entity';
 import { Goal } from '../entities/goal.entity';
@@ -26,6 +27,8 @@ import { TeamsService } from './teams.service';
  */
 @Module({
     imports: [
+        // Record visibility (EW-P1-3) — automatic Team ↔ Organization scope.
+        RecordVisibilityModule,
         TypeOrmModule.forFeature([
             Team,
             TeamMember,

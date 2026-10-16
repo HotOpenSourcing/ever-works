@@ -46,6 +46,7 @@ import {
 } from '../schedules/schedule-control.codes';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
 import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { AgentRepository } from '../database/repositories/agent.repository';
 import { AgentStatus, type Agent } from '../entities/agent.entity';
 import { AgentRunRepository } from '../database/repositories/agent-run.repository';
@@ -360,6 +361,9 @@ export class TasksService {
         // @Optional per the positional-spec arity rule; absent means every read stays
         // owner-only, exactly as before.
         @Optional() private readonly accessPolicy?: RecordAccessPolicy,
+        // Record visibility (EW-P1-3) — automatic Team <-> Organization scope when a
+        // Task's teamId is set or cleared. Appended LAST + @Optional.
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     /** Per-process run-now claims, used only when `runNowLock` is unbound. */
@@ -537,8 +541,7 @@ export class TasksService {
                 .map((work) => work.id),
         );
         return rows.filter(
-            (task) =>
-                task.userId !== userId || !task.workId || reachableWorkIds.has(task.workId),
+            (task) => task.userId !== userId || !task.workId || reachableWorkIds.has(task.workId),
         );
     }
 
@@ -1034,6 +1037,11 @@ export class TasksService {
         }
 
         await this.tasks.updateById(id, patch);
+        // Record visibility (EW-P1-3): a first Team narrows an automatic
+        // `organization` Task to `team`; clearing its last widens it back.
+        if ('teamId' in ownerPatch) {
+            await this.visibility?.recomputeAutomatic('task', id);
+        }
         const refreshed = await this.getOne(userId, id, ownershipScope);
         await this.logActivity({
             userId,

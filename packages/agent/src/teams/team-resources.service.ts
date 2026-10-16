@@ -3,7 +3,9 @@ import {
     ConflictException,
     Injectable,
     NotFoundException,
+    Optional,
 } from '@nestjs/common';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
@@ -67,6 +69,10 @@ export class TeamResourcesService {
         private readonly tasks: Repository<Task>,
         @InjectRepository(Goal)
         private readonly goals: Repository<Goal>,
+        // Record visibility (EW-P1-3) — attaching a record's first Team narrows it to
+        // `team`, detaching its last widens it to `organization` (while not chosen
+        // by hand). @Optional(): absent means no automatic change.
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     /**
@@ -104,6 +110,7 @@ export class TeamResourcesService {
 
         try {
             const saved = await this.resources.save(row);
+            await this.recomputeVisibility(resourceType, input.resourceId);
             return this.toItem(saved, this.resolveRef(resourceType, resource));
         } catch (error) {
             if (this.isUniqueViolation(error)) {
@@ -126,6 +133,22 @@ export class TeamResourcesService {
         if (!result.affected) {
             throw new NotFoundException('Resource is not attached to this team');
         }
+        await this.recomputeVisibility(type, resourceId);
+    }
+
+    /** Record visibility (EW-P1-3): re-apply D11 to a record whose Teams changed. */
+    private async recomputeVisibility(
+        resourceType: TeamResourceType,
+        resourceId: string,
+    ): Promise<void> {
+        if (!this.visibility) return;
+        const aggregate =
+            resourceType === 'idea'
+                ? 'idea'
+                : resourceType === 'work'
+                  ? null
+                  : (resourceType as 'task' | 'agent' | 'mission' | 'goal');
+        if (aggregate) await this.visibility.recomputeAutomatic(aggregate, resourceId);
     }
 
     /** List a Team's attached resources, resolved + grouped by type. */
