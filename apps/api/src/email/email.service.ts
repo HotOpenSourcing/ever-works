@@ -364,10 +364,16 @@ export class EmailService {
                 { strict: true },
             );
         } catch (error) {
-            // Nothing went out: give the cooldown back so the owner can retry
-            // at once, and say why instead of "sent".
+            // Nothing went out: put the row back exactly as it was — the
+            // previous link (token + expiry) keeps working, and the cooldown is
+            // given back so the owner can retry at once — and say why instead
+            // of "sent".
             await this.addresses
-                .update(row.id, { verificationSentAt: row.verificationSentAt ?? null })
+                .update(row.id, {
+                    verificationSentAt: row.verificationSentAt ?? null,
+                    verificationToken: row.verificationToken ?? null,
+                    verificationTokenExpiresAt: row.verificationTokenExpiresAt ?? null,
+                })
                 .catch(() => undefined);
             this.logger.warn(
                 `Confirmation email for address ${row.id} was not sent: ${

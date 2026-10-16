@@ -781,15 +781,23 @@ describe('EmailService verification (EW-P4-3)', () => {
         });
     });
 
-    it('a refused email answers 503 and gives the cooldown back', async () => {
+    it('a refused email answers 503, gives the cooldown back and keeps the earlier link working', async () => {
         const previous = new Date('2026-10-15T10:00:00Z');
-        addresses.findByIdForUser.mockResolvedValue({ ...row, verificationSentAt: previous });
+        const earlierExpiry = new Date(Date.now() + 60 * 60 * 1000);
+        addresses.findByIdForUser.mockResolvedValue({
+            ...row,
+            verificationSentAt: previous,
+            verificationToken: 'earlier-token',
+            verificationTokenExpiresAt: earlierExpiry,
+        });
         mail.sendNotificationEmail.mockRejectedValue(new Error('Resend refused the email: x'));
         await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
             status: 503,
         });
         expect(addresses.update).toHaveBeenLastCalledWith('addr-1', {
             verificationSentAt: previous,
+            verificationToken: 'earlier-token',
+            verificationTokenExpiresAt: earlierExpiry,
         });
         expect(mail.sendNotificationEmail.mock.calls[0][3]).toEqual({ strict: true });
     });
