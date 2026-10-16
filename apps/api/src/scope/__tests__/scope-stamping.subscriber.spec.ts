@@ -196,9 +196,7 @@ describe('ScopeStampingSubscriber (EW-657 Phase 5b)', () => {
         it('an org-scoped Task created on a Team starts `team`', () => {
             const entity: Record<string, unknown> = { id: 'x', teamId: 'team-1' };
             scopeContext.runWith({ tenantId: 't-1', organizationId: 'o-1' }, () => {
-                subscriber.beforeInsert(
-                    makeEvent(entity, [...visibilityColumns, 'teamId']),
-                );
+                subscriber.beforeInsert(makeEvent(entity, [...visibilityColumns, 'teamId']));
             });
             expect(entity.visibility).toBe('team');
         });
@@ -227,9 +225,7 @@ describe('ScopeStampingSubscriber (EW-657 Phase 5b)', () => {
         it('does not touch entities without the visibility columns', () => {
             const entity: Record<string, unknown> = { id: 'x' };
             scopeContext.runWith({ tenantId: 't-1', organizationId: 'o-1' }, () => {
-                subscriber.beforeInsert(
-                    makeEvent(entity, ['id', 'tenantId', 'organizationId']),
-                );
+                subscriber.beforeInsert(makeEvent(entity, ['id', 'tenantId', 'organizationId']));
             });
             expect(entity).not.toHaveProperty('visibility');
         });

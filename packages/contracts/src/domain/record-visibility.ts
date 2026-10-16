@@ -40,9 +40,7 @@ export function normalizeRecordVisibility(value?: string | null): RecordVisibili
 		return DEFAULT_RECORD_VISIBILITY;
 	}
 	const normalized = value.trim().toLowerCase();
-	return RECORD_VISIBILITY_SET.has(normalized)
-		? (normalized as RecordVisibility)
-		: DEFAULT_RECORD_VISIBILITY;
+	return RECORD_VISIBILITY_SET.has(normalized) ? (normalized as RecordVisibility) : DEFAULT_RECORD_VISIBILITY;
 }
 
 /**
@@ -83,7 +81,5 @@ export function normalizeRecordListView(value?: string | null): RecordListView {
 		return DEFAULT_RECORD_LIST_VIEW;
 	}
 	const normalized = value.trim().toLowerCase();
-	return RECORD_LIST_VIEW_SET.has(normalized)
-		? (normalized as RecordListView)
-		: DEFAULT_RECORD_LIST_VIEW;
+	return RECORD_LIST_VIEW_SET.has(normalized) ? (normalized as RecordListView) : DEFAULT_RECORD_LIST_VIEW;
 }

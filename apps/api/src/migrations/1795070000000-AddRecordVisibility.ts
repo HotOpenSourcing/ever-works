@@ -35,13 +35,16 @@ interface VisibilityTable {
  * (`private`, not explicit) are touched, so a re-run, or a run after somebody chose
  * `private` by hand, changes nothing.
  *
- * **Roster backfill:** `organization_members` gets a row for every active user whose
- * `users.tenantId` matches the Organization's Tenant. Access in Ever Works is
- * tenant-wide (`OrganizationMembershipService` compares `user.tenantId` with
- * `organization.tenantId`), so these people can already open the Organization; the
- * roster only records it. The Tenant owner is skipped: they are a member by
- * construction, `listMembers` synthesizes their row, and seat counting already counts
- * them — a real row would change neither access nor anything else.
+ * **Roster backfill:** every active user whose `users.tenantId` matches an
+ * Organization's Tenant and who holds no roster row in that Tenant yet (they joined
+ * before `organization_members` existed; it is empty in production) gets a row in
+ * every Organization of the Tenant. Access in Ever Works is tenant-wide
+ * (`OrganizationMembershipService` compares `user.tenantId` with
+ * `organization.tenantId`), so they can already open those Organizations; the roster
+ * only records it. Users who already hold a row joined through the invitation flow,
+ * which records the Organization they were invited to, and are left alone. The Tenant
+ * owner is skipped: a member by construction (`listMembers` synthesizes the row, seat
+ * counting already counts them).
  *
  * Also: `idx_<table>_org_visibility (organizationId, visibility)` per table for the
  * org-wide reads of the access policy.
@@ -192,9 +195,18 @@ export class AddRecordVisibility1795070000000 implements MigrationInterface {
     }
 
     /**
-     * One `organization_members` row per (Organization, active tenant user) that has
-     * none yet, in batches. Re-running finds no candidates, which is what makes the
-     * backfill idempotent.
+     * Roster rows for the members who joined before the roster existed.
+     *
+     * A person with NO roster row anywhere in their Tenant joined before
+     * `organization_members` was written (it is empty in production), so nothing says
+     * which Organization they were invited to: they get a row in every Organization of
+     * their Tenant, which is exactly the access they have. A person who already holds a
+     * row joined through the roster-era invitation flow, which records the Organization
+     * they were invited to; they are left as they are, so `removeMember` keeps revoking
+     * what it revokes today.
+     *
+     * Keyset batches over users; a user's rows are inserted together, and a re-run
+     * finds no candidates, which is what makes the backfill idempotent.
      */
     private async backfillRoster(queryRunner: QueryRunner): Promise<void> {
         for (const required of ['organization_members', 'organizations', 'users']) {
@@ -206,22 +218,20 @@ export class AddRecordVisibility1795070000000 implements MigrationInterface {
         const trueLiteral = this.booleanLiteral(queryRunner, true);
         const falseLiteral = this.booleanLiteral(queryRunner, false);
         const batch = AddRecordVisibility1795070000000.ROSTER_BATCH;
+        let afterUserId: string | null = null;
 
         for (;;) {
             const qb = queryRunner.manager
                 .createQueryBuilder()
-                .select(`o.${q('id')}`, 'organizationId')
-                .addSelect(`o.${q('tenantId')}`, 'tenantId')
-                .addSelect(`o.${q('createdAt')}`, 'organizationCreatedAt')
-                .addSelect(`u.${q('id')}`, 'userId')
-                .addSelect(`u.${q('createdAt')}`, 'userCreatedAt')
-                .from('organizations', 'o')
-                .innerJoin('users', 'u', `u.${q('tenantId')} = o.${q('tenantId')}`)
-                .where(`u.${q('isActive')} = ${trueLiteral}`)
+                .select(`u.${q('id')}`, 'userId')
+                .addSelect(`u.${q('tenantId')}`, 'tenantId')
+                .from('users', 'u')
+                .where(`u.${q('tenantId')} IS NOT NULL`)
+                .andWhere(`u.${q('isActive')} = ${trueLiteral}`)
                 .andWhere(
                     `NOT EXISTS (SELECT 1 FROM ${q('organization_members')} m` +
-                        ` WHERE m.${q('organizationId')} = o.${q('id')}` +
-                        ` AND m.${q('userId')} = u.${q('id')})`,
+                        ` WHERE m.${q('userId')} = u.${q('id')}` +
+                        ` AND m.${q('tenantId')} = u.${q('tenantId')})`,
                 );
             if (users?.findColumnByName('isAnonymous')) {
                 qb.andWhere(`u.${q('isAnonymous')} = ${falseLiteral}`);
@@ -229,71 +239,88 @@ export class AddRecordVisibility1795070000000 implements MigrationInterface {
             if (hasTenants) {
                 qb.andWhere(
                     `NOT EXISTS (SELECT 1 FROM ${q('tenants')} tn` +
-                        ` WHERE tn.${q('id')} = o.${q('tenantId')}` +
+                        ` WHERE tn.${q('id')} = u.${q('tenantId')}` +
                         ` AND tn.${q('ownerUserId')} = u.${q('id')})`,
                 );
             }
-            const rows = await qb
-                .orderBy(`o.${q('id')}`, 'ASC')
-                .addOrderBy(`u.${q('id')}`, 'ASC')
+            if (afterUserId !== null) {
+                qb.andWhere(`u.${q('id')} > :afterUserId`, { afterUserId });
+            }
+            const candidates = await qb
+                .orderBy(`u.${q('id')}`, 'ASC')
                 .limit(batch)
-                .getRawMany<{
-                    organizationId: string;
-                    tenantId: string;
-                    organizationCreatedAt: Date | string | null;
-                    userId: string;
-                    userCreatedAt: Date | string | null;
-                }>();
-            if (rows.length === 0) return;
+                .getRawMany<{ userId: string; tenantId: string }>();
+            if (candidates.length === 0) return;
+            afterUserId = candidates[candidates.length - 1].userId;
+
+            const tenantIds = [...new Set(candidates.map((candidate) => candidate.tenantId))];
+            const organizations = await queryRunner.manager
+                .createQueryBuilder()
+                .select(`o.${q('id')}`, 'organizationId')
+                .addSelect(`o.${q('tenantId')}`, 'tenantId')
+                .from('organizations', 'o')
+                .where(`o.${q('tenantId')} IN (:...tenantIds)`, { tenantIds })
+                .getRawMany<{ organizationId: string; tenantId: string }>();
 
             const now = new Date();
-            const members = rows.map((row) => ({
-                id: randomUUID(),
-                organizationId: row.organizationId,
-                tenantId: row.tenantId,
-                userId: row.userId,
-                role: 'member',
-                invitedById: null,
-                invitationId: null,
-                joinedAt: this.earliestPossibleJoin(row.organizationCreatedAt, row.userCreatedAt, now),
-                createdAt: now,
-                updatedAt: now,
-            }));
-            await queryRunner.manager
-                .createQueryBuilder()
-                .insert()
-                .into('organization_members', [
-                    'id',
-                    'organizationId',
-                    'tenantId',
-                    'userId',
-                    'role',
-                    'invitedById',
-                    'invitationId',
-                    'joinedAt',
-                    'createdAt',
-                    'updatedAt',
-                ])
-                .values(members)
-                .execute();
+            const members = candidates.flatMap((candidate) =>
+                organizations
+                    .filter((organization) => organization.tenantId === candidate.tenantId)
+                    .map((organization) => ({
+                        id: randomUUID(),
+                        organizationId: organization.organizationId,
+                        tenantId: organization.tenantId,
+                        userId: candidate.userId,
+                        role: 'member',
+                        invitedById: null,
+                        invitationId: null,
+                        joinedAt: now,
+                        createdAt: now,
+                        updatedAt: now,
+                    })),
+            );
 
-            if (rows.length < batch) return;
+            for (let offset = 0; offset < members.length; offset += batch) {
+                const chunk = members.slice(offset, offset + batch);
+                await queryRunner.manager
+                    .createQueryBuilder()
+                    .insert()
+                    .into('organization_members', [
+                        'id',
+                        'organizationId',
+                        'tenantId',
+                        'userId',
+                        'role',
+                        'invitedById',
+                        'invitationId',
+                        'joinedAt',
+                        'createdAt',
+                        'updatedAt',
+                    ])
+                    .values(chunk)
+                    .execute();
+
+                // Nobody recorded when a pre-roster member joined; the earliest
+                // moment they can have been one is when both the Organization and
+                // their account existed. Copied inside the database, so no driver
+                // turns a zone-less timestamp into a shifted JS Date on the way.
+                await queryRunner.manager
+                    .createQueryBuilder()
+                    .update('organization_members')
+                    .set({
+                        joinedAt: () =>
+                            `(SELECT CASE WHEN o2.${q('createdAt')} > u2.${q('createdAt')}` +
+                            ` THEN o2.${q('createdAt')} ELSE u2.${q('createdAt')} END` +
+                            ` FROM ${q('organizations')} o2, ${q('users')} u2` +
+                            ` WHERE o2.${q('id')} = ${q('organization_members')}.${q('organizationId')}` +
+                            ` AND u2.${q('id')} = ${q('organization_members')}.${q('userId')})`,
+                    })
+                    .where(`${q('id')} IN (:...ids)`, { ids: chunk.map((member) => member.id) })
+                    .execute();
+            }
+
+            if (candidates.length < batch) return;
         }
-    }
-
-    /**
-     * Nobody records when a pre-roster member joined; the earliest moment they can
-     * have been one is when both the Organization and their account existed.
-     */
-    private earliestPossibleJoin(
-        organizationCreatedAt: Date | string | null,
-        userCreatedAt: Date | string | null,
-        fallback: Date,
-    ): Date {
-        const times = [organizationCreatedAt, userCreatedAt]
-            .map((value) => (value ? new Date(value).getTime() : Number.NaN))
-            .filter((time) => Number.isFinite(time));
-        return times.length > 0 ? new Date(Math.max(...times)) : fallback;
     }
 
     /** `true`/`false` on Postgres; `1`/`0` on MySQL (tinyint) and SQLite (integer). */

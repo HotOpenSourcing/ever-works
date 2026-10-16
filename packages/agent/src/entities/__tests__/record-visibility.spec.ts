@@ -71,12 +71,15 @@ describe('record visibility columns (EW-P1-3)', () => {
 });
 
 describe('insert-time visibility default (owner decision D11)', () => {
-    it.each(ENTITIES)('%s: an org row starts `organization`, not explicit', (_name, entityClass) => {
-        const row = instanceOf(entityClass, { organizationId: 'org-1' });
-        row.applyDefaultVisibility();
-        expect(row.visibility).toBe('organization');
-        expect(row.visibilityExplicit).toBe(false);
-    });
+    it.each(ENTITIES)(
+        '%s: an org row starts `organization`, not explicit',
+        (_name, entityClass) => {
+            const row = instanceOf(entityClass, { organizationId: 'org-1' });
+            row.applyDefaultVisibility();
+            expect(row.visibility).toBe('organization');
+            expect(row.visibilityExplicit).toBe(false);
+        },
+    );
 
     it.each(ENTITIES)('%s: a personal row stays `private`', (_name, entityClass) => {
         const row = instanceOf(entityClass, { organizationId: null });
