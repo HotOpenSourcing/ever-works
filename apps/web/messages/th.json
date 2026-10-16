@@ -2655,6 +2655,7 @@
                 "appLauncher": "ตัวเรียกใช้แอป",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "เว็บฮุก",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

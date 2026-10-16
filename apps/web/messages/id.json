@@ -2655,6 +2655,7 @@
                 "appLauncher": "Peluncur Aplikasi",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Webhook",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

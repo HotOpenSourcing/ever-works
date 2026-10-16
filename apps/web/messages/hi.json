@@ -2655,6 +2655,7 @@
                 "appLauncher": "ऐप लॉन्चर",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "वेबहुक",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",
