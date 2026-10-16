@@ -555,6 +555,11 @@ Now:
   attachment is listed on the row (`filename`, `mimeType`, `size`, `cid`, `stored`, `uploadId`, `url`, `reason`): one
   the pipeline refused, one over the per-message limits (20 attachments, 25 MB decoded), an empty one, or any when no
   store is bound, is listed with `stored: false` and why. A refused attachment never blocks the message.
+- **Request size**: the inbound-email webhooks (`/api/email/inbound/*`) get their own body-parser limit, mounted ahead of
+  the global 1 MB one (`BODY_LIMIT`, unchanged for every other route): **25 MB** by default — the `proxy-body-size` the
+  ingress already allows on every environment — overridable with `INBOUND_EMAIL_BODY_LIMIT` up to a 50 MB ceiling
+  (invalid or larger values fall back to the default). Base64 adds a third, so roughly 18 MB of attachments fit in one
+  message by default; raising the limit means raising the ingress's `proxy-body-size` too.
 - **Cc and metadata**: `ccAddresses` and `metadata` are kept. Metadata is bounded to 32,000 serialized characters
   (first the raw header list is dropped, marked `headersOmitted`; then only the keys are kept, marked `truncated`).
 - **Tenant / organization**: the inbound row — and a conversation it creates — is stamped with the **receiving
