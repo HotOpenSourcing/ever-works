@@ -110,13 +110,17 @@ export class TenantEmailAddressRepository {
      * the caller has already checked ownership.
      */
     async claimVerificationSend(id: string, notBefore: Date, sentAt: Date): Promise<boolean> {
-        const result = await this.repository.update(
-            [
-                { id, verificationSentAt: IsNull() },
-                { id, verificationSentAt: LessThan(notBefore) },
-            ] as never,
-            { verificationSentAt: sentAt },
-        );
+        // An explicit query builder with object conditions (TypeORM quotes the
+        // camelCase columns): `Repository.update` treats an ARRAY criteria as a
+        // list of primary keys in some TypeORM versions, which would drop the
+        // `verificationSentAt` condition and defeat the compare-and-set.
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(TenantEmailAddress)
+            .set({ verificationSentAt: sentAt })
+            .where({ id, verificationSentAt: IsNull() })
+            .orWhere({ id, verificationSentAt: LessThan(notBefore) })
+            .execute();
         return (result.affected ?? 0) > 0;
     }
 
