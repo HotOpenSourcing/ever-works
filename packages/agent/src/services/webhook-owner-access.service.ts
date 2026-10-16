@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { INTEGRATION_API_KEY_KIND } from '@ever-works/contracts';
+import { INTEGRATION_API_KEY_KIND, recipientScopeForEventType } from '@ever-works/contracts';
 import { ApiKey } from '../entities/api-key.entity';
 import { Organization } from '../entities/organization.entity';
 import { User } from '../entities/user.entity';
@@ -14,6 +14,12 @@ export interface WebhookOwnerAccess {
     readonly disable: boolean;
     /** The organizations the owner can still see; empty when not ok. */
     readonly organizationIds: ReadonlySet<string>;
+    /**
+     * An integration-key owner's granted scopes (EW-P3-1: the recipient-scoped
+     * domains `inbox.*` / `email.*` need their read scope). Absent for a user
+     * owner, which never receives those events.
+     */
+    readonly scopes?: ReadonlySet<string> | null;
 }
 
 const DENIED_FOR_NOW: WebhookOwnerAccess = {
@@ -62,6 +68,7 @@ export class WebhookOwnerAccessService {
                 ok: true,
                 disable: false,
                 organizationIds: new Set(Array.isArray(pinned) ? pinned : []),
+                scopes: new Set(Array.isArray(key.scopes) ? key.scopes : []),
             };
         }
         const user = await this.dataSource
@@ -75,13 +82,24 @@ export class WebhookOwnerAccessService {
         return { ok: true, disable: false, organizationIds: new Set(orgs.map((org) => org.id)) };
     }
 
-    /** {@link resolve} narrowed to one organization (`null`: no organization to check, e.g. a test fire). */
+    /**
+     * {@link resolve} narrowed to one organization (`null`: no organization to
+     * check, e.g. a test fire) and, with `eventType`, to the recipient scope
+     * that type needs (EW-P3-1: `inbox.*` → `inbox:read`, `email.*` →
+     * `email:read`): checked again right before each send, so a queued or
+     * retried delivery is not sent after its key lost the scope.
+     */
     async canReceive(
         sub: WebhookSubscription,
         organizationId: string | null,
+        eventType?: string | null,
     ): Promise<{ allowed: boolean; disable: boolean }> {
         const access = await this.resolve(sub);
         if (!access.ok) return { allowed: false, disable: access.disable };
+        const recipientScope = eventType ? recipientScopeForEventType(eventType) : null;
+        if (recipientScope && !access.scopes?.has(recipientScope)) {
+            return { allowed: false, disable: false };
+        }
         if (organizationId === null) return { allowed: true, disable: false };
         return { allowed: access.organizationIds.has(organizationId), disable: false };
     }

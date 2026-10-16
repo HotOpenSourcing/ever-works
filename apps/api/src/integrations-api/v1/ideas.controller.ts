@@ -309,6 +309,11 @@ export class IntegrationIdeasController {
         const expected = expectedVersionOf(ifMatch);
         assertIfMatch(expected, Number(current.dto.version));
         await this.owned(user, id);
+        // Every Team must be one of the pinned organization's (404 otherwise) BEFORE the
+        // first write, so a foreign Team never leaves a half-applied PATCH behind.
+        for (const teamId of dto.teamIds ?? []) {
+            await this.resources.get('team', organizationId, teamId, source);
+        }
 
         await withExpectedVersion('idea', id, expected, async () => {
             if (dto.title !== undefined || dto.description !== undefined) {

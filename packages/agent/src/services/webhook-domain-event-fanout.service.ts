@@ -8,7 +8,12 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { type DomainEventEnvelope, matchesAnyDomainEventPattern } from '@ever-works/contracts';
+import {
+    type DomainEventEnvelope,
+    matchesAnyDomainEventPattern,
+    RECIPIENT_EVENT_SCOPES,
+    recipientScopeForEventType,
+} from '@ever-works/contracts';
 import { WebhookDeliveryRepository } from '../database/repositories/webhook-delivery.repository';
 import { WebhookSubscriptionRepository } from '../database/repositories/webhook-subscription.repository';
 import { seqToBigInt } from '../domain-events/domain-event-envelope';
@@ -76,6 +81,8 @@ const UNSENT_BATCH = 100;
  *    rules, applied by {@link DomainEventFeedService});
  *  - whose type matches its `events` (opt-in types only by exact name);
  *  - whose `origin.tag` is not in its `excludeOriginTags` (loop guard);
+ *  - of a recipient-scoped domain (`inbox.*`, `email.*`: one person's messages)
+ *    only when its owner is an integration key holding that domain's read scope;
  *  - that occurred after the subscription was created;
  *  - while its owner still has access: a user owner must still belong to the
  *    event's tenant; an integration-key owner must be active, unexpired and
@@ -178,6 +185,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
                     after,
                     limit: PAGE_SIZE,
                     types: patterns,
+                    // Read the recipient-scoped domains too; each subscription is
+                    // gated on its owner's scopes below.
+                    grantedScopes: RECIPIENT_EVENT_SCOPES,
                 });
             } catch (error) {
                 if (error instanceof DomainEventCursorExpiredError) {
@@ -199,6 +209,11 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
                     const owner = await this.ownerVerdict(sub, owners);
                     if (!owner.ok || !owner.organizationIds.has(event.organizationId ?? ''))
                         continue;
+                    // One person's messages (`inbox.*`, `email.*`): only to an
+                    // integration key holding the domain's read scope — never to a
+                    // user-owned subscription (another member's inbox).
+                    const recipientScope = recipientScopeForEventType(event.type);
+                    if (recipientScope && !owner.scopes?.has(recipientScope)) continue;
                     if (await this.deliver(sub, event)) created += 1;
                 }
             }

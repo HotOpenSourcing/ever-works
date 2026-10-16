@@ -23,6 +23,7 @@ import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder.service';
+import { assertExpectedAggregateVersion } from '../domain-events/domain-event-context';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
@@ -524,6 +525,9 @@ export class RecordVisibilityService {
         if (!this.recorder || !build || !row.organizationId) return;
         const aggregateType = aggregate;
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, row.id);
+        // An integration write under `If-Match` (runExpectingAggregateVersion) is refused
+        // here, in the change's transaction, when a concurrent write bumped first.
+        assertExpectedAggregateVersion(aggregateType, row.id, version);
         let data: Record<string, unknown>;
         if (next.visibility === 'private') {
             data = { id: row.id, visibility: 'private' };
@@ -566,6 +570,7 @@ export class RecordVisibilityService {
         const build = SNAPSHOT_OF[aggregate];
         if (!this.recorder || !build) return;
         const version = await this.recorder.bumpAggregateVersion(manager, aggregate, id);
+        assertExpectedAggregateVersion(aggregate, id, version);
         const snapshot = await build(manager, id);
         if (!snapshot?.organizationId) return;
         await this.recorder.record(manager, {
