@@ -44,6 +44,10 @@
 - [x] **T24** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
       (act-as = the recipient only; `integrations-api-v1` spec §9) + coverage gate entries (the Inbox, escalation and
       approvals controllers, whose decisions close the Inbox mirror).
+      `inbox.item.*` events are recorded `visibility: recipient` (an inbox item is one person's message): the feed and
+      webhooks v2 serve them only to an integration key holding `inbox:read` (never to a user-owned subscription or a
+      key without the scope); in-process listeners get them all. Until these routes landed they were recorded
+      `private` (#2644).
 
 ## Status legend
 

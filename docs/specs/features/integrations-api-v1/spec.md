@@ -274,6 +274,10 @@ Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
   (at least one): read / unread, archive / restore (an answered item comes back `answered`, else `open`). Archiving an
   OPEN fleet question releases the run parked on it, as in the app. `If-Match` is optional (`412`); it is checked
   against the version read at the start of the request. Answers the item DTO and its `ETag`.
+- **Who receives the events.** `inbox.item.*` are recipient-scoped (one person's messages): the feed serves them only
+  to a key that holds `inbox:read` on top of `events:read`, and webhooks v2 deliver them only to a subscription owned
+  by such a key, never to a user-owned subscription (another member would otherwise receive somebody else's messages).
+  The outbox records them `visibility: recipient`. The same rule will cover `email.*` with `email:read` (P4).
 - **Events** (`inbox.item.*`, `data` = the same DTO): `created` from every producer, `answered` once per answer whichever
   door it came through (Inbox reply, escalation resolve, approval decide), `state_changed` for a real read / archive
   flip (also when a reply whose routing failed leaves the item read), `deleted` with the last snapshot. `webUrl` is the

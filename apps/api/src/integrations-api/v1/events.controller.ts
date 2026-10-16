@@ -19,7 +19,8 @@ import { listParam, parseLimit, principalOf, validationFailed } from './integrat
  * `{events, nextCursor, hasMore, head}`, in ascending `seq`, for the key's
  * pinned organizations (narrowed to one by `X-Scope-Slug` when sent). Never
  * personal scope, never `private` aggregates except the id-only
- * `*.visibility_changed` notice. A cursor older than retention answers
+ * `*.visibility_changed` notice, and `inbox.*` / `email.*` only with
+ * `inbox:read` / `email:read`. A cursor older than retention answers
  * `410 cursor_expired`.
  */
 @ApiTags('Integrations API v1')
@@ -57,6 +58,9 @@ export class IntegrationEventsController {
             limit: parseLimit(limit),
             types: listParam(types),
             excludeOrigins: listParam(excludeOrigin),
+            // `inbox.*` / `email.*` (one person's messages) need `inbox:read` /
+            // `email:read` on top of `events:read`.
+            grantedScopes: principal.scopes,
         });
     }
 }

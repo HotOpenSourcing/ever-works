@@ -5,8 +5,12 @@ import { DomainEvent } from '../../entities/domain-event.entity';
 import { InboxItem } from '../../entities/inbox-item.entity';
 import { Organization } from '../../entities/organization.entity';
 import { InboxService } from '../../inbox/inbox.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DomainEventFeedService } from '../domain-event-feed.service';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
+import { DomainEventRelayService } from '../domain-event-relay.service';
+import { DomainEventRetentionService } from '../domain-event-retention.service';
 import {
     catalogDataValidator,
     createDomainEventsDataSource,
@@ -107,6 +111,34 @@ describe('inbox recording points', () => {
         });
         expect(event.data).not.toHaveProperty('sourceMeta');
         expectValid(event);
+    });
+
+    it('records inbox events recipient-scoped: the feed serves them only with inbox:read', async () => {
+        await fileNotice();
+        const item = await onlyItem();
+        await inbox.setUnread(item.id, RECIPIENT, false);
+        const recorded = await events();
+        expect(recorded.length).toBeGreaterThan(0);
+        expect(recorded.map((event) => event.visibility)).toEqual(recorded.map(() => 'recipient'));
+
+        const relay = new DomainEventRelayService(
+            dataSource,
+            new DomainEventRetentionService(dataSource),
+            new EventEmitter2(),
+        );
+        await relay.tick();
+        await relay.stop();
+        const feed = new DomainEventFeedService(dataSource);
+        const read = (grantedScopes?: string[]) =>
+            feed.readPage({ organizationIds: [ORG_A], after: '0', grantedScopes });
+        // `events:read` alone (or no scopes at all): one person's messages stay out.
+        expect((await read()).events).toEqual([]);
+        expect((await read(['events:read', 'tasks:read'])).events).toEqual([]);
+        // With `inbox:read` the integration reads every recipient's messages.
+        expect((await read(['events:read', 'inbox:read'])).events.map((e) => e.type)).toEqual([
+            'inbox.item.created',
+            'inbox.item.state_changed',
+        ]);
     });
 
     it('every producer records created: escalation and approval mirrors too', async () => {

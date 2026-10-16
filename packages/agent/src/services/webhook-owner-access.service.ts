@@ -14,6 +14,12 @@ export interface WebhookOwnerAccess {
     readonly disable: boolean;
     /** The organizations the owner can still see; empty when not ok. */
     readonly organizationIds: ReadonlySet<string>;
+    /**
+     * An integration-key owner's granted scopes (EW-P3-1: the recipient-scoped
+     * domains `inbox.*` / `email.*` need their read scope). Absent for a user
+     * owner, which never receives those events.
+     */
+    readonly scopes?: ReadonlySet<string> | null;
 }
 
 const DENIED_FOR_NOW: WebhookOwnerAccess = {
@@ -62,6 +68,7 @@ export class WebhookOwnerAccessService {
                 ok: true,
                 disable: false,
                 organizationIds: new Set(Array.isArray(pinned) ? pinned : []),
+                scopes: new Set(Array.isArray(key.scopes) ? key.scopes : []),
             };
         }
         const user = await this.dataSource

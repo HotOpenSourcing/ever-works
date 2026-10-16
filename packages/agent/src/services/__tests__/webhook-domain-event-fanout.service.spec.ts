@@ -310,6 +310,57 @@ describe('WebhookDomainEventFanoutService', () => {
         expect((await subscriptions.findById(personal.id))?.status).toBe('disabled');
     });
 
+    it('delivers inbox events only to an integration key holding inbox:read, never to a user-owned subscription', async () => {
+        await fanout.catchUp();
+        const insertKey = async (scopes: string[]) => {
+            const id = randomUUID();
+            await dataSource.getRepository(ApiKey).insert({
+                id,
+                userId: OWNER,
+                name: 'gauzy',
+                hashedKey: `h-${id}`,
+                prefix: 'ew_int_x',
+                isActive: true,
+                kind: 'integration',
+                organizationIds: [ORG_A],
+                scopes,
+            } as unknown as ApiKey);
+            return id;
+        };
+        const withInbox = await subscribe({
+            events: ['inbox.*', 'task.*'],
+            ownerType: 'integration_key',
+            ownerId: await insertKey(['events:read', 'webhooks:manage', 'inbox:read']),
+        });
+        const withoutInbox = await subscribe({
+            events: ['inbox.*', 'task.*'],
+            ownerType: 'integration_key',
+            ownerId: await insertKey(['events:read', 'webhooks:manage', 'tasks:read']),
+        });
+        const userOwned = await subscribe({ events: ['inbox.*', 'task.*'] });
+        const itemId = randomUUID();
+        await record({
+            type: 'inbox.item.answered',
+            aggregate: { type: 'inbox_item', id: itemId, version: 2 },
+            data: { id: itemId, recipientUserId: OWNER, status: 'answered' },
+            visibility: 'recipient',
+        });
+        await record();
+        await dispatch();
+        await fanout.catchUp();
+        const rows = (await deliveries()).map((row) => [row.subscriptionId, row.event]);
+        expect(rows.filter(([, event]) => event === 'inbox.item.answered')).toEqual([
+            [withInbox.id, 'inbox.item.answered'],
+        ]);
+        // Ordinary organization events still reach every matching subscription.
+        expect(
+            rows
+                .filter(([, event]) => event === 'task.updated')
+                .map(([id]) => id)
+                .sort(),
+        ).toEqual([withInbox.id, withoutInbox.id, userOwned.id].sort());
+    });
+
     it('ignores v1 subscriptions and paused v2 ones', async () => {
         await fanout.catchUp();
         await subscriptions.createForAccount({
