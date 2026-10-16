@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
+import { buildKbDocumentSnapshot, buildKbFolderSnapshot } from './domain-event-kb-snapshots';
 import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
 import {
     type AggregateSnapshot,
@@ -35,6 +36,9 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     organization: buildOrganizationSnapshot,
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
+    // EW-P3-2 — Knowledge Base documents and organization library folders.
+    kb_document: buildKbDocumentSnapshot,
+    kb_folder: buildKbFolderSnapshot,
     // EW-P4-2 — agent email (recipient-scoped).
     email_message: buildEmailMessageSnapshot,
 };
