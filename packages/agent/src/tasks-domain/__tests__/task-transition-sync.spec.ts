@@ -1,7 +1,11 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { TASK_BOARD_TRANSITIONS } from '@ever-works/contracts';
 import { TaskTransitionService, TASK_STATUS_TRANSITIONS } from '../task-transition.service';
-import { shortestTransitionPath, TaskTransitionBlockedException } from '../task-transition-path';
+import {
+    shortestTransitionPath,
+    TaskTransitionBlockedException,
+    TaskTransitionConflictException,
+} from '../task-transition-path';
 import { TaskStatus, TaskPriority } from '../../entities/task.entity';
 import type { Task } from '../../entities/task.entity';
 
@@ -358,7 +362,33 @@ describe('TaskTransitionService.transitionSync', () => {
         expect(plain.agentReviewPlanState).toBeNull();
     });
 
-    it('a lost race on a hop is the ordinary 400, not a 409', async () => {
+    it('a lost race mid-walk answers 409 conflict with the path walked and the status found', async () => {
+        // The first hop lands; before the second, someone else moves the Task.
+        const realCas = tasks.casUpdateStatus.getMockImplementation();
+        tasks.casUpdateStatus.mockImplementationOnce(realCas).mockImplementationOnce(async () => {
+            row = { ...row, status: TaskStatus.CANCELLED } as Task;
+            return false;
+        });
+        const err = (await svc
+            .transitionSync(row, TaskStatus.IN_PROGRESS)
+            .catch((e) => e)) as TaskTransitionConflictException;
+        expect(err).toBeInstanceOf(TaskTransitionConflictException);
+        expect(err.getStatus()).toBe(409);
+        expect(err.getResponse()).toEqual({
+            error: {
+                code: 'conflict',
+                message: expect.stringContaining('re-read'),
+                details: {
+                    from: TaskStatus.BACKLOG,
+                    to: TaskStatus.IN_PROGRESS,
+                    path: [TaskStatus.TODO, TaskStatus.IN_PROGRESS],
+                    currentStatus: TaskStatus.CANCELLED,
+                },
+            },
+        });
+    });
+
+    it('a refused hop whose Task did not move stays the ordinary 400', async () => {
         tasks.casUpdateStatus.mockResolvedValueOnce(false);
         await expect(svc.transitionSync(row, TaskStatus.TODO)).rejects.toBeInstanceOf(
             BadRequestException,

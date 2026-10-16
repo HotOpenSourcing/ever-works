@@ -91,3 +91,28 @@ export class TaskTransitionBlockedException extends ConflictException {
         this.details = details;
     }
 }
+
+export interface TransitionConflictDetails {
+    from: TaskStatus;
+    to: TaskStatus;
+    /** The legal path attempted (statuses after `from`), up to and including the hop that lost. */
+    path: TaskStatus[];
+    /** The status someone else moved the Task to while the walk was running. */
+    currentStatus: TaskStatus;
+}
+
+/**
+ * `409 conflict` in the integration error envelope: a sync walk LOST a race —
+ * another writer moved the Task between two hops, so the hop's compare-and-set
+ * found a different status. Not `transition_blocked`: no gate refused, and a
+ * consumer that reverts its own status on `transition_blocked` must not do so
+ * here; it re-reads the Task and retries from `currentStatus`.
+ */
+export class TaskTransitionConflictException extends ConflictException {
+    readonly details: TransitionConflictDetails;
+
+    constructor(message: string, details: TransitionConflictDetails) {
+        super({ error: { code: 'conflict', message, details } });
+        this.details = details;
+    }
+}

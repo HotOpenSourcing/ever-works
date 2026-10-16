@@ -178,7 +178,9 @@ _Then_ it renders as a wikilink — same WikiLinkExtension reused from `KbEditor
   `{ "error": { "code": "transition_blocked", "details": { from, to, blockers[], pendingApprovers[], path[] } } }` and
   moves nothing. A sync walk never starts agent work (no `→ in_progress` agent fan-out, no `→ in_review` reviewer runs —
   plan decision D9). Integration keys (`tasks:write`) may only use `mode: 'sync'` and never `force` (`422 domain_rule`);
-  sessions and personal keys may opt into it.
+  sessions and personal keys may opt into it. If another writer moves the Task between two hops (the hop's
+  compare-and-set loses), the walk answers `409` with `code: "conflict"` and `details: { from, to, path[], currentStatus }`
+  — no gate refused, so the caller re-reads the Task and retries rather than treating it as `transition_blocked`.
 - **FR-9** When a Task with active blockers tries to move to `in_progress`, the system MUST reject the transition with `409 Conflict — has unresolved blockers`.
 - **FR-10** When all blockers for a `blocked` Task are `done`, the Task MUST auto-transition back to its prior status (stored in `previousStatus` column on the row).
 - **FR-11** On `done` transition: if any approvers are configured, the system MUST require all approvers' `approved=true` row before allowing `done`. Configurable per-task via `requireAllApprovers`.

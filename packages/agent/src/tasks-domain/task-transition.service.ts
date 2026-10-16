@@ -11,6 +11,7 @@ import type { Task, TaskActorType } from '../entities/task.entity';
 import {
     shortestTransitionPath,
     TaskTransitionBlockedException,
+    TaskTransitionConflictException,
     type TransitionBlocker,
     type TransitionPendingApprover,
 } from './task-transition-path';
@@ -572,6 +573,26 @@ export class TaskTransitionService {
                         [...walked, hop],
                         err.message,
                     );
+                }
+                // Review of EW-P1-6 (CodeRabbit): `transition()` answers a lost
+                // compare-and-set with the same 400 as an illegal move. Every hop
+                // of the walk is legal from the status it started at, so a 400
+                // whose Task now sits elsewhere means another writer moved it
+                // mid-walk: report the race (409 conflict) with how far the walk
+                // got, instead of an unexplained 400.
+                if (err instanceof BadRequestException) {
+                    const latest = await this.tasks.findById(current.id).catch(() => null);
+                    if (latest && latest.status !== current.status) {
+                        throw new TaskTransitionConflictException(
+                            `Task moved to ${latest.status} while the sync walk was at ${current.status}; re-read it and retry.`,
+                            {
+                                from,
+                                to,
+                                path: [...walked, hop],
+                                currentStatus: latest.status,
+                            },
+                        );
+                    }
                 }
                 throw err;
             }
