@@ -10,6 +10,8 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from 'typeorm';
+import type { RecordVisibility } from '@ever-works/contracts';
+import { applyInsertVisibilityDefault } from './_record-visibility';
 import type { AgentHaltDetailDto, MergePolicyOverride } from '@ever-works/contracts';
 import { User } from './user.entity';
 import { PortableDateColumn } from './_types';
@@ -220,6 +222,7 @@ export enum AgentIdleBehavior {
  * avoid forward-import cycles; FK constraints are added by the migration.
  */
 @Entity({ name: 'agents' })
+@Index('idx_agents_org_visibility', ['organizationId', 'visibility'])
 // Durable per-scope slug uniqueness. The scope's target is normalized into the
 // NON-NULL `scopeTargetId` column (see below) so this index has no nullable
 // members — SQL treats NULLs as DISTINCT inside a unique index, so the previous
@@ -583,6 +586,23 @@ export class Agent {
     @Column({ type: 'uuid', nullable: true })
     organizationId?: string | null;
 
+    /**
+     * Record visibility (EW-P1-3, `docs/specs/features/record-visibility/spec.md`).
+     * Ownership (`userId`) is unchanged; this only ADDS readers of an org-scope row:
+     * `private` = the owner and the participants, `team` = also the members of the
+     * row's Teams and Work, `organization` = also every member of the Organization.
+     * Existing org rows were backfilled by migration 1795070000000 (owner decision D11).
+     */
+    @Column({ type: 'varchar', length: 16, default: 'private' })
+    visibility: RecordVisibility;
+
+    /**
+     * `true` once somebody chose `visibility` by hand: the automatic Team ↔
+     * Organization changes then stop. `private` is only ever set by hand.
+     */
+    @Column({ type: 'boolean', default: false })
+    visibilityExplicit: boolean;
+
     @CreateDateColumn()
     createdAt: Date;
 
@@ -599,5 +619,15 @@ export class Agent {
     @BeforeUpdate()
     syncScopeTargetId(): void {
         this.scopeTargetId = this.missionId ?? this.ideaId ?? this.workId ?? '';
+    }
+
+    /**
+     * Insert-time visibility default (owner decision D11): personal rows stay
+     * `private`; org rows start `organization` (Teams attach later and narrow it
+     * to `team` while `visibilityExplicit` is false).
+     */
+    @BeforeInsert()
+    applyDefaultVisibility(): void {
+        applyInsertVisibilityDefault(this, false);
     }
 }

@@ -1,4 +1,5 @@
 import {
+    BeforeInsert,
     Column,
     CreateDateColumn,
     Entity,
@@ -8,6 +9,8 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from 'typeorm';
+import type { RecordVisibility } from '@ever-works/contracts';
+import { applyInsertVisibilityDefault } from './_record-visibility';
 import { User } from './user.entity';
 import { Work } from './work.entity';
 
@@ -95,6 +98,7 @@ export interface WorkProposalRecommendedPlugin {
 }
 
 @Entity({ name: 'work_proposals' })
+@Index('idx_work_proposals_org_visibility', ['organizationId', 'visibility'])
 @Index('idx_work_proposals_user_status_mission_generated', [
     'userId',
     'status',
@@ -227,9 +231,36 @@ export class WorkProposal {
     @Column({ type: 'uuid', nullable: true })
     organizationId?: string | null;
 
+    /**
+     * Record visibility (EW-P1-3, `docs/specs/features/record-visibility/spec.md`).
+     * Ownership (`userId`) is unchanged; this only ADDS readers of an org-scope row:
+     * `private` = the owner and the participants, `team` = also the members of the
+     * row's Teams and Work, `organization` = also every member of the Organization.
+     * Existing org rows were backfilled by migration 1795070000000 (owner decision D11).
+     */
+    @Column({ type: 'varchar', length: 16, default: 'private' })
+    visibility: RecordVisibility;
+
+    /**
+     * `true` once somebody chose `visibility` by hand: the automatic Team ↔
+     * Organization changes then stop. `private` is only ever set by hand.
+     */
+    @Column({ type: 'boolean', default: false })
+    visibilityExplicit: boolean;
+
     @CreateDateColumn()
     generatedAt: Date;
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    /**
+     * Insert-time visibility default (owner decision D11): personal rows stay
+     * `private`; org rows start `organization` (Teams attach later and narrow it
+     * to `team` while `visibilityExplicit` is false).
+     */
+    @BeforeInsert()
+    applyDefaultVisibility(): void {
+        applyInsertVisibilityDefault(this, false);
+    }
 }

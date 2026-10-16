@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
 import { Mission } from '../entities/mission.entity';
 import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
@@ -35,7 +36,7 @@ interface ScopedResourceRow {
 /**
  * Teams & Prebuilt Companies — Team ↔ resource association service
  * (operator ask "some Works belong to some Teams", generalized to
- * Works / Tasks / Agents / Missions / Ideas).
+ * Works / Tasks / Agents / Missions / Ideas / Goals).
  *
  * Authorization happens BEFORE these methods run: every route is behind
  * `OrganizationOwnershipGuard` (fail-closed tenant-ownership, 404 posture).
@@ -64,6 +65,8 @@ export class TeamResourcesService {
         private readonly ideas: Repository<WorkProposal>,
         @InjectRepository(Task)
         private readonly tasks: Repository<Task>,
+        @InjectRepository(Goal)
+        private readonly goals: Repository<Goal>,
     ) {}
 
     /**
@@ -139,6 +142,7 @@ export class TeamResourcesService {
             agent: [],
             mission: [],
             idea: [],
+            goal: [],
         };
         if (rows.length === 0) {
             return grouped;
@@ -249,6 +253,8 @@ export class TeamResourcesService {
                 return this.ideas as unknown as Repository<ScopedResourceRow>;
             case 'task':
                 return this.tasks as unknown as Repository<ScopedResourceRow>;
+            case 'goal':
+                return this.goals as unknown as Repository<ScopedResourceRow>;
         }
     }
 
@@ -296,6 +302,7 @@ export class TeamResourcesService {
             case 'task':
                 return { name: str(e.title), slug: str(e.slug) };
             case 'mission':
+            case 'goal':
                 return { name: str(e.title), slug: null };
             case 'idea':
                 return { name: str(e.title), slug: str(e.slugSuggestion) };

@@ -261,3 +261,4 @@ export * from './work-app-runtime-state.entity';
 export * from './ever-instance.entity';
 export * from './ever-stats-report.entity';
 export * from './ever-stats-lease.entity';
+export * from './_record-visibility';

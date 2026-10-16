@@ -1,4 +1,5 @@
 import {
+    BeforeInsert,
     Column,
     CreateDateColumn,
     Entity,
@@ -8,6 +9,8 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from 'typeorm';
+import type { RecordVisibility } from '@ever-works/contracts';
+import { applyInsertVisibilityDefault } from './_record-visibility';
 import { User } from './user.entity';
 import { PortableDateColumn } from './_types';
 import type { TaskExtraRepo } from '@ever-works/contracts';
@@ -80,6 +83,7 @@ export interface TaskLinkedPullRequest {
 }
 
 @Entity({ name: 'tasks' })
+@Index('idx_tasks_org_visibility', ['organizationId', 'visibility'])
 // Review-fix C1: slug uniqueness is per-user (UserTaskCounter
 // increments per user, so two users both produce `T-1`). Global
 // unique would deadlock the platform after the second user creates a Task.
@@ -600,9 +604,36 @@ export class Task {
     @Column({ type: 'uuid', nullable: true })
     organizationId?: string | null;
 
+    /**
+     * Record visibility (EW-P1-3, `docs/specs/features/record-visibility/spec.md`).
+     * Ownership (`userId`) is unchanged; this only ADDS readers of an org-scope row:
+     * `private` = the owner and the participants, `team` = also the members of the
+     * row's Teams and Work, `organization` = also every member of the Organization.
+     * Existing org rows were backfilled by migration 1795070000000 (owner decision D11).
+     */
+    @Column({ type: 'varchar', length: 16, default: 'private' })
+    visibility: RecordVisibility;
+
+    /**
+     * `true` once somebody chose `visibility` by hand: the automatic Team ↔
+     * Organization changes then stop. `private` is only ever set by hand.
+     */
+    @Column({ type: 'boolean', default: false })
+    visibilityExplicit: boolean;
+
     @CreateDateColumn()
     createdAt: Date;
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    /**
+     * Insert-time visibility default (owner decision D11): personal rows stay
+     * `private`; org rows start `team` when created with a `teamId`, else
+     * `organization`.
+     */
+    @BeforeInsert()
+    applyDefaultVisibility(): void {
+        applyInsertVisibilityDefault(this, Boolean(this.teamId));
+    }
 }

@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
 import { Mission } from '../entities/mission.entity';
 import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
@@ -37,6 +38,7 @@ import { TeamsService } from './teams.service';
             Mission,
             WorkProposal,
             Task,
+            Goal,
         ]),
     ],
     providers: [TeamsService, OrgChartService, TeamResourcesService],
