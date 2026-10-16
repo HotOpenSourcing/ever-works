@@ -537,8 +537,7 @@ export class TasksService {
                 .map((work) => work.id),
         );
         return rows.filter(
-            (task) =>
-                task.userId !== userId || !task.workId || reachableWorkIds.has(task.workId),
+            (task) => task.userId !== userId || !task.workId || reachableWorkIds.has(task.workId),
         );
     }
 

@@ -38,16 +38,16 @@
   roster only records that existing membership; it grants no permission by itself, and it is not what authorizes a
   write — an integration's act-as user still passes that user's own permission checks for every operation
   ([`integration-keys`](../integration-keys/spec.md) §2).
-  - **As implemented (migration `1795070000000-AddRecordVisibility`):** the rows go to every active, non-anonymous
-    user of the tenant who holds **no** roster row in that tenant yet — the members who joined before
-    `organization_members` was written (it is empty in production) — one row per organization of the tenant, since
-    nothing records which one they were invited to. A user who already holds a row joined through the roster-era
-    invitation flow, which records the organization they were invited to; adding sibling-organization rows for them
-    would change what `removeMember` revokes, so they are left alone. The tenant owner gets no row: a member by
-    construction (`listMembers` synthesizes the row, seat counting already counts them), and the access policy treats
-    the owner as a member of every organization of their tenant. `joinedAt` = the later of the organization's and the
-    account's creation. `down()` keeps these rows (they state true membership and cannot be told apart from later
-    invitation rows).
+    - **As implemented (migration `1795070000000-AddRecordVisibility`):** the rows go to every active, non-anonymous
+      user of the tenant who holds **no** roster row in that tenant yet — the members who joined before
+      `organization_members` was written (it is empty in production) — one row per organization of the tenant, since
+      nothing records which one they were invited to. A user who already holds a row joined through the roster-era
+      invitation flow, which records the organization they were invited to; adding sibling-organization rows for them
+      would change what `removeMember` revokes, so they are left alone. The tenant owner gets no row: a member by
+      construction (`listMembers` synthesizes the row, seat counting already counts them), and the access policy treats
+      the owner as a member of every organization of their tenant. `joinedAt` = the later of the organization's and the
+      account's creation. `down()` keeps these rows (they state true membership and cannot be told apart from later
+      invitation rows).
 - **Insert-time default (§5) ships with the columns:** an entity `@BeforeInsert` listener on the five entities, plus
   `ScopeStampingSubscriber` after it stamps the scope (the entity listener runs first), set `team` / `organization` on
   new org rows, so no org row is created `private` between this migration and the read policy.
