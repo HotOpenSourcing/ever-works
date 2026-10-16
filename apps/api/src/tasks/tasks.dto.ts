@@ -209,7 +209,8 @@ export class CreateTaskDto {
         nullable: true,
         type: String,
         format: 'date-time',
-        description: 'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
+        description:
+            'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
     })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
@@ -416,7 +417,8 @@ export class UpdateTaskDto {
         nullable: true,
         type: String,
         format: 'date-time',
-        description: 'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
+        description:
+            'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
     })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)

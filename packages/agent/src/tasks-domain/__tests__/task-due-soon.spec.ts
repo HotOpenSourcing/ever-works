@@ -50,10 +50,20 @@ describe('TaskRecurrenceDispatcherService.notifyDueSoon', () => {
         expect(tasks.casClaimDueSoon).toHaveBeenCalledWith('t1', dueAt, now);
         expect(notifications.emit).toHaveBeenCalledWith(
             'task_due_soon',
-            expect.objectContaining({ taskId: 't1', taskSlug: 'T-1', extra: { dueAt: dueAt.toISOString() } }),
+            expect.objectContaining({
+                taskId: 't1',
+                taskSlug: 'T-1',
+                extra: { dueAt: dueAt.toISOString() },
+            }),
             ['owner', 'u-2'],
         );
-        expect(summary).toMatchObject({ dueCount: 1, notified: 1, skipped: 0, failed: 0, windowHours: 24 });
+        expect(summary).toMatchObject({
+            dueCount: 1,
+            notified: 1,
+            skipped: 0,
+            failed: 0,
+            windowHours: 24,
+        });
     });
 
     it('a lost claim notifies nobody', async () => {
@@ -66,7 +76,10 @@ describe('TaskRecurrenceDispatcherService.notifyDueSoon', () => {
     it('a failure is counted, never thrown', async () => {
         const { svc, notifications } = build();
         notifications.emit.mockRejectedValueOnce(new Error('down'));
-        await expect(svc.notifyDueSoon(100, now)).resolves.toMatchObject({ failed: 1, notified: 0 });
+        await expect(svc.notifyDueSoon(100, now)).resolves.toMatchObject({
+            failed: 1,
+            notified: 0,
+        });
     });
 });
 

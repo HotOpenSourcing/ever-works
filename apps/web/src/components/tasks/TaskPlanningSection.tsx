@@ -86,7 +86,10 @@ export function TaskPlanningSection({ task }: { task: Task }) {
             <p className="text-xs text-text-muted dark:text-text-muted-dark">{t('hint')}</p>
             <div className="grid grid-cols-3 gap-3">
                 <div>
-                    <label className="block text-[10px] text-text-muted" htmlFor="task-planning-due">
+                    <label
+                        className="block text-[10px] text-text-muted"
+                        htmlFor="task-planning-due"
+                    >
                         {t('dueAt')}
                     </label>
                     <input
@@ -100,7 +103,10 @@ export function TaskPlanningSection({ task }: { task: Task }) {
                     />
                 </div>
                 <div>
-                    <label className="block text-[10px] text-text-muted" htmlFor="task-planning-start">
+                    <label
+                        className="block text-[10px] text-text-muted"
+                        htmlFor="task-planning-start"
+                    >
                         {t('startAt')}
                     </label>
                     <input

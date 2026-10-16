@@ -54,7 +54,12 @@ describe('AddTaskDatesAndEstimate1795090000000', () => {
         const [row] = await dataSource.query(
             `SELECT "dueAt","startAt","estimateMinutes","dueSoonNotifiedAt" FROM "tasks" WHERE "id"='t1'`,
         );
-        expect(row).toEqual({ dueAt: null, startAt: null, estimateMinutes: null, dueSoonNotifiedAt: null });
+        expect(row).toEqual({
+            dueAt: null,
+            startAt: null,
+            estimateMinutes: null,
+            dueSoonNotifiedAt: null,
+        });
     });
 
     it('is idempotent and down() removes exactly what up() added', async () => {
