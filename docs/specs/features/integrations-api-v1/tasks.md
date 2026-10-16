@@ -101,6 +101,19 @@
       `{item, routed, restart, runId?}`, `Idempotency-Key` optional; state `If-Match` pre-check. Contract CR-4
       (`requests.schema.json` `InboxReply` / `InboxStateChange`, `resources/inbox-reply-result.schema.json`).
 
+## Phase 7 — Knowledge Base (EW-P3-2)
+
+- [x] **T29** `version` on `work_knowledge_documents` and `memory_folders` + keyset indexes (migration
+      `1795130200000`, 3 dialects); `kb_document` / `kb_folder` snapshots (`domain-event-kb-snapshots.ts`, event body
+      limit 256 KiB → `bodyOmitted`).
+- [x] **T30** `kb.document.*` recorded in `KnowledgeBaseService` (Work and organization documents) and
+      `KnowledgeLibraryService` (filing, folder-delete unfiling); `kb.folder.*` in `MemoryFoldersService`
+      (organization folders only); the `kb_document_updated` / `kb_document_deleted` activity rows; every class at
+      organization scope (inheritance into Works unchanged).
+- [x] **T31** `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `/accept`, `/archive`, `/unarchive`,
+      `/move`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (`IntegrationKbController`) + coverage
+      gate entries for every KB controller. Contract CR-7 (`kb-document`, `kb-folder`, five request bodies).
+
 ## Phase 8 — Agent email (EW-P4-2, EW-P4-1)
 
 - [x] **T32** `email_messages.updatedAt` (backfilled from `createdAt`) + `version` + keyset index (migration

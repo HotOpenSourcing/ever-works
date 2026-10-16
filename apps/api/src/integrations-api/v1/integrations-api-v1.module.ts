@@ -5,6 +5,7 @@ import { InboxModule as AgentInboxModule } from '@ever-works/agent/inbox';
 import { NotificationsModule as AgentNotificationsModule } from '@ever-works/agent/notifications';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
 import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
+import { KnowledgeBaseModule, KnowledgeLibraryModule } from '@ever-works/agent/services';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
@@ -12,6 +13,7 @@ import { IntegrationEventsController } from './events.controller';
 import { IntegrationEmailController } from './email.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
 import { IntegrationInboxController } from './inbox.controller';
+import { IntegrationKbController } from './kb.controller';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
@@ -21,6 +23,7 @@ import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
+import { OrganizationsModule } from '../../organizations/organizations.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -49,6 +52,11 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
         // `InboxService` (steer, resume, decide exactly like the Inbox UI).
         AgentInboxModule,
+        // The KB routes (EW-P3-2) delegate to the Knowledge Base and the
+        // Knowledge library; organization admin comes from the membership service.
+        KnowledgeBaseModule,
+        KnowledgeLibraryModule,
+        OrganizationsModule,
         // `POST /email/inbound` (EW-P4-1) dispatches through the same inbound
         // dispatcher as provider mail (AGENT_INBOUND_EMAIL_DISPATCHER).
         AgentNotificationsModule,
@@ -67,6 +75,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationWebhooksController,
         // EW-P3-1 — the Inbox (`inbox:*`).
         IntegrationInboxController,
+        // EW-P3-2 — the Knowledge Base (`kb:*`).
+        IntegrationKbController,
         // EW-P4-2 / EW-P4-1 — agent email (`email:*`).
         IntegrationEmailController,
     ],
