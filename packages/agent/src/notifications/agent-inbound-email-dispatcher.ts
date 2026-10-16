@@ -18,6 +18,11 @@
  *         Task + enqueues agent-task-execute), or
  *     4b. conversation mode → find/create email_conversations thread, link the
  *         message, touch lastMessageAt (the chat-reply path picks it up).
+ *
+ * RFC threading (EW-P4-3): a message whose `In-Reply-To` / `References` name
+ * an earlier message of the same owner and Agent joins that message's thread
+ * — its conversation, or (task-spawn) its Task through the spawner's optional
+ * `appendInboundEmailToTask` — before the subject fallback is tried.
  */
 
 /**
@@ -56,6 +61,14 @@ export interface AgentInboundEmailDispatchPayload {
     bodyText: string;
     bodyHtml?: string;
     receivedAt: Date;
+    /**
+     * EW-P4-3 — RFC threading ids from the message's headers, bare (see
+     * `normalizeMessageId` in `@ever-works/plugin`). Sender-written: they
+     * only ever select among the SAME owner's and Agent's own messages.
+     */
+    messageIdHeader?: string;
+    inReplyTo?: string;
+    references?: readonly string[];
 }
 
 export interface AgentInboundEmailDispatchResult {
@@ -65,6 +78,11 @@ export interface AgentInboundEmailDispatchResult {
     emailMessageId?: string;
     conversationId?: string;
     taskId?: string;
+    /**
+     * EW-P4-3 — `true` when the message joined an existing thread (Task or
+     * conversation) through its `In-Reply-To` / `References` headers.
+     */
+    threaded?: boolean;
     reason?: string;
 }
 
@@ -100,9 +118,30 @@ export interface InboundEmailTaskSpawnerInput {
     from: string;
 }
 
+/**
+ * EW-P4-3 — a reply that threads (by `In-Reply-To` / `References`) onto an
+ * email already linked to a Task. Same untrusted-data rule as
+ * {@link InboundEmailTaskSpawnerInput}: `subject`, `bodyText` and `from` are
+ * attacker-controlled.
+ */
+export interface InboundEmailTaskAppendInput extends InboundEmailTaskSpawnerInput {
+    /** The Task the earlier message of the thread is linked to. */
+    taskId: string;
+}
+
 export interface InboundEmailTaskSpawner {
     spawnTaskForInboundEmail(
         input: InboundEmailTaskSpawnerInput,
+    ): Promise<{ taskId: string } | null>;
+    /**
+     * EW-P4-3 — optional: hand a threaded reply to the Task it belongs to
+     * instead of spawning a new one. Answers the Task id when the reply was
+     * delivered there; `null` (or a throw) makes the dispatcher fall back to
+     * {@link spawnTaskForInboundEmail}, so a reply is never lost. An adapter
+     * without it keeps the old behaviour: one new Task per message.
+     */
+    appendInboundEmailToTask?(
+        input: InboundEmailTaskAppendInput,
     ): Promise<{ taskId: string } | null>;
 }
 

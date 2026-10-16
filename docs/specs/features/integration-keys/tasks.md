@@ -25,8 +25,9 @@
 
 ## Follow-ups (other items)
 
-- [ ] EW-P1-1: bind `INTEGRATION_FEED_HEAD` to the domain-event feed head (`DomainEventFeedService.head()`); map the
-      integration principal (`request.user.integration.keyId`, `.actAsUserId`) into the domain-event actor context.
+- [x] EW-P1-1: bind `INTEGRATION_FEED_HEAD` to the domain-event feed head (`DomainEventFeedService.head()`, the global
+      head) in `IntegrationsApiV1Module`; the domain-event context interceptor (#2611) maps the integration principal
+      (`request.user.integration.keyId`, `.actAsUserId`) into the event actor.
 - [ ] EW-P1-1: record the integration-key lifecycle (created / rotated / revoked) through the domain-event recorder in
       the same transaction as the key write, so the security audit is durable. Today's `integration_key_*` activity rows
       are best-effort, like every activity row; the key row itself is kept on revoke.

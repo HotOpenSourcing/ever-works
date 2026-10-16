@@ -99,6 +99,86 @@ describe('PostmarkPlugin', () => {
 		});
 	});
 
+	// EW-P4-3 — RFC threading.
+	describe('RFC threading headers', () => {
+		it('forwards EmailSendInput.headers as Postmark Headers', async () => {
+			sendEmailMock.mockResolvedValueOnce({ MessageID: 'pm-1', ErrorCode: 0 });
+			await plugin.sendEmail(
+				{
+					from: 'a@example.com',
+					to: ['b@example.com'],
+					subject: 'Re: hi',
+					bodyText: 'hi',
+					messageRef: 'ref-thread',
+					headers: {
+						'Message-ID': '<out-1@acme.test>',
+						'In-Reply-To': '<in-1@client.test>',
+						References: '<root@client.test> <in-1@client.test>'
+					}
+				},
+				{ userId: 'user-1' }
+			);
+			expect(sendEmailMock.mock.calls[0][0].Headers).toEqual([
+				{ Name: 'Message-ID', Value: '<out-1@acme.test>' },
+				{ Name: 'In-Reply-To', Value: '<in-1@client.test>' },
+				{ Name: 'References', Value: '<root@client.test> <in-1@client.test>' }
+			]);
+		});
+
+		it('sends no Headers when none are given', async () => {
+			sendEmailMock.mockResolvedValueOnce({ MessageID: 'pm-2', ErrorCode: 0 });
+			await plugin.sendEmail(
+				{ from: 'a@example.com', to: ['b@example.com'], subject: 's', bodyText: 'b', messageRef: 'ref-none' },
+				{ userId: 'user-1' }
+			);
+			expect(sendEmailMock.mock.calls[0][0].Headers).toBeUndefined();
+		});
+
+		it('parses Message-ID / In-Reply-To / References from the inbound Headers (case-insensitive)', async () => {
+			const msg = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'postmark-own-id',
+						From: 'x@y.test',
+						To: 'agent@acme.test',
+						Subject: 'Re: hi',
+						Date: '2026-10-15T10:00:00Z',
+						Headers: [
+							{ Name: 'message-id', Value: '<reply-2@client.test>' },
+							{ Name: 'In-Reply-To', Value: '<out-1@acme.test>' },
+							{ Name: 'References', Value: '<root@client.test>\r\n <out-1@acme.test>' }
+						]
+					})
+				),
+				{},
+				{}
+			);
+			expect(msg.providerMessageId).toBe('postmark-own-id');
+			expect(msg.messageIdHeader).toBe('reply-2@client.test');
+			expect(msg.inReplyTo).toBe('out-1@acme.test');
+			expect(msg.references).toEqual(['root@client.test', 'out-1@acme.test']);
+		});
+
+		it('leaves the threading fields out when the headers are absent', async () => {
+			const msg = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(msg.messageIdHeader).toBeUndefined();
+			expect(msg.inReplyTo).toBeUndefined();
+			expect(msg.references).toBeUndefined();
+		});
+	});
+
 	describe('parseInboundWebhook', () => {
 		it('decodes Postmark Inbound JSON into canonical shape', async () => {
 			const payload = {

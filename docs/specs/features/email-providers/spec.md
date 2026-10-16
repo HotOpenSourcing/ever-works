@@ -327,7 +327,7 @@ Rate-limited per plugin id (default 600/min — reduces blast radius if a provid
 
 ## 8. Out of scope (v1)
 
-- **Reply-by-email threading.** Inbound messages create or join Tasks via subject parsing; SMTP-level threading (`In-Reply-To` headers) lands in v2.
+- **Reply-by-email threading.** Inbound messages create or join Tasks via subject parsing; SMTP-level threading (`In-Reply-To` headers) lands in v2. _(Landed: §14.2, EW-P4-3.)_
 - **Templates.** Send paths in v1 use plain text + HTML body inlined by the caller. Template management (Mailchimp templates, Postmark templates, etc.) lands in v2.
 - **Calendar / contacts.** Out of scope for this spec — see future `calendar-providers` spec.
 - **Multi-tenant routing.** Today addresses are scoped per `userId`. Multi-tenant work groups land later — see the platform's multi-tenancy track.
@@ -499,3 +499,40 @@ Now **verification is mandatory**:
   (§7), so the response does not reveal whether a secret exists.
 - Rollout check (2026-10-15): no deployed environment had an inbound address or an inbound message, so the change broke no
   working path. An operator who adds an inbound address must also configure the provider secret.
+
+### 14.2 RFC threading (`Message-ID`, `In-Reply-To`, `References`)
+
+Before: threading keyed only on the normalized subject (conversation mode); in task-spawn mode **every** inbound message
+created a new Task; outbound mail carried no threading headers, so replies did not thread in the recipient's client; and
+the Task an inbound message spawned was never written back onto the message.
+
+Now:
+
+- **Columns** on `email_messages` (migration `1795061520000-AddEmailMessageThreadingHeaders`, portable DDL for Postgres,
+  MySQL and better-sqlite3): `messageIdHeader varchar(255)`, `inReplyTo varchar(255)`, `references text` (simple-json
+  list), all nullable; index `(userId, messageIdHeader)`. Ids are stored **bare** (no angle brackets) via
+  `normalizeMessageId` / `parseMessageIdList` in `@ever-works/plugin`; an id over 255 characters is not stored (never
+  truncated); `References` keeps the newest 50 ids.
+- **Contract** (`@ever-works/plugin`): `EmailSendInput.headers` (extra RFC 5322 header fields, forwarded verbatim —
+  Postmark `Headers`, Mailgun `h:<Name>`, Resend / SendGrid / Mandrill `headers`); `EmailInboundMessage.messageIdHeader`,
+  `inReplyTo`, `references` (parsed by the Postmark and Mailgun plugins from the original headers).
+- **Outbound** (`EmailFacadeService.send`): every send carries a `Message-ID` (`<uuid@sending-domain>`, unless the
+  caller set one) and the caller's `In-Reply-To` / `References`; all three are recorded on the row (direct send,
+  reservation, or released draft). Header names that are not RFC 5322 field names and values with CR/LF are dropped
+  before the plugin sees them (no header injection).
+- **Reply in thread**: `POST /api/email/messages` and the Agent `sendEmail` tool accept `inReplyToMessageId` (an
+  `email_messages.id` of the caller's own; another account's answers 404). The send gets `In-Reply-To` = that message's
+  id and `References` = its chain + its id (RFC 5322 §3.6.4), and inherits its `taskId`. A held draft keeps
+  `inReplyTo` / `references` on its row and the release rebuilds the headers.
+- **Inbound** (`DefaultInboundEmailDispatcher`): the ids of `In-Reply-To`, then `References` newest-first (never the
+  message's own id, at most 20) are matched against the **same owner's and the same Agent's** messages — the headers
+  are sender-written, so they can only ever select among that Agent's own mail.
+    - `conversation` mode: a match joins the matched message's conversation; else the normalized subject (as before).
+    - `task-spawn` mode: a match whose message is linked to a Task is handed to the spawner's optional
+      `appendInboundEmailToTask`; the platform binding posts it on that Task's chat (as the address owner, mentioning only
+      the receiving Agent so it picks the reply up; the email text is defused — `@` mentions and `[[…]]` links made
+      inert, forged closing delimiters neutralized, capped well under the 16 KiB chat limit). If there is no match, the
+      adapter cannot append, or appending fails (e.g. the secret scanner rejects the body), a new Task is spawned exactly
+      as before — a reply is never lost.
+    - After a Task is spawned or joined, the message is linked to it (`email_messages.taskId`, only when still empty).
+    - A spawned Task's description ends with the inbound message id and how to reply in thread.
