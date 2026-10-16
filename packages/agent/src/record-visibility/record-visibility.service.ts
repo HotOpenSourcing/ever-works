@@ -23,6 +23,7 @@ import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder.service';
+import { buildAgentSnapshot, buildTaskSnapshot } from '../domain-events/domain-event-snapshots';
 import { VISIBILITY_AGGREGATE_SHAPES } from './record-access.types';
 
 /** A hand-picked visibility, or `automatic` to hand the choice back to D11. */
@@ -180,28 +181,46 @@ export class RecordVisibilityService {
      */
     async recomputeAutomatic(aggregate: VisibilityAggregate, id: string): Promise<void> {
         try {
-            await this.dataSource.transaction(async (manager) => {
-                const row = await this.load(manager, aggregate, id);
-                if (!row || row.visibilityExplicit || !row.organizationId) return;
-                const teamIds = await this.teamIdsOf(manager, aggregate, row);
-                const visibility = automaticRecordVisibility({
-                    organizationId: row.organizationId,
-                    hasTeam: teamIds.length > 0,
-                });
-                if (visibility === row.visibility) return;
-                await this.apply(
-                    manager,
-                    aggregate,
-                    row,
-                    { visibility, visibilityExplicit: false },
-                    teamIds,
-                );
-            });
+            await this.dataSource.transaction((manager) =>
+                this.recomputeAutomaticIn(manager, aggregate, id),
+            );
         } catch (error) {
             this.logger.warn(
                 `Automatic visibility for ${aggregate} ${id} failed: ${(error as Error).message}`,
             );
         }
+    }
+
+    /**
+     * {@link recomputeAutomatic} inside the caller's transaction, BEFORE it records its
+     * own snapshot event (`task.updated`, `agent.updated` with `teamIds` changed), so
+     * that event already carries the new visibility. Pass `recordEvent: false` there:
+     * the caller's full-snapshot event is the change notice, and an automatic change is
+     * never to or from `private`. Answers whether the visibility changed.
+     */
+    async recomputeAutomaticIn(
+        manager: EntityManager,
+        aggregate: VisibilityAggregate,
+        id: string,
+        options: { recordEvent?: boolean } = {},
+    ): Promise<boolean> {
+        const row = await this.load(manager, aggregate, id);
+        if (!row || row.visibilityExplicit || !row.organizationId) return false;
+        const teamIds = await this.teamIdsOf(manager, aggregate, row);
+        const visibility = automaticRecordVisibility({
+            organizationId: row.organizationId,
+            hasTeam: teamIds.length > 0,
+        });
+        if (visibility === row.visibility) return false;
+        await this.apply(
+            manager,
+            aggregate,
+            row,
+            { visibility, visibilityExplicit: false },
+            teamIds,
+            options.recordEvent ?? true,
+        );
+        return true;
     }
 
     /**
@@ -375,6 +394,7 @@ export class RecordVisibilityService {
         row: VisibilityRecord,
         next: { visibility: RecordVisibility; visibilityExplicit: boolean },
         teamIds: string[],
+        recordEvent = true,
     ): Promise<void> {
         if (
             next.visibility === row.visibility &&
@@ -388,7 +408,7 @@ export class RecordVisibilityService {
                 { id: row.id },
                 { visibility: next.visibility, visibilityExplicit: next.visibilityExplicit },
             );
-        if (next.visibility !== row.visibility) {
+        if (recordEvent && next.visibility !== row.visibility) {
             await this.recordChange(manager, aggregate, row, next, teamIds);
         }
     }
@@ -396,11 +416,11 @@ export class RecordVisibilityService {
     /**
      * `<aggregate>.visibility_changed` (contract B.4). To `private`: `{id, visibility}`
      * only, so consumers stop syncing without seeing the content. To `team` /
-     * `organization`: id, visibility, version, the explicit flag and the Teams.
+     * `organization`: the full integration DTO (B2 snapshot builders, read through the
+     * same transaction, so it already carries the new visibility).
      *
-     * HOOK (EW-P1-1 B2 / EW-P2): the full integration DTO for a team / organization
-     * change arrives with the B2 snapshot builders; goals, missions and ideas record
-     * once they carry a `version` column (their P2 recording points).
+     * HOOK (EW-P2): goals, missions and ideas record once they carry a `version`
+     * column (their P2 recording points).
      */
     private async recordChange(
         manager: EntityManager,
@@ -412,9 +432,16 @@ export class RecordVisibilityService {
         if (!this.recorder || !RECORDED_AGGREGATES.has(aggregate) || !row.organizationId) return;
         const aggregateType = aggregate as 'task' | 'agent';
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, row.id);
-        const data: Record<string, unknown> =
-            next.visibility === 'private'
-                ? { id: row.id, visibility: 'private' }
+        let data: Record<string, unknown>;
+        if (next.visibility === 'private') {
+            data = { id: row.id, visibility: 'private' };
+        } else {
+            const snapshot =
+                aggregateType === 'task'
+                    ? await buildTaskSnapshot(manager, row.id)
+                    : await buildAgentSnapshot(manager, row.id);
+            data = snapshot
+                ? (snapshot.dto as unknown as Record<string, unknown>)
                 : {
                       id: row.id,
                       organizationId: row.organizationId,
@@ -423,6 +450,7 @@ export class RecordVisibilityService {
                       version,
                       teamIds,
                   };
+        }
         await this.recorder.record(manager, {
             type: `${aggregate}.visibility_changed`,
             tenantId: row.tenantId ?? null,

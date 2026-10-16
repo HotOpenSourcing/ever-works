@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import Ajv2020 from 'ajv/dist/2020';
+import addFormats from 'ajv-formats';
+import { getDomainEventCatalogEntry } from '@ever-works/contracts';
 import { DataSource } from 'typeorm';
 import { ENTITIES } from '../../database/_entities-inventory';
 import { DomainEvent } from '../../entities/domain-event.entity';
+import { RecordVisibilitySubscriber } from '../../entities/_record-visibility';
 import {
     DOMAIN_EVENT_RELAY_STATE_ID,
     DomainEventRelayState,
@@ -19,6 +25,9 @@ export async function createDomainEventsDataSource(): Promise<DataSource> {
         type: 'better-sqlite3',
         database: ':memory:',
         entities: ENTITIES,
+        // Record visibility (EW-P1-3): the insert-time default, registered exactly as
+        // `databaseConfig()` registers it, so org rows start `team` / `organization`.
+        subscribers: [RecordVisibilitySubscriber],
         synchronize: true,
         logging: false,
     });
@@ -84,4 +93,64 @@ export async function recordMany(
         );
     }
     return rows;
+}
+
+export const CONTRACT_DIR = join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    '..',
+    '..',
+    'docs',
+    'specs',
+    'features',
+    'integrations-api-v1',
+    'contract',
+);
+const BASE = 'https://ever.works/schemas/integrations/v1/';
+
+/** Validates a value against a contract schema by `$id` suffix (`resources/task.schema.json`, `…#/$defs/X`). */
+export function contractValidator() {
+    const ajv = new Ajv2020({ strict: false, allErrors: true });
+    addFormats(ajv);
+    const walk = (dir: string): string[] =>
+        readdirSync(dir).flatMap((name) => {
+            const path = join(dir, name);
+            if (statSync(path).isDirectory()) return walk(path);
+            return name.endsWith('.schema.json') ? [path] : [];
+        });
+    for (const file of walk(join(CONTRACT_DIR, 'schemas')))
+        ajv.addSchema(JSON.parse(readFileSync(file, 'utf8')));
+    return (ref: string, value: unknown) => {
+        const validate = ajv.getSchema(BASE + ref);
+        if (!validate) throw new Error(`no schema ${ref}`);
+        if (!validate(JSON.parse(JSON.stringify(value)))) {
+            throw new Error(`${ref}: ${JSON.stringify(validate.errors, null, 1)}`);
+        }
+    };
+}
+
+interface ContractCatalogRow {
+    readonly type: string;
+    readonly dataSchema: string;
+}
+
+/**
+ * Validates a recorded event's `data` against the schema its row in the
+ * published catalog (`event-catalog.v1.json`) names.
+ */
+export function catalogDataValidator(): (event: { type: string; data: unknown }) => void {
+    const validate = contractValidator();
+    const catalog = JSON.parse(
+        readFileSync(join(CONTRACT_DIR, 'event-catalog.v1.json'), 'utf8'),
+    ) as {
+        events: ContractCatalogRow[];
+    };
+    const rows = new Map(catalog.events.map((row) => [row.type, row]));
+    return (event) => {
+        const row = rows.get(event.type);
+        if (!row) throw new Error(`not in event-catalog.v1.json: ${event.type}`);
+        validate(row.dataSchema.replace(/^schemas\//, ''), event.data);
+    };
 }

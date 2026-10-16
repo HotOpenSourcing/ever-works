@@ -51,7 +51,7 @@ describe('Task visibility rules (EW-P1-3)', () => {
             contextFor: jest.fn().mockResolvedValue(context),
             isTaskParticipant: jest.fn().mockResolvedValue(opts.participant ?? false),
         };
-        const positional: unknown[] = new Array(25).fill(undefined);
+        const positional: unknown[] = new Array(26).fill(undefined);
         positional[0] = tasks;
         positional[1] = {};
         positional[2] = {};
@@ -60,7 +60,8 @@ describe('Task visibility rules (EW-P1-3)', () => {
         positional[5] = {};
         positional[6] = {};
         positional[7] = transitions;
-        positional[24] = accessPolicy;
+        // [24] = the domain-event publisher (EW-P1-1 B2), absent here.
+        positional[25] = accessPolicy;
         const service = new (TasksService as unknown as new (...args: unknown[]) => TasksService)(
             ...positional,
         );
@@ -171,6 +172,7 @@ describe('Task visibility rules (EW-P1-3)', () => {
                 chatDispatcher as never,
                 undefined,
                 undefined,
+                undefined, // domain-event publisher (EW-P1-1 B2)
                 accessPolicy as never,
             );
             return { chat, tasks, messages, runs };

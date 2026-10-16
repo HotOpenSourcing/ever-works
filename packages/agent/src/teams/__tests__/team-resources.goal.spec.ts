@@ -38,6 +38,7 @@ describe('TeamResourcesService — goal resources (EW-P1-3)', () => {
             repo() as never,
             repo() as never,
             repo() as never,
+            undefined, // domain-event publisher (EW-P1-1 B2)
             repo(goals) as never,
             visibility as never,
         );

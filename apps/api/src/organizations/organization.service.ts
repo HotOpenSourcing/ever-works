@@ -3,8 +3,10 @@ import {
     Injectable,
     Logger,
     NotFoundException,
+    Optional,
     UnauthorizedException,
 } from '@nestjs/common';
+import { DomainEventPublisher, recordAfterWrite } from '@ever-works/agent/domain-events';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { OrganizationRepository, UserRepository } from '@ever-works/agent/database';
@@ -454,6 +456,9 @@ export class OrganizationService {
         private readonly organizationRepository: OrganizationRepository,
         private readonly tenantBootstrap: TenantBootstrapService,
         private readonly usernameAllocator: UsernameAllocatorService,
+        // Domain events (EW-P1-1 B2) — `organization.updated`, recorded right
+        // after the write. Appended LAST + @Optional.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -1113,6 +1118,32 @@ export class OrganizationService {
                     : sanitizeOrganizationConnectionPolicy(connectionPolicy);
         }
         await this.organizationRepository.update(organizationId, updatePayload);
+        const changedFields = ['slug', 'displayName', 'legalName', 'countryCode'].filter(
+            (field) => field in updatePayload,
+        );
+        if (changedFields.length > 0) {
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.changed(
+                        manager,
+                        'organization',
+                        organizationId,
+                        'organization.updated',
+                        {
+                            changedFields,
+                            previous: Object.fromEntries(
+                                changedFields.map((field) => [
+                                    field,
+                                    (org as unknown as Record<string, unknown>)[field] ?? null,
+                                ]),
+                            ),
+                        },
+                    ),
+                (message) => this.logger.warn(message),
+                `organization.updated for ${organizationId}`,
+            );
+        }
         const updated = await this.organizationRepository.findById(organizationId);
         if (!updated) {
             // Race with a concurrent delete — surface as NotFound.

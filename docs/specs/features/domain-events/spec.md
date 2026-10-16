@@ -1,9 +1,9 @@
 # Feature Specification: Domain Events
 
 **Feature ID**: `domain-events`
-**Status**: `In progress` — B1 (catalog, outbox, recorder, relay, feed reader, plugin delivery, retention) implemented; B2 (recording points) next
+**Status**: `In progress` — B1 (catalog, outbox, recorder, relay, feed reader, plugin delivery, retention) merged in #2611; B2 (P1 recording points + coverage gate) implemented, see §3 for its known gaps
 **Created**: 2026-10-15
-**Last updated**: 2026-10-15
+**Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); implementation: the Ever Works integration lane
 **Plan items**: EW-P1-1 (outbox, relay, plugin capability, P1 recording points); later phases add goal, mission, idea,
 inbox, KB and email recording points.
@@ -83,14 +83,34 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
   transaction**, with the `EntityManager` of that transaction. Mutations that were not transactional are wrapped in a
   transaction at the recording point. The event row commits or rolls back with the state change.
 - **Not ORM subscribers**: Ever Works writes through QueryBuilder and bulk deletes, which subscribers miss.
-- **Hard deletes** record a tombstone: `type = '<x>.deleted'`, `data` = the last snapshot + `deleted: true`.
+- **Hard deletes** record a tombstone: `type = '<x>.deleted'`, `data` = the last snapshot + `deleted: true`, at a version
+  claimed before the delete (see *Tombstone version* below).
 - **Child changes** (edges, chat, members, resources) record a child event (`task.assignee.added`, …) whose `aggregate`
   is the parent with its new version.
 - **Attribution**: the actor comes from the request (user, agent run, integration key with optional act-as) or is a
   named system actor (`pr-status-cron`, `recurrence-dispatcher`, …). `originTag` comes from `X-Sync-Origin`.
-- **Coverage gate**: a contract test enumerates every mutating controller route in scope and asserts that each records
-  its expected event. A new mutating route without an event fails CI until it records one or is listed as exempt with a
-  reason.
+- **Coverage gate**: `apps/api/src/domain-events/domain-event-route-coverage.spec.ts` reads every mutating route
+  (POST/PUT/PATCH/DELETE) of the controllers in scope from their source and requires an entry in
+  `DOMAIN_EVENT_ROUTE_COVERAGE` naming the catalog events the route records, or the reason it records none. A new
+  mutating route fails CI until someone decides. The recording specs in
+  `packages/agent/src/domain-events/__tests__/*-recording.spec.ts` pin the behaviour behind each entry and validate
+  every event's `data` against the schema its row in `event-catalog.v1.json` names.
+- **Two recording modes** (B2):
+  - *In the write's transaction*: tasks (fields, transitions, edges, chat, templates), teams (fields, roster,
+    resources). A rolled-back write leaves no event.
+  - *Right after the write, in a transaction of its own* (`recordAfterWrite`, best-effort, a failure is logged and
+    never fails the write): agents, works (incl. members), organization roster and organization fields. These writes
+    are multi-step or go through repositories that take no `EntityManager` yet. The integration's hourly reconcile
+    (`updatedSince`) repairs a missed event. Moving them into the write's transaction is a follow-up.
+- **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
+  added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
+  direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of
+  them.
+- **Side events**: a team roster change for an agent also records `agent.updated` (`teamIds`); a resource link change
+  records `task.updated` / `work.updated` (`teamIds`); deleting a team records `team.updated` for re-parented child
+  teams and `agent.updated` / `task.updated` / `work.updated` for everything that loses it from `teamIds`.
+- **Tombstone version**: `beforeDelete` bumps the version before snapshotting (the `UPDATE` takes the row lock), and
+  `<x>.deleted` carries that version, so a racing edit can never record the same version.
 
 ## 4. Aggregate `version` and `updatedAt`
 

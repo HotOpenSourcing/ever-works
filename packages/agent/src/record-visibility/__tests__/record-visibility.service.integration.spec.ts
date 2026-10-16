@@ -7,6 +7,7 @@ import {
 import { DataSource, type ObjectLiteral, type Repository } from 'typeorm';
 import { ENTITIES } from '../../database/_entities-inventory';
 import { DomainEventRecorder } from '../../domain-events/domain-event-recorder.service';
+import { buildTaskSnapshot } from '../../domain-events/domain-event-snapshots';
 import { DomainEvent } from '../../entities/domain-event.entity';
 import { Goal } from '../../entities/goal.entity';
 import { Organization } from '../../entities/organization.entity';
@@ -300,6 +301,33 @@ describe('RecordVisibilityService (better-sqlite3)', () => {
             const task = await newTask({ teamId: ids.team2 });
             const records = await service.recordsOfTeam(ids.team2);
             expect(records).toEqual(expect.arrayContaining([{ aggregate: 'task', id: task.id }]));
+        });
+    });
+
+    describe('domain-event snapshots read the stored visibility (EW-P1-1 B2)', () => {
+        it('a private Task snapshots as private (kept out of the feed), explicit flag included', async () => {
+            const task = await newTask({ teamId: ids.team });
+            await service.setVisibility('task', task.id, 'private');
+            const snapshot = await buildTaskSnapshot(dataSource.manager, task.id);
+            expect(snapshot?.dto).toEqual(
+                expect.objectContaining({ visibility: 'private', visibilityExplicit: true }),
+            );
+        });
+
+        it('a team / organization change carries the full integration DTO', async () => {
+            const task = await newTask();
+            await service.setVisibility('task', task.id, 'team');
+            const [event] = await events(task.id);
+            expect(event.data).toEqual(
+                expect.objectContaining({
+                    id: task.id,
+                    visibility: 'team',
+                    visibilityExplicit: true,
+                    title: task.title,
+                    owner: { type: 'user', id: ids.user },
+                }),
+            );
+            expect(event.visibility).toBe('team');
         });
     });
 
