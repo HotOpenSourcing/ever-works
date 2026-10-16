@@ -153,6 +153,37 @@ describe('agent email recording points', () => {
         for (const event of recorded) expectValid(event);
     });
 
+    it('a re-save records only what the DTO shows changed, and never rolls the version back', async () => {
+        const saved = await messages.save(message());
+        // Bcc and metadata are not in the DTO: nothing to record.
+        await messages.save({
+            ...saved,
+            bccAddresses: ['other@example.com'],
+            metadata: { note: 'x' },
+        } as EmailMessage);
+        await messages.save({
+            ...saved,
+            deliveryStatus: 'opened',
+            subject: 'Refund (2)',
+        } as EmailMessage);
+        // A stale copy (read at version 1) saved again must not undo the bump.
+        await messages.save({
+            ...saved,
+            deliveryStatus: 'opened',
+            subject: 'Refund (3)',
+        } as EmailMessage);
+        const recorded = (await events()).slice(1);
+        expect(
+            recorded.map((event) => [event.type, event.aggregateVersion, event.changedFields]),
+        ).toEqual([
+            ['email.message.status_changed', 2, ['deliveryStatus', 'subject']],
+            ['email.message.status_changed', 3, ['subject']],
+        ]);
+        expect(recorded[0].previous).toEqual({ deliveryStatus: 'delivered' });
+        expect(recorded[1].data).toMatchObject({ subject: 'Refund (3)', version: 3 });
+        for (const event of recorded) expectValid(event);
+    });
+
     it('a message outside any organization records nothing', async () => {
         await messages.save(message({ organizationId: null } as Partial<EmailMessage>));
         expect(await events()).toEqual([]);

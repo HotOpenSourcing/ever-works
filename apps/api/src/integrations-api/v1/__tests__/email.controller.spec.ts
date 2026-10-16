@@ -57,7 +57,9 @@ describe('IntegrationEmailController', () => {
         },
     });
 
-    const setup = (opts: { inbox?: boolean; pushed?: boolean } = {}) => {
+    const setup = (
+        opts: { inbox?: boolean; pushed?: boolean; addressOrganizationId?: string | null } = {},
+    ) => {
         const email = {
             list: jest.fn().mockResolvedValue({ data: [], nextCursor: null, hasMore: false }),
             get: jest.fn(async (_org: string, id: string) => ({
@@ -67,7 +69,13 @@ describe('IntegrationEmailController', () => {
             inboundAddressOf: jest.fn(async () =>
                 opts.inbox === false
                     ? { ok: false, reason: 'The agent has no inbound email assignment.' }
-                    : { ok: true, address },
+                    : {
+                          ok: true,
+                          address:
+                              'addressOrganizationId' in opts
+                                  ? { ...address, organizationId: opts.addressOrganizationId }
+                                  : address,
+                      },
             ),
             findPushed: jest.fn(async () => (opts.pushed ? { id: 'msg-old' } : null)),
         };
@@ -160,11 +168,23 @@ describe('IntegrationEmailController', () => {
     });
 
     it('answers a push already delivered (same Message-ID) with 200 and dispatches nothing', async () => {
-        const { controller, dispatcher } = setup({ pushed: true });
+        const { controller, dispatcher, email } = setup({ pushed: true });
         const response = res();
         await controller.inbound(user, body(), req(), response);
         expect(dispatcher.dispatch).not.toHaveBeenCalled();
         expect(response.status).toHaveBeenCalledWith(200);
+        // The replay lookup is the pinned organization's only.
+        expect(email.findPushed).toHaveBeenCalledWith(ORG, 'postmark', expect.any(String));
+    });
+
+    it('refuses an inbound address of another organization, or of none (422): its mail would be unreadable', async () => {
+        for (const addressOrganizationId of ['00000000-0000-4000-8000-0000000000ff', null]) {
+            const { controller, dispatcher } = setup({ addressOrganizationId });
+            await expect(controller.inbound(user, body(), req(), res())).rejects.toMatchObject({
+                code: 'domain_rule',
+            });
+            expect(dispatcher.dispatch).not.toHaveBeenCalled();
+        }
     });
 
     it('refuses an agent without an inbound assignment (422) and a message with no body (400)', async () => {

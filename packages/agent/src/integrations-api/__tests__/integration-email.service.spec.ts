@@ -114,10 +114,20 @@ describe('IntegrationEmailService', () => {
         expect(resolved).toMatchObject({ ok: true, address: { id: active.id } });
     });
 
-    it('derives a stable provider message id per key and dedupe key', () => {
-        const a = integrationProviderMessageId('key-1', 'message-id:x@y');
-        expect(a).toBe(integrationProviderMessageId('key-1', 'message-id:x@y'));
-        expect(a).not.toBe(integrationProviderMessageId('key-2', 'message-id:x@y'));
+    it('derives a stable provider message id per key, organization and dedupe key', () => {
+        const a = integrationProviderMessageId('key-1', ORG_A, 'message-id:x@y');
+        expect(a).toBe(integrationProviderMessageId('key-1', ORG_A, 'message-id:x@y'));
+        expect(a).not.toBe(integrationProviderMessageId('key-2', ORG_A, 'message-id:x@y'));
+        // One key pushing the same mail into two organizations delivers it to each.
+        expect(a).not.toBe(integrationProviderMessageId('key-1', ORG_B, 'message-id:x@y'));
         expect(a.length).toBeLessThanOrEqual(200);
+    });
+
+    it("finds a replayed push only in the pinned organization's mail", async () => {
+        const pushed = await message(ORG_A, { providerMessageId: 'integration-abc' });
+        await expect(email.findPushed(ORG_A, 'postmark', 'integration-abc')).resolves.toMatchObject(
+            { id: pushed.id },
+        );
+        await expect(email.findPushed(ORG_B, 'postmark', 'integration-abc')).resolves.toBeNull();
     });
 });

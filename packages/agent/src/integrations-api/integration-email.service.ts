@@ -105,18 +105,31 @@ export class IntegrationEmailService {
     }
 
     /** An existing message with this provider id (a replayed push), if any. */
-    async findPushed(pluginId: string, providerMessageId: string): Promise<EmailMessage | null> {
+    async findPushed(
+        organizationId: string,
+        pluginId: string,
+        providerMessageId: string,
+    ): Promise<EmailMessage | null> {
         return this.dataSource
             .getRepository(EmailMessage)
-            .findOne({ where: { pluginId, providerMessageId } });
+            .findOne({ where: { organizationId, pluginId, providerMessageId } });
     }
 }
 
 /**
- * The provider message id of an integration-pushed email: stable per key and
- * RFC Message-ID (or, without one, per Idempotency-Key), so a retried push
- * finds the message it already delivered (`uq_email_messages_provider_message`).
+ * The provider message id of an integration-pushed email: stable per key,
+ * pinned organization and RFC Message-ID (or, without one, per
+ * Idempotency-Key), so a retried push finds the message it already delivered
+ * (`uq_email_messages_provider_message`), and one key pushing the same mail
+ * into two organizations delivers it to each.
  */
-export function integrationProviderMessageId(keyId: string, dedupeKey: string): string {
-    return `integration-${createHash('sha256').update(`${keyId}:${dedupeKey}`).digest('hex').slice(0, 48)}`;
+export function integrationProviderMessageId(
+    keyId: string,
+    organizationId: string,
+    dedupeKey: string,
+): string {
+    return `integration-${createHash('sha256')
+        .update(`${keyId}:${organizationId}:${dedupeKey}`)
+        .digest('hex')
+        .slice(0, 48)}`;
 }

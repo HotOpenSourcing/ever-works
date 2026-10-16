@@ -316,8 +316,11 @@ Edge cases:
 
 - **No inbound assignment.** An agent without an active inbound assignment answers `422 domain_rule`. Its owner opts in
   by giving it one; that is also what starts any agent work on the mail.
-- **Repeated push.** `Idempotency-Key` is required. A push repeated with the same Message-ID answers `200` with the
-  message already delivered.
+- **Address of another organization.** The stored message takes its address's organization, so an inbound address of
+  another organization, or of none, answers `422 domain_rule`: its mail would be invisible to the key.
+- **Repeated push.** `Idempotency-Key` is required. A push repeated with the same Message-ID into the same organization
+  answers `200` with the message already delivered. The de-duplication key is per integration key **and** pinned
+  organization, so one key pushing the same mail into two organizations delivers it to each.
 - **Attachments.** They are recorded with their `url` and **never fetched**: Ever Works makes no request to a
   caller-supplied URL.
 
@@ -328,6 +331,9 @@ Edge cases:
 | `email.message.received`       | An inbound message is stored.                                                                        |
 | `email.message.sent`           | An outbound message reaches `sent`.                                                                  |
 | `email.message.status_changed` | Any other change: a draft filed, `sending`, `failed`, `discarded`, a delivery status, the Task link. |
+
+`changedFields` names DTO fields (`to`, `text`, `messageId` …) and lists only what the write really changed; a write
+that changes nothing the DTO shows (Bcc, provider bookkeeping, metadata) records no event and keeps `version`.
 
 An event whose text + HTML exceed 262144 UTF-8 bytes carries `text: null, html: null, bodyOmitted: true`. A message
 outside any organization records none.

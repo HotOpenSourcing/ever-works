@@ -291,11 +291,14 @@ export class IntegrationEmailController {
         const inbox = await this.email.inboundAddressOf(dto.agentId);
         if (!inbox.ok) throw new IntegrationHttpException(422, 'domain_rule', inbox.reason);
         const address = inbox.address;
-        if (address.organizationId && address.organizationId !== organizationId) {
+        // The stored message takes the address's organization: an address of
+        // another organization (or of none) would deliver mail this key can
+        // never read back.
+        if (address.organizationId !== organizationId) {
             throw new IntegrationHttpException(
                 422,
                 'domain_rule',
-                "The agent's inbound address belongs to another organization.",
+                "The agent's inbound address is not an address of this organization.",
             );
         }
         if (!this.dispatcher) {
@@ -311,13 +314,18 @@ export class IntegrationEmailController {
             const idempotencyKey = (Array.isArray(header) ? header[0] : header)?.trim() ?? '';
             const providerMessageId = integrationProviderMessageId(
                 principal.keyId,
+                organizationId,
                 dto.message.messageId
                     ? `message-id:${dto.message.messageId}`
                     : `key:${idempotencyKey}`,
             );
             // A push replayed without its Idempotency-Key (same Message-ID): the
             // message it already delivered, never a second Task.
-            const pushed = await this.email.findPushed(address.pluginId, providerMessageId);
+            const pushed = await this.email.findPushed(
+                organizationId,
+                address.pluginId,
+                providerMessageId,
+            );
             if (pushed) {
                 const existing = await this.email.get(organizationId, pushed.id);
                 return {

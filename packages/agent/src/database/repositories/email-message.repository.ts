@@ -181,14 +181,27 @@ export class EmailMessageRepository {
     }
 
     async save(entry: EmailMessage): Promise<EmailMessage> {
-        const isNew = !entry.id;
-        const saved = await this.repository.save(entry);
-        if (saved?.id) {
-            await this.notify(
-                isNew
-                    ? { kind: 'created', id: saved.id }
-                    : { kind: 'status', id: saved.id, changedFields: ['status'], previous: {} },
-            );
+        // EW-P4-2 — a re-save of an existing row reports what it really
+        // changed (read before the write, only while someone listens).
+        const tracking = !!this.changeListener || !!this.deferredChanges;
+        const before =
+            tracking && entry.id
+                ? await this.repository.findOne({ where: { id: entry.id } })
+                : null;
+        // `version` and `updatedAt` belong to the domain-event recorder (and
+        // TypeORM): a caller re-saving a copy read before an event must never
+        // roll them back, or the integration's `updatedSince` sync would miss
+        // the change.
+        const saved = await this.repository.save(entry.id ? withoutRecorderColumns(entry) : entry);
+        if (!saved?.id || !tracking) return saved;
+        if (!before) {
+            await this.notify({ kind: 'created', id: saved.id });
+            return saved;
+        }
+        const change = describeEmailMessageChange(before, saved);
+        // Nothing the integration DTO shows moved: no event, no version bump.
+        if (change.changedFields.length > 0) {
+            await this.notify({ kind: 'status', id: saved.id, ...change });
         }
         return saved;
     }
@@ -425,7 +438,7 @@ export class EmailMessageRepository {
                 kind: 'status',
                 id,
                 to,
-                changedFields: ['status', ...Object.keys(patch)],
+                changedFields: ['status', ...emailMessageDtoFields(Object.keys(patch))],
                 previous: from.length === 1 ? { status: from[0] } : {},
             });
         }
@@ -448,6 +461,98 @@ export class EmailMessageRepository {
         if (filter.userId) where.userId = filter.userId;
         return where;
     }
+}
+
+/**
+ * EW-P4-2 — the integration DTO field (`IntegrationEmailMessageDto`) each
+ * `email_messages` column shows as. A column the DTO does not show (bcc, the
+ * provider ids, approval bookkeeping, metadata …) changes no event.
+ */
+const EMAIL_MESSAGE_DTO_FIELDS: Readonly<Record<string, string>> = {
+    userId: 'ownerUserId',
+    agentId: 'agentId',
+    taskId: 'taskId',
+    conversationId: 'conversationId',
+    direction: 'direction',
+    status: 'status',
+    deliveryStatus: 'deliveryStatus',
+    from: 'from',
+    toAddresses: 'to',
+    ccAddresses: 'cc',
+    subject: 'subject',
+    bodyText: 'text',
+    bodyHtml: 'html',
+    messageIdHeader: 'messageId',
+    inReplyTo: 'inReplyTo',
+    references: 'references',
+    attachments: 'attachments',
+    sentAt: 'sentAt',
+    receivedAt: 'receivedAt',
+};
+
+/** Small values an event carries in `previous` (never a body or an address list). */
+const EMAIL_MESSAGE_PREVIOUS_FIELDS = new Set([
+    'status',
+    'deliveryStatus',
+    'taskId',
+    'conversationId',
+]);
+
+/** The DTO names of `columns`, de-duplicated, dropping columns the DTO does not show. */
+export function emailMessageDtoFields(columns: readonly string[]): string[] {
+    const fields = columns
+        .map((column) => EMAIL_MESSAGE_DTO_FIELDS[column])
+        .filter((field): field is string => !!field);
+    return [...new Set(fields)];
+}
+
+function withoutRecorderColumns(entry: EmailMessage): EmailMessage {
+    const {
+        version: _version,
+        updatedAt: _updatedAt,
+        ...writable
+    } = entry as EmailMessage & { version?: number; updatedAt?: Date };
+    return writable as EmailMessage;
+}
+
+function comparable(value: unknown): unknown {
+    if (value === undefined || value === null) return null;
+    if (value instanceof Date) return value.getTime();
+    if (typeof value === 'object') return JSON.stringify(value);
+    return value;
+}
+
+/**
+ * EW-P4-2 — what a `save` of an existing row changed, as DTO fields: only the
+ * columns the write carried and whose value differs from the row before it.
+ */
+export function describeEmailMessageChange(
+    before: EmailMessage,
+    after: Partial<EmailMessage>,
+): {
+    to?: EmailMessageStatus;
+    changedFields: string[];
+    previous: Record<string, unknown>;
+} {
+    const columns = Object.keys(EMAIL_MESSAGE_DTO_FIELDS).filter(
+        (column) =>
+            Object.prototype.hasOwnProperty.call(after, column) &&
+            comparable((after as Record<string, unknown>)[column]) !==
+                comparable((before as unknown as Record<string, unknown>)[column]),
+    );
+    const previous: Record<string, unknown> = {};
+    for (const column of columns) {
+        if (EMAIL_MESSAGE_PREVIOUS_FIELDS.has(column)) {
+            previous[EMAIL_MESSAGE_DTO_FIELDS[column]] =
+                (before as unknown as Record<string, unknown>)[column] ?? null;
+        }
+    }
+    const statusMoved = columns.includes('status') && !!after.status;
+    return {
+        ...(statusMoved ? { to: after.status as EmailMessageStatus } : {}),
+        changedFields: emailMessageDtoFields(columns),
+        previous,
+    };
 }
 
 /**
