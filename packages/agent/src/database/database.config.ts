@@ -50,7 +50,7 @@ export interface DatabaseConfig extends Omit<TypeOrmModuleOptions, 'type'> {
 }
 
 import { ENTITIES } from './_entities-inventory';
-import { RecordVisibilitySubscriber } from '../entities/_record-visibility';
+import { RecordVisibilitySubscriber } from './record-visibility.subscriber';
 // Re-exported so existing importers of `database.config` keep working.
 export { ENTITIES };
 
