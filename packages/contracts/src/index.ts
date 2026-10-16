@@ -96,3 +96,7 @@ export * from './ever-platform/index.js';
 // an event's `data` carries. Plain `export *`: the catalog arrays and the
 // pattern matcher are runtime values.
 export * from './events/index.js';
+// Integration keys and the integration principal (EW-P1-2, Gauzy ↔ Ever Works):
+// the `ew_int_` key kind, scope vocabulary v1, presets, headers and the error
+// envelope codes shared by the API guards, the settings UI and the contract.
+export * from './integrations/index.js';
