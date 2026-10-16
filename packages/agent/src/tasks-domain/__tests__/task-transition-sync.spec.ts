@@ -409,4 +409,48 @@ describe('TaskTransitionService.transitionSync', () => {
         expect(assignees.findByTaskId).not.toHaveBeenCalled();
         expect(dispatcher.dispatch).not.toHaveBeenCalled();
     });
+
+    // EW-P1-6 + EW-P1-1 — every hop of a sync walk records its own
+    // `task.transitioned`, inside that hop's transaction.
+    it('records one task.transitioned per hop through the domain-event publisher', async () => {
+        const manager = { tag: 'tx' };
+        const publisher = {
+            transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) => work(manager)),
+            changed: jest.fn().mockResolvedValue(2),
+        };
+        const recorded = new TaskTransitionService(
+            tasks,
+            blocks,
+            approvers,
+            assignees,
+            undefined,
+            dispatcher,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            publisher as never,
+        );
+        await recorded.transitionSync(row, TaskStatus.DONE);
+
+        const hops = publisher.changed.mock.calls.map((call: unknown[]) => [
+            call[3],
+            (call[4] as { previous: { status: string } }).previous.status,
+            (call[4] as { changedFields: string[] }).changedFields[0],
+        ]);
+        expect(hops).toEqual([
+            ['task.transitioned', TaskStatus.BACKLOG, 'status'],
+            ['task.transitioned', TaskStatus.TODO, 'status'],
+            ['task.transitioned', TaskStatus.IN_PROGRESS, 'status'],
+        ]);
+        expect(publisher.changed.mock.calls.every((call: unknown[]) => call[0] === manager)).toBe(
+            true,
+        );
+        expect(
+            tasks.casUpdateStatus.mock.calls.every((call: unknown[]) => call[3] === manager),
+        ).toBe(true);
+    });
 });

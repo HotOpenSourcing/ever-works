@@ -409,10 +409,10 @@ export class TaskTransitionService {
         // the `recurrenceOccurredCount + 1` on the parent template (or
         // just `1` for non-recurring tasks) — keeps a rapid status
         // flip-flop from double-firing the same Agent.
-        // EW-P1-1 hook (domain events): this is the ONE place a status change
-        // lands, so `task.transitioned` is recorded here, once per call — and
-        // a sync walk (`transitionSync`) calls this once per hop, so every hop
-        // records its own event with `previous.status = from`.
+        // EW-P1-6: `task.transitioned` is recorded above, in the same
+        // transaction as the compare-and-set, once per call — and a sync walk
+        // (`transitionSync`) calls this once per hop, so every hop records its
+        // own event with `previous.status` = that hop's source status.
         if (
             to === TaskStatus.IN_PROGRESS &&
             this.dispatcher &&
