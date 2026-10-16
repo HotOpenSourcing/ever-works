@@ -974,8 +974,8 @@ export class WorkProposalService {
      * Spend safety (D9): nothing here queues or builds the Idea. Building stays a user
      * action in Ever Works (`POST /me/work-proposals/:id/build`).
      *
-     * `missionId` must name a non-`private` Mission of the same Organization (404
-     * otherwise). The row, its Teams and `idea.created` commit together.
+     * `missionId` must name the caller's own non-`private` Mission of the same
+     * Organization (404 otherwise). The row, its Teams and `idea.created` commit together.
      */
     async createExternal(
         input: Omit<CreateExternalIdeaInput, 'slugSuggestion'> & {
@@ -997,10 +997,16 @@ export class WorkProposalService {
         const teamIds = [...new Set(input.teamIds ?? [])];
         const id = await publisher.transaction(async (manager) => {
             if (input.missionId) {
-                // The Mission must be one the integration sees in the pinned Organization:
-                // a foreign, missing or `private` Mission reads the same (404).
+                // The Mission must be the caller's own (writes are owner-scoped: an Idea on
+                // someone else's Mission would count against its outstanding-Ideas cap) in
+                // the pinned Organization; a foreign, missing or `private` Mission reads the
+                // same (404).
                 const mission = await manager.getRepository(Mission).findOne({
-                    where: { id: input.missionId, organizationId: input.organizationId },
+                    where: {
+                        id: input.missionId,
+                        organizationId: input.organizationId,
+                        userId: input.userId,
+                    },
                     select: { id: true, visibility: true },
                 });
                 if (!mission || mission.visibility === 'private') {

@@ -129,6 +129,15 @@ describe('goal recording points', () => {
         expectValid(created);
     });
 
+    it('createExternal without Teams or a visibility derives `organization`, never the column default `private`', async () => {
+        const goal = await external();
+        const stored = await dataSource.getRepository(Goal).findOneByOrFail({ id: goal.id });
+        expect(stored).toMatchObject({ visibility: 'organization', visibilityExplicit: false });
+        const [created] = await events();
+        expect(created).toMatchObject({ type: 'goal.created', visibility: 'organization' });
+        expectValid(created);
+    });
+
     it('refuses a provider metric source from an integration (422) and writes nothing', async () => {
         await expect(
             external({ metricSource: { pluginId: 'stripe', metricId: 'income' } }),

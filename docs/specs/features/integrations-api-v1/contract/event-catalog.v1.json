@@ -531,7 +531,7 @@
 			"aggregateType": "inbox_item",
 			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
-			"notes": "data.recipientUserId is always set."
+			"notes": "data.recipientUserId is always set. Recipient-scoped: served (feed, webhooks v2) only to a key that also holds inbox:read; never to a user-owned subscription (CR-4)."
 		},
 		{
 			"type": "inbox.item.answered",
@@ -540,7 +540,7 @@
 			"aggregateType": "inbox_item",
 			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
-			"notes": "data.recipientUserId is always set."
+			"notes": "data.recipientUserId is always set. Recipient-scoped: served (feed, webhooks v2) only to a key that also holds inbox:read; never to a user-owned subscription (CR-4)."
 		},
 		{
 			"type": "inbox.item.state_changed",
@@ -549,7 +549,7 @@
 			"aggregateType": "inbox_item",
 			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
-			"notes": "data.recipientUserId is always set."
+			"notes": "data.recipientUserId is always set. Recipient-scoped: served (feed, webhooks v2) only to a key that also holds inbox:read; never to a user-owned subscription (CR-4)."
 		},
 		{
 			"type": "inbox.item.deleted",
@@ -558,7 +558,7 @@
 			"aggregateType": "inbox_item",
 			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
-			"notes": "data.recipientUserId is always set."
+			"notes": "data.recipientUserId is always set. Recipient-scoped: served (feed, webhooks v2) only to a key that also holds inbox:read; never to a user-owned subscription (CR-4)."
 		},
 		{
 			"type": "kb.document.created",
@@ -645,24 +645,27 @@
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-11)."
 		},
 		{
 			"type": "email.message.sent",
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-11)."
 		},
 		{
 			"type": "email.message.status_changed",
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-11)."
 		},
 		{
 			"type": "task.visibility_changed",

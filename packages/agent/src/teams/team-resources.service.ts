@@ -234,7 +234,9 @@ export class TeamResourcesService {
     /**
      * The same, inside the team-event transaction and BEFORE `recordResourceSide`, so the
      * task's `task.updated` snapshot already carries the new visibility (and no separate
-     * notice is needed for it). Other aggregates get their own `visibility_changed`.
+     * notice is needed for it). Ideas likewise: `recordResourceSide` records `idea.updated`
+     * for them (EW-P2-1), so a second event would bump the version twice for one change.
+     * Other aggregates get their own `visibility_changed`.
      */
     private async recomputeVisibilityIn(
         manager: EntityManager,
@@ -244,7 +246,7 @@ export class TeamResourcesService {
         const aggregate = this.visibilityAggregateOf(resourceType);
         if (!this.visibility || !aggregate) return;
         await this.visibility.recomputeAutomaticIn(manager, aggregate, resourceId, {
-            recordEvent: aggregate !== 'task',
+            recordEvent: aggregate !== 'task' && aggregate !== 'idea',
         });
     }
 

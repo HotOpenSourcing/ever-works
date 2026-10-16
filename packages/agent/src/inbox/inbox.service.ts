@@ -316,12 +316,21 @@ export class InboxService implements InboxProducer {
 
         // The tombstone (version bump + last snapshot) is taken BEFORE the
         // row goes; `inbox.item.deleted` is recorded once it is gone.
+        // Best-effort like every inbox recording: a failure is logged (the
+        // reconcile repairs the missing tombstone), never thrown.
         const tombstone = this.domainEvents
             ? await this.domainEvents
                   .transaction((manager) =>
                       this.domainEvents!.beforeDelete(manager, 'inbox_item', id),
                   )
-                  .catch(() => null)
+                  .catch((err: unknown) => {
+                      this.logger.warn(
+                          `Could not take the inbox.item.deleted tombstone for ${id}: ${
+                              err instanceof Error ? err.message : String(err)
+                          }`,
+                      );
+                      return null;
+                  })
             : null;
         const deleted = await this.items.deleteOwned(id, userId);
         if (!deleted) throw new NotFoundException(`Inbox item ${id} not found.`);
@@ -622,12 +631,21 @@ export class InboxService implements InboxProducer {
                     break;
             }
         } catch (err) {
-            await this.items.reopen(id, userId).catch((reopenErr) => {
+            const reopened = await this.items.reopen(id, userId).catch((reopenErr) => {
                 this.logger.warn(
                     `Inbox item ${id}: routing failed AND the claim could not be released: ${reopenErr}`,
                 );
                 return false;
             });
+            // The claim marked the item read and `reopen` keeps it read (the
+            // human has seen it): that flip is a real state change, so it is
+            // recorded like a mark-read — otherwise a mirror would keep showing
+            // the item unread at an unchanged version.
+            if (reopened && row.unread) {
+                await this.recordChanged(id, 'inbox.item.state_changed', ['unread'], {
+                    unread: true,
+                });
+            }
             throw err;
         }
 
