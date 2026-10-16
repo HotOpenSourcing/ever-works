@@ -10,6 +10,7 @@
  * | `DOMAIN_EVENTS_RELAY_BATCH_SIZE`      | `200`   | rows given positions per transaction                           |
  * | `DOMAIN_EVENTS_LEASE_TTL_MS`          | `30000` | how long a relay lease lasts without renewal                   |
  * | `DOMAIN_EVENTS_PLUGIN_TIMEOUT_MS`     | `10000` | per-call timeout of a plugin's `onDomainEvent`                 |
+ * | `DOMAIN_EVENTS_LISTENER_TIMEOUT_MS`   | `10000` | bound on in-process listeners and consumers per event/batch    |
  */
 export interface DomainEventsSettings {
     readonly relayEnabled: boolean;
@@ -18,6 +19,7 @@ export interface DomainEventsSettings {
     readonly batchSize: number;
     readonly leaseTtlMs: number;
     readonly pluginTimeoutMs: number;
+    readonly listenerTimeoutMs: number;
 }
 
 /** Consecutive failures on one event before a plugin's delivery dead-letters it. */
@@ -49,5 +51,6 @@ export function readDomainEventsSettings(
         batchSize: positiveInt(env.DOMAIN_EVENTS_RELAY_BATCH_SIZE, 200, 1, 1000),
         leaseTtlMs: positiveInt(env.DOMAIN_EVENTS_LEASE_TTL_MS, 30_000, 5_000, 600_000),
         pluginTimeoutMs: positiveInt(env.DOMAIN_EVENTS_PLUGIN_TIMEOUT_MS, 10_000, 100, 300_000),
+        listenerTimeoutMs: positiveInt(env.DOMAIN_EVENTS_LISTENER_TIMEOUT_MS, 10_000, 100, 300_000),
     };
 }

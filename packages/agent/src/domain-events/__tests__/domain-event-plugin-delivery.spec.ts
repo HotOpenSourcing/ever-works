@@ -127,7 +127,8 @@ describe('DomainEventPluginDeliveryService', () => {
             cursors.map((cursor) => [cursor.tenantId, String(cursor.lastSeq)]),
         );
         expect(byTenant[TENANT]).toBe('4');
-        expect(byTenant[OTHER_TENANT]).toBe('3');
+        // The other tenant (plugin not enabled) has nothing pending up to 4: it moves to 4.
+        expect(byTenant[OTHER_TENANT]).toBe('4');
     });
 
     it('retries a failed event on the next pass and holds back that tenant’s later events', async () => {
@@ -174,6 +175,62 @@ describe('DomainEventPluginDeliveryService', () => {
         expect(cursor.lastDeadLetterEventId).toMatch(/^evt_/);
         await delivery.deliverFor(sub);
         expect(seen).toEqual(['2']);
+    });
+
+    it('does not let a quiet tenant pin the scan: a busy tenant gets past one batch', async () => {
+        const seen: string[] = [];
+        const sub = subscriber(['*'], async (event) => {
+            if (event.tenantId === TENANT) seen.push(event.seq);
+        });
+        enabledOwners.add(ownerOf[OTHER_TENANT]);
+        await delivery.deliverFor(sub); // anchor at 0
+        // One event of a tenant that then goes quiet, then 250 of a busy tenant.
+        await recordMany(dataSource, 1, () => ({ tenantId: OTHER_TENANT }));
+        await recordMany(dataSource, 250);
+        await dispatch();
+        await dispatch(); // the relay gives 200 positions per tick
+        for (let pass = 0; pass < 3; pass++) await delivery.deliverFor(sub);
+        expect(seen).toHaveLength(250);
+        expect(seen[seen.length - 1]).toBe('251');
+    });
+
+    it('stops before calling the plugin once the relay lease is lost, keeping progress so far', async () => {
+        const seen: string[] = [];
+        const sub = subscriber(['*'], async (event) => {
+            seen.push(event.seq);
+        });
+        await delivery.deliverFor(sub);
+        await recordMany(dataSource, 3);
+        await dispatch();
+        let calls = 0;
+        await delivery.deliverFor(sub, { keepLease: async () => ++calls <= 1 });
+        expect(seen).toEqual(['1']);
+        const cursor = await dataSource
+            .getRepository(PluginEventCursor)
+            .findOneByOrFail({ pluginId: 'test-subscriber', tenantId: TENANT });
+        expect(String(cursor.lastSeq)).toBe('1');
+    });
+
+    it('never overwrites progress another replica made meanwhile (compare-and-set cursors)', async () => {
+        const sub = subscriber(['*'], async (event) => {
+            if (event.seq === '2') {
+                // Another replica advances this tenant's cursor while we deliver.
+                await dataSource
+                    .getRepository(PluginEventCursor)
+                    .update({ pluginId: 'test-subscriber', tenantId: TENANT }, { lastSeq: 9 });
+            }
+        });
+        await delivery.deliverFor(sub);
+        await recordMany(dataSource, 1);
+        await dispatch();
+        await delivery.deliverFor(sub); // creates the tenant cursor at 1
+        await recordMany(dataSource, 2);
+        await dispatch();
+        await delivery.deliverFor(sub);
+        const cursor = await dataSource
+            .getRepository(PluginEventCursor)
+            .findOneByOrFail({ pluginId: 'test-subscriber', tenantId: TENANT });
+        expect(String(cursor.lastSeq)).toBe('9');
     });
 
     it('times out a hanging plugin and aborts its signal', async () => {

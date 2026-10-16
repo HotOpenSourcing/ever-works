@@ -39,6 +39,9 @@ export interface DomainEventConsumer {
     consume(events: readonly DomainEventEnvelope[]): Promise<void>;
 }
 
+/** How long `stop()` waits for the tick in flight before releasing the lease anyway. */
+const STOP_DRAIN_MS = 15_000;
+
 /** Retention runs at most this often, and only on the leader. */
 const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -76,6 +79,9 @@ export class DomainEventRelayService {
     private settings: DomainEventsSettings = readDomainEventsSettings();
     private timer: NodeJS.Timeout | null = null;
     private running = false;
+    private loop: Promise<void> | null = null;
+    /** Set by `stop()`: long work in flight (plugin delivery) winds down at its next step. */
+    private stopping = false;
     private rerun = false;
     private leader = false;
     private leaseExpiresAt = 0;
@@ -114,18 +120,27 @@ export class DomainEventRelayService {
         }
         if (!this.stopped) return;
         this.stopped = false;
+        this.stopping = false;
         this.timer = setInterval(() => this.wake(), this.settings.relayIntervalMs);
         this.timer.unref?.();
         await this.listen();
         this.wake();
     }
 
-    /** Stop the timer, close the `LISTEN` connection and release the lease. */
+    /**
+     * Stop the timer, close the `LISTEN` connection, wait (bounded) for the
+     * tick in flight to finish, then release the lease — so a successor never
+     * starts while this replica is still delivering.
+     */
     async stop(): Promise<void> {
+        this.stopping = true;
         this.stopped = true;
         if (this.timer) clearInterval(this.timer);
         this.timer = null;
         this.unlisten();
+        if (this.loop) {
+            await Promise.race([this.loop, delay(STOP_DRAIN_MS)]);
+        }
         if (this.leader) {
             try {
                 await this.release();
@@ -144,7 +159,7 @@ export class DomainEventRelayService {
             this.rerun = true;
             return;
         }
-        void this.runLoop();
+        this.loop = this.runLoop();
     }
 
     private async runLoop(): Promise<void> {
@@ -160,6 +175,7 @@ export class DomainEventRelayService {
             this.logger.error(`Domain event relay tick failed: ${describe(error)}`);
         } finally {
             this.running = false;
+            this.loop = null;
         }
     }
 
@@ -186,7 +202,9 @@ export class DomainEventRelayService {
 
         if (this.plugins) {
             try {
-                await this.plugins.deliverPending();
+                await this.plugins.deliverPending(undefined, {
+                    keepLease: () => this.keepLease(),
+                });
             } catch (error) {
                 this.logger.warn(`Plugin delivery of domain events failed: ${describe(error)}`);
             }
@@ -205,6 +223,15 @@ export class DomainEventRelayService {
     }
 
     // ── lease ──────────────────────────────────────────────────────────────
+
+    /**
+     * Renew the lease when due; `false` once this replica no longer leads (or
+     * is stopping). Long work (plugin delivery) calls it between steps.
+     */
+    async keepLease(now: Date = new Date()): Promise<boolean> {
+        if (this.stopping || !this.leader) return false;
+        return this.ensureLeadership(now);
+    }
 
     private async ensureLeadership(now: Date): Promise<boolean> {
         const ttl = this.settings.leaseTtlMs;
@@ -335,7 +362,11 @@ export class DomainEventRelayService {
         if (this.events) {
             for (const envelope of envelopes) {
                 try {
-                    await this.events.emitAsync(domainEventEmitterName(envelope.type), envelope);
+                    await withTimeout(
+                        this.events.emitAsync(domainEventEmitterName(envelope.type), envelope),
+                        this.settings.listenerTimeoutMs,
+                        `listeners of ${domainEventEmitterName(envelope.type)}`,
+                    );
                 } catch (error) {
                     this.logger.warn(
                         `A listener of ${domainEventEmitterName(envelope.type)} failed for ${envelope.id}: ${describe(error)}`,
@@ -345,7 +376,11 @@ export class DomainEventRelayService {
         }
         for (const consumer of this.consumers) {
             try {
-                await consumer.consume(envelopes);
+                await withTimeout(
+                    consumer.consume(envelopes),
+                    this.settings.listenerTimeoutMs,
+                    `consumer ${consumer.name}`,
+                );
             } catch (error) {
                 this.logger.warn(
                     `Domain event consumer ${consumer.name} failed: ${describe(error)}`,
@@ -402,6 +437,27 @@ export class DomainEventRelayService {
     private column(name: string): string {
         return this.dataSource.driver.escape(name);
     }
+}
+
+/** Resolve with `promise`, or reject after `ms` (the promise keeps running; its result is ignored). */
+async function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${what} timed out after ${ms} ms`)), ms);
+        timer.unref?.();
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        timer.unref?.();
+    });
 }
 
 function describe(error: unknown): string {

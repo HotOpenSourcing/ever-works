@@ -65,6 +65,47 @@ describe('DomainEventFeedService', () => {
         expect(page).toEqual({ events: [], nextCursor: '3', hasMore: false, head: '3' });
     });
 
+    it('never returns a position past the head it reports', async () => {
+        await recordMany(dataSource, 3);
+        await dispatch();
+        // A batch the relay commits between this page's head read and its scan:
+        // a dispatched row above the recorded head.
+        await dataSource.query(
+            `UPDATE "domain_events" SET "seq" = 4 WHERE "outboxSeq" = (SELECT MAX("outboxSeq") FROM "domain_events")`,
+        );
+        await dataSource
+            .getRepository(DomainEventRelayState)
+            .update({ id: 'relay' }, { lastSeq: 2 });
+        const page = await feed.readPage({ organizationIds: [ORG_A], after: '0' });
+        expect(page.head).toBe('2');
+        expect(page.events.map((event) => event.seq)).toEqual(['1', '2']);
+        expect(page.nextCursor).toBe('2');
+    });
+
+    it('answers cursor_expired when retention passes the cursor while the page is being scanned', async () => {
+        await recordMany(dataSource, 3);
+        await dispatch();
+        const scan = (
+            feed as unknown as { scan: (...args: unknown[]) => Promise<unknown> }
+        ).scan.bind(feed);
+        const spy = jest
+            .spyOn(feed as unknown as { scan: (...args: unknown[]) => Promise<unknown> }, 'scan')
+            .mockImplementationOnce(async (...args: unknown[]) => {
+                const rows = await scan(...args);
+                await dataSource
+                    .getRepository(DomainEventRelayState)
+                    .update({ id: 'relay' }, { retentionFloorSeq: 2 });
+                return rows;
+            });
+        try {
+            await expect(
+                feed.readPage({ organizationIds: [ORG_A], after: '1' }),
+            ).rejects.toBeInstanceOf(DomainEventCursorExpiredError);
+        } finally {
+            spy.mockRestore();
+        }
+    });
+
     it('never serves personal-scope events', async () => {
         await recordMany(dataSource, 1, () => ({ organizationId: null }));
         await dispatch();

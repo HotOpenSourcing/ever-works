@@ -99,7 +99,7 @@ export class DomainEventFeedService {
         let exhausted = false;
 
         while (events.length < limit && scanned < MAX_SCAN) {
-            const rows = await this.scan(query.organizationIds, cursor, SCAN_CHUNK);
+            const rows = await this.scan(query.organizationIds, cursor, head, SCAN_CHUNK);
             if (rows.length === 0) {
                 exhausted = true;
                 break;
@@ -123,6 +123,20 @@ export class DomainEventFeedService {
         // retention floor instead of expiring with nothing missed. Safe because every
         // position <= head was assigned and committed before `head` was read.
         if (exhausted && head > cursor) cursor = head;
+
+        // Retention raises the floor BEFORE it deletes. If it ran while this page
+        // was being scanned and passed `after`, rows this page should have
+        // returned may be gone: answer 410 instead of a page with a silent hole.
+        const floorAfterScan = seqToBigInt(
+            (
+                await this.dataSource
+                    .getRepository(DomainEventRelayState)
+                    .findOne({ where: { id: DOMAIN_EVENT_RELAY_STATE_ID } })
+            )?.retentionFloorSeq,
+        );
+        if (after < floorAfterScan) {
+            throw new DomainEventCursorExpiredError(after.toString(), floorAfterScan.toString());
+        }
         const hasMore = !exhausted && cursor < head;
         const moved = cursor > after;
         return {
@@ -146,9 +160,11 @@ export class DomainEventFeedService {
         return matchesAnyDomainEventPattern(row.type, types);
     }
 
+    /** Rows of the given orgs in (after, head], in seq order — never past the head this page reports. */
     private scan(
         organizationIds: readonly string[],
         after: bigint,
+        head: bigint,
         take: number,
     ): Promise<DomainEvent[]> {
         return this.dataSource
@@ -156,6 +172,7 @@ export class DomainEventFeedService {
             .createQueryBuilder('event')
             .where('event.seq IS NOT NULL')
             .andWhere('event.seq > :after', { after: after.toString() })
+            .andWhere('event.seq <= :head', { head: head.toString() })
             .andWhere('event.organizationId IN (:...organizationIds)', {
                 organizationIds: [...organizationIds],
             })
