@@ -15,6 +15,10 @@ import helmet from 'helmet';
 import { initSentry, initPostHog, PostHogLoggerService } from '@ever-works/monitoring';
 import { IncomingMessage, ServerResponse } from 'http';
 import { json, urlencoded } from 'express';
+import {
+    INBOUND_EMAIL_WEBHOOK_PATH,
+    resolveInboundEmailBodyLimit,
+} from './email/inbound-email-body-limit';
 import { assertProductionCorsConfig } from './cors-validation';
 import { config as appConfig } from './config/constants';
 import { config as agentConfig } from '@ever-works/agent/config';
@@ -145,6 +149,22 @@ async function bootstrap() {
             bodyLimit = requestedBodyLimit;
         }
     }
+    // EW-P4-3 — the inbound-email webhooks carry whole messages with their
+    // attachments, so they get their own limit (25 MB default, the ingress's
+    // proxy-body-size; `INBOUND_EMAIL_BODY_LIMIT`, capped). Mounted BEFORE the
+    // global parsers: a body parsed here is not parsed again below, and every
+    // other route keeps the tight limit above.
+    const inboundEmailBodyLimit = resolveInboundEmailBodyLimit(
+        process.env.INBOUND_EMAIL_BODY_LIMIT,
+    );
+    app.use(
+        INBOUND_EMAIL_WEBHOOK_PATH,
+        json({ limit: inboundEmailBodyLimit, verify: captureRawBody }),
+    );
+    app.use(
+        INBOUND_EMAIL_WEBHOOK_PATH,
+        urlencoded({ limit: inboundEmailBodyLimit, extended: true, verify: captureRawBody }),
+    );
     app.use(json({ limit: bodyLimit, verify: captureRawBody }));
     app.use(urlencoded({ limit: bodyLimit, extended: true, verify: captureRawBody }));
 
