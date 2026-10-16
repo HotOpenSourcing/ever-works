@@ -121,6 +121,7 @@ describe('task recording points', () => {
             u,
             u,
             publisher,
+            u, // accessPolicy (EW-P1-3)
             new TaskWatcherRepository(dataSource.getRepository(TaskWatcher)),
         );
         // The same graph WITHOUT the publisher: today's behaviour, no events.

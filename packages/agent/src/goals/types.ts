@@ -1,3 +1,4 @@
+import type { RecordListView } from '@ever-works/contracts';
 import { normalizeGoalKind, type GoalKind } from '@ever-works/contracts';
 import type {
     Goal,
@@ -245,6 +246,11 @@ export interface UpdateGoalInput {
 }
 
 export interface ListGoalsFilter {
+    /**
+     * Record visibility (EW-P1-3) list tab: `mine` (default — today's list),
+     * `shared` or `organization`.
+     */
+    view?: RecordListView;
     status?: GoalStatus;
     limit?: number;
     offset?: number;
