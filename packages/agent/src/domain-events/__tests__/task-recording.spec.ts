@@ -222,7 +222,9 @@ describe('task recording points', () => {
             previous: { status: 'todo', startedAt: null },
             aggregateVersion: 3,
         });
-        expect((started.data as { startedAt: string | null }).startedAt).toEqual(expect.any(String));
+        expect((started.data as { startedAt: string | null }).startedAt).toEqual(
+            expect.any(String),
+        );
     });
 
     it('a teamId change reports the previous teamIds as the DTO had them (teamId + links)', async () => {
