@@ -42,6 +42,15 @@ const RESOURCES: Readonly<
     work: { entity: Work as unknown as new () => Row, build: buildWorkSnapshot, archivable: true },
 };
 
+/**
+ * Kinds whose rows STORE their visibility (EW-P1-3 columns). The snapshot DTO
+ * may still report a derived value, so `private` is checked on the row.
+ */
+const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set(['task', 'agent']);
+
+/** Chunk size for `IN (...)` lookups. */
+const ID_CHUNK = 500;
+
 /** A list query: keyset paging plus `includeArchived` (agents and works; default false). */
 export interface IntegrationListQuery extends KeysetQuery {
     readonly includeArchived?: boolean;
@@ -85,6 +94,9 @@ export class IntegrationResourcesService {
         if (archivable && !query.includeArchived) {
             qb.andWhere('row.status != :archived', { archived: 'archived' });
         }
+        if (STORED_VISIBILITY.has(kind)) {
+            qb.andWhere('row.visibility != :private', { private: 'private' });
+        }
         const page = await readKeysetPage(qb, 'row', query);
         const manager = this.dataSource.manager;
         const dtos: Record<string, unknown>[] = [];
@@ -106,6 +118,9 @@ export class IntegrationResourcesService {
         id: string,
         source: string,
     ): Promise<IntegrationResource> {
+        if (STORED_VISIBILITY.has(kind) && (await this.isStoredPrivate(kind, id))) {
+            throw notFound(kind, id);
+        }
         const snapshot = await RESOURCES[kind].build(this.dataSource.manager, id);
         if (!snapshot || snapshot.organizationId !== organizationId || isPrivate(snapshot.dto)) {
             throw notFound(kind, id);
@@ -238,6 +253,55 @@ export class IntegrationResourcesService {
         }
     }
 
+    /**
+     * `GET /links`: drop the links whose record is `private` (a task or agent
+     * made private, or a comment on a private task) — a link would otherwise
+     * still reveal the record's id and its external id and URL.
+     */
+    async withoutPrivateTargets<T extends { entityType: string; entityId: string }>(
+        rows: T[],
+    ): Promise<T[]> {
+        const hidden = new Set<string>();
+        for (const kind of STORED_VISIBILITY) {
+            const ids = rows.filter((row) => row.entityType === kind).map((row) => row.entityId);
+            for (const chunk of chunks(ids)) {
+                const found = (await this.dataSource
+                    .getRepository(RESOURCES[kind].entity)
+                    .createQueryBuilder('row')
+                    .select('row.id', 'id')
+                    .where('row.id IN (:...ids)', { ids: chunk })
+                    .andWhere('row.visibility = :private', { private: 'private' })
+                    .getRawMany()) as Array<{ id: string }>;
+                for (const { id } of found) hidden.add(`${kind}:${id}`);
+            }
+        }
+        const commentIds = rows
+            .filter((row) => row.entityType === 'task_comment')
+            .map((row) => row.entityId);
+        for (const chunk of chunks(commentIds)) {
+            const found = (await this.dataSource
+                .getRepository(TaskChatMessage)
+                .createQueryBuilder('comment')
+                .innerJoin(Task, 'task', 'task.id = comment.taskId')
+                .select('comment.id', 'id')
+                .where('comment.id IN (:...ids)', { ids: chunk })
+                .andWhere('task.visibility = :private', { private: 'private' })
+                .getRawMany()) as Array<{ id: string }>;
+            for (const { id } of found) hidden.add(`task_comment:${id}`);
+        }
+        return rows.filter((row) => !hidden.has(`${row.entityType}:${row.entityId}`));
+    }
+
+    private async isStoredPrivate(kind: IntegrationResourceKind, id: string): Promise<boolean> {
+        const row = (await this.dataSource
+            .getRepository(RESOURCES[kind].entity)
+            .createQueryBuilder('row')
+            .select('row.visibility', 'visibility')
+            .where('row.id = :id', { id })
+            .getRawOne()) as { visibility?: string } | undefined;
+        return row?.visibility === 'private';
+    }
+
     private async withLinks(
         kind: ExternalLinkEntityType,
         organizationId: string,
@@ -259,4 +323,12 @@ function isPrivate(dto: object): boolean {
 
 function notFound(kind: string, id: string): ResourceNotFoundError {
     return new ResourceNotFoundError(kind, id);
+}
+
+function chunks<T>(items: T[]): T[][] {
+    const out: T[][] = [];
+    for (let index = 0; index < items.length; index += ID_CHUNK) {
+        out.push(items.slice(index, index + ID_CHUNK));
+    }
+    return out;
 }

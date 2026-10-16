@@ -43,6 +43,7 @@ import {
     type IdempotentResponse,
 } from './integration-idempotency';
 import {
+    assertOwnLinkSource,
     linkSourceOf,
     parseLimit,
     parseUpdatedSince,
@@ -162,6 +163,7 @@ export class IntegrationTaskCommentsController {
         const principal = principalOf(user);
         const organizationId = this.organizationId();
         const source = linkSourceOf(principal);
+        assertOwnLinkSource(dto.externalRef, source);
         return runIdempotent(this.idempotency, principal, req, res, async () => {
             // The task must be one the caller sees (404 otherwise).
             await this.resources.get('task', organizationId, id, source);

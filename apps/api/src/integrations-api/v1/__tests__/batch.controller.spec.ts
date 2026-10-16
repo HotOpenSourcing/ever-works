@@ -12,6 +12,7 @@ describe('IntegrationBatchController', () => {
     const outer = {
         headers: {
             authorization: 'Bearer ew_int_secret',
+            'x-api-key': 'ew_int_other_form',
             'x-scope-slug': 'acme',
             cookie: 'never-forwarded',
         },
@@ -66,6 +67,7 @@ describe('IntegrationBatchController', () => {
         const first = calls[0].init.headers as Record<string, string>;
         expect(first).toMatchObject({
             authorization: 'Bearer ew_int_secret',
+            'x-api-key': 'ew_int_other_form',
             'x-scope-slug': 'acme',
             'idempotency-key': 'k-1',
             'content-type': 'application/json',

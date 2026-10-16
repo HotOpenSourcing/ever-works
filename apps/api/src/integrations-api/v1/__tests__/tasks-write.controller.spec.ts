@@ -41,7 +41,12 @@ describe('IntegrationTasksWriteController', () => {
             addAssignee: jest.fn().mockResolvedValue({}),
             syncTransition: jest.fn().mockResolvedValue({ task: {}, from: 'backlog', path: [] }),
         };
-        const teamResources = { attach: jest.fn(), detach: jest.fn() };
+        const teamResources = {
+            attach: jest.fn(),
+            detach: jest.fn(),
+            // The task's current team_resources links (not teamIds minus its first).
+            listTeamsForResource: jest.fn().mockResolvedValue([{ teamId: 'team-b' }]),
+        };
         const links = {
             findByExternal: jest.fn().mockResolvedValue(null),
             create: jest.fn().mockResolvedValue({}),
@@ -156,6 +161,20 @@ describe('IntegrationTasksWriteController', () => {
         expect(tasks.remove).toHaveBeenCalledWith('owner-1', 'task-1', expect.anything());
         expect(response.status).toHaveBeenCalledWith(200);
         expect(body).toMatchObject({ id: 'task-winner' });
+    });
+
+    it("refuses an externalRef of another integration's source", async () => {
+        const { controller, tasks } = setup();
+        await expect(
+            controller.create(
+                user,
+                { title: 'x', externalRef: { source: 'jira', externalId: 'J-1' } },
+                undefined,
+                req(),
+                res(),
+            ),
+        ).rejects.toMatchObject({ code: 'validation_failed' });
+        expect(tasks.create).not.toHaveBeenCalled();
     });
 
     it('requires an Idempotency-Key, and refuses private visibility', async () => {

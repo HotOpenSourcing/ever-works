@@ -52,10 +52,12 @@ import {
     type IdempotentResponse,
 } from './integration-idempotency';
 import {
+    assertOwnLinkSource,
     linkSourceOf,
     pinnedOrganizationOf,
     principalOf,
     validationFailed,
+    withExpectedVersion,
 } from './integration-request';
 
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'] as const;
@@ -254,6 +256,7 @@ export class IntegrationTasksWriteController {
         const organizationId = pinnedOrganizationOf(this.scope.getScope().organizationId);
         const source = linkSourceOf(principal);
         assertWritableVisibility(dto.visibility);
+        assertOwnLinkSource(dto.externalRef, source);
         return runIdempotent(this.idempotency, principal, req, res, async () => {
             const linkScope = dto.externalRef
                 ? {
@@ -383,7 +386,8 @@ export class IntegrationTasksWriteController {
             throw validationFailed('body', 'must change at least one field');
         assertWritableVisibility(dto.visibility);
         const current = await this.resources.get('task', organizationId, id, source);
-        assertIfMatch(expectedVersion(ifMatch), Number(current.dto.version));
+        const expected = expectedVersion(ifMatch);
+        assertIfMatch(expected, Number(current.dto.version));
 
         const patch: Record<string, unknown> = {};
         if (dto.title !== undefined) patch.title = dto.title;
@@ -393,18 +397,14 @@ export class IntegrationTasksWriteController {
         if (dto.workId !== undefined) patch.workId = dto.workId;
         if (dto.parentTaskId !== undefined) patch.parentTaskId = dto.parentTaskId;
         if (dto.teamIds !== undefined) patch.teamId = dto.teamIds[0] ?? null;
-        if (Object.keys(patch).length > 0) {
-            await this.tasks.update(user.userId, id, patch, this.scope.getScope() as never);
-        }
-        if (dto.teamIds !== undefined) {
-            await this.syncExtraTeams(
-                user.userId,
-                organizationId,
-                id,
-                current.dto,
-                dto.teamIds.slice(1),
-            );
-        }
+        await withExpectedVersion('task', id, expected, async () => {
+            if (Object.keys(patch).length > 0) {
+                await this.tasks.update(user.userId, id, patch, this.scope.getScope() as never);
+            }
+            if (dto.teamIds !== undefined) {
+                await this.syncExtraTeams(user.userId, organizationId, id, dto.teamIds.slice(1));
+            }
+        });
         const updated = await this.resources.get('task', organizationId, id, source);
         if (updated.etag) res.setHeader('ETag', updated.etag);
         return updated.dto;
@@ -459,21 +459,29 @@ export class IntegrationTasksWriteController {
             id,
             linkSourceOf(principal),
         );
-        assertIfMatch(expectedVersion(ifMatch), Number(current.dto.version));
-        await this.tasks.remove(user.userId, id, this.scope.getScope() as never);
+        const expected = expectedVersion(ifMatch);
+        assertIfMatch(expected, Number(current.dto.version));
+        await withExpectedVersion('task', id, expected, () =>
+            this.tasks.remove(user.userId, id, this.scope.getScope() as never),
+        );
         await this.links.removeAllFor(organizationId, 'task', id);
     }
 
-    /** `teamIds[1..]` are `team_resources` links: attach the new ones, detach the dropped ones. */
+    /**
+     * `teamIds[1..]` are `team_resources` links: attach the new ones, detach the
+     * dropped ones. The current links are read from `team_resources` itself: a
+     * task with no primary `teamId` can still have links, so they are not
+     * `teamIds` minus its first entry.
+     */
     private async syncExtraTeams(
         userId: string,
         organizationId: string,
         taskId: string,
-        current: Record<string, unknown>,
         wanted: string[],
     ): Promise<void> {
-        const currentTeams = (current.teamIds as string[] | undefined) ?? [];
-        const currentLinks = currentTeams.slice(1);
+        const currentLinks = (
+            await this.teamResources.listTeamsForResource(organizationId, 'task', taskId)
+        ).map((team) => team.teamId);
         for (const teamId of wanted.filter((team) => !currentLinks.includes(team))) {
             await this.teamResources.attach(userId, organizationId, teamId, {
                 resourceType: 'task',

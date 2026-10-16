@@ -1,3 +1,4 @@
+import { runExpectingAggregateVersion } from '@ever-works/agent/domain-events';
 import type { AuthenticatedUser, IntegrationPrincipal } from '../../auth/types/auth.types';
 import { IntegrationHttpException } from '../../auth/integration/integration-http.exception';
 import { InvalidCursorError } from '@ever-works/agent/integrations-api';
@@ -75,4 +76,30 @@ export function validationFailed(path: string, message: string): IntegrationHttp
 export function rethrowCursor(error: unknown): never {
     if (error instanceof InvalidCursorError) throw validationFailed('cursor', error.message);
     throw error;
+}
+
+/**
+ * An `externalRef` names the caller's own source (`ever-gauzy` -> `gauzy`): a
+ * key may never claim, or look up, another integration's references.
+ */
+export function assertOwnLinkSource(ref: { source: string } | undefined, source: string): void {
+    if (ref && ref.source !== source) {
+        throw validationFailed('externalRef.source', `must be "${source}", the source of this key`);
+    }
+}
+
+/**
+ * Run a write under its `If-Match` version (`null`: no precondition). The
+ * publisher re-checks it at the version bump inside the write's transaction,
+ * so of two writers that read the same version only the first succeeds; the
+ * other answers `412`.
+ */
+export function withExpectedVersion<T>(
+    aggregateType: string,
+    id: string,
+    expected: number | null,
+    fn: () => Promise<T>,
+): Promise<T> {
+    if (expected === null) return fn();
+    return runExpectingAggregateVersion({ aggregateType, id, version: expected }, fn);
 }

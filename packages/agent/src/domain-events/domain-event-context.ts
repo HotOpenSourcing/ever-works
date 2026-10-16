@@ -48,3 +48,79 @@ export function normalizeSyncOrigin(value: unknown): string | null {
     if (!trimmed || trimmed.length > 100 || !/^[\x21-\x7e]+$/.test(trimmed)) return null;
     return trimmed;
 }
+
+/**
+ * Integration API v1 `If-Match` (EW-P1-4, contract v1 B.1): a write that must
+ * apply to a known version of its aggregate. The route checks the version
+ * before calling the domain service (the fast `412`), and runs the call with
+ * {@link runExpectingAggregateVersion}; the publisher then checks again at the
+ * version bump, INSIDE the write's transaction and under the row lock the bump
+ * takes. A concurrent writer that got there first makes the bump land on a
+ * different version: the publisher throws this error and the whole write rolls
+ * back, so two requests that read the same version can never both succeed.
+ */
+export class AggregateVersionConflictError extends Error {
+    constructor(
+        readonly aggregateType: string,
+        readonly aggregateId: string,
+        readonly expected: number,
+        readonly actual: number,
+    ) {
+        super(
+            `${aggregateType} ${aggregateId} is at version ${actual}, not the expected ${expected}.`,
+        );
+        this.name = 'AggregateVersionConflictError';
+    }
+}
+
+interface AggregateVersionExpectation {
+    readonly aggregateType: string;
+    readonly id: string;
+    readonly version: number;
+    checked: boolean;
+}
+
+const versionExpectations = new AsyncLocalStorage<AggregateVersionExpectation>();
+
+/**
+ * Run `fn` expecting the FIRST version bump of `aggregateType`/`id` inside it
+ * to move the aggregate from `version` to `version + 1`.
+ */
+export function runExpectingAggregateVersion<T>(
+    expectation: { aggregateType: string; id: string; version: number },
+    fn: () => Promise<T>,
+): Promise<T> {
+    return versionExpectations.run({ ...expectation, checked: false }, fn);
+}
+
+/**
+ * Called by the publisher right after it bumps an aggregate's version: throws
+ * {@link AggregateVersionConflictError} when the active expectation names this
+ * aggregate and the bump did not start from the expected version. Only the
+ * first bump of that aggregate is checked (a write may bump it again, e.g. a
+ * task PATCH that also moves its teams).
+ */
+export function assertExpectedAggregateVersion(
+    aggregateType: string,
+    id: string,
+    bumpedTo: number,
+): void {
+    const expectation = versionExpectations.getStore();
+    if (
+        !expectation ||
+        expectation.checked ||
+        expectation.aggregateType !== aggregateType ||
+        expectation.id !== id
+    ) {
+        return;
+    }
+    expectation.checked = true;
+    if (bumpedTo !== expectation.version + 1) {
+        throw new AggregateVersionConflictError(
+            aggregateType,
+            id,
+            expectation.version,
+            bumpedTo - 1,
+        );
+    }
+}

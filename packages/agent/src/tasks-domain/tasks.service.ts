@@ -2205,7 +2205,7 @@ export class TasksService {
             (row) => row.id === relationId,
         );
         const removed = await this.withTaskEvent(
-            () => this.relations.removeForTask(taskId, relationId),
+            (manager) => this.relations.removeForTask(taskId, relationId, manager),
             async (publisher, manager, gone) => {
                 if (!gone || !existing) return;
                 await publisher.child(
@@ -2255,7 +2255,7 @@ export class TasksService {
         );
         if (already) return already;
         return this.withTaskEvent(
-            () => watchers.add(taskId, watcherUserId),
+            (manager) => watchers.add(taskId, watcherUserId, manager),
             (publisher, manager) =>
                 publisher.child(
                     manager,
@@ -2282,7 +2282,7 @@ export class TasksService {
         );
         if (!existing) return { removed: false };
         await this.withTaskEvent(
-            () => watchers.remove(existing.id, taskId),
+            (manager) => watchers.remove(existing.id, taskId, manager),
             (publisher, manager) =>
                 publisher.child(
                     manager,

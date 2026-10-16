@@ -96,7 +96,9 @@ export class IntegrationLinksController {
                 externalId: externalId || undefined,
             },
         );
-        return { data: rows.map(toExternalRecordLinkDto) };
+        // A link to a private record would still reveal it (ids, external URL).
+        const visible = await this.resources.withoutPrivateTargets(rows);
+        return { data: visible.map(toExternalRecordLinkDto) };
     }
 
     @Put('links/:entityType/:entityId')

@@ -52,10 +52,12 @@ import {
     type IdempotentResponse,
 } from './integration-idempotency';
 import {
+    assertOwnLinkSource,
     linkSourceOf,
     pinnedOrganizationOf,
     principalOf,
     validationFailed,
+    withExpectedVersion,
 } from './integration-request';
 import { IntegrationExternalRefDto } from './tasks-write.controller';
 
@@ -196,6 +198,7 @@ export class IntegrationTeamsWriteController {
         const principal = principalOf(user);
         const organizationId = this.organizationId();
         const source = linkSourceOf(principal);
+        assertOwnLinkSource(dto.externalRef, source);
         return runIdempotent(this.idempotency, principal, req, res, async () => {
             const linkScope = dto.externalRef
                 ? {
@@ -284,8 +287,11 @@ export class IntegrationTeamsWriteController {
             throw validationFailed('body', 'must change at least one field');
         }
         const current = await this.resources.get('team', organizationId, id, source);
-        assertIfMatch(expectedVersion(ifMatch), Number(current.dto.version));
-        await this.teams.update(organizationId, id, patch);
+        const expected = expectedVersion(ifMatch);
+        assertIfMatch(expected, Number(current.dto.version));
+        await withExpectedVersion('team', id, expected, () =>
+            this.teams.update(organizationId, id, patch),
+        );
         return this.answer(organizationId, id, source, res);
     }
 
@@ -305,8 +311,11 @@ export class IntegrationTeamsWriteController {
             id,
             linkSourceOf(principalOf(user)),
         );
-        assertIfMatch(expectedVersion(ifMatch), Number(current.dto.version));
-        await this.teams.remove(organizationId, id);
+        const expected = expectedVersion(ifMatch);
+        assertIfMatch(expected, Number(current.dto.version));
+        await withExpectedVersion('team', id, expected, () =>
+            this.teams.remove(organizationId, id),
+        );
         await this.links.removeAllFor(organizationId, 'team', id);
     }
 

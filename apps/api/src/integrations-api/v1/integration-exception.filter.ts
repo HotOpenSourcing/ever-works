@@ -7,7 +7,10 @@ import {
     Logger,
 } from '@nestjs/common';
 import type { IntegrationErrorCode } from '@ever-works/contracts';
-import { DomainEventCursorExpiredError } from '@ever-works/agent/domain-events';
+import {
+    AggregateVersionConflictError,
+    DomainEventCursorExpiredError,
+} from '@ever-works/agent/domain-events';
 import {
     DuplicateExternalRefError,
     IdempotencyConflictError,
@@ -102,6 +105,15 @@ export class IntegrationExceptionFilter implements ExceptionFilter {
         }
         if (exception instanceof ResourceNotFoundError) {
             return { status: HttpStatus.NOT_FOUND, code: 'not_found', message: exception.message };
+        }
+        if (exception instanceof AggregateVersionConflictError) {
+            // The If-Match re-check inside the write's transaction lost a race.
+            return {
+                status: HttpStatus.PRECONDITION_FAILED,
+                code: 'version_mismatch',
+                message: exception.message,
+                details: { expected: exception.expected, current: exception.actual },
+            };
         }
         if (exception instanceof VersionMismatchError) {
             return {

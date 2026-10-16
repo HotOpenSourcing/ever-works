@@ -17,7 +17,8 @@
       `packages/agent/src/integrations-api/keyset-cursor.ts`; `(organizationId, updatedAt, id)` indexes (and
       `(taskId, updatedAt, id)` for comments) in migration `1795080300000`.
 - [x] **T3** `ETag` / `If-Match` — helpers (`etagFor`, `parseIfMatch`, `assertIfMatch` → `412 version_mismatch`),
-      applied per write route (PATCH / DELETE of tasks and teams).
+      applied per write route (PATCH / DELETE of tasks and teams), and re-checked at the version bump inside the
+      write's transaction (`runExpectingAggregateVersion`), so of two writers on one version only the first wins.
 - [~] **T4** `integration_idempotency_keys` table + migration (3 dialects, `1795080200000`) +
   `IntegrationIdempotencyService` (claim-first, replay, mismatch/in-progress `409`, release on error/5xx, purge);
   `runIdempotent` on every create (`Idempotent-Replayed: true` on a replay). Open: a schedule for `purgeExpired`.
@@ -44,8 +45,14 @@
 - [x] **T16** Links: `GET /links`, `PUT`/`DELETE /links/:entityType/:entityId` (the record must be visible; types not
       served in v1 yet → `400`).
 - [x] **T17** OpenAPI in production: `GET /api/integrations/v1/openapi.json` (`serveIntegrationOpenApi`).
-- [ ] **T17a** Create + link in ONE transaction (today: create, then link, undo on a lost race; a crash between the
-      two leaves an unlinked record and a retry after the 5-minute stale claim creates a second one).
+- [ ] **T17a** One transaction per request: create + link, and every edge of a `PUT` set or of a create's assignees /
+      extra teams. Today each step commits on its own (create, then link, undone on a lost race; a `PUT` set that fails
+      half-way keeps the steps before the failure); a crash between create and link leaves an unlinked record.
+- [ ] **T17b** OpenAPI request/response bodies (`@ApiProperty` or the Swagger CLI plugin under SWC); today the document
+      lists every route, scope and summary, and the bodies are the contract JSON Schemas.
+- [ ] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through the record-visibility
+      service of EW-P1-3 3/4 (#2621); until it merges the value is validated (`private` → `422`) but not stored.
+      Reads already hide a row whose STORED visibility is `private`.
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 

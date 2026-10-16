@@ -150,6 +150,26 @@ describe('IntegrationResourcesService', () => {
         expect(later.data).toEqual([]);
     });
 
+    it('never serves a task whose STORED visibility is private, nor links to it', async () => {
+        const shared = await task(ORG_A, 'Shared');
+        const secret = await task(ORG_A, 'Secret');
+        await dataSource.getRepository(Task).update(secret.id, { visibility: 'private' } as never);
+        const page = await resources.list('task', ORG_A, {}, 'gauzy');
+        expect(page.data.map((dto) => dto.id)).toEqual([shared.id]);
+        await expect(resources.get('task', ORG_A, secret.id, 'gauzy')).rejects.toBeInstanceOf(
+            ResourceNotFoundError,
+        );
+        const rows = [
+            { entityType: 'task', entityId: shared.id },
+            { entityType: 'task', entityId: secret.id },
+            { entityType: 'team', entityId: randomUUID() },
+        ];
+        expect((await resources.withoutPrivateTargets(rows)).map((row) => row.entityId)).toEqual([
+            shared.id,
+            rows[2].entityId,
+        ]);
+    });
+
     it('gets one resource with its ETag, and 404s outside the organization', async () => {
         const mine = await task(ORG_A, 'Ship the feed');
         const other = await task(ORG_B, 'Not yours');

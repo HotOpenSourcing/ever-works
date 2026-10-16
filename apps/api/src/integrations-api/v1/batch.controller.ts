@@ -36,6 +36,7 @@ const OPERATION_HEADERS = ['idempotency-key', 'if-match', 'x-act-as-user', 'x-sy
 /** Headers every operation takes from the outer request. */
 const OUTER_HEADERS = [
     'authorization',
+    'x-api-key',
     'x-scope-slug',
     'x-organization-id',
     'x-sync-origin',
