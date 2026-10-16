@@ -105,6 +105,9 @@ describe('taxonomy-watcher', () => {
 				// Both waits expect a callback to FIRE, so poll for it rather than
 				// hoping a fixed sleep outlasts fs-watch latency.
 				await waitUntil(() => onNewItem.mock.calls.length >= 1);
+				// Fail HERE when the first event never came, rather than spending a second
+				// full wait and letting the suite timeout fire before the assertions below.
+				expect(onNewItem.mock.calls.length).toBeGreaterThanOrEqual(1);
 
 				await writeFile(
 					join(workspacePath, 'item-b.json'),
