@@ -388,6 +388,96 @@
 			},
 			"additionalProperties": false
 		},
+		"CreateGoal": {
+			"description": "POST /goals (EW-P2-2). Always created status='draft': an integration never activates a Goal (spend safety D9). A metric Goal (the default kind) reads the external source: `metricSource` may be omitted (= {pluginId:'external', metricId:'value'}); any other pluginId, on the Goal or a criterion, answers 422 domain_rule. A metric Goal needs comparator, targetValue and unit (window defaults to 'point'); a delivery Goal needs at least one Definition-of-Done item and carries no metric fields. `teamIds` decide the scope (D11) unless `visibility` is set by hand.",
+			"type": "object",
+			"required": ["title"],
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"description": { "type": ["string", "null"], "maxLength": 100000 },
+				"goalKind": { "type": "string", "enum": ["metric", "delivery"] },
+				"metricSource": { "$ref": "resources/goal.schema.json#/$defs/MetricSource" },
+				"comparator": { "type": "string", "enum": ["gte", "lte"] },
+				"targetValue": { "type": "number" },
+				"unit": { "type": "string", "minLength": 1, "maxLength": 32 },
+				"window": { "$ref": "resources/goal.schema.json#/$defs/Window" },
+				"baselineValue": { "type": ["number", "null"] },
+				"deadline": { "$ref": "common.schema.json#/$defs/NullableDateTime" },
+				"criteria": {
+					"type": "array",
+					"maxItems": 20,
+					"items": { "$ref": "resources/goal.schema.json#/$defs/Criterion" }
+				},
+				"dodCriteria": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/GoalDoDItem" } },
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateGoal": {
+			"description": "PATCH /goals/:id (EW-P2-2, If-Match optional). No status, outcome, metricSource or goalKind: an integration never activates, resumes or completes a Goal (D9), the source stays external and the kind is immutable. Metric fields on a delivery Goal answer 400.",
+			"type": "object",
+			"minProperties": 1,
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
+				"description": { "type": ["string", "null"], "maxLength": 100000 },
+				"comparator": { "type": "string", "enum": ["gte", "lte"] },
+				"targetValue": { "type": "number" },
+				"unit": { "type": "string", "minLength": 1, "maxLength": 32 },
+				"window": { "$ref": "resources/goal.schema.json#/$defs/Window" },
+				"baselineValue": { "type": ["number", "null"] },
+				"deadline": { "$ref": "common.schema.json#/$defs/NullableDateTime" },
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" }
+			},
+			"additionalProperties": false
+		},
+		"PutGoalCriteria": {
+			"description": "PUT /goals/:id/criteria (If-Match optional): the full set of weighted criteria of a metric Goal (`[]` clears the weighted path). Criteria read the external source (their own metricSource, or the Goal's). Answers the Goal DTO.",
+			"type": "object",
+			"required": ["criteria"],
+			"properties": {
+				"criteria": {
+					"type": "array",
+					"maxItems": 20,
+					"items": { "$ref": "resources/goal.schema.json#/$defs/Criterion" }
+				}
+			},
+			"additionalProperties": false
+		},
+		"PutGoalDod": {
+			"description": "PUT /goals/:id/dod (If-Match optional): the full Definition of Done (`[]` clears it on a metric Goal; a delivery Goal must keep one item). Items are written as approved operator items. Answers the Goal DTO.",
+			"type": "object",
+			"required": ["dodCriteria"],
+			"properties": {
+				"dodCriteria": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/GoalDoDItem" } }
+			},
+			"additionalProperties": false
+		},
+		"GoalDoDItem": {
+			"type": "object",
+			"required": ["id", "text", "status"],
+			"properties": {
+				"id": { "type": "string", "minLength": 1, "maxLength": 64 },
+				"text": { "type": "string", "minLength": 1, "maxLength": 500 },
+				"status": { "type": "string", "enum": ["open", "done", "waived"] },
+				"evidence": { "type": ["string", "null"], "maxLength": 1000 },
+				"note": { "type": ["string", "null"], "maxLength": 500 }
+			},
+			"additionalProperties": false
+		},
+		"GoalSample": {
+			"description": "POST /goals/:id/samples (EW-P2-2, Idempotency-Key required): one externally measured value. Without criterionId it is the Goal's own metric (it becomes currentValue when it is the newest, and the baseline when there is none); with criterionId it measures that criterion. The Goal (or the criterion) must read the external source, else 422 domain_rule; a delivery Goal takes no samples (422). Re-scores a Goal with criteria; never activates, completes or schedules it. Records goal.progress_changed (at most one per Goal per 5 minutes; the version still moves). Answers 200 with the Goal DTO.",
+			"type": "object",
+			"required": ["value", "sampledAt"],
+			"properties": {
+				"criterionId": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
+				"value": { "type": "number" },
+				"sampledAt": { "$ref": "common.schema.json#/$defs/DateTime" }
+			},
+			"additionalProperties": false
+		},
 		"PutLink": {
 			"description": "PUT /links/:entityType/:entityId. `source` comes from the key's integrationKind (ever-gauzy → gauzy).",
 			"type": "object",

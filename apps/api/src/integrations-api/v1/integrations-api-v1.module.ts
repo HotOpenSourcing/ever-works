@@ -6,6 +6,7 @@ import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { UserResearchModule } from '@ever-works/agent/user-research';
+import { GoalsModule } from '@ever-works/agent/goals';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
@@ -18,6 +19,7 @@ import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
 import { IntegrationIdeasController } from './ideas.controller';
+import { IntegrationGoalsController } from './goals.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
@@ -47,6 +49,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         WebhooksModule,
         // Ideas (EW-P2-1): `WorkProposalService` (createExternal, dismiss, restore).
         UserResearchModule,
+        // Goals (EW-P2-2): `GoalsService` + the orchestrator's Definition of Done.
+        GoalsModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -62,6 +66,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationWebhooksController,
         // P2 resources.
         IntegrationIdeasController,
+        IntegrationGoalsController,
     ],
     providers: [
         IntegrationOnlyGuard,

@@ -32,6 +32,10 @@ import { AGENT_RUN_CANCELLER, type AgentRunCanceller } from '../agents/agent-run
 import { TasksService } from '../tasks-domain/tasks.service';
 import { TaskTransitionService } from '../tasks-domain/task-transition.service';
 import {
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '../domain-events/domain-event-publisher.service';
+import {
     ownershipRelationScopeOf,
     ownershipScopeOf,
     ownershipWhereWith,
@@ -180,6 +184,11 @@ export class GoalOrchestratorService {
         @Inject(AGENT_RUN_CANCELLER)
         private readonly runCanceller?: AgentRunCanceller,
         @Optional() private readonly dispatchGate?: RunDispatchGateService,
+        // EW-P2-2 — `goal.*` events for the Goal fields the integration DTO carries
+        // (Definition of Done, archive, a loop's terminal status). Loop control alone
+        // (start / pause / cancel / limits / spend) is runtime: no event, no version.
+        // TRAILING + @Optional() per the arity rule above.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     // ─── limits ─────────────────────────────────────────────────────
@@ -301,7 +310,18 @@ export class GoalOrchestratorService {
         goal.dodCriteria = criteria === null ? null : normalizeDoDCriteria(criteria);
         this.markProgressIfChanged(goal, beforeSignature);
 
-        const saved = await this.goals.save(goal);
+        // EW-P2-2 — the write and its `goal.updated` commit together, so an
+        // integration's `If-Match` (re-checked at the version bump) can refuse it.
+        const publisher = this.domainEvents;
+        const saved = publisher
+            ? await publisher.transaction(async (manager) => {
+                  const row = await manager.getRepository(Goal).save(goal);
+                  await publisher.changed(manager, 'goal', row.id, 'goal.updated', {
+                      changedFields: ['dodCriteria', 'progress'],
+                  });
+                  return row;
+              })
+            : await this.goals.save(goal);
         const summary = summarizeDoD(saved.dodCriteria);
         await this.recordEvent(saved, {
             kind: 'dod',
@@ -347,6 +367,7 @@ export class GoalOrchestratorService {
         goal.dodCriteria = merged;
 
         const saved = await this.goals.save(goal);
+        await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         await this.recordEvent(saved, {
             kind: 'dod',
             message:
@@ -395,6 +416,7 @@ export class GoalOrchestratorService {
         this.markProgressIfChanged(goal, beforeSignature);
 
         const saved = await this.goals.save(goal);
+        await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         await this.recordEvent(saved, {
             kind: 'dod',
             message: `Operator approved ${approved} proposed Definition-of-Done criteria.`,
@@ -441,6 +463,7 @@ export class GoalOrchestratorService {
         this.markProgressIfChanged(goal, beforeSignature);
 
         const saved = await this.goals.save(goal);
+        await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         const summary = summarizeDoD(saved.dodCriteria);
         await this.recordEvent(saved, {
             kind: 'dod',
@@ -651,6 +674,7 @@ export class GoalOrchestratorService {
             goal.loopStatus = 'paused';
         }
         const saved = await this.goals.save(goal);
+        await this.recordGoalEvent(saved.id, 'goal.archived', ['archivedAt']);
         await this.recordEvent(saved, { kind: 'control', message: 'Goal archived.' });
         await this.recordActivity(saved, ActivityActionType.GOAL_ARCHIVED, 'archive', {});
         return toGoalDto(saved);
@@ -661,6 +685,7 @@ export class GoalOrchestratorService {
         if (!goal.archivedAt) return toGoalDto(goal);
         goal.archivedAt = null;
         const saved = await this.goals.save(goal);
+        await this.recordGoalEvent(saved.id, 'goal.unarchived', ['archivedAt']);
         await this.recordEvent(saved, { kind: 'control', message: 'Goal unarchived.' });
         await this.recordActivity(saved, ActivityActionType.GOAL_UNARCHIVED, 'unarchive', {});
         return toGoalDto(saved);
@@ -1060,12 +1085,18 @@ export class GoalOrchestratorService {
     ): Promise<GoalAdvanceResult> {
         goal.loopStatus = loopStatus;
         goal.activeAgentId = null;
+        const statusBefore = goal.status;
         if (loopStatus === 'done' && isDeliveryGoal(goal) && goal.status !== GoalStatus.COMPLETED) {
             goal.status = GoalStatus.COMPLETED;
             goal.outcome = GoalOutcome.ACHIEVED;
             goal.nextCheckAt = null;
         }
         const saved = await this.goals.save(goal);
+        if (saved.status !== statusBefore) {
+            await this.recordGoalEvent(saved.id, 'goal.status_changed', ['status', 'outcome'], {
+                status: statusBefore,
+            });
+        }
 
         const kind: GoalEventKind = loopStatus === 'done' ? 'complete' : 'limit';
         await this.recordEvent(saved, {
@@ -1095,6 +1126,29 @@ export class GoalOrchestratorService {
     }
 
     // ─── internals ──────────────────────────────────────────────────
+
+    /**
+     * EW-P2-2 — a full-snapshot `goal.*` event, best-effort after the save (the
+     * orchestrator's writes are not transactional; the integration's reconcile
+     * repairs a missed event). A no-op without the publisher.
+     */
+    private async recordGoalEvent(
+        goalId: string,
+        type: string,
+        changedFields: string[],
+        previous?: Record<string, unknown>,
+    ): Promise<void> {
+        await recordAfterWrite(
+            this.domainEvents,
+            (publisher, manager) =>
+                publisher.changed(manager, 'goal', goalId, type, {
+                    changedFields,
+                    ...(previous ? { previous } : {}),
+                }),
+            (message) => this.logger.warn(message),
+            `${type} for goal ${goalId}`,
+        );
+    }
 
     private async findOrThrow(
         userId: string,

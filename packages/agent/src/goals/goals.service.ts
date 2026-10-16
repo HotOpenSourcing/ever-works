@@ -4,10 +4,18 @@ import {
     Logger,
     NotFoundException,
     Optional,
+    UnprocessableEntityException,
 } from '@nestjs/common';
 import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, IsNull, Not, Repository, type FindOptionsWhere } from 'typeorm';
+import { In, IsNull, Not, Repository, type EntityManager, type FindOptionsWhere } from 'typeorm';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import {
+    isExternalMetricSource,
+    recordGoalProgress,
+    rescoreFromExternalValues,
+} from './goal-domain-events';
 import { DEFAULT_GOAL_KIND, GOAL_KINDS, isGoalKind, type GoalKind } from '@ever-works/contracts';
 import {
     Goal,
@@ -106,6 +114,11 @@ export class GoalsService {
         // Record visibility (EW-P1-3) — the shared / org tabs and the readable get.
         // Appended LAST + @Optional(): absent means reads stay owner-only.
         @Optional() private readonly accessPolicy?: RecordAccessPolicy,
+        // EW-P2-2 — `goal.*` domain events: every write and its event commit together.
+        // TRAILING + @Optional(): a graph without DomainEventsModule records nothing.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
+        // EW-P2-2 — integration-created Goals' Teams + D11 (`createExternal`).
+        @Optional() private readonly recordVisibility?: RecordVisibilityService,
     ) {}
 
     // ─── CRUD ───────────────────────────────────────────────────────
@@ -234,7 +247,7 @@ export class GoalsService {
         this.assertGoalKindShape({ ...input, goalKind });
         const dodCriteria = this.normalizeDodInput(input.dodCriteria);
 
-        const saved = await this.goals.save(
+        const saved = await this.persist(
             this.goals.create({
                 userId,
                 ...ownershipStamp(scope),
@@ -274,8 +287,190 @@ export class GoalsService {
                 status: GoalStatus.DRAFT,
                 outcome: null,
                 dodCriteria,
+                ...(input.createdBy
+                    ? { createdByType: input.createdBy.type, createdById: input.createdBy.id }
+                    : {}),
+                ...(input.visibility
+                    ? { visibility: input.visibility, visibilityExplicit: true }
+                    : {}),
             }),
+            async (publisher, manager, row) => {
+                if (input.teamIds && input.teamIds.length > 0) {
+                    if (!this.recordVisibility) {
+                        throw new Error('Goal teamIds need RecordVisibilityModule');
+                    }
+                    await this.recordVisibility.setTeamsIn(
+                        manager,
+                        'goal',
+                        row.id,
+                        input.teamIds,
+                        userId,
+                    );
+                    await this.recordVisibility.recomputeAutomaticIn(manager, 'goal', row.id, {
+                        recordEvent: false,
+                    });
+                }
+                await publisher.created(manager, 'goal', row.id, 'goal.created');
+            },
         );
+        return toGoalDto(saved);
+    }
+
+    /**
+     * EW-P2-2 — create a Goal for an integration (contract v1 B.6 `POST /goals`).
+     * Always `draft` (D9: activation stays a person's action in Ever Works). A metric
+     * Goal must read the EXTERNAL source (`pluginId: 'external'`) — its own and every
+     * criterion's: a provider read can be metered spend, and an integration pushes its
+     * values through {@link recordExternalSample} instead. `teamIds` become
+     * `team_resources` rows of the Organization and decide the scope (D11) unless
+     * `visibility` is set by hand. The row, its Teams and `goal.created` commit together.
+     */
+    async createExternal(
+        userId: string,
+        input: CreateGoalInput,
+        scope: OwnershipScope,
+    ): Promise<GoalDto> {
+        GoalsService.assertExternalSources(input);
+        if (input.visibility !== undefined) {
+            RecordVisibilityService.assertIntegrationVisibility(input.visibility);
+        }
+        if (!scope.organizationId) {
+            throw new BadRequestException('An integration Goal is created in an Organization.');
+        }
+        return this.create(
+            userId,
+            {
+                ...input,
+                teamIds: input.teamIds ? [...new Set(input.teamIds)] : undefined,
+            },
+            scope,
+        );
+    }
+
+    /**
+     * EW-P2-2 — an integration may only name the external metric source (the Goal's
+     * and each criterion's; a criterion without one inherits the Goal's). `422
+     * domain_rule` otherwise.
+     */
+    static assertExternalSources(input: {
+        metricSource?: GoalMetricSource | null;
+        criteria?: ReadonlyArray<{ metricSource?: GoalMetricSource }> | null;
+        constraints?: ReadonlyArray<{ metricSource?: GoalMetricSource }> | null;
+    }): void {
+        const offending: string[] = [];
+        if (input.metricSource && !isExternalMetricSource(input.metricSource)) {
+            offending.push('metricSource');
+        }
+        (input.criteria ?? []).forEach((criterion, index) => {
+            if (criterion.metricSource && !isExternalMetricSource(criterion.metricSource)) {
+                offending.push(`criteria[${index}].metricSource`);
+            }
+        });
+        (input.constraints ?? []).forEach((constraint, index) => {
+            if (constraint.metricSource && !isExternalMetricSource(constraint.metricSource)) {
+                offending.push(`constraints[${index}].metricSource`);
+            }
+        });
+        if (offending.length > 0) {
+            throw new UnprocessableEntityException(
+                `An integration can only use the external metric source (pluginId "external"): ${offending.join(', ')}.`,
+            );
+        }
+    }
+
+    /**
+     * EW-P2-2 — one externally measured value (`POST /api/integrations/v1/goals/:id/samples`).
+     *
+     * The Goal (or, with `criterionId`, that criterion) must read the external
+     * source. The sample row is appended; a Goal-level sample at or after the current
+     * observation becomes `currentValue` (and the baseline when there is none yet); a
+     * Goal with criteria is re-scored from the latest pushed values. Records
+     * `goal.progress_changed` (at most one per Goal per 5 minutes; the version still
+     * moves). It never activates, completes or schedules anything: the outcome rules
+     * run on an ACTIVE Goal's evaluation (D9).
+     */
+    async recordExternalSample(
+        userId: string,
+        goalId: string,
+        input: { criterionId?: string | null; value: number; sampledAt: Date },
+        scope?: OwnershipScope,
+    ): Promise<GoalDto> {
+        const goal = await this.findOrThrow(userId, goalId, scope);
+        if (isDeliveryGoal(goal)) {
+            throw new UnprocessableEntityException(
+                'A delivery Goal has no metric: track its Definition of Done instead.',
+            );
+        }
+        this.assertFiniteNumber(input.value, 'value');
+        if (!(input.sampledAt instanceof Date) || Number.isNaN(input.sampledAt.getTime())) {
+            throw new BadRequestException('sampledAt must be a date-time.');
+        }
+        if (input.sampledAt.getTime() > Date.now() + 5 * 60_000) {
+            throw new BadRequestException('sampledAt cannot be in the future.');
+        }
+        const criterionId = input.criterionId?.trim() || null;
+        if (criterionId) {
+            const criterion = (goal.criteria ?? []).find((entry) => entry.id === criterionId);
+            if (!criterion) throw new NotFoundException(`Goal criterion ${criterionId} not found`);
+            if (!isExternalMetricSource(criterion.metricSource ?? goal.metricSource)) {
+                throw new UnprocessableEntityException(
+                    `Criterion ${criterionId} reads a provider, not the external source.`,
+                );
+            }
+        } else if (!isExternalMetricSource(goal.metricSource)) {
+            throw new UnprocessableEntityException(
+                'This Goal reads a provider, not the external source: it takes no samples.',
+            );
+        }
+
+        const apply = async (manager: EntityManager) => {
+            await manager.getRepository(GoalMetricSample).insert({
+                goalId,
+                criterionId,
+                sampledAt: input.sampledAt,
+                value: input.value,
+            });
+            const before = { currentValue: goal.currentValue ?? null, score: goal.resolvedScore };
+            const changedFields: string[] = [];
+            if (
+                !criterionId &&
+                (!goal.currentValueAt || input.sampledAt.getTime() >= goal.currentValueAt.getTime())
+            ) {
+                goal.currentValue = input.value;
+                goal.currentValueAt = input.sampledAt;
+                changedFields.push('currentValue', 'currentValueAt');
+                if (goal.baselineValue === null || goal.baselineValue === undefined) {
+                    goal.baselineValue = input.value;
+                    changedFields.push('baselineValue');
+                }
+            }
+            if (Array.isArray(goal.criteria) && goal.criteria.length > 0) {
+                goal.resolvedScore = await rescoreFromExternalValues(manager, goal);
+                changedFields.push('resolvedScore');
+            }
+            changedFields.push('progress');
+            const saved = await manager.getRepository(Goal).save(goal);
+            return { saved, before, changedFields };
+        };
+
+        const publisher = this.domainEvents;
+        if (!publisher) {
+            const { saved } = await this.goals.manager.transaction(apply);
+            return toGoalDto(saved);
+        }
+        const saved = await publisher.transaction(async (manager) => {
+            const result = await apply(manager);
+            await recordGoalProgress(publisher, manager, goalId, {
+                changedFields: result.changedFields,
+                previous: {
+                    currentValue: result.before.currentValue,
+                    ...(result.changedFields.includes('resolvedScore')
+                        ? { score: result.before.score?.score ?? null }
+                        : {}),
+                },
+            });
+            return result.saved;
+        });
         return toGoalDto(saved);
     }
 
@@ -359,6 +554,7 @@ export class GoalsService {
             }
             if (input.constraints !== undefined) existing.constraints = input.constraints;
         }
+        const statusBefore = existing.status;
         if (input.outcome !== undefined) {
             if (input.outcome !== null && !GOAL_OUTCOMES.includes(input.outcome)) {
                 throw new BadRequestException(
@@ -374,7 +570,26 @@ export class GoalsService {
             }
         }
 
-        return toGoalDto(await this.goals.save(existing));
+        const changedFields = Object.keys(input).filter(
+            (key) => (input as Record<string, unknown>)[key] !== undefined,
+        );
+        const statusChanged = existing.status !== statusBefore;
+        return toGoalDto(
+            await this.persist(existing, (publisher, manager, row) =>
+                publisher.changed(
+                    manager,
+                    'goal',
+                    row.id,
+                    statusChanged ? 'goal.status_changed' : 'goal.updated',
+                    {
+                        changedFields: statusChanged
+                            ? [...new Set([...changedFields, 'status'])]
+                            : changedFields,
+                        ...(statusChanged ? { previous: { status: statusBefore } } : {}),
+                    },
+                ),
+            ),
+        );
     }
 
     async delete(
@@ -383,8 +598,19 @@ export class GoalsService {
         scope?: OwnershipScope,
     ): Promise<{ deleted: true }> {
         const existing = await this.findOrThrow(userId, goalId, scope);
-        // DB-level cascades remove samples + mission_goals edges.
-        await this.goals.remove(existing);
+        const publisher = this.domainEvents;
+        if (!publisher) {
+            // DB-level cascades remove samples + mission_goals edges.
+            await this.goals.remove(existing);
+            return { deleted: true };
+        }
+        // `goal.deleted` carries the last snapshot, its version claimed first (under the
+        // row lock), in the delete's own transaction.
+        await publisher.transaction(async (manager) => {
+            const tombstone = await publisher.beforeDelete(manager, 'goal', goalId);
+            await manager.getRepository(Goal).delete({ id: goalId });
+            await publisher.deleted(manager, tombstone, 'goal.deleted');
+        });
         return { deleted: true };
     }
 
@@ -419,10 +645,18 @@ export class GoalsService {
         } else {
             this.validateMetricSource(existing.metricSource, { requireProvider: true });
         }
+        const statusBefore = existing.status;
         existing.status = GoalStatus.ACTIVE;
         existing.outcome = null;
         existing.nextCheckAt = new Date();
-        return toGoalDto(await this.goals.save(existing));
+        return toGoalDto(
+            await this.persist(existing, (publisher, manager, row) =>
+                publisher.changed(manager, 'goal', row.id, 'goal.status_changed', {
+                    changedFields: ['status', 'outcome'],
+                    previous: { status: statusBefore },
+                }),
+            ),
+        );
     }
 
     /** ACTIVE → PAUSED; clears `nextCheckAt` so the dispatcher skips it. */
@@ -435,7 +669,14 @@ export class GoalsService {
         }
         existing.status = GoalStatus.PAUSED;
         existing.nextCheckAt = null;
-        return toGoalDto(await this.goals.save(existing));
+        return toGoalDto(
+            await this.persist(existing, (publisher, manager, row) =>
+                publisher.changed(manager, 'goal', row.id, 'goal.status_changed', {
+                    changedFields: ['status'],
+                    previous: { status: GoalStatus.ACTIVE },
+                }),
+            ),
+        );
     }
 
     /**
@@ -606,6 +847,28 @@ export class GoalsService {
     }
 
     // ─── internals ──────────────────────────────────────────────────
+
+    /**
+     * Save a Goal and record its event in ONE transaction (EW-P2-2): the version bump
+     * (re-checked against an integration's `If-Match`), the snapshot and the outbox row
+     * commit with the write or not at all. Without a publisher it is today's plain save.
+     */
+    private async persist(
+        goal: Goal,
+        record: (
+            publisher: DomainEventPublisher,
+            manager: EntityManager,
+            row: Goal,
+        ) => Promise<unknown>,
+    ): Promise<Goal> {
+        const publisher = this.domainEvents;
+        if (!publisher) return this.goals.save(goal);
+        return publisher.transaction(async (manager) => {
+            const row = await manager.getRepository(Goal).save(goal);
+            await record(publisher, manager, row);
+            return row;
+        });
+    }
 
     private archivedPredicate(archived: ListGoalsFilter['archived']): FindOptionsWhere<Goal> {
         if (archived === 'all') return {};

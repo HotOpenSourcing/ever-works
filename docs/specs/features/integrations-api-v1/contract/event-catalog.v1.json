@@ -277,7 +277,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -285,7 +285,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -293,7 +293,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -301,7 +301,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -309,7 +309,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -317,7 +317,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -325,7 +325,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2",
 			"notes": "Throttled to at most 1 per goal per 5 min."
 		},

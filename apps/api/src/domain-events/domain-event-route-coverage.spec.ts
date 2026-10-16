@@ -31,6 +31,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'works/members.controller.ts',
     'works/works.controller.ts',
     'work-proposals/work-proposals.controller.ts',
+    'goals/goals.controller.ts',
     // Integration API v1 (EW-P1-4) — writes delegate to the same services.
     'integrations-api/v1/tasks-write.controller.ts',
     'integrations-api/v1/tasks-sets.controller.ts',
@@ -38,6 +39,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/teams-write.controller.ts',
     // P2 resources (EW-P2-1 ideas).
     'integrations-api/v1/ideas.controller.ts',
+    'integrations-api/v1/goals.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([
