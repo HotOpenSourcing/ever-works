@@ -9,6 +9,10 @@ import {
     Optional,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import {
+    DomainEventPublisher,
+    type PublishOptions,
+} from '../domain-events/domain-event-publisher.service';
 import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
 import { SEAT_GUARD, type SeatGuard } from './seat-guard';
 import {
@@ -279,10 +283,41 @@ export class AgentsService {
         @Optional()
         @Inject(SEAT_GUARD)
         private readonly seatGuard?: SeatGuard,
+        // Domain events (EW-P1-1 B2) — `agent.*`. Agent writes are multi-step
+        // (row + memberships) and some steps tolerate their own failures, so the
+        // event is recorded in its own transaction right AFTER the write
+        // (best-effort, see `recordAgentEvent`). Appended LAST + @Optional.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
         // Record visibility (EW-P1-3) — the shared / org tabs and the readable get.
         // Appended LAST + @Optional(): absent means reads stay owner-only.
         @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
+
+    /**
+     * Record an `agent.*` event in its own transaction after the write
+     * (`created` records without a version bump). Best-effort: logged, never
+     * thrown — agents are read-only to integrations, and the integration's
+     * hourly reconcile repairs a missed event.
+     */
+    private async recordAgentEvent(
+        id: string,
+        type: string,
+        options: PublishOptions = {},
+    ): Promise<void> {
+        const publisher = this.domainEvents;
+        if (!publisher) return;
+        try {
+            await publisher.transaction(async (manager) => {
+                if (type === 'agent.created') {
+                    await publisher.created(manager, 'agent', id, type, options);
+                } else {
+                    await publisher.changed(manager, 'agent', id, type, options);
+                }
+            });
+        } catch (err) {
+            this.logger.warn(`Could not record ${type} for agent ${id}: ${err}`);
+        }
+    }
 
     async list(
         userId: string,
@@ -491,6 +526,7 @@ export class AgentsService {
             );
         }
 
+        await this.recordAgentEvent(created.id, 'agent.created');
         return toAgentDto(created);
     }
 
@@ -676,6 +712,9 @@ export class AgentsService {
         }
 
         await this.agents.updateById(id, patch);
+        await this.recordAgentEvent(id, 'agent.updated', {
+            changedFields: agentDtoFieldsOf(patch),
+        });
 
         // Reconcile memberships if targets changed — every scope, for the
         // same reason `create` materializes them for every scope.
@@ -979,6 +1018,10 @@ export class AgentsService {
         if (!ok) {
             throw new ConflictException('Agent status changed between read and write — retry.');
         }
+        await this.recordAgentEvent(id, 'agent.status_changed', {
+            changedFields: ['status'],
+            previous: { status: agent.status },
+        });
         // Activating from draft schedules first heartbeat.
         // Review-fix I17: compute the FIRST cadence slot via
         // `computeNextHeartbeat` instead of setting it to `now`. The
@@ -1104,6 +1147,10 @@ export class AgentsService {
         if (!ok) {
             throw new ConflictException('Agent status changed between read and write — retry.');
         }
+        await this.recordAgentEvent(id, 'agent.status_changed', {
+            changedFields: ['status'],
+            previous: { status: AgentStatus.ARCHIVED },
+        });
         const refreshed = await this.agents.findById(id);
         if (!refreshed) throw new NotFoundException('Agent vanished after unarchive');
         return toAgentDto(refreshed);
@@ -1114,8 +1161,12 @@ export class AgentsService {
         id: string,
         ownershipScope?: OwnershipScope,
     ): Promise<{ archived: true }> {
-        await this.requireOwned(userId, id, ownershipScope);
+        const agent = await this.requireOwned(userId, id, ownershipScope);
         await this.agents.archiveById(id);
+        await this.recordAgentEvent(id, 'agent.archived', {
+            changedFields: ['status'],
+            previous: { status: agent.status },
+        });
         return { archived: true };
     }
 
@@ -1125,9 +1176,22 @@ export class AgentsService {
         ownershipScope?: OwnershipScope,
     ): Promise<{ deleted: true }> {
         await this.requireOwned(userId, id, ownershipScope);
+        const publisher = this.domainEvents;
+        const tombstone = publisher
+            ? await publisher
+                  .transaction((manager) => publisher.beforeDelete(manager, 'agent', id))
+                  .catch(() => null)
+            : null;
         await this.budgets.deleteByAgentId(id).catch(() => undefined); // FK CASCADE handles it; tolerate
         await this.memberships.deleteByAgentId(id).catch(() => undefined);
         await this.agents.deleteById(id);
+        if (publisher && tombstone) {
+            await publisher
+                .transaction((manager) => publisher.deleted(manager, tombstone, 'agent.deleted'))
+                .catch((err) =>
+                    this.logger.warn(`Could not record agent.deleted for ${id}: ${err}`),
+                );
+        }
         return { deleted: true };
     }
 
@@ -1491,4 +1555,31 @@ export class AgentsService {
                 );
         }
     }
+}
+
+/** Agent entity column → integration DTO field (integration contract v1, B.6). */
+const AGENT_COLUMN_TO_DTO_FIELD: Readonly<Record<string, string>> = {
+    name: 'name',
+    slug: 'slug',
+    title: 'title',
+    capabilities: 'capabilities',
+    status: 'status',
+    scope: 'scope',
+    scopeTargetId: 'scopeTargetId',
+    reportsToAgentId: 'reportsToAgentId',
+    avatarMode: 'avatar',
+    avatarIcon: 'avatar',
+    avatarImageUploadId: 'avatar',
+    modelId: 'modelId',
+};
+
+/** The integration DTO fields an agent patch touches (domain events, EW-P1-1). */
+function agentDtoFieldsOf(patch: object): string[] {
+    return [
+        ...new Set(
+            Object.keys(patch)
+                .map((key) => AGENT_COLUMN_TO_DTO_FIELD[key])
+                .filter((field): field is string => Boolean(field)),
+        ),
+    ];
 }
