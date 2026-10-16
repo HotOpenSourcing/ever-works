@@ -231,6 +231,46 @@ describe('IntegrationTasksWriteController', () => {
         ).rejects.toBeInstanceOf(IntegrationHttpException);
     });
 
+    // EW-P2-3 — planning dates + estimate (contract v1 B.6).
+    it('passes dueAt / startAt / estimateMinutes through create and PATCH (null clears)', async () => {
+        const { controller, tasks } = setup();
+        await controller.create(
+            user,
+            {
+                title: 'Dated',
+                dueAt: '2026-10-20T14:00:00.000Z',
+                startAt: '2026-10-18T09:00:00.000Z',
+                estimateMinutes: 90,
+            },
+            undefined,
+            req(),
+            res(),
+        );
+        expect(tasks.create).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({
+                dueAt: new Date('2026-10-20T14:00:00.000Z'),
+                startAt: new Date('2026-10-18T09:00:00.000Z'),
+                estimateMinutes: 90,
+            }),
+            expect.anything(),
+        );
+
+        await controller.update(
+            user,
+            'task-1',
+            { dueAt: null, estimateMinutes: 30 },
+            undefined,
+            res(),
+        );
+        expect(tasks.update).toHaveBeenCalledWith(
+            'owner-1',
+            'task-1',
+            { dueAt: null, estimateMinutes: 30 },
+            expect.anything(),
+        );
+    });
+
     it('DELETE honours If-Match and drops the task links', async () => {
         const { controller, tasks, links } = setup();
         await expect(controller.remove(user, 'task-1', 'W/"9"')).rejects.toBeInstanceOf(
