@@ -42,6 +42,9 @@ no code and no generated site: it needs a Work that holds Tasks, Goals, Missions
 - **Web**: a `project` presentation entry (badge, lime tone, `ClipboardList` icon) and a translated
   `dashboard.workKind.project` label in all 21 locales, so a Project Work renders correctly wherever a kind badge is
   shown. No create chip yet (a later UI slice, see tasks).
+- **Anonymous statistics** (`ever.stats.v1`): the published `works_by_kind` keys are a closed list with no `project`
+  key yet, so Project Works are counted under `other` — on purpose, listed in `WORK_KINDS_WITHOUT_STATS_KEY`; the
+  guard test still fails for any other new kind without a key.
 
 ## 3. Not in scope (this slice)
 
@@ -50,6 +53,7 @@ no code and no generated site: it needs a Work that holds Tasks, Goals, Missions
   rule first).
 - Creating Project Works from the integration API (`/integrations/v1`, EW-P1-4) — that route will call
   `createProjectWork` once it exists.
+- A `project` key in the `ever.stats.v1` schema (a contract release in `@ever-co/connect-contracts`; task T11).
 
 ## 4. Acceptance
 

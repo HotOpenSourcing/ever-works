@@ -12,5 +12,8 @@
       `/works`.
 - [ ] **T9** Knowledge base on Project Works: a repo-less KB mirror rule (DB only), then `kb: true`.
 - [ ] **T10** Integration API (EW-P1-4): create / link Project Works for Gauzy projects through `createProjectWork`.
+- [ ] **T11** Anonymous statistics: a `project` key in `ever.stats.v1` `counts.works_by_kind` (a contract release of
+      `@ever-co/connect-contracts`), then drop `project` from `WORK_KINDS_WITHOUT_STATS_KEY`
+      (`apps/api/src/instance-stats/instance-stats.mapping.ts`). Until then Project Works are counted under `other`.
 
 Status legend: `[ ]` not started · `[~]` in progress · `[x]` done.
