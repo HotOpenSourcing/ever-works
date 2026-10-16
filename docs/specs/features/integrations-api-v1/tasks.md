@@ -36,7 +36,7 @@
 
 - [x] **T18** Subscription columns + migration (3 dialects) — `1795080100000-AddWebhookSubscriptionsV2`.
 - [x] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags` — `WebhookDomainEventFanoutService` (cursor
-  `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
+      `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
 - [x] **T20** `t=,v1=` signer + rotation grace + vector contract test — `webhook-signature-v2.ts` (all 22 vectors).
 - [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily; the
   `/api/integrations/v1/webhooks` routes for key-owned subscriptions follow #2606).
@@ -44,8 +44,8 @@
 
 ## Phase 4 — Transitions (EW-P1-6)
 
-- [ ] **T23** Sync transition path-walk + `409 transition_blocked`.
-- [ ] **T24** `cancelled → backlog | todo` reopen (+ web board).
+- [x] **T23** Sync transition path-walk + `409 transition_blocked` (EW-P1-6: `TaskTransitionService.transitionSync` on `POST /api/tasks/:id/transition {to, mode:'sync'}`; the `/integrations/v1` route delegates to it in EW-P1-4).
+- [x] **T24** `cancelled → backlog | todo` reopen (+ web board) (EW-P1-6: `TASK_STATUS_TRANSITIONS` / `TASK_BOARD_TRANSITIONS`, Task detail page, Kanban).
 
 ## Phase 5 — Tests (EW-P1-8)
 

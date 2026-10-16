@@ -7,8 +7,11 @@ import { TenantJobRuntimeConfig } from '@ever-works/agent/entities';
 // subscription to that Work's event stream.
 import {
     WEBHOOK_V2_ENQUEUER,
-    WebhookDeliveryService,
     WebhookDomainEventFanoutService,
+} from '@ever-works/agent/webhooks-v2';
+import {
+    WebhookDeliveryService,
+    WebhookOwnerAccessService,
     WebhookSubscriptionDeliveryService,
     WorkModule,
 } from '@ever-works/agent/services';
@@ -73,6 +76,7 @@ import { TriggerRunFailureSentryBreadcrumbSubscriber } from './subscribers/trigg
         // Webhooks v2 (EW-P1-5) — domain events → v2 subscriptions, enqueued on
         // the same delivery pipeline as every other webhook.
         WebhookDomainEventFanoutService,
+        WebhookOwnerAccessService,
         { provide: WEBHOOK_V2_ENQUEUER, useExisting: WebhookEventDispatcherService },
         // EW-743 — SecretStoreResolver binding for the Trigger.dev
         // webhook receiver. `TenantJobRuntimeModule` also binds this

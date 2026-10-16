@@ -2652,7 +2652,7 @@
                 "errorOpenTable": "Open the Table view instead",
                 "columnErrorTitle": "Couldn't load this column.",
                 "transitionFailed": "Couldn't move this Task.",
-                "dropRefusedCancelled": "A cancelled Task can't be reopened."
+                "dropRefusedCancelled": "A cancelled Task can only be reopened into Backlog or Todo."
             },
             "gateChip": {
                 "green": "Gate passed",
@@ -4414,6 +4414,7 @@
                 "channels": "Channels",
                 "emails": "Email Addresses",
                 "webhooks": "Webhooks",
+                "everGauzy": "Ever Gauzy",
                 "connections": "Connections",
                 "repositories": "Repositories",
                 "agentPlugins": "Agent Plugins",
@@ -4856,7 +4857,109 @@
                     "revokeSuccess": "API key revoked successfully",
                     "revokeError": "Failed to revoke API key",
                     "copyError": "Failed to copy to clipboard"
+                },
+                "integration": {
+                    "title": "Integration keys",
+                    "subtitle": "Keys for other systems, such as Ever Gauzy. Each key is pinned to organizations, carries only the scopes you grant, and can never manage keys, your account or billing.",
+                    "create": "New integration key",
+                    "empty": "No integration keys yet.",
+                    "ownerOnly": "Only the workspace owner can create and manage integration keys.",
+                    "kinds": {
+                        "ever-gauzy": "Ever Gauzy",
+                        "generic": "Integration"
+                    },
+                    "columns": {
+                        "name": "Name",
+                        "key": "Key",
+                        "pins": "Organizations",
+                        "scopes": "Scopes",
+                        "lastUsed": "Last used",
+                        "actions": "Actions"
+                    },
+                    "scopeCount": "{count, plural, one {# scope} other {# scopes}}",
+                    "graceUntil": "Previous key works until {date}",
+                    "dialog": {
+                        "title": "New integration key",
+                        "nameLabel": "Name",
+                        "namePlaceholder": "e.g. Ever Gauzy — Acme",
+                        "descriptionLabel": "Description (optional)",
+                        "presetLabel": "Preset",
+                        "presets": {
+                            "ever-gauzy": "Ever Gauzy",
+                            "custom": "Custom"
+                        },
+                        "presetHint": "The Ever Gauzy preset grants every scope except creating organizations (org:write) and sending email (email:write). Tick those two only if you need them.",
+                        "organizationsLabel": "Organizations",
+                        "organizationsHint": "The key works only inside the organizations you pick.",
+                        "noOrganizations": "Create an organization first: integration keys are pinned to organizations.",
+                        "scopesLabel": "Scopes",
+                        "expirationLabel": "Expiration",
+                        "createButton": "Create key",
+                        "cancel": "Cancel",
+                        "keyCreated": "Integration key created",
+                        "keyWarning": "Copy this key now and paste it into the other system. You won't be able to see it again.",
+                        "copy": "Copy to clipboard",
+                        "copied": "Copied!",
+                        "done": "Done"
+                    },
+                    "rotate": {
+                        "action": "Rotate",
+                        "title": "Rotate integration key",
+                        "description": "A new secret replaces the current one for \"{name}\". The current secret keeps working for the grace period, so you can update the other system without downtime.",
+                        "graceLabel": "Grace period",
+                        "grace": {
+                            "0": "None (stop the old secret now)",
+                            "1": "1 hour",
+                            "24": "24 hours",
+                            "72": "3 days",
+                            "168": "7 days"
+                        },
+                        "confirm": "Rotate",
+                        "cancel": "Cancel",
+                        "rotated": "New secret created",
+                        "warning": "Copy the new secret now. You won't be able to see it again."
+                    },
+                    "revoke": {
+                        "title": "Revoke integration key",
+                        "description": "Revoke \"{name}\"? Every system using it is disconnected immediately. This cannot be undone.",
+                        "cancel": "Cancel",
+                        "confirm": "Revoke"
+                    },
+                    "messages": {
+                        "nameRequired": "Please enter a name for the key",
+                        "organizationsRequired": "Pick at least one organization",
+                        "scopesRequired": "Pick at least one scope",
+                        "createSuccess": "Integration key created",
+                        "createError": "Failed to create the integration key",
+                        "rotateSuccess": "Key rotated",
+                        "rotateError": "Failed to rotate the key",
+                        "revokeSuccess": "Integration key revoked",
+                        "revokeError": "Failed to revoke the integration key",
+                        "copyError": "Failed to copy to clipboard"
+                    }
                 }
+            },
+            "everGauzy": {
+                "title": "Ever Gauzy",
+                "subtitle": "Connect this workspace to Ever Gauzy so tasks, teams, goals and more stay in sync in both directions.",
+                "howTitle": "How to connect",
+                "steps": {
+                    "one": "Create an integration key with the Ever Gauzy preset and pin it to the organizations to sync.",
+                    "two": "Copy the key. It starts with ew_int_ and is shown once.",
+                    "three": "In Ever Gauzy, open Integrations → Ever Works → Connect and paste the key with this API URL."
+                },
+                "apiUrlLabel": "Ever Works API URL",
+                "apiUrlMissing": "not published by this install. Ask its operator to set NEXT_PUBLIC_API_URL to the API's public address.",
+                "createKey": "Create an Ever Gauzy key",
+                "keysTitle": "Active Ever Gauzy keys",
+                "noKeys": "No Ever Gauzy key yet. Ever Gauzy is not connected.",
+                "manageKeys": "Manage keys",
+                "revoke": "Revoke",
+                "revokeHint": "Revoking a key disconnects Ever Gauzy immediately.",
+                "lastUsed": "Last used {date}",
+                "neverUsed": "Never used",
+                "revokeSuccess": "Ever Gauzy key revoked",
+                "revokeError": "Failed to revoke the key"
             },
             "fleet": {
                 "title": "Fleet",

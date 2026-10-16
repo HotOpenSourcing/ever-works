@@ -358,6 +358,11 @@ export class EmailController {
                 providerMessageId: message.providerMessageId,
                 from: message.from,
                 to: [...message.to],
+                // EW-P4-3 — Cc, attachments and the provider metadata used to
+                // be dropped here; the dispatcher now keeps them.
+                cc: message.cc ? [...message.cc] : undefined,
+                attachments: message.attachments ? [...message.attachments] : undefined,
+                metadata: message.metadata,
                 subject: message.subject,
                 bodyText: message.bodyText,
                 bodyHtml: message.bodyHtml,

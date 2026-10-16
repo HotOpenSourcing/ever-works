@@ -8,6 +8,7 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from 'typeorm';
+import type { RecordVisibility } from '@ever-works/contracts';
 import { User } from './user.entity';
 import { PortableDateColumn } from './_types';
 import type { WorkAgentGuardrails } from './work-agent-preference.entity';
@@ -93,6 +94,7 @@ export type MissionGuardrailsOverride = Partial<WorkAgentGuardrails>;
  * reviewability.
  */
 @Entity({ name: 'missions' })
+@Index('idx_missions_org_visibility', ['organizationId', 'visibility'])
 @Index('idx_missions_user_status', ['userId', 'status'])
 export class Mission {
     @PrimaryGeneratedColumn('uuid')
@@ -261,6 +263,23 @@ export class Mission {
 
     @Column({ type: 'uuid', nullable: true })
     organizationId?: string | null;
+
+    /**
+     * Record visibility (EW-P1-3, `docs/specs/features/record-visibility/spec.md`).
+     * Ownership (`userId`) is unchanged; this only ADDS readers of an org-scope row:
+     * `private` = the owner and the participants, `team` = also the members of the
+     * row's Teams and Work, `organization` = also every member of the Organization.
+     * Existing org rows were backfilled by migration 1795070000000 (owner decision D11).
+     */
+    @Column({ type: 'varchar', length: 16, default: 'private' })
+    visibility: RecordVisibility;
+
+    /**
+     * `true` once somebody chose `visibility` by hand: the automatic Team ↔
+     * Organization changes then stop. `private` is only ever set by hand.
+     */
+    @Column({ type: 'boolean', default: false })
+    visibilityExplicit: boolean;
 
     @CreateDateColumn()
     createdAt: Date;

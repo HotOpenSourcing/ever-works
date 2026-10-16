@@ -67,7 +67,9 @@ describe('webhooks v2 signature (contract vectors)', () => {
     );
 
     it.each(
-        VECTORS.filter((vector) => vector.expectedV1).map((vector) => [vector.name, vector] as const),
+        VECTORS.filter((vector) => vector.expectedV1).map(
+            (vector) => [vector.name, vector] as const,
+        ),
     )('the signer reproduces the expected v1 of %s', (_name, vector) => {
         const t = Number(/t=(\d+)/.exec(vector.header)?.[1]);
         expect(computeWebhookV2Digest(vector.body, vector.secret, t)).toBe(vector.expectedV1);
@@ -78,11 +80,21 @@ describe('webhooks v2 signature (contract vectors)', () => {
 
     it('signs with every live secret during a rotation, and either secret verifies', () => {
         const body = '{"id":"evt_01JABZ3K9QW8E5R2T7Y4V6X0ZP"}';
-        const header = signWebhookV2(body, ['current-secret-0123456789abcdef', 'previous-secret-0123456789abcdef'], 1792087200);
+        const header = signWebhookV2(
+            body,
+            ['current-secret-0123456789abcdef', 'previous-secret-0123456789abcdef'],
+            1792087200,
+        );
         expect(header.split(',')).toHaveLength(3);
-        expect(verifyWebhookV2Signature(body, header, 'current-secret-0123456789abcdef', 1792087200)).toBe(true);
-        expect(verifyWebhookV2Signature(body, header, 'previous-secret-0123456789abcdef', 1792087200)).toBe(true);
-        expect(verifyWebhookV2Signature(body, header, 'some-other-secret-0123456789abcd', 1792087200)).toBe(false);
+        expect(
+            verifyWebhookV2Signature(body, header, 'current-secret-0123456789abcdef', 1792087200),
+        ).toBe(true);
+        expect(
+            verifyWebhookV2Signature(body, header, 'previous-secret-0123456789abcdef', 1792087200),
+        ).toBe(true);
+        expect(
+            verifyWebhookV2Signature(body, header, 'some-other-secret-0123456789abcd', 1792087200),
+        ).toBe(false);
     });
 
     it('refuses to sign without a secret or with a non-integer timestamp', () => {

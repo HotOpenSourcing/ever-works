@@ -1,7 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { WebhookSubscriptionRepository, WebhookDeliveryRepository } from '../database';
 import type { WebhookSubscriptionStatus } from '../entities/webhook-subscription.entity';
 import { WebhookDeliveryService, type DeliveryResult } from './webhook-delivery.service';
+import { WebhookOwnerAccessService } from './webhook-owner-access.service';
 
 /**
  * Default dead-letter threshold (overridable via env). Picked to match the
@@ -64,6 +65,11 @@ export class WebhookSubscriptionDeliveryService {
         private readonly delivery: WebhookDeliveryService,
         private readonly subscriptions: WebhookSubscriptionRepository,
         private readonly deliveries: WebhookDeliveryRepository,
+        // Webhooks v2 (EW-P1-5): the owner's access is re-checked right before
+        // every v2 send (a queued or retried delivery must not reach a receiver
+        // whose owner lost access). Optional + last; when absent, v2 deliveries
+        // are refused rather than sent unchecked.
+        @Optional() private readonly ownerAccess?: WebhookOwnerAccessService,
     ) {}
 
     /**
@@ -216,6 +222,38 @@ export class WebhookSubscriptionDeliveryService {
         // Webhooks v2 (EW-P1-5): v2 subscriptions sign `t=,v1=` and, inside a
         // rotation's grace window, also with the previous secret.
         const isV2 = Number(sub.version) === 2;
+        if (isV2) {
+            const organizationId = (input.payload as { organizationId?: unknown }).organizationId;
+            const access = this.ownerAccess
+                ? await this.ownerAccess.canReceive(
+                      sub,
+                      typeof organizationId === 'string' ? organizationId : null,
+                  )
+                : { allowed: false, disable: false };
+            if (!access.allowed) {
+                if (access.disable) {
+                    await this.subscriptions.markDisabled(sub.id).catch(() => undefined);
+                }
+                this.logger.warn(
+                    `webhook.owner_access_denied sub=${sub.id} event=${input.event} — not sending`,
+                );
+                await this.recordTerminalSkip(input, {
+                    outcome: 'owner_access_denied',
+                    error: this.ownerAccess ? 'owner_access_denied' : 'owner_access_unchecked',
+                });
+                return {
+                    result: {
+                        ok: false,
+                        outcome: 'client_error',
+                        error: 'owner_access_denied',
+                        deliveryId: input.deliveryId ?? sub.id,
+                    },
+                    subscription: { id: sub.id, status: access.disable ? 'disabled' : sub.status },
+                    shouldRetry: false,
+                    consecutiveFailures: sub.consecutiveFailures,
+                };
+            }
+        }
         let previousSecret: string | null = null;
         if (
             isV2 &&

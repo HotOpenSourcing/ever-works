@@ -232,6 +232,14 @@ export function SettingsLayoutClient({
                     icon: Webhook,
                     href: `${baseSettingsPath}/integrations/webhooks`,
                 },
+                // EW-P1-7 — the Ever Gauzy integration card (manual connection
+                // with an `ew_int_` integration key).
+                {
+                    id: 'ever-gauzy',
+                    label: t('tabs.everGauzy'),
+                    icon: Plug,
+                    href: `${baseSettingsPath}/integrations/ever-gauzy`,
+                },
                 // Wave 13 — Billing + Usage & Credits (billing/usage PRD §2):
                 // also reachable from the settings shell like api-keys/security.
                 {

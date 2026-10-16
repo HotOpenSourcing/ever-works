@@ -274,29 +274,33 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/jso
   `task.runtime_updated` arrives only when named exactly.
 - Never events whose `origin.tag` is listed in `excludeOriginTags`. This is
   the loop guard for two-way sync.
-- Only events that occur after the subscription was created, and only while
-  its owner still has access:
-  - a user owner must still belong to the organization's tenant;
-  - an integration-key owner must be active, unexpired and still pinned to
-    the organization.
+- Only events after the subscription was created: it records the change-feed
+  head at creation (`startAfterSeq`) and receives later positions only. It also
+  receives them only while its owner still has access, checked when the
+  delivery is created AND again right before every send or retry:
+    - a user owner must still belong to the organization's tenant;
+    - an integration-key owner must be active, unexpired and still pinned to
+      the organization.
 
-  When the owner is gone or the key is revoked, the subscription becomes
-  `disabled`, and `PATCH` cannot resume it.
+    When the owner is gone or the key is revoked, the subscription becomes
+    `disabled`, and `PATCH` can neither pause nor resume it.
 
 Delivery is **at least once** and **unordered**. Dedupe on the envelope
 `id`, order by `seq` per aggregate, and fill gaps from
 `GET /api/integrations/v1/events`. The fan-out reads the change feed from
 its own cursor (`plugin_event_cursors`, `core:webhooks-v2`), and a unique
-`(subscriptionId, eventId)` index keeps it to one delivery per event.
+`(subscriptionId, eventId)` index keeps it to one delivery per event. A
+delivery that was created but never enqueued (the API stopped in between) is
+re-enqueued after 5 minutes.
 Retries follow the ladder above; only 5xx and timeouts are retried.
 
 ### Headers and signature
 
-| Header                   | Value                                                           |
-| ------------------------ | --------------------------------------------------------------- |
-| `X-Ever-Works-Event`     | the event type, e.g. `task.updated`                             |
-| `X-Ever-Works-Event-Id`  | the envelope `id` (`evt_<ULID>`)                                |
-| `X-Ever-Works-Delivery`  | the delivery id (uuid); a redelivery gets a new one             |
+| Header                   | Value                                                            |
+| ------------------------ | ---------------------------------------------------------------- |
+| `X-Ever-Works-Event`     | the event type, e.g. `task.updated`                              |
+| `X-Ever-Works-Event-Id`  | the envelope `id` (`evt_<ULID>`)                                 |
+| `X-Ever-Works-Delivery`  | the delivery id (uuid); a redelivery gets a new one              |
 | `X-Ever-Works-Signature` | `t=<unix seconds>,v1=<hex HMAC-SHA256(secret, "<t>.<rawBody>")>` |
 
 - The HMAC key is the secret string exactly as returned, as UTF-8 bytes.
@@ -317,11 +321,11 @@ Retries follow the ladder above; only 5xx and timeouts are retried.
 - `GET /api/webhooks` lists every subscription, whatever its status
   (`active`, `paused`, `failed`, `disabled`).
 - `PATCH /api/webhooks/:id`:
-  - `{"status":"paused"}` pauses any subscription;
-  - `{"status":"active"}` resumes a paused or failed one and resets its
-    failure streak;
-  - a v2 subscription also takes `url`, `events`, `organizationIds`,
-    `excludeOriginTags` and `description`.
+    - `{"status":"paused"}` pauses any subscription;
+    - `{"status":"active"}` resumes a paused or failed one and resets its
+      failure streak (within the 25-active-subscriptions limit);
+    - a v2 subscription also takes `url`, `events`, `organizationIds`,
+      `excludeOriginTags` and `description`.
 - `GET /api/webhooks/deliveries?subscriptionId=<id>&limit=<n>` shows one
   subscription's deliveries; `POST /api/webhooks/deliveries/:id/redeliver`
   re-sends one.

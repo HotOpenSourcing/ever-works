@@ -246,8 +246,7 @@ export class WebhookDeliveryService {
             secrets.push(request.previousSecret);
         }
         const payloadId = (request.payload as { id?: unknown }).id;
-        const eventId =
-            request.eventId ?? (typeof payloadId === 'string' ? payloadId : deliveryId);
+        const eventId = request.eventId ?? (typeof payloadId === 'string' ? payloadId : deliveryId);
         return {
             url: request.url,
             body,

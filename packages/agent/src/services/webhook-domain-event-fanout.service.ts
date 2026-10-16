@@ -18,11 +18,10 @@ import {
 } from '../domain-events/domain-event-feed.service';
 import { PLUGIN_EVENT_ANCHOR_TENANT_ID } from '../domain-events/domain-event-plugin-delivery.service';
 import { DomainEventRelayService } from '../domain-events/domain-event-relay.service';
-import { ApiKey } from '../entities/api-key.entity';
-import { Organization } from '../entities/organization.entity';
+import { DomainEvent } from '../entities/domain-event.entity';
 import { PluginEventCursor } from '../entities/plugin-event-cursor.entity';
-import { User } from '../entities/user.entity';
 import type { WebhookSubscription } from '../entities/webhook-subscription.entity';
+import { type WebhookOwnerAccess, WebhookOwnerAccessService } from './webhook-owner-access.service';
 
 /**
  * Enqueues a `webhook_deliveries` row the fan-out created on the platform's
@@ -50,17 +49,9 @@ const MAX_PAGES_PER_PASS = 25;
 /** The leader's catch-up timer: picks up anything a crash or a slow pass left behind. */
 const CATCH_UP_INTERVAL_MS = 10_000;
 
-/** Whether a subscription's owner may receive its events right now (and where). */
-interface OwnerVerdict {
-    readonly ok: boolean;
-    /** Not ok AND permanently so (owner gone / key revoked): mark the subscription `disabled`. */
-    readonly disable: boolean;
-    /** The organizations the owner can still see; `null` = no restriction beyond the subscription's. */
-    readonly organizationIds: ReadonlySet<string> | null;
-}
-
-const DENIED_FOR_NOW: OwnerVerdict = { ok: false, disable: false, organizationIds: null };
-const DENIED_FOR_GOOD: OwnerVerdict = { ok: false, disable: true, organizationIds: null };
+/** A pending delivery the fan-out created but never enqueued (crash in between) is re-enqueued after this. */
+const UNSENT_GRACE_MS = 5 * 60 * 1000;
+const UNSENT_BATCH = 100;
 
 /**
  * Webhooks v2 fan-out (EW-P1-5, integration contract v1 B.5).
@@ -103,6 +94,7 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         private readonly subscriptions: WebhookSubscriptionRepository,
         private readonly deliveries: WebhookDeliveryRepository,
         private readonly feed: DomainEventFeedService,
+        private readonly ownerAccess: WebhookOwnerAccessService,
         @Optional()
         @Inject(WEBHOOK_V2_ENQUEUER)
         private readonly enqueuer?: WebhookV2Enqueuer,
@@ -159,10 +151,10 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
     }
 
     private async pass(): Promise<number> {
-        const cursor = await this.loadCursor();
         const subscriptions = (await this.subscriptions.listActiveV2()).filter(
             (sub) => (sub.organizationIds?.length ?? 0) > 0 && (sub.events?.length ?? 0) > 0,
         );
+        const cursor = await this.loadCursor(subscriptions);
         if (subscriptions.length === 0) {
             // Nobody listens: keep the cursor at the head so a new subscription
             // starts from now, not from the whole retained history.
@@ -170,9 +162,11 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
             return 0;
         }
 
-        const organizationIds = [...new Set(subscriptions.flatMap((sub) => sub.organizationIds ?? []))];
+        const organizationIds = [
+            ...new Set(subscriptions.flatMap((sub) => sub.organizationIds ?? [])),
+        ];
         const patterns = [...new Set(subscriptions.flatMap((sub) => sub.events ?? []))];
-        const owners = new Map<string, OwnerVerdict>();
+        const owners = new Map<string, WebhookOwnerAccess>();
         let after = cursor.lastSeq;
         let created = 0;
 
@@ -203,10 +197,8 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
                 for (const sub of subscriptions) {
                     if (!this.matches(sub, event)) continue;
                     const owner = await this.ownerVerdict(sub, owners);
-                    if (!owner.ok) continue;
-                    if (owner.organizationIds && !owner.organizationIds.has(event.organizationId ?? '')) {
+                    if (!owner.ok || !owner.organizationIds.has(event.organizationId ?? ''))
                         continue;
-                    }
                     if (await this.deliver(sub, event)) created += 1;
                 }
             }
@@ -217,6 +209,11 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
             }
             if (!result.hasMore) break;
         }
+        await this.recoverUnsent().catch((error) =>
+            this.logger.warn(
+                `webhooks v2 recovery of unsent deliveries failed: ${describe(error)}`,
+            ),
+        );
         return created;
     }
 
@@ -229,18 +226,23 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         if (event.origin.tag && (sub.excludeOriginTags ?? []).includes(event.origin.tag)) {
             return false;
         }
+        // Only events after the subscription existed: exactly by feed position
+        // when it recorded one, else by its creation time.
+        if (sub.startAfterSeq !== null && sub.startAfterSeq !== undefined) {
+            return seqToBigInt(event.seq) > seqToBigInt(sub.startAfterSeq);
+        }
         const createdAt = sub.createdAt instanceof Date ? sub.createdAt.getTime() : 0;
-        return Date.parse(event.occurredAt) >= createdAt - 1000;
+        return Date.parse(event.occurredAt) >= createdAt;
     }
 
     /** Whether the owner may still receive the subscription's events (cached per pass). */
     private async ownerVerdict(
         sub: WebhookSubscription,
-        cache: Map<string, OwnerVerdict>,
-    ): Promise<OwnerVerdict> {
+        cache: Map<string, WebhookOwnerAccess>,
+    ): Promise<WebhookOwnerAccess> {
         const cached = cache.get(sub.id);
         if (cached) return cached;
-        const verdict = await this.resolveOwner(sub);
+        const verdict = await this.ownerAccess.resolve(sub);
         if (!verdict.ok && verdict.disable) {
             await this.subscriptions.markDisabled(sub.id);
             this.logger.warn(
@@ -251,35 +253,29 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         return verdict;
     }
 
-    private async resolveOwner(sub: WebhookSubscription): Promise<OwnerVerdict> {
-        const ownerId = sub.ownerId ?? sub.accountId;
-        if (sub.ownerType === 'integration_key') {
-            const key = await this.dataSource.getRepository(ApiKey).findOne({ where: { id: ownerId } });
-            if (!key || !key.isActive || (key.expiresAt && key.expiresAt.getTime() <= Date.now())) {
-                return DENIED_FOR_GOOD;
-            }
-            const pinned = (key as unknown as { organizationIds?: string[] | null }).organizationIds;
-            return {
-                ok: true,
-                disable: false,
-                organizationIds: Array.isArray(pinned) ? new Set(pinned) : new Set<string>(),
-            };
+    /**
+     * Re-enqueue fan-out deliveries that exist but were never handed to the
+     * pipeline (the process stopped between creating the row and enqueueing
+     * it): still `pending`, never attempted, no Trigger run, older than
+     * {@link UNSENT_GRACE_MS}. The send path re-checks the subscription and
+     * its owner, so a stale row for a paused or revoked subscription is
+     * settled there, not sent.
+     */
+    private async recoverUnsent(): Promise<number> {
+        const rows = await this.deliveries.listUnsentFanout(
+            new Date(Date.now() - UNSENT_GRACE_MS),
+            UNSENT_BATCH,
+        );
+        for (const row of rows) {
+            if (!this.enqueuer) break;
+            await this.enqueuer.enqueueDelivery({
+                deliveryId: row.id,
+                subscriptionId: row.subscriptionId,
+                eventName: row.event,
+                payload: row.payload,
+            });
         }
-        const user = await this.dataSource
-            .getRepository(User)
-            .findOne({ where: { id: ownerId }, select: ['id', 'tenantId'] });
-        if (!user) return DENIED_FOR_GOOD;
-        if (!user.tenantId) return DENIED_FOR_NOW;
-        // A user belongs to an organization through its tenant (OrganizationMembershipService).
-        const tenantOrgs = await this.organizationsOfTenant(user.tenantId);
-        return { ok: true, disable: false, organizationIds: tenantOrgs };
-    }
-
-    private async organizationsOfTenant(tenantId: string): Promise<ReadonlySet<string>> {
-        const rows = await this.dataSource
-            .getRepository(Organization)
-            .find({ where: { tenantId }, select: ['id'] });
-        return new Set(rows.map((row) => row.id));
+        return this.enqueuer ? rows.length : 0;
     }
 
     /** Create the pending delivery (idempotent) and enqueue it. */
@@ -296,7 +292,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         });
         if (!delivery) return false;
         if (!this.enqueuer) {
-            this.logger.warn(`webhooks v2 delivery ${delivery.id} created but no enqueuer is bound`);
+            this.logger.warn(
+                `webhooks v2 delivery ${delivery.id} created but no enqueuer is bound`,
+            );
             return true;
         }
         await this.enqueuer.enqueueDelivery({
@@ -310,28 +308,61 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
 
     // ── cursor ─────────────────────────────────────────────────────────────
 
-    private async loadCursor(): Promise<{ id: string; lastSeq: string }> {
+    /**
+     * The fan-out's cursor row. Created on first use at the lowest
+     * `startAfterSeq` of the active subscriptions (or, for rows without one,
+     * just before the first event after the oldest was created; at the head
+     * when there is none), so the batch whose dispatch triggered the very first
+     * pass is not skipped.
+     */
+    private async loadCursor(
+        subscriptions: readonly WebhookSubscription[],
+    ): Promise<{ id: string; lastSeq: string }> {
         const repo = this.dataSource.getRepository(PluginEventCursor);
-        const existing = await repo.findOne({
-            where: { pluginId: WEBHOOKS_V2_CURSOR_ID, tenantId: PLUGIN_EVENT_ANCHOR_TENANT_ID },
-        });
+        const where = { pluginId: WEBHOOKS_V2_CURSOR_ID, tenantId: PLUGIN_EVENT_ANCHOR_TENANT_ID };
+        const existing = await repo.findOne({ where });
         if (existing) return { id: existing.id, lastSeq: String(existing.lastSeq ?? '0') };
-        // First run: start at the head — v2 subscriptions receive new events.
-        const head = await this.feed.head();
+        const start = await this.initialPosition(subscriptions);
         try {
             await repo.insert({
-                pluginId: WEBHOOKS_V2_CURSOR_ID,
-                tenantId: PLUGIN_EVENT_ANCHOR_TENANT_ID,
-                lastSeq: head,
+                ...where,
+                lastSeq: start,
                 consecutiveFailures: 0,
             } as Partial<PluginEventCursor>);
         } catch {
             // Another replica created it first.
         }
-        const row = await repo.findOneOrFail({
-            where: { pluginId: WEBHOOKS_V2_CURSOR_ID, tenantId: PLUGIN_EVENT_ANCHOR_TENANT_ID },
-        });
+        const row = await repo.findOneOrFail({ where });
         return { id: row.id, lastSeq: String(row.lastSeq ?? '0') };
+    }
+
+    private async initialPosition(subscriptions: readonly WebhookSubscription[]): Promise<string> {
+        const head = await this.feed.head();
+        if (
+            subscriptions.length > 0 &&
+            subscriptions.every(
+                (sub) => sub.startAfterSeq !== null && sub.startAfterSeq !== undefined,
+            )
+        ) {
+            const lowest = subscriptions
+                .map((sub) => seqToBigInt(sub.startAfterSeq))
+                .reduce((min, seq) => (seq < min ? seq : min));
+            return lowest.toString();
+        }
+        const created = subscriptions
+            .map((sub) => (sub.createdAt instanceof Date ? sub.createdAt.getTime() : Number.NaN))
+            .filter((time) => Number.isFinite(time));
+        if (created.length === 0) return head;
+        const first = await this.dataSource
+            .getRepository(DomainEvent)
+            .createQueryBuilder('event')
+            .select('MIN(event.seq)', 'seq')
+            .where('event.seq IS NOT NULL')
+            .andWhere('event.occurredAt >= :since', { since: new Date(Math.min(...created)) })
+            .getRawOne<{ seq: string | number | null }>();
+        if (first?.seq === null || first?.seq === undefined) return head;
+        const before = seqToBigInt(first.seq) - 1n;
+        return (before < 0n ? 0n : before).toString();
     }
 
     /** Move the cursor forward only (compare-and-set on the value it was read at). */

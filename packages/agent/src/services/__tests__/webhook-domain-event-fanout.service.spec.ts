@@ -4,7 +4,10 @@ import type { DataSource } from 'typeorm';
 import { WebhookDeliveryRepository } from '../../database/repositories/webhook-delivery.repository';
 import { WebhookSubscriptionRepository } from '../../database/repositories/webhook-subscription.repository';
 import { DomainEventFeedService } from '../../domain-events/domain-event-feed.service';
-import { DomainEventRecorder, type RecordDomainEventInput } from '../../domain-events/domain-event-recorder.service';
+import {
+    DomainEventRecorder,
+    type RecordDomainEventInput,
+} from '../../domain-events/domain-event-recorder.service';
 import { DomainEventRelayService } from '../../domain-events/domain-event-relay.service';
 import { DomainEventRetentionService } from '../../domain-events/domain-event-retention.service';
 import {
@@ -21,6 +24,7 @@ import { PluginEventCursor } from '../../entities/plugin-event-cursor.entity';
 import { User } from '../../entities/user.entity';
 import { WebhookDelivery } from '../../entities/webhook-delivery.entity';
 import { WebhookSubscription } from '../../entities/webhook-subscription.entity';
+import { WebhookOwnerAccessService } from '../webhook-owner-access.service';
 import {
     WEBHOOKS_V2_CURSOR_ID,
     WebhookDomainEventFanoutService,
@@ -35,7 +39,11 @@ describe('WebhookDomainEventFanoutService', () => {
     let dataSource: DataSource;
     let fanout: WebhookDomainEventFanoutService;
     let subscriptions: WebhookSubscriptionRepository;
-    const enqueued: Array<{ subscriptionId: string; eventName: string; payload: Record<string, unknown> }> = [];
+    const enqueued: Array<{
+        subscriptionId: string;
+        eventName: string;
+        payload: Record<string, unknown>;
+    }> = [];
     const enqueuer: WebhookV2Enqueuer = {
         enqueueDelivery: async (payload) => {
             enqueued.push(payload);
@@ -47,7 +55,9 @@ describe('WebhookDomainEventFanoutService', () => {
 
     const record = async (overrides: Partial<RecordDomainEventInput> = {}) => {
         const recorder = new DomainEventRecorder();
-        await dataSource.transaction((manager) => recorder.record(manager, taskEventInput(overrides)));
+        await dataSource.transaction((manager) =>
+            recorder.record(manager, taskEventInput(overrides)),
+        );
     };
     const dispatch = async () => {
         const relay = new DomainEventRelayService(
@@ -60,8 +70,12 @@ describe('WebhookDomainEventFanoutService', () => {
     };
     const deliveries = () =>
         dataSource.getRepository(WebhookDelivery).find({ order: { createdAt: 'ASC' } });
-    const subscribe = (overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {}) =>
+    const subscribe = async (
+        overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {},
+    ) =>
         subscriptions.createV2({
+            // As WebhooksService.createV2 does: start after the current feed head.
+            startAfterSeq: await new DomainEventFeedService(dataSource).head(),
             accountId: OWNER,
             ownerType: 'user',
             ownerId: OWNER,
@@ -76,25 +90,44 @@ describe('WebhookDomainEventFanoutService', () => {
 
     beforeAll(async () => {
         dataSource = await createDomainEventsDataSource();
-        subscriptions = new WebhookSubscriptionRepository(dataSource.getRepository(WebhookSubscription));
+        subscriptions = new WebhookSubscriptionRepository(
+            dataSource.getRepository(WebhookSubscription),
+        );
         fanout = new WebhookDomainEventFanoutService(
             dataSource,
             subscriptions,
             new WebhookDeliveryRepository(dataSource.getRepository(WebhookDelivery)),
             new DomainEventFeedService(dataSource),
+            new WebhookOwnerAccessService(dataSource),
             enqueuer,
         );
     });
 
     beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
-        for (const table of ['webhook_deliveries', 'webhook_subscriptions', 'users', 'organizations', 'api_keys']) {
+        for (const table of [
+            'webhook_deliveries',
+            'webhook_subscriptions',
+            'users',
+            'organizations',
+            'api_keys',
+        ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
         enqueued.length = 0;
         await dataSource.getRepository(Organization).insert([
-            { id: ORG_A, tenantId: TENANT, slug: `a-${randomUUID().slice(0, 6)}`, displayName: 'A' },
-            { id: ORG_B, tenantId: OTHER_TENANT, slug: `b-${randomUUID().slice(0, 6)}`, displayName: 'B' },
+            {
+                id: ORG_A,
+                tenantId: TENANT,
+                slug: `a-${randomUUID().slice(0, 6)}`,
+                displayName: 'A',
+            },
+            {
+                id: ORG_B,
+                tenantId: OTHER_TENANT,
+                slug: `b-${randomUUID().slice(0, 6)}`,
+                displayName: 'B',
+            },
         ] as unknown as Organization[]);
         await dataSource.getRepository(User).insert({
             id: OWNER,
@@ -119,11 +152,46 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(String(cursor.lastSeq)).toBe('1');
     });
 
+    it('a first pass that runs after its batch was dispatched still delivers that batch', async () => {
+        // The relay assigns positions, THEN hands the batch to the fan-out: a
+        // cursor created at the head right then would skip it for good.
+        await subscribe();
+        await record();
+        await dispatch();
+        expect(await fanout.catchUp()).toBe(1);
+        expect(await deliveries()).toHaveLength(1);
+    });
+
+    it('re-enqueues a fan-out delivery that was created but never enqueued', async () => {
+        await fanout.catchUp();
+        const sub = await subscribe();
+        const repo = new WebhookDeliveryRepository(dataSource.getRepository(WebhookDelivery));
+        const orphan = await repo.createPendingForEvent({
+            subscriptionId: sub.id,
+            accountId: OWNER,
+            event: 'task.updated',
+            eventId: 'evt_01JABZ3K9QW8E5R2T7Y4V6X0ZP',
+            payload: { id: 'evt_01JABZ3K9QW8E5R2T7Y4V6X0ZP', type: 'task.updated' },
+        });
+        // Fresh: still inside the grace window, left alone.
+        await fanout.catchUp();
+        expect(enqueued).toEqual([]);
+        await dataSource
+            .getRepository(WebhookDelivery)
+            .update({ id: orphan!.id }, { createdAt: new Date(Date.now() - 10 * 60 * 1000) });
+        await fanout.catchUp();
+        expect(enqueued.map((item) => item.subscriptionId)).toEqual([sub.id]);
+    });
+
     it('delivers what matches the organization, type pattern and origin filter — once', async () => {
         await fanout.catchUp(); // cursor at the (empty) head
         const sub = await subscribe({ excludeOriginTags: ['gauzy:conn-1'] });
         await record({ type: 'task.updated' });
-        await record({ type: 'team.created', aggregate: { type: 'team', id: randomUUID(), version: 1 }, data: { id: 'x', visibility: 'organization' } });
+        await record({
+            type: 'team.created',
+            aggregate: { type: 'team', id: randomUUID(), version: 1 },
+            data: { id: 'x', visibility: 'organization' },
+        });
         await record({ type: 'task.updated', organizationId: ORG_B, tenantId: OTHER_TENANT });
         await record({ type: 'task.updated', originTag: 'gauzy:conn-1' });
         await record({ type: 'task.runtime_updated' });
@@ -132,7 +200,11 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(await fanout.catchUp()).toBe(1);
         const rows = await deliveries();
         expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ subscriptionId: sub.id, event: 'task.updated', status: 'pending' });
+        expect(rows[0]).toMatchObject({
+            subscriptionId: sub.id,
+            event: 'task.updated',
+            status: 'pending',
+        });
         expect(rows[0].eventId).toMatch(/^evt_/);
         expect(enqueued).toHaveLength(1);
         expect(enqueued[0].payload).toMatchObject({
@@ -207,9 +279,44 @@ describe('WebhookDomainEventFanoutService', () => {
         expect((await subscriptions.findById(sub.id))?.status).toBe('disabled');
     });
 
+    it('delivers to an active integration key in its pinned organizations; a personal key never owns one', async () => {
+        await fanout.catchUp();
+        const insertKey = async (kind: string, organizationIds: string[] | null) => {
+            const id = randomUUID();
+            await dataSource.getRepository(ApiKey).insert({
+                id,
+                userId: OWNER,
+                name: kind,
+                hashedKey: `h-${id}`,
+                prefix: 'ew_int_x',
+                isActive: true,
+                kind,
+                organizationIds,
+            } as unknown as ApiKey);
+            return id;
+        };
+        const pinned = await subscribe({
+            ownerType: 'integration_key',
+            ownerId: await insertKey('integration', [ORG_A]),
+        });
+        const personal = await subscribe({
+            ownerType: 'integration_key',
+            ownerId: await insertKey('personal', null),
+        });
+        await record();
+        await dispatch();
+        expect(await fanout.catchUp()).toBe(1);
+        expect((await deliveries()).map((row) => row.subscriptionId)).toEqual([pinned.id]);
+        expect((await subscriptions.findById(personal.id))?.status).toBe('disabled');
+    });
+
     it('ignores v1 subscriptions and paused v2 ones', async () => {
         await fanout.catchUp();
-        await subscriptions.createForAccount({ accountId: OWNER, url: 'https://v1.example.com', secretEncrypted: 's' });
+        await subscriptions.createForAccount({
+            accountId: OWNER,
+            url: 'https://v1.example.com',
+            secretEncrypted: 's',
+        });
         const paused = await subscribe();
         await subscriptions.pause(paused.id);
         await record();

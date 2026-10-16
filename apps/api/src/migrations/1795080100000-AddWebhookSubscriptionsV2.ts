@@ -14,6 +14,7 @@ import { MigrationInterface, QueryRunner, TableColumn, TableIndex } from 'typeor
  * | `events`                  | text, null    | simple-json catalog types / `<domain>.*` patterns  |
  * | `organizationIds`         | text, null    | simple-json organization ids                       |
  * | `excludeOriginTags`       | text, null    | simple-json origin tags to skip (loop guard)       |
+ * | `startAfterSeq`           | bigint, null  | feed head at creation: only later events are sent  |
  * | `description`             | varchar(500)  | free text                                          |
  * | `previousSecretEncrypted` | text, null    | rotation grace: the previous secret, encrypted     |
  * | `previousSecretExpiresAt` | bigint (ms)   | when the previous secret stops signing             |
@@ -34,11 +35,17 @@ export class AddWebhookSubscriptionsV21795080100000 implements MigrationInterfac
     public async up(queryRunner: QueryRunner): Promise<void> {
         const subscriptionColumns: TableColumn[] = [
             new TableColumn({ name: 'version', type: 'int', default: 1 }),
-            new TableColumn({ name: 'ownerType', type: 'varchar', length: '32', default: "'user'" }),
+            new TableColumn({
+                name: 'ownerType',
+                type: 'varchar',
+                length: '32',
+                default: "'user'",
+            }),
             new TableColumn({ name: 'ownerId', type: 'uuid', isNullable: true }),
             new TableColumn({ name: 'events', type: 'text', isNullable: true }),
             new TableColumn({ name: 'organizationIds', type: 'text', isNullable: true }),
             new TableColumn({ name: 'excludeOriginTags', type: 'text', isNullable: true }),
+            new TableColumn({ name: 'startAfterSeq', type: 'bigint', isNullable: true }),
             new TableColumn({
                 name: 'description',
                 type: 'varchar',
@@ -135,6 +142,7 @@ export class AddWebhookSubscriptionsV21795080100000 implements MigrationInterfac
                 'previousSecretExpiresAt',
                 'previousSecretEncrypted',
                 'description',
+                'startAfterSeq',
                 'excludeOriginTags',
                 'organizationIds',
                 'events',

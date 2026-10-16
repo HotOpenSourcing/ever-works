@@ -57,6 +57,8 @@ export interface AgentInboundEmailDispatchPayload {
     from: string;
     /** Every recipient the message names — recorded, never used for routing. */
     to: string[];
+    /** EW-P4-3 — `Cc` recipients; recorded, never used for routing. */
+    cc?: string[];
     subject: string;
     bodyText: string;
     bodyHtml?: string;
@@ -69,7 +71,47 @@ export interface AgentInboundEmailDispatchPayload {
     messageIdHeader?: string;
     inReplyTo?: string;
     references?: readonly string[];
+    /**
+     * EW-P4-3 — the plugin's attachments (base64 content). Stored through
+     * {@link INBOUND_EMAIL_ATTACHMENT_STORE} for the address owner and listed
+     * on the message row; never trusted for type (the store validates).
+     */
+    attachments?: readonly InboundEmailAttachment[];
+    /** EW-P4-3 — the plugin's provider metadata (spam score, headers, …), kept on the row. */
+    metadata?: Readonly<Record<string, unknown>>;
 }
+
+/** EW-P4-3 — an inbound attachment as the plugin decoded it. */
+export interface InboundEmailAttachment {
+    readonly filename: string;
+    readonly mimeType: string;
+    /** Base64-encoded content. */
+    readonly content: string;
+    readonly cid?: string;
+}
+
+/** EW-P4-3 — what the attachment store is asked to keep. */
+export interface InboundEmailAttachmentStoreInput {
+    /** The receiving address's owner — the upload is theirs. */
+    userId: string;
+    tenantId: string | null;
+    organizationId: string | null;
+    filename: string;
+    mimeType: string;
+    content: Buffer;
+}
+
+/**
+ * EW-P4-3 — optional adapter that stores an inbound attachment's bytes (the
+ * platform binds the upload pipeline, which validates type by magic bytes and
+ * size). Throws to refuse one; the dispatcher then lists it as not stored.
+ * When unbound, attachments are listed on the message but not stored.
+ */
+export interface InboundEmailAttachmentStore {
+    store(input: InboundEmailAttachmentStoreInput): Promise<{ uploadId: string; url?: string }>;
+}
+
+export const INBOUND_EMAIL_ATTACHMENT_STORE = 'INBOUND_EMAIL_ATTACHMENT_STORE' as const;
 
 export interface AgentInboundEmailDispatchResult {
     handled: boolean;
@@ -116,6 +158,20 @@ export interface InboundEmailTaskSpawnerInput {
     subject: string;
     bodyText: string;
     from: string;
+    /**
+     * EW-P4-3 — the receiving address's tenant / organization: the Task is
+     * created in that scope (`null` = personal, as before).
+     */
+    tenantId?: string | null;
+    organizationId?: string | null;
+    /** EW-P4-3 — the message's attachments as recorded (names are sender-written). */
+    attachments?: readonly {
+        filename: string;
+        mimeType: string;
+        size: number;
+        stored: boolean;
+        uploadId?: string | null;
+    }[];
 }
 
 /**
