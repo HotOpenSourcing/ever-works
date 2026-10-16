@@ -334,7 +334,7 @@
 			"version": 1,
 			"domain": "ideas",
 			"aggregateType": "idea",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/idea.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -342,7 +342,7 @@
 			"version": 1,
 			"domain": "ideas",
 			"aggregateType": "idea",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/idea.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -350,7 +350,7 @@
 			"version": 1,
 			"domain": "ideas",
 			"aggregateType": "idea",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/idea.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -358,7 +358,7 @@
 			"version": 1,
 			"domain": "ideas",
 			"aggregateType": "idea",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/idea.schema.json",
 			"phase": "P2"
 		},
 		{

@@ -1,7 +1,11 @@
 import {
     getWorkCapabilities,
     type IntegrationAgentDto,
+<<<<<<< HEAD
     type IntegrationInboxItemDto,
+=======
+    type IntegrationIdeaDto,
+>>>>>>> 5e264b7b2e9f49e2dca8724e9353779a2884db58
     type IntegrationMemberDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
@@ -28,6 +32,7 @@ import { Team } from '../entities/team.entity';
 import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { User } from '../entities/user.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
 import { Work } from '../entities/work.entity';
 import { WorkMember } from '../entities/work-member.entity';
 
@@ -315,6 +320,54 @@ export async function buildAgentSnapshot(
         webUrl: webUrl(`/agents/${agent.id}`),
     };
     return { dto, tenantId: agent.tenantId ?? null, organizationId: agent.organizationId ?? null };
+}
+
+/**
+ * `createdBy` of a P2 aggregate (ideas, goals, missions): the stored author when an
+ * integration or agent created it (`createdByType` / `createdById`, migration
+ * 1795100000000), else the owning user.
+ */
+function p2CreatedBy(row: {
+    userId: string;
+    createdByType?: string | null;
+    createdById?: string | null;
+}): IntegrationIdeaDto['createdBy'] {
+    if ((row.createdByType === 'integration' || row.createdByType === 'agent') && row.createdById) {
+        return { type: row.createdByType, id: row.createdById };
+    }
+    return { type: 'user', id: row.userId };
+}
+
+/** The Idea's (work_proposals) integration DTO, or `null` when the row is gone (EW-P2-1). */
+export async function buildIdeaSnapshot(
+    manager: EntityManager,
+    ideaId: string,
+): Promise<AggregateSnapshot<IntegrationIdeaDto> | null> {
+    const idea = await manager.getRepository(WorkProposal).findOne({ where: { id: ideaId } });
+    if (!idea) return null;
+    const teamIds = unique(await teamResourceIds(manager, 'idea', ideaId));
+    const dto: IntegrationIdeaDto = {
+        id: idea.id,
+        organizationId: idea.organizationId ?? '',
+        version: Number(idea.version) || 1,
+        createdAt: isoRequired(idea.generatedAt),
+        updatedAt: isoRequired(idea.updatedAt ?? idea.generatedAt),
+        ...recordVisibility(idea, teamIds),
+        owner: { type: 'user', id: idea.userId },
+        createdBy: p2CreatedBy(idea),
+        externalLinks: [],
+        teamIds,
+        title: idea.title,
+        description: idea.description,
+        status: idea.status as IntegrationIdeaDto['status'],
+        source: idea.source as IntegrationIdeaDto['source'],
+        missionId: idea.missionId ?? null,
+        targetWorkId: idea.targetWorkId ?? null,
+        acceptedWorkId: idea.acceptedWorkId ?? null,
+        failureMessage: idea.failureMessage ?? null,
+        webUrl: webUrl(`/ideas/${idea.id}`),
+    };
+    return { dto, tenantId: idea.tenantId ?? null, organizationId: idea.organizationId ?? null };
 }
 
 /** The work's integration DTO (members and repositories embedded), or `null` when gone. */

@@ -1,4 +1,4 @@
-import type { HeartbeatState, NodeRuntime } from 'ever-works-node';
+import { untilHeartbeatAccepted, type NodeRuntime } from 'ever-works-node';
 
 /**
  * Start a freshly connected runtime so that the worker leases only after a
@@ -27,26 +27,8 @@ export async function startRuntimeInOrder(
 	isCurrent: () => boolean
 ): Promise<void> {
 	await runtime.loop.start();
-	await untilAccepted(runtime.loop, isCurrent);
-	if (!isCurrent()) return;
+	// The shared core wait (also used by the CLI, #2628).
+	const accepted = await untilHeartbeatAccepted(runtime.loop, isCurrent);
+	if (!accepted || !isCurrent()) return;
 	await runtime.worker?.start();
-}
-
-type ObservableLoop = Pick<NodeRuntime['loop'], 'getState' | 'onChange'>;
-
-/**
- * Resolves once the loop is `connected` (at once if it already is), or once
- * waiting is pointless: the runtime is no longer current, or the loop stopped.
- */
-function untilAccepted(loop: ObservableLoop, isCurrent: () => boolean): Promise<void> {
-	const settles = (state: HeartbeatState): boolean =>
-		state.state === 'connected' || state.state === 'stopped' || !isCurrent();
-	if (settles(loop.getState())) return Promise.resolve();
-	return new Promise<void>((resolve) => {
-		const unsubscribe = loop.onChange((state) => {
-			if (!settles(state)) return;
-			unsubscribe();
-			resolve();
-		});
-	});
 }
