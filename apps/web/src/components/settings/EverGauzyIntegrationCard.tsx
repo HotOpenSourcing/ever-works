@@ -12,8 +12,11 @@ import { ROUTES } from '@/lib/constants';
 
 interface EverGauzyIntegrationCardProps {
     initialKeys: IntegrationKeySummary[];
-    /** The API base Ever Gauzy should call, e.g. `https://api.ever.works/api`. */
-    apiUrl: string;
+    /**
+     * The API base Ever Gauzy should call, e.g. `https://api.ever.works/api`;
+     * `null` when this install exposes no public API URL (set NEXT_PUBLIC_API_URL).
+     */
+    apiUrl: string | null;
 }
 
 /** The deep link that opens the "New integration key" dialog with the Ever Gauzy preset. */
@@ -76,9 +79,13 @@ export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyInteg
                 </ol>
                 <div className="text-xs text-text-muted dark:text-text-muted-dark">
                     {t('apiUrlLabel')}:{' '}
-                    <code className="font-mono bg-surface-secondary dark:bg-surface-secondary-dark px-1.5 py-0.5 rounded">
-                        {apiUrl}
-                    </code>
+                    {apiUrl ? (
+                        <code className="font-mono bg-surface-secondary dark:bg-surface-secondary-dark px-1.5 py-0.5 rounded">
+                            {apiUrl}
+                        </code>
+                    ) : (
+                        <span className="text-warning">{t('apiUrlMissing')}</span>
+                    )}
                 </div>
                 <Button href={EVER_GAUZY_NEW_KEY_HREF} size="sm" className="text-sm">
                     <KeyRound className="w-4 h-4" />

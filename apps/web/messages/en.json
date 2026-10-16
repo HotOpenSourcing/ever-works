@@ -4948,6 +4948,7 @@
                     "three": "In Ever Gauzy, open Integrations → Ever Works → Connect and paste the key with this API URL."
                 },
                 "apiUrlLabel": "Ever Works API URL",
+                "apiUrlMissing": "not published by this install. Ask its operator to set NEXT_PUBLIC_API_URL to the API's public address.",
                 "createKey": "Create an Ever Gauzy key",
                 "keysTitle": "Active Ever Gauzy keys",
                 "noKeys": "No Ever Gauzy key yet. Ever Gauzy is not connected.",

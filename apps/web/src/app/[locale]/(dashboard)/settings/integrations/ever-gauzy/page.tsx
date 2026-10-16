@@ -16,10 +16,25 @@ export async function generateMetadata(): Promise<Metadata> {
  * locally and names the API service under Compose). Never a hard-coded
  * production host: a dev or self-hosted install must name itself.
  */
-function publicApiBase(): string {
+function publicApiBase(): string | null {
     const publicOrigin = process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/+$/, '');
-    if (!publicOrigin) return API_URL;
+    if (!publicOrigin) return isReachableFromOutside(API_URL) ? API_URL : null;
     return publicOrigin.endsWith('/api') ? publicOrigin : `${publicOrigin}/api`;
+}
+
+/**
+ * Review of EW-P1-7 (CodeRabbit): without `NEXT_PUBLIC_API_URL` the fallback is
+ * the web app's own `API_URL`, which under Compose is a service name such as
+ * `http://ever-works-api:3100` that Ever Gauzy can never resolve. Only offer it
+ * when it is localhost (a developer's own machine) or a dotted host name.
+ */
+function isReachableFromOutside(url: string): boolean {
+    try {
+        const host = new URL(url).hostname;
+        return host === 'localhost' || host === '127.0.0.1' || host.includes('.');
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -43,12 +58,9 @@ function liveEverGauzyKeys<T extends { integrationKind: string; expiresAt: strin
  * Revoke that disconnects Ever Gauzy at once.
  */
 export default async function EverGauzyIntegrationPage() {
-    let keys: Awaited<ReturnType<typeof apiKeysAPI.listIntegration>> = [];
-    try {
-        keys = await apiKeysAPI.listIntegration();
-    } catch {
-        keys = [];
-    }
+    // A failed read is NOT "no keys": let it reach the error boundary rather
+    // than tell the owner Ever Gauzy is disconnected (review, CodeRabbit).
+    const keys = await apiKeysAPI.listIntegration();
     return (
         <EverGauzyIntegrationCard initialKeys={liveEverGauzyKeys(keys)} apiUrl={publicApiBase()} />
     );
