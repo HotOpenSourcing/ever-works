@@ -429,8 +429,14 @@ export class TaskTransitionService {
         // transitions to a "resolved" state. Done/cancelled both
         // count — a cancelled blocker no longer holds anything back.
         // Best-effort: failures log WARN but don't bubble.
+        // A sync move (`suppressAgentDispatch`) carries its no-dispatch choice
+        // down the cascade (review of EW-P1-6): a dependent restored to
+        // `in_progress` because a mirrored blocker resolved must not start a
+        // paid run either (D9). The status restore and notifications still run.
         if (to === TaskStatus.DONE || to === TaskStatus.CANCELLED) {
-            void this.autoUnblockResolvedTasks(refreshed.id).catch((err) =>
+            void this.autoUnblockResolvedTasks(refreshed.id, {
+                suppressAgentDispatch: opts.suppressAgentDispatch === true,
+            }).catch((err) =>
                 this.logger.warn(`autoUnblock cascade failed for task ${refreshed.id}: ${err}`),
             );
         }
@@ -1487,12 +1493,17 @@ export class TaskTransitionService {
      * but never bubbles, so resolving a blocker can't be rolled back
      * by a transient downstream failure.
      */
-    async autoUnblockResolvedTasks(blockerTaskId: string): Promise<{ unblocked: string[] }> {
+    async autoUnblockResolvedTasks(
+        blockerTaskId: string,
+        // EW-P1-6 — set when the resolving move was a sync (mirrored) one: the
+        // restores it causes then start no agent work either.
+        cascade: { suppressAgentDispatch?: boolean } = {},
+    ): Promise<{ unblocked: string[] }> {
         // Find every Task that was blocked BY this Task and is still in `blocked` status.
         const blockedTaskIds = await this.blocks.findTasksBlockedBy(blockerTaskId).catch(() => []);
         const unblocked: string[] = [];
         for (const blockedTaskId of blockedTaskIds) {
-            if (await this.tryUnblockSingleTask(blockedTaskId)) {
+            if (await this.tryUnblockSingleTask(blockedTaskId, cascade)) {
                 unblocked.push(blockedTaskId);
             }
         }
@@ -1525,7 +1536,10 @@ export class TaskTransitionService {
      * starts them through the ordinary gated dispatch path, bounded per
      * owner and off by default.
      */
-    private async tryUnblockSingleTask(taskId: string): Promise<boolean> {
+    private async tryUnblockSingleTask(
+        taskId: string,
+        cascade: { suppressAgentDispatch?: boolean } = {},
+    ): Promise<boolean> {
         const blocked = await this.tasks.findById(taskId).catch(() => null);
         if (!blocked || blocked.status !== TaskStatus.BLOCKED) return false;
         const openBlockers = await this.findOpenBlockers(taskId);
@@ -1535,7 +1549,10 @@ export class TaskTransitionService {
             // Re-enter transition() so blocker/approver gates + side
             // effects (previousStatus clear, startedAt set) all fire
             // consistently with a user-driven move.
-            await this.transition(blocked, restoreTo, { force: false });
+            await this.transition(blocked, restoreTo, {
+                force: false,
+                suppressAgentDispatch: cascade.suppressAgentDispatch === true,
+            });
             return true;
         } catch (err) {
             this.logger.warn(

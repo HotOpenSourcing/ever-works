@@ -364,4 +364,49 @@ describe('TaskTransitionService.transitionSync', () => {
             BadRequestException,
         );
     });
+
+    // Review of EW-P1-6 (Greptile P1): the no-dispatch choice rides the
+    // auto-unblock cascade, so a dependent restored to `in_progress` because a
+    // MIRRORED blocker resolved starts no agent run either.
+    it('carries no-dispatch through the auto-unblock cascade of a sync move', async () => {
+        const rows = new Map<string, Task>([
+            ['t1', makeTask({ id: 't1', status: TaskStatus.IN_PROGRESS })],
+            [
+                'dep',
+                makeTask({
+                    id: 'dep',
+                    status: TaskStatus.BLOCKED,
+                    previousStatus: TaskStatus.IN_PROGRESS,
+                    agentId: 'agent-1',
+                } as Partial<Task>),
+            ],
+        ]);
+        tasks.casUpdateStatus.mockImplementation(
+            async (id: string, from: TaskStatus, patch: Partial<Task>) => {
+                const cur = rows.get(id);
+                if (!cur || cur.status !== from) return false;
+                rows.set(id, { ...cur, ...patch } as Task);
+                return true;
+            },
+        );
+        tasks.findById.mockImplementation(async (id: string) =>
+            rows.has(id) ? { ...rows.get(id)! } : null,
+        );
+        blocks.findTasksBlockedBy = jest.fn().mockResolvedValue(['dep']);
+        // `dep`'s only blocker is `t1`, which is done by the time it is rechecked.
+        blocks.findByTaskId.mockImplementation(async (id: string) =>
+            id === 'dep' ? [{ blockedByTaskId: 't1' }] : [],
+        );
+        approvers.allApproved.mockResolvedValue(true);
+
+        await svc.transitionSync(rows.get('t1')!, TaskStatus.DONE);
+        for (let i = 0; i < 20 && rows.get('dep')!.status !== TaskStatus.IN_PROGRESS; i += 1) {
+            await new Promise((resolve) => setImmediate(resolve));
+        }
+
+        expect(rows.get('dep')!.status).toBe(TaskStatus.IN_PROGRESS);
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(assignees.findByTaskId).not.toHaveBeenCalled();
+        expect(dispatcher.dispatch).not.toHaveBeenCalled();
+    });
 });
