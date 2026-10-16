@@ -322,6 +322,40 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
             expect(res.status).toBe(400);
         });
 
+        it('withdraws a key that an overlapping create pushed over the cap', async () => {
+            for (let i = 0; i < 19; i++) await createIntegrationKey({ name: `k${i}` });
+            // Simulate the race: the pre-insert count still reads 19 while a
+            // concurrent create has already landed the 20th row.
+            const realCount = keys.countActiveIntegrationKeysByTenant.bind(keys);
+            let first = true;
+            keys.countActiveIntegrationKeysByTenant = async (tenantId: string) => {
+                if (first) {
+                    first = false;
+                    await keys.create({
+                        userId: OWNER,
+                        kind: 'integration',
+                        tenantId: TENANT,
+                        organizationIds: [ORG_A],
+                        hashedKey: 'concurrent',
+                    });
+                    return 19;
+                }
+                return realCount(tenantId);
+            };
+            try {
+                const res = await request(app.getHttpServer())
+                    .post('/api/auth/api-keys/integration')
+                    .set(session(OWNER))
+                    .send({ name: 'raced', scopes: ['tasks:read'], organizationIds: [ORG_A] });
+                expect(res.status).toBe(400);
+                expect(res.body).not.toHaveProperty('key');
+                expect(keys.rows.filter((r) => r.name === 'raced')).toHaveLength(0);
+                expect(await realCount(TENANT)).toBe(20);
+            } finally {
+                keys.countActiveIntegrationKeysByTenant = realCount;
+            }
+        });
+
         it('closes the minting hole: no API key of any kind can create or rotate keys', async () => {
             const personal = await request(app.getHttpServer())
                 .post('/api/auth/api-keys')
@@ -406,6 +440,18 @@ describe('Integration keys over HTTP (EW-P1-2)', () => {
             expect(revokedEvents).toEqual([
                 { keyId: id, tenantId: TENANT, revokedByUserId: OWNER },
             ]);
+
+            // A retried revoke is idempotent: 200, and the row stays (audit trail),
+            // with no second event or audit row.
+            const again = await request(app.getHttpServer())
+                .delete(`/api/auth/api-keys/${id}`)
+                .set(session(OWNER));
+            expect(again.status).toBe(200);
+            expect(keys.rows).toHaveLength(1);
+            expect(revokedEvents).toHaveLength(1);
+            expect(
+                activityRows.filter((r) => r.actionType === 'integration_key_revoked'),
+            ).toHaveLength(1);
             const after = await request(app.getHttpServer())
                 .get('/api/integrations/v1/whoami')
                 .set('Authorization', `Bearer ${key}`);

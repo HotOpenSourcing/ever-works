@@ -95,9 +95,13 @@ export class FakeApiKeyRepository {
         if (row) row.lastUsedAt = new Date();
     }
 
-    async applyRotation(id: string, patch: Partial<FakeApiKeyRow>) {
-        const row = this.rows.find((r) => r.id === id);
-        if (row) Object.assign(row, patch);
+    async applyRotation(id: string, expectedHashedKey: string, patch: Partial<FakeApiKeyRow>) {
+        const row = this.rows.find(
+            (r) => r.id === id && r.hashedKey === expectedHashedKey && r.isActive,
+        );
+        if (!row) return false;
+        Object.assign(row, patch);
+        return true;
     }
 
     async deactivateById(id: string) {

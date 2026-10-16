@@ -145,15 +145,26 @@ export class ApiKeyRepository {
         });
     }
 
-    /** Apply an in-place rotation (new secret, previous secret kept for the grace period). */
+    /**
+     * Apply an in-place rotation (new secret, previous secret kept for the
+     * grace period) as a compare-and-set on the digest the caller read:
+     * `false` when another rotation landed first. Two overlapping rotations
+     * therefore cannot both answer with a secret — the loser's secret would
+     * otherwise be dead on arrival, overwritten by the winner's.
+     */
     async applyRotation(
         id: string,
+        expectedHashedKey: string,
         patch: Pick<
             ApiKey,
             'hashedKey' | 'prefix' | 'previousHashedKey' | 'previousKeyGraceUntil' | 'rotatedAt'
         >,
-    ): Promise<void> {
-        await this.repository.update(id, patch);
+    ): Promise<boolean> {
+        const result = await this.repository.update(
+            { id, hashedKey: expectedHashedKey, isActive: true },
+            patch,
+        );
+        return (result.affected ?? 0) > 0;
     }
 
     /**
