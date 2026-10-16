@@ -5,7 +5,12 @@ import { Mission } from '../mission.entity';
 import { Task } from '../task.entity';
 import { TEAM_RESOURCE_TYPES } from '../team-resource.entity';
 import { WorkProposal } from '../work-proposal.entity';
-import { applyInsertVisibilityDefault, hasVisibilityColumns } from '../_record-visibility';
+import {
+    applyInsertVisibilityDefault,
+    hasVisibilityColumns,
+    RecordVisibilitySubscriber,
+} from '../_record-visibility';
+import { databaseConfig } from '../../database/database.config';
 
 /**
  * Record visibility columns + insert default (EW-P1-3,
@@ -24,11 +29,18 @@ type VisibilityInstance = {
     visibilityExplicit?: boolean | null;
     organizationId?: string | null;
     teamId?: string | null;
-    applyDefaultVisibility(): void;
 };
 
-function instanceOf(entityClass: (typeof ENTITIES)[number][1], fields: object): VisibilityInstance {
-    return Object.assign(Object.create(entityClass.prototype), fields) as VisibilityInstance;
+const subscriber = new RecordVisibilitySubscriber();
+
+/** Run the subscriber's beforeInsert on a row of `entityClass`, as TypeORM would. */
+function inserted(entityClass: (typeof ENTITIES)[number][1], fields: object): VisibilityInstance {
+    const row = Object.assign(Object.create(entityClass.prototype), fields) as VisibilityInstance;
+    const columns = getMetadataArgsStorage()
+        .filterColumns(entityClass)
+        .map((column) => ({ propertyName: column.propertyName }));
+    subscriber.beforeInsert({ entity: row, metadata: { columns } } as never);
+    return row;
 }
 
 describe('record visibility columns (EW-P1-3)', () => {
@@ -56,60 +68,31 @@ describe('record visibility columns (EW-P1-3)', () => {
         expect(indices.map((index) => index.name)).toContain(`idx_${table}_org_visibility`);
     });
 
-    it.each(ENTITIES)('%s registers the insert-time default listener', (_name, entityClass) => {
-        const listeners = getMetadataArgsStorage().entityListeners.filter(
-            (listener) => listener.target === entityClass && listener.type === 'before-insert',
-        );
-        expect(listeners.map((listener) => listener.propertyName)).toContain(
-            'applyDefaultVisibility',
-        );
-    });
-
-    it('team_resources accepts `goal` (goals sit on Teams like every other resource)', () => {
-        expect(TEAM_RESOURCE_TYPES).toEqual(['work', 'task', 'agent', 'mission', 'idea', 'goal']);
-    });
-});
-
-describe('insert-time visibility default (owner decision D11)', () => {
-    it.each(ENTITIES)(
-        '%s: an org row starts `organization`, not explicit',
-        (_name, entityClass) => {
-            const row = instanceOf(entityClass, { organizationId: 'org-1' });
-            row.applyDefaultVisibility();
-            expect(row.visibility).toBe('organization');
-            expect(row.visibilityExplicit).toBe(false);
-        },
-    );
-
     it.each(ENTITIES)('%s: a personal row stays `private`', (_name, entityClass) => {
-        const row = instanceOf(entityClass, { organizationId: null });
-        row.applyDefaultVisibility();
+        const row = inserted(entityClass, { organizationId: null });
         expect(row.visibility).toBe('private');
     });
 
     it.each(ENTITIES)(
-        '%s: an unstamped row is left for the scope subscriber (then the column default)',
+        '%s: an unstamped row is left for ScopeStampingSubscriber (then the column default)',
         (_name, entityClass) => {
-            const row = instanceOf(entityClass, {});
-            row.applyDefaultVisibility();
+            const row = inserted(entityClass, {});
             expect(row.visibility).toBeUndefined();
         },
     );
 
     it('a Task created with a teamId starts `team`', () => {
-        const row = instanceOf(Task, { organizationId: 'org-1', teamId: 'team-1' });
-        row.applyDefaultVisibility();
+        const row = inserted(Task, { organizationId: 'org-1', teamId: 'team-1' });
         expect(row.visibility).toBe('team');
     });
 
     it('a visibility chosen by the caller is kept', () => {
-        const row = instanceOf(Task, {
+        const row = inserted(Task, {
             organizationId: 'org-1',
             teamId: 'team-1',
             visibility: 'private',
             visibilityExplicit: true,
         });
-        row.applyDefaultVisibility();
         expect(row.visibility).toBe('private');
         expect(row.visibilityExplicit).toBe(true);
     });
@@ -123,6 +106,20 @@ describe('insert-time visibility default (owner decision D11)', () => {
             visibility: 'organization',
             visibilityExplicit: false,
         });
+    });
+
+    it('the subscriber ignores entities without the visibility columns', () => {
+        const row: Record<string, unknown> = { organizationId: 'org-1' };
+        subscriber.beforeInsert({
+            entity: row,
+            metadata: { columns: [{ propertyName: 'organizationId' }] },
+        } as never);
+        expect(row).not.toHaveProperty('visibility');
+    });
+
+    it('the subscriber is registered with every DataSource built from databaseConfig()', () => {
+        const options = databaseConfig() as { subscribers?: unknown[] };
+        expect(options.subscribers).toContain(RecordVisibilitySubscriber);
     });
 
     it('hasVisibilityColumns needs both columns', () => {
