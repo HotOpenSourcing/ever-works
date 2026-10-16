@@ -103,6 +103,7 @@ export class DomainEventPublisher {
             changedFields: options.changedFields,
             previous: options.previous,
             actor: options.actor,
+            visibility: snapshot.visibility,
         });
         return version;
     }
@@ -132,6 +133,7 @@ export class DomainEventPublisher {
             },
             data: snapshot.dto as Record<string, unknown>,
             actor: options.actor,
+            visibility: snapshot.visibility,
         });
     }
 
@@ -161,7 +163,10 @@ export class DomainEventPublisher {
             changedFields: options.changedFields,
             previous: options.previous,
             actor: options.actor,
-            visibility: (snapshot.dto as { visibility?: string }).visibility ?? null,
+            visibility:
+                snapshot.visibility !== undefined
+                    ? snapshot.visibility
+                    : ((snapshot.dto as { visibility?: string }).visibility ?? null),
         });
         return version;
     }
@@ -210,6 +215,7 @@ export class DomainEventPublisher {
             },
             data: { ...(tombstone.snapshot.dto as Record<string, unknown>), deleted: true },
             actor: options.actor,
+            visibility: tombstone.snapshot.visibility,
         });
     }
 

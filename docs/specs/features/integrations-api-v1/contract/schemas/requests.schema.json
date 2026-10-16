@@ -362,6 +362,25 @@
 			},
 			"additionalProperties": false
 		},
+		"InboxReply": {
+			"description": "POST /inbox/items/:id/reply (P3, EW-P3-1). Requires X-Act-As-User = the item's recipientUserId (else 403 act_as_forbidden). Text, an option, or both; optionId must be one of the item's options[].id; an approval needs approve or reject (400 validation_failed otherwise). Answered or archived items answer 409 conflict. Idempotency-Key is optional (a reply creates nothing) and, when sent, replays the first answer. Routed through the app's own Inbox reply: a question steers or resumes the run, an approval decides the proposal, an escalation resolves (CR-4).",
+			"type": "object",
+			"properties": {
+				"text": { "type": ["string", "null"], "maxLength": 8000 },
+				"optionId": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 }
+			},
+			"additionalProperties": false
+		},
+		"InboxStateChange": {
+			"description": "PATCH /inbox/items/:id/state (P3, EW-P3-1). Requires X-Act-As-User = the item's recipientUserId. At least one field. archived: false restores an answered item as answered, else open. Archiving an OPEN fleet question releases the run parked on it, as in the app. If-Match optional (412 version_mismatch). Answers the inbox item DTO with its ETag (CR-4).",
+			"type": "object",
+			"properties": {
+				"unread": { "type": "boolean" },
+				"archived": { "type": "boolean" }
+			},
+			"minProperties": 1,
+			"additionalProperties": false
+		},
 		"CreateIdea": {
 			"description": "POST /ideas (EW-P2-1). An integration-created Idea is always source='external' and status='pending' (a `source` or `status` in the body answers 400). It is never queued or built: building stays a user action in Ever Works (spend safety D9). `missionId` must name a Mission of the pinned organization the key sees (404 otherwise). `teamIds` decide the scope (D11) unless `visibility` is set by hand.",
 			"type": "object",

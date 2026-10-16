@@ -766,7 +766,7 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
     // ---------------------------------------------------------------------------------------------
     // 15. A revoked key loses ALL surfaces, not just profile.
     // ---------------------------------------------------------------------------------------------
-    test('revocation is total: a revoked key 401s on profile AND on the management list AND on create — the grant is gone everywhere at once', async ({
+    test('revocation is total: a revoked key 401s on profile AND on the management list AND on create (which it could never use: minting is session-only) — the grant is gone everywhere at once', async ({
         request,
     }) => {
         const owner = await registerUserViaAPI(request);
@@ -776,7 +776,9 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
         }
         const key = await mint(request, owner.access_token, uniq('total'));
 
-        // Prove reach on all three surfaces BEFORE revoke.
+        // Prove reach on profile + list BEFORE revoke. Create is refused even now: since EW-P1-2
+        // `@SessionCredentialOnly()` keeps every machine credential, a personal key included, from
+        // minting keys (403), so the key itself never had that surface.
         expect((await whoAmI(request, { 'x-api-key': key.key })).status, 'profile pre').toBe(200);
         const listPre = await request.get(KEYS, {
             headers: { 'x-api-key': key.key },
@@ -788,7 +790,9 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
             { 'x-api-key': key.key },
             uniq('total-child'),
         );
-        expect(createPre.status, 'create pre').toBe(201);
+        expect(createPre.status, 'create pre → 403 (minting is session-only)').toBe(403);
+        // A sibling minted through the owner's SESSION before the revoke: revoke must stay per-row.
+        const sibling = await mint(request, owner.access_token, uniq('total-sibling'));
 
         // Revoke via the owner session.
         const revoke = await request.delete(`${KEYS}/${key.id}`, {
@@ -813,11 +817,10 @@ test.describe('API keys — rotation, redaction shape, self/cross-key revoke & s
         );
         expect(createPost.status, 'create post → 401').toBe(401);
 
-        // The child key minted BEFORE revoke is independent and still works (revoke is per-row).
-        const child = createPre.key!;
+        // The sibling minted BEFORE revoke is independent and still works (revoke is per-row).
         expect(
-            (await whoAmI(request, { 'x-api-key': child.key })).status,
-            'pre-revoke child survives',
+            (await whoAmI(request, { 'x-api-key': sibling.key })).status,
+            'pre-revoke sibling survives',
         ).toBe(200);
     });
 

@@ -88,6 +88,16 @@
 - [ ] **T25** Contract test suite over `contract/`.
 - [ ] **T26** Idempotency / `If-Match` / act-as tests.
 
+## Phase 6 — Inbox (EW-P3-1)
+
+- [x] **T27** `GET /inbox/items` (every recipient of the pinned organization; `recipientUserId`, `status`, `kind`,
+      `includeArchived`, keyset) and `GET /inbox/items/:id` (`ETag`) — `IntegrationInboxService`; keyset index
+      `idx_inbox_items_org_updated` (migration `1795130100000`, 3 dialects).
+- [x] **T28** `POST /inbox/items/:id/reply` and `PATCH /inbox/items/:id/state`, act-as = the recipient only
+      (`403 act_as_forbidden` otherwise), through the app's own `InboxService`; reply answers
+      `{item, routed, restart, runId?}`, `Idempotency-Key` optional; state `If-Match` pre-check. Contract CR-4
+      (`requests.schema.json` `InboxReply` / `InboxStateChange`, `resources/inbox-reply-result.schema.json`).
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
