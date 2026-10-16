@@ -394,6 +394,28 @@ describe('AuthService', () => {
                 );
             });
 
+            it('stores the link under the SAME trimmed account id it looks the link up by', async () => {
+                authAccountRepo.findProviderAccountByAccountId.mockResolvedValue(null);
+                userRepo.findByEmailForSocialAuth.mockResolvedValue({
+                    id: 'u-1',
+                    email: 'sa@b.co',
+                    isActive: true,
+                    emailVerified: true,
+                } as any);
+                userRepo.updateForSocialAuth.mockResolvedValue({ id: 'u-1' } as any);
+                authAccountRepo.upsertProviderAccount.mockResolvedValue({} as any);
+
+                await service.validateSocialUser(socialUser({ providerUserId: '  gh-1  ' }) as any);
+
+                expect(authAccountRepo.findProviderAccountByAccountId).toHaveBeenCalledWith(
+                    'github',
+                    'gh-1',
+                );
+                expect(authAccountRepo.upsertProviderAccount).toHaveBeenCalledWith(
+                    expect.objectContaining({ accountId: 'gh-1' }),
+                );
+            });
+
             it('refuses, writing nothing, when the linked local user cannot be loaded (dangling link)', async () => {
                 authAccountRepo.findProviderAccountByAccountId.mockResolvedValue({
                     id: 'acc-gone',

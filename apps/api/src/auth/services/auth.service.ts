@@ -288,7 +288,9 @@ export class AuthService {
         await this.authAccountRepository.upsertProviderAccount({
             userId: user.id,
             providerId: socialUser.provider,
-            accountId: socialUser.providerUserId,
+            // The SAME normalised id the link lookup above used, so the next
+            // sign-in finds this link (review on #2633).
+            accountId: providerAccountId || socialUser.providerUserId,
             username: socialUser.username || undefined,
             email: socialUser.email,
             accessToken: socialUser.accessToken,
