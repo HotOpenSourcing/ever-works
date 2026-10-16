@@ -133,11 +133,16 @@ export interface CodexUserSettings {
  */
 const CODEX_SETTING_VALUE = /^[A-Za-z0-9._-]{1,64}$/;
 
-/** `key = "value"` / `key = 'value'`, optionally followed by a comment. */
-const TOML_STRING_ASSIGNMENT = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$/;
+/**
+ * `key = "value"` / `key = 'value'`, optionally followed by a comment,
+ * matched against a TRIMMED line. No leading/trailing whitespace runs and no
+ * nested quantifiers, so it stays linear on any input (CodeQL review on
+ * #2635 flagged the previous header pattern as polynomial).
+ */
+const TOML_STRING_ASSIGNMENT = /^([A-Za-z0-9_-]+)[ \t]*=[ \t]*(?:"([^"\\]*)"|'([^']*)')(?:[ \t]+#.*|#.*)?$/;
 
-/** `[table]` (not `[[array-of-tables]]`), optionally followed by a comment. */
-const TOML_TABLE_HEADER = /^\s*\[\s*([^\][]+?)\s*\]\s*(?:#.*)?$/;
+/** TOML multiline string delimiters (basic and literal). */
+const TOML_MULTILINE_DELIMITERS = ['"""', "'''"] as const;
 
 /**
  * The {@link CodexUserSettings} in a Codex `config.toml`, read with a
@@ -146,19 +151,40 @@ const TOML_TABLE_HEADER = /^\s*\[\s*([^\][]+?)\s*\]\s*(?:#.*)?$/;
  * (`sandbox`). Anything it does not recognise, or a value outside
  * {@link CODEX_SETTING_VALUE}, is simply not forwarded. A config it cannot
  * read therefore yields `{}`, which is the run an owner with no config gets.
+ *
+ * The CONTENT of a multiline string (`"""` or `'''`, e.g. an instructions
+ * field holding an example `model = "…"` or `[windows]` line) is skipped:
+ * it is text, not config (review on #2635). Table headers are parsed by
+ * position, not by a regular expression.
  */
 export function readCodexUserSettings(configToml: string | null | undefined): CodexUserSettings {
 	const settings: CodexUserSettings = {};
 	if (typeof configToml !== 'string' || configToml.length === 0) return settings;
 	let table = '';
-	for (const line of configToml.split(/\r?\n/)) {
-		if (/^\s*\[\[/.test(line)) {
-			table = '\u0000array';
+	let openMultiline: (typeof TOML_MULTILINE_DELIMITERS)[number] | null = null;
+	for (const raw of configToml.split(/\r?\n/)) {
+		if (openMultiline !== null) {
+			if (raw.includes(openMultiline)) openMultiline = null;
 			continue;
 		}
-		const header = TOML_TABLE_HEADER.exec(line);
-		if (header) {
-			table = header[1];
+		const line = raw.trim();
+		// A multiline string that opens on this line without closing on it:
+		// everything up to its closing delimiter is string content.
+		for (const delimiter of TOML_MULTILINE_DELIMITERS) {
+			const first = line.indexOf(delimiter);
+			if (first !== -1 && line.indexOf(delimiter, first + delimiter.length) === -1) {
+				openMultiline = delimiter;
+				break;
+			}
+		}
+		if (openMultiline !== null) continue;
+		if (line.startsWith('[')) {
+			if (line.startsWith('[[')) {
+				table = '\u0000array';
+			} else {
+				const close = line.indexOf(']');
+				table = close > 1 ? line.slice(1, close).trim() : '\u0000unknown';
+			}
 			continue;
 		}
 		const assignment = TOML_STRING_ASSIGNMENT.exec(line);

@@ -382,6 +382,36 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 		expect(commands[0]).not.toContain('notify');
 	});
 
+	it("reads the owner settings from the operator's modelSessionHome.codex when one is set (review)", async () => {
+		stub.dropIsolation = false;
+		const scratch = scratchFs();
+		const { commands, spawnFn } = recordingSpawn();
+		const reads: string[] = [];
+
+		await runAgentTaskJob(
+			job({ ...basePayload, execution: { ...basePayload.execution, provider: 'codex' } }),
+			io({
+				spawnFn,
+				scratchFs: scratch.fs,
+				parentEnv: { CODEX_HOME: '/not/this/home' },
+				modelSessionHome: { codex: '/operator/codex' },
+				sessionConfigFs: {
+					readFile: async (path: string) => {
+						const normalised = path.replace(/\\/g, '/');
+						reads.push(normalised);
+						return normalised.endsWith('/operator/codex/config.toml')
+							? '[windows]\nsandbox = "elevated"'
+							: null;
+					}
+				}
+			})
+		);
+
+		expect(reads).toContain('/operator/codex/config.toml');
+		expect(reads.some((path) => path.startsWith('/not/this/home'))).toBe(false);
+		expect(commands[0]).toContain('-c windows.sandbox=elevated');
+	});
+
 	it('a Codex config that cannot be read keeps nothing, and the run is STILL isolated', async () => {
 		stub.dropIsolation = false;
 		const scratch = scratchFs();

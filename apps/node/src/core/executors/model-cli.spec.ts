@@ -838,6 +838,36 @@ describe('readCodexUserSettings / codexUserSettings (control 16)', () => {
 		});
 	});
 
+	it('skips the CONTENT of multiline strings: an example model / [windows] line in instructions is text (review)', () => {
+		const config = [
+			'developer_instructions = """',
+			'When asked, say: model = "gpt-example"',
+			'[windows]',
+			'sandbox = "unelevated"',
+			'"""',
+			'model = "gpt-6-astra"',
+			"notes = '''",
+			"model_reasoning_effort = 'low'",
+			"'''",
+			'model_reasoning_effort = "high"',
+			'[windows]',
+			'sandbox = "elevated"'
+		].join('\n');
+		expect(readCodexUserSettings(config)).toEqual({
+			model: 'gpt-6-astra',
+			reasoningEffort: 'high',
+			windowsSandbox: 'elevated'
+		});
+	});
+
+	it('parses table headers by position, so a pathological header line stays cheap and unrecognised (CodeQL)', () => {
+		const hostile = '[' + '\t'.repeat(50_000) + 'Z';
+		expect(readCodexUserSettings(`${hostile}\nmodel = "x"`)).toEqual({});
+		expect(readCodexUserSettings('[windows] # the sandbox\nsandbox = "elevated"')).toEqual({
+			windowsSandbox: 'elevated'
+		});
+	});
+
 	it('forwards nothing it cannot prove is a bare identifier (the values reach a SHELL command line)', () => {
 		expect(
 			readCodexUserSettings(

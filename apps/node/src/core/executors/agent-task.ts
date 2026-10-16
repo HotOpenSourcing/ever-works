@@ -1858,13 +1858,19 @@ export function resolveRealHomeDir(io: Pick<AgentTaskIo, 'parentEnv' | 'platform
 async function readOwnerCodexSettings(jobId: string, io: AgentTaskIo): Promise<CodexUserSettings> {
 	const read = io.sessionConfigFs?.readFile?.bind(io.sessionConfigFs);
 	if (!read) return {};
+	// The same home the spawned Codex reads: the operator's session-home
+	// setting first (review on #2635), then the parent's CODEX_HOME, then
+	// `<real home>/.codex`.
+	const operatorHome = io.modelSessionHome?.codex;
 	const env = io.parentEnv ?? process.env;
 	const codexHomeKey = Object.keys(env).find((name) => name.toUpperCase() === 'CODEX_HOME');
 	const configuredHome = codexHomeKey === undefined ? undefined : env[codexHomeKey];
 	const codexHome =
-		typeof configuredHome === 'string' && configuredHome.trim()
-			? configuredHome.trim()
-			: join(resolveRealHomeDir(io), '.codex');
+		typeof operatorHome === 'string' && operatorHome.trim()
+			? operatorHome.trim()
+			: typeof configuredHome === 'string' && configuredHome.trim()
+				? configuredHome.trim()
+				: join(resolveRealHomeDir(io), '.codex');
 	try {
 		return readCodexUserSettings(await read(join(codexHome, 'config.toml')));
 	} catch (error) {
