@@ -382,7 +382,7 @@
 			"additionalProperties": false
 		},
 		"CreateKbDocument": {
-			"description": "POST /kb/documents (P3, EW-P3-2). Idempotency-Key required; externalRef de-duplicates (200 with the existing document). scope.type organization: scope.id must be the pinned organization and the writer an organization admin; scope.type work: a Work of the pinned organization the writer may edit. Every class is allowed at organization scope (only legal, style and seo are inherited into Works). A refusal by the app's rules answers 422 domain_rule (CR-7).",
+			"description": "POST /kb/documents (P3, EW-P3-2). Idempotency-Key required; externalRef de-duplicates (200 with the existing document). scope.type organization: scope.id must be the pinned organization and the writer an organization admin; scope.type work: a Work of the pinned organization the writer may edit. Every class is allowed at organization scope (only legal, style and seo are inherited into Works). folderId is checked before the write (404 for a folder outside the organization's library, nothing created); an organization document's path must be relative without '..' (400). A refusal by the app's rules answers 422 domain_rule (CR-7).",
 			"type": "object",
 			"required": ["scope", "path", "title", "class", "body"],
 			"properties": {
@@ -406,7 +406,7 @@
 			"additionalProperties": false
 		},
 		"UpdateKbDocument": {
-			"description": "PATCH /kb/documents/:id (P3). At least one field; If-Match optional (412 version_mismatch). A fully locked document answers 422 domain_rule. Archive, restore, review and filing have their own routes.",
+			"description": "PATCH /kb/documents/:id (P3). At least one field; If-Match optional (412 version_mismatch). A fully locked document answers 422 domain_rule, and so does a status on an archived document (restore it with /unarchive). Archive, restore, review and filing have their own routes.",
 			"type": "object",
 			"properties": {
 				"title": { "type": "string", "minLength": 1, "maxLength": 255 },

@@ -316,6 +316,13 @@ organization overlay into Works, locks, revisions and the activity trail therefo
     - a Work's documents need edit access to that Work;
     - organization documents and library folders need organization admin.
 - **A refusal** answers `422 domain_rule`.
+- **`If-Match`** is compared with the version read just before the write, as for the Inbox (§9). Two writers sending
+  the same version at the same moment can both succeed.
+- **Creates** check `folderId` before writing: a folder that is not one of the organization's library folders answers
+  `404` and creates nothing. An organization document's `path` must stay relative: no `..` segment, `\`, NUL or drive
+  letter (`400`). A Work document's path follows the Work rule, which also requires a class folder first.
+- **An archived document** changes `status` only through `/unarchive`: a `PATCH` with `status` answers `422`. Other
+  edits are allowed.
 
 Document routes:
 

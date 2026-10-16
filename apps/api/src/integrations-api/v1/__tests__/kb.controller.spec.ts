@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { VersionMismatchError } from '@ever-works/agent/integrations-api';
+import { ResourceNotFoundError, VersionMismatchError } from '@ever-works/agent/integrations-api';
 import { IntegrationKbController } from '../kb.controller';
 
 /**
@@ -36,20 +36,25 @@ describe('IntegrationKbController', () => {
         body: {},
         headers: key ? { 'idempotency-key': key } : {},
     });
-    const docDto = (workId: string | null, version = 1) => ({
+    const docDto = (workId: string | null, version = 1, status = 'active') => ({
         id: 'doc-1',
         organizationId: ORG,
         workId,
         version,
+        status,
     });
 
-    const setup = (opts: { admin?: boolean; workId?: string | null } = {}) => {
+    const setup = (opts: { admin?: boolean; workId?: string | null; status?: string } = {}) => {
         const workId = opts.workId === undefined ? null : opts.workId;
         const kb = {
             listDocuments: jest
                 .fn()
                 .mockResolvedValue({ data: [], nextCursor: null, hasMore: false }),
-            getDocument: jest.fn(async () => ({ dto: docDto(workId), etag: '"1"', workId })),
+            getDocument: jest.fn(async () => ({
+                dto: docDto(workId, 1, opts.status),
+                etag: '"1"',
+                workId,
+            })),
             assertWorkOfOrganization: jest.fn().mockResolvedValue(undefined),
             listFolders: jest
                 .fn()
@@ -184,6 +189,48 @@ describe('IntegrationKbController', () => {
             ),
         ).rejects.toMatchObject({ code: 'validation_failed' });
         expect(knowledgeBase.createOrgDocument).not.toHaveBeenCalled();
+    });
+
+    it('checks the folder BEFORE creating: a folder outside the organization creates nothing (404)', async () => {
+        const { controller, kb, knowledgeBase } = setup();
+        kb.getFolder.mockRejectedValueOnce(new ResourceNotFoundError('kb_folder', FOLDER));
+        await expect(
+            controller.createDocument(
+                user(),
+                { ...createBody({ type: 'organization', id: ORG }), folderId: FOLDER },
+                undefined,
+                req(),
+                res(),
+            ),
+        ).rejects.toBeInstanceOf(ResourceNotFoundError);
+        expect(knowledgeBase.createOrgDocument).not.toHaveBeenCalled();
+    });
+
+    it('refuses an organization document path that leaves the library (400)', async () => {
+        const { controller, knowledgeBase } = setup();
+        for (const path of ['../secrets.md', '/etc/x.md', 'a\\b.md', 'C:/x.md', 'a/../../x.md']) {
+            await expect(
+                controller.createDocument(
+                    user(),
+                    { ...createBody({ type: 'organization', id: ORG }), path },
+                    undefined,
+                    req(),
+                    res(),
+                ),
+            ).rejects.toMatchObject({ code: 'validation_failed' });
+        }
+        expect(knowledgeBase.createOrgDocument).not.toHaveBeenCalled();
+    });
+
+    it('refuses a status write on an archived document (422: restore it with /unarchive)', async () => {
+        const { controller, knowledgeBase } = setup({ status: 'archived' });
+        await expect(
+            controller.updateDocument(user(), 'doc-1', { status: 'active' }, undefined, res()),
+        ).rejects.toMatchObject({ code: 'domain_rule' });
+        expect(knowledgeBase.updateOrgDocument).not.toHaveBeenCalled();
+        // Other edits of an archived document still go through.
+        await controller.updateDocument(user(), 'doc-1', { title: 'T' }, undefined, res());
+        expect(knowledgeBase.updateOrgDocument).toHaveBeenCalled();
     });
 
     it('edits a Work document through updateDocument and an organization one through updateOrgDocument; a stale If-Match is 412', async () => {

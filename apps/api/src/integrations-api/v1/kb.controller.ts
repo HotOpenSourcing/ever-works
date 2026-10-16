@@ -1,3 +1,4 @@
+import { posix } from 'node:path';
 import {
     Body,
     Controller,
@@ -85,6 +86,27 @@ const WRITABLE_STATUSES = ['draft', 'active'] as const;
 const DOCUMENT_STATUSES = ['draft', 'active', 'archived'] as const;
 /** The Markdown body limit of an integration write (the app stores bodies in `metadata.body`). */
 const KB_BODY_MAX_CHARS = 1_000_000;
+
+/**
+ * An organization document's `path`: relative, no `..` segment, no `\\`, NUL
+ * or drive letter — the Work path rule (`validateRelativeKbPath`) without its
+ * class-folder prefix, which organization documents (`memory/…`) do not use.
+ */
+function assertRelativeKbPath(path: string): void {
+    const segments = posix.normalize(path).split('/');
+    if (
+        path.includes('\\') ||
+        path.includes('\0') ||
+        path.startsWith('/') ||
+        /^[A-Za-z]:/.test(path) ||
+        segments.some((segment) => segment === '..')
+    ) {
+        throw validationFailed(
+            'path',
+            'must be a relative path without `..`, `\\` or a drive letter',
+        );
+    }
+}
 
 /** `KbScope` (contract v1 requests.schema.json). */
 export class IntegrationKbScopeDto {
@@ -429,6 +451,13 @@ export class IntegrationKbController {
                 // itself imports it. Both land `accepted` (never review-gated).
                 source: (principal.actAsUserId ? 'user' : 'imported') as never,
             };
+            // Before the create: filing afterwards would leave the document
+            // behind (one more per retry) when the folder is not one of this
+            // organization's library folders (404).
+            if (dto.folderId) await this.kb.getFolder(organizationId, dto.folderId);
+            // A Work path is checked by the Knowledge Base; an organization
+            // path (no class-folder prefix) at least stays relative.
+            if (dto.scope.type === 'organization') assertRelativeKbPath(dto.path);
             const created = await asDomainRule(async () => {
                 if (dto.scope.type === 'organization') {
                     await this.assertOrganizationAdmin(organizationId, user.userId);
@@ -509,6 +538,15 @@ export class IntegrationKbController {
         const organizationId = this.organizationId();
         const current = await this.kb.getDocument(organizationId, id);
         assertIfMatch(expectedVersion(ifMatch), current.dto.version);
+        if (patch.status !== undefined && current.dto.status === 'archived') {
+            // A status write would un-archive it half-way (archive markers and
+            // the decision left behind, `updated` instead of `unarchived`).
+            throw new IntegrationHttpException(
+                422,
+                'domain_rule',
+                'An archived document is restored with POST /kb/documents/:id/unarchive, not by setting its status.',
+            );
+        }
         await asDomainRule(async () => {
             if (current.workId) {
                 await this.knowledgeBase.updateDocument(current.workId, id, user.userId, patch);
