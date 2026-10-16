@@ -53,6 +53,27 @@ export enum TaskPriority {
 export type TaskActorType = 'user' | 'agent';
 
 /**
+ * EW-P1-2 — who CREATED a Task or WROTE a chat message. A superset of
+ * {@link TaskActorType}: an integration key (`ew_int_…`) that writes WITHOUT
+ * acting as a user is recorded as `'integration'` with its key id as the
+ * actor id. Kept apart from `TaskActorType` on purpose: an integration can
+ * never be an assignee, reviewer or approver.
+ */
+export type TaskAuthorType = TaskActorType | 'integration';
+
+/**
+ * EW-P1-2 — display-only attribution an integration may attach when it writes
+ * without acting as a user (e.g. the Gauzy employee who wrote a comment).
+ * Never an identity: nothing authorizes on it.
+ */
+export interface TaskExternalAuthor {
+    name: string;
+    avatarUrl?: string | null;
+    /** The integration it came from, e.g. `'gauzy'`. */
+    source: string;
+}
+
+/**
  * One non-primary repository a fleet run pushed for a Task (multi-repo Task
  * workspaces, self-build slice C). `state` follows the primary's
  * `branchState` vocabulary for the states that apply: the branch is
@@ -453,7 +474,7 @@ export class Task {
     latestRunStatus?: string | null;
 
     @Column({ type: 'varchar', length: 16 })
-    createdByType: TaskActorType;
+    createdByType: TaskAuthorType;
 
     @Column({ type: 'uuid' })
     createdById: string;

@@ -15,7 +15,7 @@ import { TaskRepository } from '../database/repositories/task.repository';
 import { AgentRunRepository } from '../database/repositories/agent-run.repository';
 import { ownershipScopeOf, type OwnershipScope } from '../database/ownership-scope';
 import { TaskChatMessage } from '../entities/task-chat-message.entity';
-import type { Task, TaskActorType } from '../entities/task.entity';
+import type { Task, TaskAuthorType, TaskExternalAuthor } from '../entities/task.entity';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
 import { assertNoSecrets } from '../utils/secret-scan';
@@ -54,10 +54,13 @@ const KB_LINK_RE = /\[\[([^\]]{1,200})\]\]/g;
 
 export interface PostChatInput {
     taskId: string;
-    authorType: TaskActorType;
+    /** EW-P1-2: `'integration'` when an integration key posts without acting as a user. */
+    authorType: TaskAuthorType;
     authorId: string;
     body: string;
     attachments?: { uploadId: string }[];
+    /** EW-P1-2: display attribution for an `'integration'` author (ignored otherwise). */
+    externalAuthor?: TaskExternalAuthor | null;
 }
 
 export interface MentionLookups {
@@ -139,6 +142,10 @@ export class TaskChatService {
             mentions: mentions.records.length > 0 ? mentions.records : null,
             attachments:
                 input.attachments && input.attachments.length > 0 ? input.attachments : null,
+            externalAuthor:
+                input.authorType === 'integration' && input.externalAuthor
+                    ? input.externalAuthor
+                    : null,
         };
         const publisher = this.domainEvents;
         const row = publisher
