@@ -714,6 +714,57 @@ describe('WorkLifecycleService', () => {
         });
     });
 
+    // EW-P2-4 — the repo-less Project Work kind, behind its switch.
+    describe('createProjectWork (EW-P2-4)', () => {
+        const saved = process.env.EVER_WORKS_PROJECT_WORKS_ENABLED;
+        afterEach(() => {
+            if (saved === undefined) delete process.env.EVER_WORKS_PROJECT_WORKS_ENABLED;
+            else process.env.EVER_WORKS_PROJECT_WORKS_ENABLED = saved;
+        });
+
+        it.each([undefined, '', 'false', 'TRUE', '1'])(
+            'refuses with project_works_disabled when the switch is %j (only exactly "true" is on)',
+            async (value) => {
+                if (value === undefined) delete process.env.EVER_WORKS_PROJECT_WORKS_ENABLED;
+                else process.env.EVER_WORKS_PROJECT_WORKS_ENABLED = value;
+                await expect(
+                    service.createProjectWork(user, { name: 'Relaunch', slug: 'relaunch' }),
+                ).rejects.toMatchObject({
+                    status: 400,
+                    response: expect.objectContaining({ code: 'project_works_disabled' }),
+                });
+                expect(workRepository.create).not.toHaveBeenCalled();
+            },
+        );
+
+        it('persists a bare kind=project Work with no repository, template, generation or deploy', async () => {
+            process.env.EVER_WORKS_PROJECT_WORKS_ENABLED = 'true';
+            const persisted = { id: 'w-p', kind: 'project', name: 'Relaunch' } as any;
+            workRepository.create.mockResolvedValue(persisted);
+
+            const result = await service.createProjectWork(user, {
+                name: 'Relaunch',
+                slug: 'relaunch',
+                description: 'Website relaunch',
+            });
+
+            expect(workRepository.create).toHaveBeenCalledTimes(1);
+            const [dto] = workRepository.create.mock.calls[0];
+            expect(dto).toMatchObject({
+                kind: 'project',
+                status: 'active',
+                slug: 'relaunch',
+                name: 'Relaunch',
+                description: 'Website relaunch',
+                userId: user.id,
+            });
+            expect(dto.deployProvider).toBeNull();
+            expect(dto.websiteTemplateId).toBeUndefined();
+            expect(dataGenerator.getItems).not.toHaveBeenCalled();
+            expect(result).toBe(persisted);
+        });
+    });
+
     describe('createCompanyWork (EW-665 Phase 13)', () => {
         it('persists a kind=company Work with the chosen status, no repo side-effects', async () => {
             const persisted = {

@@ -136,6 +136,11 @@ export function requireTaskRepository(
     return target;
 }
 
+/** `{ owner, repo }` of a resolved target (drops the role). */
+export function pickOwnerRepo(target: TaskRepositoryTarget): { owner: string; repo: string } {
+    return { owner: target.owner, repo: target.repo };
+}
+
 /** `owner/repo`, for copy that names the repository; `null` for a repo-less kind. */
 export function taskRepositoryFullName(work: TaskRepositoryWork): string | null {
     const target = resolveTaskRepository(work);
