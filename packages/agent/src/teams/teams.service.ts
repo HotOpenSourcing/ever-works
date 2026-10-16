@@ -367,9 +367,15 @@ export class TeamsService {
                     );
                     // An agent's team scope is its team memberships (`teamIds`).
                     if (member.memberType === 'agent') {
-                        await publisher.changed(manager, 'agent', member.memberId, 'agent.updated', {
-                            changedFields: ['teamIds'],
-                        });
+                        await publisher.changed(
+                            manager,
+                            'agent',
+                            member.memberId,
+                            'agent.updated',
+                            {
+                                changedFields: ['teamIds'],
+                            },
+                        );
                     }
                 },
             );

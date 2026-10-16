@@ -84,7 +84,7 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
   transaction at the recording point. The event row commits or rolls back with the state change.
 - **Not ORM subscribers**: Ever Works writes through QueryBuilder and bulk deletes, which subscribers miss.
 - **Hard deletes** record a tombstone: `type = '<x>.deleted'`, `data` = the last snapshot + `deleted: true`, at a version
-  claimed before the delete (see *Tombstone version* below).
+  claimed before the delete (see _Tombstone version_ below).
 - **Child changes** (edges, chat, members, resources) record a child event (`task.assignee.added`, …) whose `aggregate`
   is the parent with its new version.
 - **Attribution**: the actor comes from the request (user, agent run, integration key with optional act-as) or is a
@@ -96,12 +96,12 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
   `packages/agent/src/domain-events/__tests__/*-recording.spec.ts` pin the behaviour behind each entry and validate
   every event's `data` against the schema its row in `event-catalog.v1.json` names.
 - **Two recording modes** (B2):
-  - *In the write's transaction*: tasks (fields, transitions, edges, chat, templates), teams (fields, roster,
-    resources). A rolled-back write leaves no event.
-  - *Right after the write, in a transaction of its own* (`recordAfterWrite`, best-effort, a failure is logged and
-    never fails the write): agents, works (incl. members), organization roster and organization fields. These writes
-    are multi-step or go through repositories that take no `EntityManager` yet. The integration's hourly reconcile
-    (`updatedSince`) repairs a missed event. Moving them into the write's transaction is a follow-up.
+    - _In the write's transaction_: tasks (fields, transitions, edges, chat, templates), teams (fields, roster,
+      resources). A rolled-back write leaves no event.
+    - _Right after the write, in a transaction of its own_ (`recordAfterWrite`, best-effort, a failure is logged and
+      never fails the write): agents, works (incl. members), organization roster and organization fields. These writes
+      are multi-step or go through repositories that take no `EntityManager` yet. The integration's hourly reconcile
+      (`updatedSince`) repairs a missed event. Moving them into the write's transaction is a follow-up.
 - **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
   added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
   direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of
