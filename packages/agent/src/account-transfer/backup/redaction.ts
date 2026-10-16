@@ -108,6 +108,12 @@ export const BACKUP_DROPPED_ENTITIES: readonly string[] = Object.freeze([
     'DomainEvent',
     'DomainEventRelayState',
     'PluginEventCursor',
+    // Integration API v1 (EW-P1-4) — links to another system's records (they
+    // name its ids and its installation; a restore into another installation
+    // would point at records that are not there) and the 24 h replay store of
+    // integration responses.
+    'ExternalRecordLink',
+    'IntegrationIdempotencyKey',
     // Encrypted runtime credentials and their per-version snapshots.
     'TenantCredentialSnapshot',
     // Derived and regenerated on demand — an archive of them would be
