@@ -131,12 +131,14 @@ describe('judgeModelCliHelp', () => {
 		// `--verbose` rides every run that records evidence (stream-json needs it);
 		// `--resume` / `--fork-session` ride only a continued session (slice AU).
 		const help = CLAUDE_HELP.split('\n')
-			.filter((line) => !line.includes('--fork-session') && !line.includes('--verbose'))
+			.filter(
+				(line) => !line.includes('--fork-session') && !line.includes('--verbose') && !line.includes('--resume')
+			)
 			.join('\n');
 		const compat = judgeModelCliHelp('claude-code', '/bin/claude', '9.0.0', help);
 		expect(isModelCliCompatible(compat)).toBe(true);
 		expect(compat.missingRequiredFlags).toEqual([]);
-		expect(compat.missingConditionalFlags).toEqual(['--verbose', '--fork-session']);
+		expect(compat.missingConditionalFlags).toEqual(['--verbose', '--resume', '--fork-session']);
 	});
 
 	it('an UNRECOGNISED help text is "could not tell", never "supports nothing"', () => {
