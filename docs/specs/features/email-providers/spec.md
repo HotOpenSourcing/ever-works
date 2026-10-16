@@ -536,3 +536,78 @@ Now:
       as before — a reply is never lost.
     - After a Task is spawned or joined, the message is linked to it (`email_messages.taskId`, only when still empty).
     - A spawned Task's description ends with the inbound message id and how to reply in thread.
+
+### 14.3 Inbound data: attachments, Cc, metadata, tenant / organization
+
+Before: the inbound webhook handed the dispatcher only from / to / subject / bodies, so **attachments, Cc and the
+provider metadata (spam score, headers) were dropped**, and the row written from the public webhook (no request scope)
+got NULL tenant / organization.
+
+Now:
+
+- **Contract**: `EmailInboundMessage.cc` (bare mailboxes; Postmark `CcFull` / `Cc`, Mailgun `Cc`). Recorded, never
+  routed on — like `to`.
+- **Attachments** (`email_messages.attachments`, simple-json; migration `1795061530000-AddEmailMessageAttachments`,
+  portable DDL): each inbound attachment is stored through the optional `INBOUND_EMAIL_ATTACHMENT_STORE`, which the
+  platform binds to the **same upload pipeline as a user's own uploads** (`UploadsService.saveFile`: MIME allow-list
+  checked against magic bytes, size cap, content-hash storage key — the sender's filename never reaches storage),
+  owned by the receiving address's owner and recorded in the address's tenant / organization (`user_uploads`). Every
+  attachment is listed on the row (`filename`, `mimeType`, `size`, `cid`, `stored`, `uploadId`, `url`, `reason`): one
+  the pipeline refused, one over the per-message limits (20 attachments, 25 MB decoded), an empty one, or any when no
+  store is bound, is listed with `stored: false` and why. A refused attachment never blocks the message. The list
+  itself is bounded for the column (a MySQL `TEXT` holds 65,535 bytes): at most 50 records and 48,000 serialized UTF-8
+  bytes; whatever does not fit is summed in one trailing record (`N more attachments`, total size, how many stored).
+- **Request size**: the inbound-email webhooks (`/api/email/inbound/*`) get their own body-parser limit, mounted ahead of
+  the global 1 MB one (`BODY_LIMIT`, unchanged for every other route): **25 MB** by default — the `proxy-body-size` the
+  ingress already allows on every environment — overridable with `INBOUND_EMAIL_BODY_LIMIT` up to a 50 MB ceiling
+  (invalid or larger values fall back to the default). Base64 adds a third, so roughly 18 MB of attachments fit in one
+  message by default; raising the limit means raising the ingress's `proxy-body-size` too.
+- **Cc and metadata**: `ccAddresses` (at most 100) and `metadata` are kept. Metadata is bounded to 32,000 serialized UTF-8 bytes
+  (first the raw header list is dropped, marked `headersOmitted`; then only the keys are kept, marked `truncated`).
+- **Tenant / organization**: the inbound row — and a conversation it creates — is stamped with the **receiving
+  address's** `tenantId` / `organizationId` (explicit values, so the scope-stamping subscriber's empty request scope
+  never applies). A Task spawned from it is created in the scope of its assignee, **the receiving Agent** (an
+  address may be bound to an Agent of another scope, e.g. the owner's personal Agent on an organization address, and the
+  Agent must stay reachable from the Task; an Agent that cannot be resolved keeps the old unscoped create), and its description lists the attachments (names and types defused like the rest of the
+  email text) with their upload ids.
+
+### 14.4 Add-address wizard and real verification
+
+Before: Settings → Integrations → Email addresses was a list with an `alert('Add-address wizard: implementation in
+follow-up tick')` button and an inert "Edit"; addresses could only be registered through the API. Verification was
+cosmetic: `POST /api/email/addresses/:id/verify` asked the provider plugin for a token and **threw it away** — no email
+went out — and `verified` was **never checked** for sending.
+
+Now:
+
+- **Wizard** (`AddEmailAddressWizard`, §2.1 steps): (1) direction — send / receive / both; (2) provider, filtered by
+  capability (only Postmark and Mailgun receive); (3) address, sender name, "default for replies", and for inbound the
+  webhook URL to register at the provider (on the API's public origin) with how that provider's secret is configured
+  (§14.1); (4) for sending addresses, "Send confirmation email". Each row gets **Send confirmation** (unverified
+  sending addresses), **Disable / Enable** and **Remove** (with a confirmation that names what is lost; disabling keeps
+  the history).
+- **Verification is real**: `POST /api/email/addresses/:id/verify` rotates a fresh one-time token (24 h) and sends the
+  address a confirmation email through **platform mail** (`MailService.sendNotificationEmail`), linking to the public
+  web page `/email-address/verify/<token>`. That page confirms only on a **click** (a server action calling the public
+  `GET /api/email/verify/:token`), so a mail scanner that prefetches the link confirms nothing; it is in
+  `PUBLIC_ROUTES`, since the link is usually opened from the mailbox without a session.
+    - Already verified → nothing sent (`alreadyVerified: true`). Disabled → 400. A second email within 60 s → 429
+      (the address is the caller's to type; the route is also throttled to 5/min per caller). The send is recorded in
+      `tenant_email_addresses.verificationSentAt` (migration `1795061550000-AddTenantEmailAddressVerificationSentAt`)
+      and claimed with a compare-and-set, so concurrent clicks send one email; the token `createAddress` mints is never
+      mailed and never starts the cooldown. No platform mail, or a mailer that would only log (`MAILER_PROVIDER`
+      unset/`none`, Resend without a key) → 503, never a silent "sent". The email is sent `strict`: a provider refusal
+      (Resend answers errors without throwing) → 503 and the cooldown is given back. The provider plugin's own
+      `verifyAddress` still runs, best-effort.
+    - Response (additive): `{ messageRef, sent, alreadyVerified?, expiresAt? }`.
+- **`verified` is enforced for sending**: `EmailService.sendMessage` refuses an unverified sending address up front
+  (before a draft is held) and `EmailFacadeService.send` refuses it as the backstop every outbound path converges on —
+  `403`, `EmailSenderNotVerifiedException`, naming the address and how to confirm it — before the send gate or any
+  provider. Sends with no tenant address (system mail through the first enabled provider) are unaffected; receiving
+  never requires verification. Operator switch: `EMAIL_SENDER_VERIFICATION_REQUIRED=false` (exact string) turns the
+  check off for a self-hosted install with no platform mail to deliver the confirmation; on by default.
+- **Grandfathering** (no-breakage): migration `1795061540000-GrandfatherInUseEmailAddressesVerified` marks every
+  address **already in use** as verified — assigned to an Agent, already sent mail, or pinned by an Agent inbox — so
+  working setups keep sending. Unused, unverified addresses (2 on dev, 0 on stage at rollout) verify through the
+  confirmation email before their first send. `down()` is a no-op by design (a grandfathered row is indistinguishable
+  from a later real verification).

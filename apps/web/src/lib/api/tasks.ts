@@ -22,6 +22,13 @@ export type TaskStatus =
 export type TaskPriority = 'p0' | 'p1' | 'p2' | 'p3' | 'p4';
 export type TaskActorType = 'user' | 'agent';
 
+/**
+ * EW-P1-2 — who created a Task or wrote a chat message. `'integration'` is an
+ * integration key (e.g. Ever Gauzy) writing without acting as a user; the
+ * actor id is then the key id.
+ */
+export type TaskAuthorType = TaskActorType | 'integration';
+
 /** Wave 2 M7 — per-Task isolation override ('on'/'off'; null = inherit
  *  the Work-level `taskIsolation` setting). */
 export type TaskIsolationMode = 'on' | 'off';
@@ -202,7 +209,7 @@ export interface Task {
     teamId: string | null;
     goalId: string | null;
     parentTaskId: string | null;
-    createdByType: TaskActorType;
+    createdByType: TaskAuthorType;
     createdById: string;
     requireAllApprovers: boolean;
     startedAt: string | null;
@@ -836,8 +843,10 @@ export interface TaskChatMention {
 export interface TaskChatMessage {
     id: string;
     taskId: string;
-    authorType: TaskActorType;
+    authorType: TaskAuthorType;
     authorId: string;
+    /** EW-P1-2 — display attribution for an `'integration'` author. */
+    externalAuthor?: { name: string; avatarUrl?: string | null; source: string } | null;
     body: string;
     mentions: TaskChatMention[] | null;
     attachments: { uploadId: string }[] | null;

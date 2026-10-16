@@ -206,6 +206,15 @@ export function toTaskCommentDto(
         organizationId: message.organizationId ?? taskOrganizationId ?? '',
         authorType: authorType === 'agent' || authorType === 'integration' ? authorType : 'user',
         authorId: message.authorId,
+        // EW-P1-2 — display attribution of an integration author (null otherwise).
+        externalAuthor:
+            authorType === 'integration' && message.externalAuthor
+                ? {
+                      name: message.externalAuthor.name,
+                      avatarUrl: message.externalAuthor.avatarUrl ?? null,
+                      source: message.externalAuthor.source,
+                  }
+                : null,
         body: message.body,
         mentions: (message.mentions ?? []).map((mention) => ({
             type: mention.type,
