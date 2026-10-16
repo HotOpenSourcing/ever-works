@@ -19,6 +19,8 @@ export * from './item-source-validation-scheduler.service';
 export * from './generator-form-schema.service';
 export * from './works-manifest.service';
 export * from './webhook-delivery.service';
+export * from './webhook-signature-v2';
+export * from './webhook-owner-access.service';
 export * from './webhook-subscription-delivery.service';
 export * from './state-marker.service';
 export * from './anonymous-user-cleanup.service';
