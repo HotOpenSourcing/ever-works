@@ -80,12 +80,10 @@ export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyInteg
                         {apiUrl}
                     </code>
                 </div>
-                <Link href={EVER_GAUZY_NEW_KEY_HREF} className="inline-block">
-                    <Button size="sm" className="text-sm">
-                        <KeyRound className="w-4 h-4" />
-                        {t('createKey')}
-                    </Button>
-                </Link>
+                <Button href={EVER_GAUZY_NEW_KEY_HREF} size="sm" className="text-sm">
+                    <KeyRound className="w-4 h-4" />
+                    {t('createKey')}
+                </Button>
             </section>
 
             <section className="space-y-3">

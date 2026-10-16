@@ -117,6 +117,9 @@ export function IntegrationKeysSection({
         list.includes(value) ? list.filter((item) => item !== value) : [...list, value];
 
     const resetCreate = () => {
+        // The secret is minted server-side the moment the request lands; closing
+        // mid-request would drop the only copy of it. Stay open until it answers.
+        if (isPending) return;
         setShowCreate(false);
         setName('');
         setDescription('');
@@ -194,6 +197,9 @@ export function IntegrationKeysSection({
     };
 
     const closeRotate = () => {
+        // A rotation in flight replaces the working secret (with no grace period,
+        // at once): closing now would hide the only copy of the new one.
+        if (isPending) return;
         setRotateTarget(null);
         setRotatedSecret(null);
         setGraceHours('24');
@@ -363,7 +369,8 @@ export function IntegrationKeysSection({
             )}
 
             {/* Create */}
-            <Dialog open={showCreate} onOpenChange={resetCreate}>
+            {/* Open while the secret is on screen too, whatever closed the form. */}
+            <Dialog open={showCreate || secret !== null} onOpenChange={resetCreate}>
                 <DialogContent>
                     <DialogClose onClose={resetCreate} />
                     <DialogHeader>
@@ -494,7 +501,10 @@ export function IntegrationKeysSection({
             </Dialog>
 
             {/* Rotate */}
-            <Dialog open={rotateTarget !== null} onOpenChange={closeRotate}>
+            <Dialog
+                open={rotateTarget !== null || rotatedSecret !== null}
+                onOpenChange={closeRotate}
+            >
                 <DialogContent>
                     <DialogClose onClose={closeRotate} />
                     <DialogHeader>
