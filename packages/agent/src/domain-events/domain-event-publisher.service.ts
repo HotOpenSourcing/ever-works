@@ -8,6 +8,8 @@ import { DomainEventRecorder } from './domain-event-recorder.service';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
+    buildInboxItemSnapshot,
+    buildIdeaSnapshot,
     buildOrganizationSnapshot,
     buildTaskSnapshot,
     buildTeamSnapshot,
@@ -30,6 +32,8 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     agent: buildAgentSnapshot,
     work: buildWorkSnapshot,
     organization: buildOrganizationSnapshot,
+    inbox_item: buildInboxItemSnapshot,
+    idea: buildIdeaSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */

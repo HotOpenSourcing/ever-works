@@ -126,6 +126,35 @@ export class WebhooksService {
     }
 
     /**
+     * Integration API v1 (EW-P1-5): the v2 subscriptions one owner holds in the
+     * account, e.g. those an integration key created. Another owner's
+     * subscriptions in the same account are not listed.
+     */
+    async listForOwner(
+        accountId: string,
+        owner: { type: WebhookSubscriptionOwnerType; id: string },
+    ): Promise<WebhookSubscriptionView[]> {
+        const rows = await this.repo.listForOwner(owner.type, owner.id);
+        return rows.filter((row) => row.accountId === accountId).map((row) => this.toView(row));
+    }
+
+    /**
+     * The subscription, when it is in the account AND held by `owner`; else 404
+     * (an integration key never sees or changes the account's other webhooks).
+     */
+    async findOwnedBy(
+        accountId: string,
+        id: string,
+        owner: { type: WebhookSubscriptionOwnerType; id: string },
+    ): Promise<WebhookSubscriptionView> {
+        const row = await this.findOwn(accountId, id);
+        if ((row.ownerType ?? 'user') !== owner.type || row.ownerId !== owner.id) {
+            throw new NotFoundException('Webhook subscription not found');
+        }
+        return this.toView(row);
+    }
+
+    /**
      * Webhooks v2 (EW-P1-5): a subscription to the domain events of the given
      * organizations. The account must belong to each organization (the rule of
      * OrganizationMembershipService.ensureAdmin: the organization's tenant is

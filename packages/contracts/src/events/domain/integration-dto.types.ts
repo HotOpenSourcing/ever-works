@@ -259,3 +259,84 @@ export interface IntegrationVisibilityPrivateData {
 	readonly id: string;
 	readonly visibility: 'private';
 }
+
+/**
+ * EW-P3-1 — one Inbox message addressed to ONE human (its recipient): a
+ * question an agent run asked, an approval request, an escalation mirror or a
+ * system notice. The `data` of `inbox.item.*` events and the body of
+ * `GET /inbox/items[/:id]`.
+ *
+ * Not a {@link IntegrationResourceBase}: an inbox item is the recipient's
+ * message, not an organization resource — it has no owner, visibility, team or
+ * external links. `organizationId` is null for a message outside any
+ * organization (such items never reach an integration). Fleet provenance
+ * (`sourceMeta`: node names, branches, mount directories) is deliberately not
+ * exposed.
+ */
+export interface IntegrationInboxItemDto {
+	readonly id: string;
+	readonly organizationId: string | null;
+	readonly version: number;
+	readonly createdAt: string;
+	readonly updatedAt: string;
+	/** The human the message is for; replies and state changes act as this user only. */
+	readonly recipientUserId: string;
+	readonly kind: 'question' | 'approval' | 'escalation' | 'notice';
+	readonly title: string;
+	readonly body: string;
+	readonly options:
+		| readonly {
+				readonly id: string;
+				readonly label: string;
+				readonly description?: string;
+				readonly recommended?: boolean;
+		  }[]
+		| null;
+	/** Which producer filed it (open set: agent-run, fleet-run, escalation, proposal, system, work). */
+	readonly sourceType: string;
+	readonly status: 'open' | 'answered' | 'archived';
+	readonly unread: boolean;
+	readonly answeredAt: string | null;
+	readonly answerText: string | null;
+	readonly answerOptionId: string | null;
+	readonly agentId: string | null;
+	readonly agentRunId: string | null;
+	readonly taskId: string | null;
+	readonly workId: string | null;
+	readonly escalationId: string | null;
+	readonly proposalId: string | null;
+	readonly webUrl?: string | null;
+	/** Only on `inbox.item.deleted`. */
+	readonly deleted?: true;
+}
+
+/** Lifecycle of an Idea (Ever Works `work_proposals.status`). */
+export type IntegrationIdeaStatus = 'pending' | 'dismissed' | 'accepted' | 'queued' | 'building' | 'failed';
+
+/** Where an Idea came from; integration creates are always `external` (EW-P2-1). */
+export type IntegrationIdeaSource =
+	| 'auto-signup'
+	| 'user-refresh'
+	| 'discover'
+	| 'scheduled'
+	| 'user-manual'
+	| 'mission'
+	| 'external';
+
+/**
+ * Idea DTO (B.6, `GET /ideas`, `GET /ideas/:id`) and the `data` of `idea.*` events.
+ * An integration creates Ideas `pending` with `source = 'external'` and never builds
+ * them (spend safety D9): building stays a user action in Ever Works.
+ */
+export interface IntegrationIdeaDto extends IntegrationResourceBase {
+	readonly teamIds: readonly string[];
+	readonly title: string;
+	readonly description: string;
+	readonly status: IntegrationIdeaStatus;
+	readonly source: IntegrationIdeaSource;
+	readonly missionId: string | null;
+	readonly targetWorkId: string | null;
+	readonly acceptedWorkId: string | null;
+	readonly failureMessage: string | null;
+	readonly webUrl?: string | null;
+}
