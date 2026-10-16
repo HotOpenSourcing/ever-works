@@ -91,3 +91,8 @@ export * from './safety/index.js';
 // closed key lists of a Works report, the signed report a `stats-sink`
 // provider receives, and the operator API's status shapes.
 export * from './ever-platform/index.js';
+// Domain events (EW-P1-1) — the versioned event catalog, the event envelope the
+// integration feed, webhooks v2 and EW plugins share, and the integration DTOs
+// an event's `data` carries. Plain `export *`: the catalog arrays and the
+// pattern matcher are runtime values.
+export * from './events/index.js';
