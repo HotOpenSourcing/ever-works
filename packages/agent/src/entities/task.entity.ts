@@ -131,7 +131,7 @@ export interface TaskLinkedPullRequest {
 // be Postgres-only, and this table is small enough not to need one).
 @Index('idx_tasks_scheduled_due', ['scheduledAt', 'scheduleClaimedAt'])
 // EW-P2-3 — the due-soon scan walks rows with a `dueAt` inside the window that
-// have not been noticed yet. Shipped by 1795090000000-AddTaskDatesAndEstimate.
+// have not been noticed yet. Shipped by 1795110000000-AddTaskDatesAndEstimate.
 @Index('idx_tasks_due_soon', ['dueAt', 'dueSoonNotifiedAt'])
 export class Task {
     @PrimaryGeneratedColumn('uuid')

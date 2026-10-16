@@ -19,8 +19,8 @@ import { MigrationInterface, QueryRunner, TableColumn, TableIndex } from 'typeor
  * SQLite. Every step is guarded by a re-read of the table, so re-running is a
  * no-op, and down() drops exactly what up() added.
  */
-export class AddTaskDatesAndEstimate1795090000000 implements MigrationInterface {
-    name = 'AddTaskDatesAndEstimate1795090000000';
+export class AddTaskDatesAndEstimate1795110000000 implements MigrationInterface {
+    name = 'AddTaskDatesAndEstimate1795110000000';
 
     static readonly TABLE = 'tasks';
     static readonly INDEX = 'idx_tasks_due_soon';
@@ -30,7 +30,7 @@ export class AddTaskDatesAndEstimate1795090000000 implements MigrationInterface 
     }
 
     static columns(driver: string): TableColumn[] {
-        const date = AddTaskDatesAndEstimate1795090000000.dateType(driver);
+        const date = AddTaskDatesAndEstimate1795110000000.dateType(driver);
         return [
             new TableColumn({ name: 'dueAt', type: date, isNullable: true }),
             new TableColumn({ name: 'startAt', type: date, isNullable: true }),
@@ -40,7 +40,7 @@ export class AddTaskDatesAndEstimate1795090000000 implements MigrationInterface 
     }
 
     public async up(queryRunner: QueryRunner): Promise<void> {
-        const C = AddTaskDatesAndEstimate1795090000000;
+        const C = AddTaskDatesAndEstimate1795110000000;
         if (!(await queryRunner.getTable(C.TABLE))) return;
 
         for (const column of C.columns(queryRunner.connection.options.type)) {
@@ -60,7 +60,7 @@ export class AddTaskDatesAndEstimate1795090000000 implements MigrationInterface 
     }
 
     public async down(queryRunner: QueryRunner): Promise<void> {
-        const C = AddTaskDatesAndEstimate1795090000000;
+        const C = AddTaskDatesAndEstimate1795110000000;
         const table = await queryRunner.getTable(C.TABLE);
         if (!table) return;
         const index = table.indices.find((entry) => entry.name === C.INDEX);

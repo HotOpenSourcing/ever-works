@@ -880,11 +880,6 @@ export class TaskRepository {
     }
 
     /**
-     * EW-P2-3 — claim the due-soon notice for one Task: only the tick that
-     * stamps `dueSoonNotifiedAt` while it is still NULL (and `dueAt` is still
-     * the date it read) sends it, so two ticks or replicas never notify twice.
-     */
-    /**
      * EW-P2-3 — give a due-soon claim back (the notice did not reach everyone),
      * so the next scan retries. Only the claim stamped at `claimedAt` is
      * released, never a later one.
@@ -927,6 +922,11 @@ export class TaskRepository {
         return (result.affected ?? 0) > 0;
     }
 
+    /**
+     * EW-P2-3 — claim the due-soon notice for one Task: only the tick that
+     * stamps `dueSoonNotifiedAt` while it is still NULL (and `dueAt` is still
+     * the date it read) sends it, so two ticks or replicas never notify twice.
+     */
     async casClaimDueSoon(taskId: string, expectedDueAt: Date, now: Date): Promise<boolean> {
         const result = await this.repository
             .createQueryBuilder()

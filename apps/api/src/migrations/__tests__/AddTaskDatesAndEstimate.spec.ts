@@ -1,5 +1,5 @@
 import { DataSource } from 'typeorm';
-import { AddTaskDatesAndEstimate1795090000000 } from '../1795090000000-AddTaskDatesAndEstimate';
+import { AddTaskDatesAndEstimate1795110000000 } from '../1795110000000-AddTaskDatesAndEstimate';
 
 /**
  * EW-P2-3 — `tasks.dueAt`, `startAt`, `estimateMinutes`, `dueSoonNotifiedAt`
@@ -7,9 +7,9 @@ import { AddTaskDatesAndEstimate1795090000000 } from '../1795090000000-AddTaskDa
  * sibling migration specs use. The per-driver timestamp spelling is pinned
  * separately.
  */
-describe('AddTaskDatesAndEstimate1795090000000', () => {
+describe('AddTaskDatesAndEstimate1795110000000', () => {
     let dataSource: DataSource;
-    const migration = new AddTaskDatesAndEstimate1795090000000();
+    const migration = new AddTaskDatesAndEstimate1795110000000();
     const NEW = ['dueAt', 'startAt', 'estimateMinutes', 'dueSoonNotifiedAt'];
 
     const columns = async (): Promise<string[]> =>
@@ -74,8 +74,8 @@ describe('AddTaskDatesAndEstimate1795090000000', () => {
     });
 
     it('spells timestamps the way TypeORM maps Date per driver', () => {
-        expect(AddTaskDatesAndEstimate1795090000000.dateType('postgres')).toBe('timestamp');
-        expect(AddTaskDatesAndEstimate1795090000000.dateType('mysql')).toBe('datetime');
-        expect(AddTaskDatesAndEstimate1795090000000.dateType('better-sqlite3')).toBe('datetime');
+        expect(AddTaskDatesAndEstimate1795110000000.dateType('postgres')).toBe('timestamp');
+        expect(AddTaskDatesAndEstimate1795110000000.dateType('mysql')).toBe('datetime');
+        expect(AddTaskDatesAndEstimate1795110000000.dateType('better-sqlite3')).toBe('datetime');
     });
 });
