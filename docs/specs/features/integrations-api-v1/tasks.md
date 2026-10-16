@@ -11,14 +11,19 @@
 ## Phase 1 — Namespace and common pieces (EW-P1-4)
 
 - [ ] **T1** `integrations-api/v1` module skeleton + namespace exception filter (error envelope).
-- [ ] **T2** Keyset list helper (`updatedSince`, `(updatedAt, id)` cursor, `limit ≤ 500`) + `(organizationId, updatedAt)`
-      indexes.
-- [ ] **T3** `ETag` / `If-Match` interceptor.
-- [ ] **T4** `idempotency_keys` table + migration (3 dialects) + interceptor + purge job.
-- [ ] **T5** `external_record_links` table + migration (3 dialects) + `externalRef` create helper.
-- [ ] **T6** `X-Sync-Origin` → event `originTag`.
+- [~] **T2** Keyset list helper (`updatedSince`, `(updatedAt, id)` cursor, `limit ≤ 500`) — `readKeysetPage` in
+  `packages/agent/src/integrations-api/keyset-cursor.ts`; the `(organizationId, updatedAt)` indexes ship with the
+  resource routes that read them.
+- [~] **T3** `ETag` / `If-Match` — helpers (`etagFor`, `parseIfMatch`, `assertIfMatch` → `VersionMismatchError`); the
+  interceptor ships with the write routes.
+- [~] **T4** `integration_idempotency_keys` table + migration (3 dialects, `1795080200000`) +
+  `IntegrationIdempotencyService` (claim-first, replay, mismatch/in-progress `409`, release on error/5xx, purge);
+  the interceptor and purge schedule ship with the write routes.
+- [x] **T5** `external_record_links` table + migration (3 dialects, `1795080200000`) + `ExternalRecordLinksService`
+      (create in the caller's transaction, `PUT`/`DELETE`/list, `linksFor`, `installationFromOrigin`).
+- [x] **T6** `X-Sync-Origin` → event `originTag` (`DomainEventContextInterceptor`, EW-P1-1 #2611).
 - [ ] **T7** `POST /batch`.
-- [ ] **T8** DTO mappers shared with domain-event `data` builders.
+- [x] **T8** DTO mappers shared with domain-event `data` builders (`domain-event-snapshots.ts`, EW-P1-1 #2617).
 
 ## Phase 2 — P1 resources
 
@@ -34,10 +39,12 @@
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 
-- [ ] **T18** Subscription columns + migration (3 dialects).
-- [ ] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags`.
-- [ ] **T20** `t=,v1=` signer + rotation grace + vector contract test.
-- [ ] **T21** PATCH resume; revoke key → disable subscriptions.
+- [x] **T18** Subscription columns + migration (3 dialects) — `1795080100000-AddWebhookSubscriptionsV2`.
+- [x] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags` — `WebhookDomainEventFanoutService` (cursor
+      `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
+- [x] **T20** `t=,v1=` signer + rotation grace + vector contract test — `webhook-signature-v2.ts` (all 22 vectors).
+- [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily; the
+  `/api/integrations/v1/webhooks` routes for key-owned subscriptions follow #2606).
 - [ ] **T22** Settings → Webhooks UI.
 
 ## Phase 4 — Transitions (EW-P1-6)
