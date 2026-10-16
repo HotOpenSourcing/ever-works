@@ -621,6 +621,15 @@ export class RunTasksBatchDto {
  */
 export class TaskBoardQueryDto {
     @ApiPropertyOptional({
+        enum: ['mine', 'shared', 'organization'],
+        description:
+            "Record visibility tab (EW-P1-3). 'mine' = the caller's own Tasks (default, unchanged); 'shared' = Tasks of others the caller takes part in or reaches through a Team / Work; 'organization' = every Task of the active Organization the caller may read.",
+    })
+    @IsOptional()
+    @IsString()
+    view?: string;
+
+    @ApiPropertyOptional({
         enum: ['status', 'focus'],
         description:
             "Column table. 'status' = one column per status (default); 'focus' = backlog · in flight · needs you · done.",

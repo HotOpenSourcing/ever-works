@@ -1,4 +1,11 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    Injectable,
+    Logger,
+    NotFoundException,
+    Optional,
+} from '@nestjs/common';
+import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository, type FindOptionsWhere } from 'typeorm';
 import { DEFAULT_GOAL_KIND, GOAL_KINDS, isGoalKind, type GoalKind } from '@ever-works/contracts';
@@ -96,6 +103,9 @@ export class GoalsService {
         @InjectRepository(Mission)
         private readonly missions: Repository<Mission>,
         private readonly evaluationService: GoalEvaluationService,
+        // Record visibility (EW-P1-3) — the shared / org tabs and the readable get.
+        // Appended LAST + @Optional(): absent means reads stay owner-only.
+        @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
 
     // ─── CRUD ───────────────────────────────────────────────────────
@@ -105,6 +115,25 @@ export class GoalsService {
         filter: ListGoalsFilter = {},
         scope?: OwnershipScope,
     ): Promise<GoalDto[]> {
+        const view = filter.view ?? 'mine';
+        if (view !== 'mine' && this.accessPolicy) {
+            const { rows } = await this.accessPolicy.listVisible<Goal>({
+                aggregate: 'goal',
+                userId,
+                scope,
+                view,
+                take: filter.limit,
+                skip: filter.offset,
+                refine: (qb, alias) => {
+                    if (filter.status) {
+                        qb.andWhere(`${alias}.status = :goalStatus`, { goalStatus: filter.status });
+                    }
+                    if (filter.archived === true) qb.andWhere(`${alias}.archivedAt IS NOT NULL`);
+                    else if (filter.archived !== 'all') qb.andWhere(`${alias}.archivedAt IS NULL`);
+                },
+            });
+            return rows.map(toGoalDto);
+        }
         const whereBranches: FindOptionsWhere<Goal>[] = (
             scope ? ownershipWhere<Goal>(userId, scope) : [{ userId }]
         ).map((branch) => ({
@@ -132,6 +161,28 @@ export class GoalsService {
 
     async getForUser(userId: string, goalId: string, scope?: OwnershipScope): Promise<GoalDto> {
         return toGoalDto(await this.findOrThrow(userId, goalId, scope));
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — the READ of one Goal: the owner exactly as
+     * {@link getForUser}, or anyone `visibleTo(principal)` admits in the active
+     * Organization. Only `GET /api/me/goals/:id` uses it; every other route keeps
+     * {@link getForUser} / `findOrThrow` as its owner gate, so no write is widened.
+     */
+    async getReadable(userId: string, goalId: string, scope?: OwnershipScope): Promise<GoalDto> {
+        try {
+            return await this.getForUser(userId, goalId, scope);
+        } catch (error) {
+            if (!(error instanceof NotFoundException) || !this.accessPolicy) throw error;
+            const shared = await this.accessPolicy.findVisibleNotOwned<Goal>({
+                aggregate: 'goal',
+                userId,
+                id: goalId,
+                scope,
+            });
+            if (!shared) throw error;
+            return toGoalDto(shared);
+        }
     }
 
     /**

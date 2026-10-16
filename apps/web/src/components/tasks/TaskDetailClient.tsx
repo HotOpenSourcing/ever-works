@@ -1,5 +1,6 @@
 'use client';
 
+import { RecordVisibilityPanel } from '@/components/record-visibility';
 import { useRef, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { ArrowLeft, ArrowUpRight, Loader2, Pencil } from 'lucide-react';
@@ -658,6 +659,13 @@ export function TaskDetailClient({
 
                 {/* ---- Right rail: Details + recurring -------------------- */}
                 <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+                    {/* Record visibility (EW-P1-3): who else can see this Task. */}
+                    <div
+                        className="rounded-xl border border-border/60 dark:border-border-dark/60 bg-card dark:bg-card-primary-dark p-5"
+                        data-testid="task-visibility"
+                    >
+                        <RecordVisibilityPanel aggregate="task" id={task.id} />
+                    </div>
                     <div className="rounded-xl border border-border/60 dark:border-border-dark/60 bg-card dark:bg-card-primary-dark p-5">
                         <h2 className="text-xs font-semibold uppercase tracking-wide text-text-muted mb-4">
                             {t('details')}

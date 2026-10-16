@@ -13,6 +13,8 @@ import { Work } from '../../entities/work.entity';
 import { WorkProposal } from '../../entities/work-proposal.entity';
 import { TeamResourcesService } from '../../teams/team-resources.service';
 import { TeamsService } from '../../teams/teams.service';
+import { RecordVisibilityService } from '../../record-visibility/record-visibility.service';
+import { Goal } from '../../entities/goal.entity';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
 import {
@@ -54,6 +56,7 @@ describe('team recording points', () => {
         dataSource = await createDomainEventsDataSource();
         const repo = <T extends object>(entity: new () => T) => dataSource.getRepository(entity);
         const publisher = new DomainEventPublisher(new DomainEventRecorder(), dataSource);
+        const visibility = new RecordVisibilityService(dataSource, new DomainEventRecorder());
         teams = new TeamsService(
             repo(Team),
             repo(TeamMember),
@@ -61,6 +64,9 @@ describe('team recording points', () => {
             repo(Organization),
             repo(User),
             publisher,
+            // Record visibility (EW-P1-3), wired as in production: the automatic
+            // team / organization change lands before the side snapshots.
+            visibility,
         );
         plainTeams = new TeamsService(
             repo(Team),
@@ -79,6 +85,8 @@ describe('team recording points', () => {
             repo(WorkProposal),
             repo(Task),
             publisher,
+            repo(Goal),
+            visibility,
         );
     });
 

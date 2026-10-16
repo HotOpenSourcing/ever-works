@@ -8810,6 +8810,7 @@
             "app": "Приложение",
             "company": "Company",
             "campaign": "Кампания",
+            "project": "Проект",
             "default": "Work"
         },
         "meetingsPage": {

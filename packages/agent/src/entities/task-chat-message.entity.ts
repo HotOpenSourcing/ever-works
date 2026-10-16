@@ -30,6 +30,8 @@ export interface TaskChatAttachmentRef {
 @Entity({ name: 'task_chat_messages' })
 @Index('idx_task_chat_task_created', ['taskId', 'createdAt'])
 @Index('idx_task_chat_author', ['authorType', 'authorId'])
+// Integration API v1 comment lists (migration 1795080300000).
+@Index('idx_task_chat_task_updated', ['taskId', 'updatedAt', 'id'])
 export class TaskChatMessage {
     @PrimaryGeneratedColumn('uuid')
     id: string;

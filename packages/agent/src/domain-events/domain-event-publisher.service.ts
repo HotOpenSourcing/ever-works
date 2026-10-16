@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type { DomainEventActor, DomainEventAggregateType } from '@ever-works/contracts';
 import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
+import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
 import {
     type AggregateSnapshot,
@@ -86,6 +87,7 @@ export class DomainEventPublisher {
     ): Promise<number | null> {
         const builder = this.builderFor(aggregateType);
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
+        assertExpectedAggregateVersion(aggregateType, id, version);
         const snapshot = await builder(manager, id);
         if (!snapshot) return null;
         await this.recorder.record(manager, {
@@ -143,6 +145,7 @@ export class DomainEventPublisher {
     ): Promise<number | null> {
         const builder = this.builderFor(aggregateType);
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, parentId);
+        assertExpectedAggregateVersion(aggregateType, parentId, version);
         const snapshot = await builder(manager, parentId);
         if (!snapshot) return null;
         await this.recorder.record(manager, {
@@ -177,7 +180,8 @@ export class DomainEventPublisher {
         id: string,
     ): Promise<AggregateTombstone | null> {
         const builder = this.builderFor(aggregateType);
-        await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
+        const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
+        assertExpectedAggregateVersion(aggregateType, id, version);
         const snapshot = await builder(manager, id);
         return snapshot ? { aggregateType, id, snapshot } : null;
     }

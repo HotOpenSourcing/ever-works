@@ -91,7 +91,11 @@ The addresses on this page carry _Agent_ mail. The platform's own transactional 
 
 ## How to register an address today
 
-The settings UI cannot do this yet; the API can. Every call below is authenticated as you.
+**In the app:** Settings → Integrations → Email addresses → **Add address**. The wizard asks what the address is for (send, receive or both), which provider handles it (only Postmark and Mailgun can receive), the address and sender name, shows the inbound webhook URL to register at the provider, and sends the confirmation email for a sending address. Each address in the list can be sent a new confirmation, disabled or enabled, and removed.
+
+**An address must be confirmed before agents can send from it.** The confirmation email links to a page where you click **Confirm this address**; the link works for 24 hours, and a new one can be sent once a minute. Sending from an unconfirmed address is refused (`403`) with a message saying how to confirm it. Receiving needs no confirmation. Addresses that were already in use when this rule arrived (assigned to an agent, already sending, or pinned on an agent's inbox) were confirmed automatically. A self-hosted install with no platform mail can turn the rule off with `EMAIL_SENDER_VERIFICATION_REQUIRED=false` (that exact string).
+
+**Through the API:** every call below is authenticated as you.
 
 1. **Enable the provider plugin** and give it credentials, under **Settings → Plugins** (`/settings/plugins/email-provider`) — or supply the env vars from the table above.
 2. **Create the address.** Direction is fixed at creation:
@@ -109,7 +113,7 @@ The settings UI cannot do this yet; the API can. Every call below is authenticat
       }'
     ```
 
-3. **Trigger verification** — `POST /api/email/addresses/:id/verify` sends a confirmation mail carrying a one-time token.
+3. **Trigger verification** — `POST /api/email/addresses/:id/verify` sends a confirmation mail (through the platform's own mail) carrying a one-time link. It answers `{ sent: true, expiresAt }`, or `{ sent: false, alreadyVerified: true }`; `429` within a minute of the last link, `503` when platform mail is not configured.
 4. **Click the link.** It hits the public `GET /api/email/verify/:token` route, which flips `verified` to true. The token expires **24 hours** after it was issued, and the endpoint is rate-limited to 10 requests/minute so tokens cannot be enumerated.
 5. **Point the provider's webhooks at the platform** for an inbound or `both` address:
     - inbound mail → `POST /api/email/inbound/<pluginId>` (e.g. `/api/email/inbound/postmark`)

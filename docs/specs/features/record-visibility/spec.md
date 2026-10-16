@@ -77,6 +77,23 @@
 - **Integration writes** may set `team` or `organization` (`422 domain_rule` for `private`) and send `teamIds[]`, stored
   as `teamId` (first) plus `team_resources` (rest).
 
+**As implemented (`RecordVisibilityService`, `packages/agent/src/record-visibility/`):**
+
+- `setVisibility(aggregate, id, choice)` — `private` / `team` / `organization` by hand (`visibilityExplicit = true`) or
+  `automatic` (clears the flag and re-applies D11). A personal record takes `private` / `automatic` only (400).
+- `recomputeAutomatic(aggregate, id)` runs after every Team change: `team_resources` attach / detach
+  (`TeamResourcesService`), an agent joining or leaving a Team (`TeamsService.addMember` / `removeMember`), a task's
+  `teamId` set or cleared (`TasksService.update`), and a Team deleted (`TeamsService.remove` collects its records first,
+  since `team_resources` / `team_members` cascade and `tasks.teamId` is SET NULL). No-op for a hand-picked value and for
+  a personal record; never fails the Team write that triggered it.
+- `setTeams(aggregate, id, teamIds)` — the record's Teams as one set (integration `teamIds[]`, the goal form): for a task
+  the first is `teamId` and the rest `team_resources`; for the others every id is a `team_resources` row. Every Team
+  must belong to the record's organization (404). D11 then re-applies.
+- `assertIntegrationVisibility` — `private` → `422` `{ error: { code: 'domain_rule' } }`.
+- **API (the forms' control):** `GET /api/record-visibility/:aggregate/:id` (anyone who may read: state + `canEdit`),
+  `PUT /api/record-visibility/:aggregate/:id` `{ visibility }` and `PUT …/teams` `{ teamIds }` (the owner; 404
+  otherwise; an integration principal may not choose `private`).
+
 ## 6. Organization roster
 
 `organization_members` becomes the source of truth for "member of the org": kept in sync on invite accept and on
@@ -89,16 +106,49 @@ removal (removal emits `organization.member.removed`).
 - List tabs **Mine | Shared with me | Organization** on `/tasks`, `/goals`, `/missions`, `/ideas` and `/agents`; `Mine`
   stays the default.
 
+**As implemented (web):** `components/record-visibility/` — `RecordViewTabs` (the tab lives in `?tab=` on the web URL,
+because `/tasks` already uses `?view=` for board / list; sent to the API as `view`; every other filter is kept and paging
+resets), `VisibilityControl` (lock / team / organization icon; "Automatic (…)" until a value is picked; only the owner
+gets the picker), `RecordTeamsEditor` (the goal's Teams) and `RecordVisibilityPanel` (both, the control re-reads after a
+Teams save). Other locales fall back to `en.json` through the request-time deep merge.
+
 ## 8. Implementation shape
 
 One `RecordAccessPolicy` service plus a repository helper `visibleTo(principal)`. Every list and get path goes through
 it, replacing the scattered `userId = caller` filters; each replaced filter becomes a test case. The integration
 principal reads every row in its pinned orgs with `visibility` `team` or `organization`.
 
+**As implemented** (`packages/agent/src/record-visibility/`):
+
+- `visibleToPredicate()` (`visible-to.ts`) is the one SQL predicate for all five aggregates. A user reads a row when they
+  own it; take part in it (tasks: user assignee, approver, reviewer, watcher — any visibility); reach it through a Team
+  (`tasks.teamId`, `team_resources` of the type, an agent's `team_members`) or a Work they own or belong to
+  (`tasks.workId`, `agents.workId`, `mission_works`) when it is `team` / `organization`; or are an organization member
+  (roster row, or the tenant owner) when it is `organization`. Personal scope stays owner-only. The integration
+  principal reads `team` / `organization` rows of its pinned organizations.
+- `RecordAccessPolicy` resolves the caller's roster, Teams and Works **once per request** (`contextFor`) and exposes
+  `isOrganizationMember(orgId, userId)` (the authoritative roster for act-as, EW-P1-2) and `isTaskParticipant`.
+- **Views:** `?view=mine|shared|organization` on `GET /api/tasks` (and the board), `/api/me/goals`, `/api/me/missions`,
+  `/api/me/work-proposals` and `/api/agents`. `mine` (default, also for unknown values) is the unchanged owner query;
+  `shared` = rows the caller does not own but takes part in or reaches through a Team / Work; `organization` = every
+  readable row of the active organization, own rows included.
+- **Get by id:** a new `getReadable` (tasks, goals, missions, ideas, agents) answers the owner exactly as before, then
+  falls back to `visibleTo`. Only the `GET /:id` routes use it: **every write route keeps its owner-only gate**
+  (`getOne` / `getForUser` / `requireOwned`), several of which other routes use as an ownership check.
+- **Writes (§4):** a task's user assignees, approvers and reviewers may transition it (watchers and other readers get
+  403); anyone who can read a task may list and post comments, and edit their own; a non-owner's `@agent` mention is
+  kept on the message but never dispatches a run (no spend, no agent work on somebody else's task).
+
 ## 9. Events
 
 A change of visibility records `<aggregate>.visibility_changed` ([`domain-events`](../domain-events/spec.md)). A change
 **to** `private` carries only `{id, visibility:'private'}` so consumers stop syncing without seeing the content.
+
+**As implemented:** recorded through the domain-event recorder (EW-P1-1) in the same transaction as the change, with
+the aggregate `version` bumped: `task.visibility_changed` and `agent.visibility_changed` (P1, versioned aggregates).
+To `team` / `organization`: `{ id, organizationId, visibility, visibilityExplicit, version, teamIds }` (valid against
+`visibility-changed.schema.json`; the full integration DTO joins with the B2 snapshot builders). Goals, missions and ideas
+record once they carry a `version` column (their P2 recording points) — the hook is marked in `recordChange`.
 
 ## 10. Acceptance criteria
 

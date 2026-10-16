@@ -1,6 +1,7 @@
 import {
     Entity,
     Column,
+    Index,
     PrimaryGeneratedColumn,
     ManyToOne,
     OneToMany,
@@ -159,6 +160,8 @@ export function shouldGenerateProviderRepository(
 }
 
 @Entity({ name: 'works' })
+// Integration API v1 keyset lists (migration 1795080300000).
+@Index('idx_works_org_updated', ['organizationId', 'updatedAt', 'id'])
 export class Work {
     @PrimaryGeneratedColumn('uuid')
     id: string;

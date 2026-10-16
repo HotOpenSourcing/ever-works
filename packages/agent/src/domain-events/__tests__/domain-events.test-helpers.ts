@@ -7,6 +7,7 @@ import { getDomainEventCatalogEntry } from '@ever-works/contracts';
 import { DataSource } from 'typeorm';
 import { ENTITIES } from '../../database/_entities-inventory';
 import { DomainEvent } from '../../entities/domain-event.entity';
+import { RecordVisibilitySubscriber } from '../../database/record-visibility.subscriber';
 import {
     DOMAIN_EVENT_RELAY_STATE_ID,
     DomainEventRelayState,
@@ -24,6 +25,9 @@ export async function createDomainEventsDataSource(): Promise<DataSource> {
         type: 'better-sqlite3',
         database: ':memory:',
         entities: ENTITIES,
+        // Record visibility (EW-P1-3): the insert-time default, registered exactly as
+        // `databaseConfig()` registers it, so org rows start `team` / `organization`.
+        subscribers: [RecordVisibilitySubscriber],
         synchronize: true,
         logging: false,
     });
