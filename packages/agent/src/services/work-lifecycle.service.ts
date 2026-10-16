@@ -960,6 +960,56 @@ export class WorkLifecycleService {
     }
 
     /**
+     * EW-P2-4 — a repo-less Project Work (`kind: 'project'`): plain project
+     * tracking, and the Ever Works side of a Gauzy project. A bare row with
+     * ZERO repository / git / generation / deploy side-effects, exactly like
+     * `createCampaignWork` (`deployProvider: null`, so it does not count
+     * against the Deploy quota) — and nothing else ever provisions one: every
+     * repository role of the kind is off (`WORK_KIND_CAPABILITIES.project`).
+     *
+     * Behind `EVER_WORKS_PROJECT_WORKS_ENABLED` (exactly `'true'`, default
+     * OFF): refused with `400 project_works_disabled` otherwise.
+     */
+    async createProjectWork(
+        user: User,
+        params: { name: string; slug: string; description?: string },
+    ): Promise<Work> {
+        if (!config.everWorks.projectWorks.enabled()) {
+            throw new BadRequestException({
+                statusCode: 400,
+                code: 'project_works_disabled',
+                message:
+                    'Project Works are not enabled on this installation (EVER_WORKS_PROJECT_WORKS_ENABLED).',
+            });
+        }
+        const workData: Partial<Work> = {
+            slug: params.slug,
+            name: params.name,
+            description: params.description ?? params.name,
+            userId: user.id,
+            kind: 'project',
+            status: 'active',
+            deployProvider: null,
+        };
+
+        try {
+            const created = await this.workRepository.create(workData, user);
+            // This path emits no `work.created` app event, so the domain event is
+            // recorded here (the main create path is covered by DomainEventWorkBridge).
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.created(manager, 'work', created.id, 'work.created'),
+                (message) => this.logger.warn(message),
+                `work.created for ${created.id}`,
+            );
+            return created;
+        } catch (error) {
+            rethrowAsNormalized(error, this.logger, 'creating project work');
+        }
+    }
+
+    /**
      * Teams & Prebuilt Companies (spec §6.2) — bare DRAFT Work row with
      * zero repo/git/generation side-effects. The company-template importer
      * maps each `PROJECT.md` in a package onto one of these; a later
@@ -1689,11 +1739,6 @@ export class WorkLifecycleService {
     async syncFromDataRepository(workId: string, user: User) {
         // Require at least editor role to sync
         const { work } = await this.ownershipService.ensureCanEdit(workId, user.id);
-        // The snapshot clones the data repository looking for directory
-        // items and a README template. For a Repository Work that is a full
-        // clone of somebody's code repository into the shared checkout, for
-        // content that cannot be there.
-        assertNotRepositoryWork(work, 'syncing from the data repository');
         // A kind that provisions no data repository (`repos.data: false` in
         // the capability registry — today the App Work) has nothing to sync
         // FROM. Without this the snapshot below cloned the derived
@@ -1709,6 +1754,14 @@ export class WorkLifecycleService {
                 message: `Nothing to sync: a "${work.kind}" Work has no data repository.`,
             };
         }
+        // The snapshot clones the data repository looking for directory
+        // items and a README template. For a Repository Work that is a full
+        // clone of somebody's code repository into the shared checkout, for
+        // content that cannot be there. (After the no-op above, so a Project
+        // Work — no repository at all, page mounts call this — gets the
+        // no-op rather than a 400; a Repository Work has a data role, so it
+        // still reaches this refusal.)
+        assertNotRepositoryWork(work, 'syncing from the data repository');
         const updates: Record<string, any> = {};
 
         try {

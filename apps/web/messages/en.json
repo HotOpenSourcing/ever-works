@@ -10820,6 +10820,7 @@
             "app": "App",
             "company": "Company",
             "campaign": "Campaign",
+            "project": "Project",
             "default": "Work"
         },
         "terminal": {

@@ -61,7 +61,7 @@ import {
 // names the roles it chooses between. Same two imports, and the same rule,
 // as `repos[role]` in `packages/agent/src/works/repository-work-guard.ts`
 // (`hasRepositoryRole`) — the ONE place that knowledge lives.
-import { getWorkCapabilities, isAppWorkKind } from '@ever-works/contracts';
+import { getWorkCapabilities, isAppWorkKind, workKindHasRepository } from '@ever-works/contracts';
 import { lstat, realpath } from 'node:fs/promises';
 import {
     join as joinPath,
@@ -1012,6 +1012,15 @@ async function assertRealWriteTarget(
                     if (!work) {
                         throw new Error(
                             `${tool}: Work ${workId} not found — cannot resolve its git provider, owner or repo.`,
+                        );
+                    }
+                    // EW-P2-4 — a repo-less (Project) Work has nothing to commit
+                    // to or open a pull request against: refuse before any
+                    // derived repository name is resolved.
+                    if (!workKindHasRepository(work.kind)) {
+                        throw new Error(
+                            `${tool}: Work ${workId} is a "${work.kind}" Work with no repository — ` +
+                                `there is nothing to commit to or open a pull request against.`,
                         );
                     }
                     const providerId = (work.gitProvider ?? '').trim();

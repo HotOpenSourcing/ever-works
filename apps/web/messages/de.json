@@ -8809,6 +8809,7 @@
             "app": "App",
             "company": "Company",
             "campaign": "Kampagne",
+            "project": "Projekt",
             "default": "Work"
         },
         "meetingsPage": {
