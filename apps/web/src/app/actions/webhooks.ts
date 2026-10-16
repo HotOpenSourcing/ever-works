@@ -127,3 +127,17 @@ export async function redeliverWebhook(
         return { success: false, error: messageOf(error, 'Failed to redeliver') };
     }
 }
+
+/** The caller's subscriptions, freshly read (e.g. after a test fire moved a failure streak). */
+export async function listWebhooks(): Promise<{
+    success: boolean;
+    subscriptions?: WebhookSubscription[];
+    error?: string;
+}> {
+    await ensureAuth();
+    try {
+        return { success: true, subscriptions: await webhooksAPI.list() };
+    } catch (error) {
+        return { success: false, error: messageOf(error, 'Failed to load webhooks') };
+    }
+}

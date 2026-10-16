@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useTranslations } from 'next-intl';
 import { DOMAIN_EVENT_TYPES } from '@ever-works/contracts';
 import type { TeamsOrganization } from '@/lib/api/teams';
 import type { WebhookDelivery, WebhookSubscription } from '@/lib/api/webhooks';
@@ -8,6 +9,7 @@ import {
     createWebhook,
     deleteWebhook,
     listWebhookDeliveries,
+    listWebhooks,
     redeliverWebhook,
     rotateWebhookSecret,
     testWebhook,
@@ -17,6 +19,8 @@ import {
 interface Props {
     initialSubscriptions: WebhookSubscription[];
     organizations: TeamsOrganization[];
+    /** The server could not read the subscriptions (shown as an error, not as "none"). */
+    loadFailed?: boolean;
 }
 
 /** The opt-in type a `<prefix>.*` pattern never includes (delivered only when named). */
@@ -34,17 +38,22 @@ const STATUS_STYLE: Record<WebhookSubscription['status'], string> = {
     disabled: 'text-red-600',
 };
 
+type T = ReturnType<typeof useTranslations>;
+
 /**
  * Settings → Webhooks (EW-P1-5). Lists every subscription (active, paused,
  * failed, disabled), creates v2 domain-event subscriptions, pauses / resumes,
  * test-fires, rotates the signing secret (shown once), and shows a
  * subscription's deliveries with redelivery.
  */
-export function WebhooksSettings({ initialSubscriptions, organizations }: Props) {
+export function WebhooksSettings({ initialSubscriptions, organizations, loadFailed }: Props) {
+    const t = useTranslations('dashboard.settings.webhooksPage');
     const [subscriptions, setSubscriptions] = useState(initialSubscriptions);
     const [creating, setCreating] = useState(false);
     const [secret, setSecret] = useState<{ subscriptionId: string; value: string } | null>(null);
     const [openDeliveries, setOpenDeliveries] = useState<string | null>(null);
+    /** Bumped after a test fire so an open deliveries panel shows the new attempt. */
+    const [deliveriesVersion, setDeliveriesVersion] = useState(0);
     const [notice, setNotice] = useState<Record<string, { ok: boolean; message: string }>>({});
     const [pending, startTransition] = useTransition();
 
@@ -66,9 +75,9 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
             const result = await updateWebhook(sub.id, { status });
             if (result.success && result.subscription) {
                 replace(result.subscription);
-                note(sub.id, true, status === 'active' ? 'Resumed' : 'Paused');
+                note(sub.id, true, status === 'active' ? t('resumed') : t('pausedNotice'));
             } else {
-                note(sub.id, false, result.error ?? 'Update failed');
+                note(sub.id, false, result.error ?? t('updateFailed'));
             }
         });
     }
@@ -77,16 +86,22 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
         startTransition(async () => {
             const result = await testWebhook(sub.id);
             if (result.result) {
-                note(
-                    sub.id,
-                    result.result.ok,
-                    `${result.result.ok ? 'Delivered' : 'Failed'}: ${result.result.outcome}${
-                        result.result.status ? ` (HTTP ${result.result.status})` : ''
-                    }`,
-                );
+                const outcome = result.result.ok
+                    ? t('testDelivered', { outcome: result.result.outcome })
+                    : t('testFailedOutcome', { outcome: result.result.outcome });
+                const http = result.result.status
+                    ? ` ${t('httpStatus', { status: result.result.status })}`
+                    : '';
+                note(sub.id, result.result.ok, `${outcome}${http}`);
             } else {
-                note(sub.id, false, result.error ?? 'Test failed');
+                note(sub.id, false, result.error ?? t('testFailed'));
             }
+            // A failed test moves the failure streak (and can fail the
+            // subscription): show the subscription as the server has it now.
+            const fresh = await listWebhooks();
+            const updated = fresh.subscriptions?.find((s) => s.id === sub.id);
+            if (updated) replace(updated);
+            setDeliveriesVersion((v) => v + 1);
         });
     }
 
@@ -95,15 +110,9 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
             const result = await rotateWebhookSecret(sub.id);
             if (result.success && result.signingSecret) {
                 setSecret({ subscriptionId: sub.id, value: result.signingSecret });
-                note(
-                    sub.id,
-                    true,
-                    sub.version === 2
-                        ? 'Secret rotated; the previous one keeps signing for 24 h'
-                        : 'Secret rotated',
-                );
+                note(sub.id, true, sub.version === 2 ? t('rotatedV2') : t('rotated'));
             } else {
-                note(sub.id, false, result.error ?? 'Rotation failed');
+                note(sub.id, false, result.error ?? t('rotateFailed'));
             }
         });
     }
@@ -114,7 +123,7 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
             if (result.success) {
                 setSubscriptions((prev) => prev.filter((s) => s.id !== sub.id));
             } else {
-                note(sub.id, false, result.error ?? 'Delete failed');
+                note(sub.id, false, result.error ?? t('deleteFailed'));
             }
         });
     }
@@ -123,18 +132,15 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
         <div className="space-y-6">
             <div className="flex items-start justify-between gap-4">
                 <div>
-                    <h2 className="text-lg font-semibold">Webhooks</h2>
-                    <p className="text-sm text-muted-foreground">
-                        Signed HTTPS callbacks. Domain-event webhooks (v2) carry the event envelope
-                        and are signed <code>X-Ever-Works-Signature: t=…,v1=…</code>.
-                    </p>
+                    <h2 className="text-lg font-semibold">{t('title')}</h2>
+                    <p className="text-sm text-muted-foreground">{t('intro')}</p>
                 </div>
                 <button
                     type="button"
                     className="rounded-md bg-primary px-3 py-2 text-sm text-primary-foreground"
                     onClick={() => setCreating(true)}
                 >
-                    New webhook
+                    {t('newWebhook')}
                 </button>
             </div>
 
@@ -143,10 +149,8 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
                     role="status"
                     className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:bg-amber-950"
                 >
-                    <p className="font-medium">Signing secret — shown once</p>
-                    <p className="text-muted-foreground">
-                        Store it now; it cannot be read again. Rotate it to get a new one.
-                    </p>
+                    <p className="font-medium">{t('secretTitle')}</p>
+                    <p className="text-muted-foreground">{t('secretHint')}</p>
                     <div className="mt-2 flex items-center gap-2">
                         <code
                             className="break-all rounded bg-background px-2 py-1"
@@ -159,61 +163,63 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
                             className="text-sm underline"
                             onClick={() => void navigator.clipboard?.writeText(secret.value)}
                         >
-                            Copy
+                            {t('copy')}
                         </button>
                         <button
                             type="button"
                             className="text-sm underline"
                             onClick={() => setSecret(null)}
                         >
-                            Done
+                            {t('done')}
                         </button>
                     </div>
                 </div>
             )}
 
-            {subscriptions.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No webhooks yet.</p>
+            {loadFailed && subscriptions.length === 0 ? (
+                <p role="alert" className="text-sm text-red-600">
+                    {t('loadFailed')}
+                </p>
+            ) : subscriptions.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t('empty')}</p>
             ) : (
                 <table className="w-full text-sm">
                     <thead>
                         <tr className="border-b text-left">
-                            <th className="py-2">Endpoint</th>
-                            <th className="py-2">Events</th>
-                            <th className="py-2">Status</th>
-                            <th className="py-2 text-right">Actions</th>
+                            <th className="py-2">{t('colEndpoint')}</th>
+                            <th className="py-2">{t('colEvents')}</th>
+                            <th className="py-2">{t('colStatus')}</th>
+                            <th className="py-2 text-right">{t('colActions')}</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {subscriptions.map((sub) => {
-                            const info = notice[sub.id];
-                            return (
-                                <WebhookRow
-                                    key={sub.id}
-                                    sub={sub}
-                                    orgName={orgName}
-                                    info={info}
-                                    busy={pending}
-                                    deliveriesOpen={openDeliveries === sub.id}
-                                    onToggleDeliveries={() =>
-                                        setOpenDeliveries((prev) =>
-                                            prev === sub.id ? null : sub.id,
-                                        )
-                                    }
-                                    onPause={() => setStatus(sub, 'paused')}
-                                    onResume={() => setStatus(sub, 'active')}
-                                    onTest={() => test(sub)}
-                                    onRotate={() => rotate(sub)}
-                                    onDelete={() => remove(sub)}
-                                />
-                            );
-                        })}
+                        {subscriptions.map((sub) => (
+                            <WebhookRow
+                                key={sub.id}
+                                t={t}
+                                sub={sub}
+                                orgName={orgName}
+                                info={notice[sub.id]}
+                                busy={pending}
+                                deliveriesOpen={openDeliveries === sub.id}
+                                deliveriesVersion={deliveriesVersion}
+                                onToggleDeliveries={() =>
+                                    setOpenDeliveries((prev) => (prev === sub.id ? null : sub.id))
+                                }
+                                onPause={() => setStatus(sub, 'paused')}
+                                onResume={() => setStatus(sub, 'active')}
+                                onTest={() => test(sub)}
+                                onRotate={() => rotate(sub)}
+                                onDelete={() => remove(sub)}
+                            />
+                        ))}
                     </tbody>
                 </table>
             )}
 
             {creating && (
                 <CreateWebhookDialog
+                    t={t}
                     organizations={organizations}
                     onClose={() => setCreating(false)}
                     onCreated={(subscription, signingSecret) => {
@@ -228,11 +234,13 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
 }
 
 function WebhookRow({
+    t,
     sub,
     orgName,
     info,
     busy,
     deliveriesOpen,
+    deliveriesVersion,
     onToggleDeliveries,
     onPause,
     onResume,
@@ -240,11 +248,13 @@ function WebhookRow({
     onRotate,
     onDelete,
 }: {
+    t: T;
     sub: WebhookSubscription;
     orgName: (id: string) => string;
     info?: { ok: boolean; message: string };
     busy: boolean;
     deliveriesOpen: boolean;
+    deliveriesVersion: number;
     onToggleDeliveries: () => void;
     onPause: () => void;
     onResume: () => void;
@@ -271,18 +281,23 @@ function WebhookRow({
                     {sub.version === 2 ? (
                         <span className="text-xs">{(sub.events ?? []).join(', ')}</span>
                     ) : (
-                        <span className="text-xs text-muted-foreground">
-                            Work &amp; deployment (v1)
-                        </span>
+                        <span className="text-xs text-muted-foreground">{t('legacyEvents')}</span>
                     )}
                 </td>
                 <td className="py-2">
-                    <span className={STATUS_STYLE[sub.status]}>{sub.status}</span>
+                    <span className={STATUS_STYLE[sub.status]}>{t(`status.${sub.status}`)}</span>
                     {sub.consecutiveFailures > 0 && (
                         <div className="text-xs text-muted-foreground">
-                            {sub.consecutiveFailures} failed in a row
+                            {t('failedInARow', { count: sub.consecutiveFailures })}
                         </div>
                     )}
+                    <div className="text-xs text-muted-foreground">
+                        {sub.lastDeliveryAt
+                            ? t('lastDelivery', {
+                                  when: new Date(sub.lastDeliveryAt).toLocaleString(),
+                              })
+                            : t('neverDelivered')}
+                    </div>
                 </td>
                 <td className="py-2 text-right">
                     <div className="flex flex-wrap items-center justify-end gap-3">
@@ -302,7 +317,7 @@ function WebhookRow({
                                 disabled={busy}
                                 onClick={onPause}
                             >
-                                Pause
+                                {t('pause')}
                             </button>
                         )}
                         {canResume && (
@@ -312,11 +327,11 @@ function WebhookRow({
                                 disabled={busy}
                                 onClick={onResume}
                             >
-                                Resume
+                                {t('resume')}
                             </button>
                         )}
                         <button type="button" className="text-sm" disabled={busy} onClick={onTest}>
-                            Test
+                            {t('test')}
                         </button>
                         <button
                             type="button"
@@ -324,10 +339,10 @@ function WebhookRow({
                             disabled={busy}
                             onClick={onRotate}
                         >
-                            Rotate secret
+                            {t('rotate')}
                         </button>
                         <button type="button" className="text-sm" onClick={onToggleDeliveries}>
-                            {deliveriesOpen ? 'Hide deliveries' : 'Deliveries'}
+                            {deliveriesOpen ? t('hideDeliveries') : t('deliveries')}
                         </button>
                         <button
                             type="button"
@@ -335,7 +350,7 @@ function WebhookRow({
                             disabled={busy}
                             onClick={onDelete}
                         >
-                            Delete
+                            {t('delete')}
                         </button>
                     </div>
                 </td>
@@ -343,7 +358,11 @@ function WebhookRow({
             {deliveriesOpen && (
                 <tr className="border-b">
                     <td colSpan={4} className="py-2">
-                        <DeliveriesPanel subscriptionId={sub.id} />
+                        <DeliveriesPanel
+                            t={t}
+                            subscriptionId={sub.id}
+                            refreshKey={deliveriesVersion}
+                        />
                     </td>
                 </tr>
             )}
@@ -351,11 +370,21 @@ function WebhookRow({
     );
 }
 
-function DeliveriesPanel({ subscriptionId }: { subscriptionId: string }) {
+function DeliveriesPanel({
+    t,
+    subscriptionId,
+    refreshKey,
+}: {
+    t: T;
+    subscriptionId: string;
+    refreshKey: number;
+}) {
     const [deliveries, setDeliveries] = useState<WebhookDelivery[] | null>(null);
     const [error, setError] = useState<string | null>(null);
-    const [redelivered, setRedelivered] = useState<Record<string, string>>({});
-    const [, startRedeliver] = useTransition();
+    /** Per delivery: a redelivery in flight, or the outcome of the last one. */
+    const [redelivery, setRedelivery] = useState<
+        Record<string, { state: 'sending' | 'sent' | 'failed'; error?: string }>
+    >({});
 
     useEffect(() => {
         let cancelled = false;
@@ -365,75 +394,96 @@ function DeliveriesPanel({ subscriptionId }: { subscriptionId: string }) {
                 setDeliveries(result.deliveries ?? []);
                 setError(null);
             } else {
-                setError(result.error ?? 'Failed to load deliveries');
+                setError(result.error ?? t('deliveriesLoadFailed'));
             }
         });
         return () => {
             cancelled = true;
         };
-    }, [subscriptionId]);
+    }, [subscriptionId, refreshKey, t]);
 
-    function redeliver(id: string) {
-        startRedeliver(async () => {
-            const result = await redeliverWebhook(id);
-            setRedelivered((prev) => ({
-                ...prev,
-                [id]: result.success ? 'Re-sent' : (result.error ?? 'Failed'),
-            }));
-        });
+    async function redeliver(id: string) {
+        // One request per click: the button stays disabled until it answers,
+        // since every call queues a fresh delivery.
+        if (redelivery[id]?.state === 'sending') return;
+        setRedelivery((prev) => ({ ...prev, [id]: { state: 'sending' } }));
+        const result = await redeliverWebhook(id);
+        setRedelivery((prev) => ({
+            ...prev,
+            [id]: result.success
+                ? { state: 'sent' }
+                : { state: 'failed', error: result.error ?? '' },
+        }));
     }
 
     if (error) return <p className="text-sm text-red-600">{error}</p>;
-    if (deliveries === null) return <p className="text-sm text-muted-foreground">Loading…</p>;
+    if (deliveries === null) return <p className="text-sm text-muted-foreground">{t('loading')}</p>;
     if (deliveries.length === 0) {
-        return <p className="text-sm text-muted-foreground">No deliveries yet.</p>;
+        return <p className="text-sm text-muted-foreground">{t('noDeliveries')}</p>;
     }
     return (
         <table className="w-full text-xs">
             <thead>
                 <tr className="text-left">
-                    <th className="py-1">Event</th>
-                    <th className="py-1">Status</th>
-                    <th className="py-1">Attempts</th>
-                    <th className="py-1">Response</th>
-                    <th className="py-1">Created</th>
+                    <th className="py-1">{t('dEvent')}</th>
+                    <th className="py-1">{t('dStatus')}</th>
+                    <th className="py-1">{t('dAttempts')}</th>
+                    <th className="py-1">{t('dResponse')}</th>
+                    <th className="py-1">{t('dCreated')}</th>
                     <th className="py-1" />
                 </tr>
             </thead>
             <tbody>
-                {deliveries.map((d) => (
-                    <tr key={d.id}>
-                        <td className="py-1">{d.event}</td>
-                        <td className="py-1">{d.status}</td>
-                        <td className="py-1">{d.attempts}</td>
-                        <td className="py-1">
-                            {d.lastResponseStatus ?? d.lastOutcome ?? '—'}
-                            {d.lastError ? ` · ${d.lastError}` : ''}
-                        </td>
-                        <td className="py-1">{new Date(d.createdAt).toLocaleString()}</td>
-                        <td className="py-1 text-right">
-                            {redelivered[d.id] ?? (
-                                <button
-                                    type="button"
-                                    className="underline"
-                                    onClick={() => redeliver(d.id)}
-                                >
-                                    Redeliver
-                                </button>
-                            )}
-                        </td>
-                    </tr>
-                ))}
+                {deliveries.map((d) => {
+                    const state = redelivery[d.id];
+                    return (
+                        <tr key={d.id}>
+                            <td className="py-1">{d.event}</td>
+                            <td className="py-1">{d.status}</td>
+                            <td className="py-1">{d.attempts}</td>
+                            <td className="py-1">
+                                {d.lastResponseStatus ?? d.lastOutcome ?? '—'}
+                                {d.lastError ? ` · ${d.lastError}` : ''}
+                            </td>
+                            <td className="py-1">{new Date(d.createdAt).toLocaleString()}</td>
+                            <td className="py-1 text-right">
+                                {state?.state === 'sent' ? (
+                                    t('resent')
+                                ) : (
+                                    <span className="inline-flex items-center gap-2">
+                                        {state?.state === 'failed' && (
+                                            <span className="text-red-600">
+                                                {t('redeliverFailed', { error: state.error ?? '' })}
+                                            </span>
+                                        )}
+                                        <button
+                                            type="button"
+                                            className="underline disabled:opacity-50"
+                                            disabled={state?.state === 'sending'}
+                                            onClick={() => void redeliver(d.id)}
+                                        >
+                                            {state?.state === 'sending'
+                                                ? t('redelivering')
+                                                : t('redeliver')}
+                                        </button>
+                                    </span>
+                                )}
+                            </td>
+                        </tr>
+                    );
+                })}
             </tbody>
         </table>
     );
 }
 
 function CreateWebhookDialog({
+    t,
     organizations,
     onClose,
     onCreated,
 }: {
+    t: T;
     organizations: TeamsOrganization[];
     onClose: () => void;
     onCreated: (subscription: WebhookSubscription, signingSecret: string) => void;
@@ -456,15 +506,15 @@ function CreateWebhookDialog({
     function submit() {
         setError(null);
         if (!/^https?:\/\//i.test(url.trim())) {
-            setError('Enter the https:// URL of your endpoint.');
+            setError(t('errUrl'));
             return;
         }
         if (orgIds.length === 0) {
-            setError('Pick at least one organization.');
+            setError(t('errOrg'));
             return;
         }
         if (events.length === 0) {
-            setError('Pick at least one event group.');
+            setError(t('errEvents'));
             return;
         }
         startSubmit(async () => {
@@ -475,22 +525,26 @@ function CreateWebhookDialog({
                 events,
                 excludeOriginTags: excludeTags
                     .split(',')
-                    .map((t) => t.trim())
-                    .filter((t) => t.length > 0),
+                    .map((tag) => tag.trim())
+                    .filter((tag) => tag.length > 0),
             });
             if (result.success && result.subscription && result.signingSecret) {
                 onCreated(result.subscription, result.signingSecret);
             } else {
-                setError(result.error ?? 'Failed to create the webhook');
+                setError(result.error ?? t('createFailed'));
             }
         });
     }
 
     return (
-        <div role="dialog" aria-label="New webhook" className="space-y-4 rounded-md border p-4">
-            <h3 className="font-semibold">New webhook</h3>
+        <div
+            role="dialog"
+            aria-label={t('dialogTitle')}
+            className="space-y-4 rounded-md border p-4"
+        >
+            <h3 className="font-semibold">{t('dialogTitle')}</h3>
             <label className="block text-sm">
-                Endpoint URL
+                {t('endpointUrl')}
                 <input
                     type="url"
                     className="mt-1 w-full rounded-md border px-2 py-1"
@@ -500,7 +554,7 @@ function CreateWebhookDialog({
                 />
             </label>
             <label className="block text-sm">
-                Description
+                {t('description')}
                 <input
                     type="text"
                     className="mt-1 w-full rounded-md border px-2 py-1"
@@ -510,9 +564,9 @@ function CreateWebhookDialog({
                 />
             </label>
             <fieldset className="text-sm">
-                <legend className="font-medium">Organizations</legend>
+                <legend className="font-medium">{t('organizations')}</legend>
                 {organizations.length === 0 && (
-                    <p className="text-muted-foreground">You have no organizations yet.</p>
+                    <p className="text-muted-foreground">{t('noOrganizations')}</p>
                 )}
                 {organizations.map((org) => (
                     <label key={org.id} className="mr-4 inline-flex items-center gap-1">
@@ -526,7 +580,7 @@ function CreateWebhookDialog({
                 ))}
             </fieldset>
             <fieldset className="text-sm">
-                <legend className="font-medium">Events</legend>
+                <legend className="font-medium">{t('events')}</legend>
                 {patterns.map((pattern) => (
                     <label key={pattern} className="mr-4 inline-flex items-center gap-1">
                         <input
@@ -544,11 +598,11 @@ function CreateWebhookDialog({
                         onChange={() => setEvents((prev) => toggle(prev, RUNTIME_TYPE))}
                     />
                     <code>{RUNTIME_TYPE}</code>
-                    <span className="text-muted-foreground">(PR / CI / run state — chatty)</span>
+                    <span className="text-muted-foreground">{t('runtimeHint')}</span>
                 </label>
             </fieldset>
             <label className="block text-sm">
-                Skip events from these origins (comma-separated, optional)
+                {t('skipOrigins')}
                 <input
                     type="text"
                     className="mt-1 w-full rounded-md border px-2 py-1"
@@ -565,14 +619,14 @@ function CreateWebhookDialog({
                     disabled={submitting}
                     onClick={submit}
                 >
-                    {submitting ? 'Creating…' : 'Create'}
+                    {submitting ? t('creating') : t('create')}
                 </button>
                 <button
                     type="button"
                     className="rounded-md border px-3 py-2 text-sm"
                     onClick={onClose}
                 >
-                    Cancel
+                    {t('cancel')}
                 </button>
             </div>
         </div>

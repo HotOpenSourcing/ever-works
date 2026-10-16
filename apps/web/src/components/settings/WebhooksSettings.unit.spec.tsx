@@ -1,6 +1,9 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render as rtlRender, screen } from '@testing-library/react';
+import type { ReactElement } from 'react';
+import { NextIntlClientProvider } from 'next-intl';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WebhookSubscription } from '@/lib/api/webhooks';
+import messages from '../../../messages/en.json';
 
 /**
  * Settings → Webhooks (EW-P1-5): list every subscription with the right
@@ -14,6 +17,7 @@ const actions = vi.hoisted(() => ({
     rotateWebhookSecret: vi.fn(),
     testWebhook: vi.fn(),
     listWebhookDeliveries: vi.fn(),
+    listWebhooks: vi.fn(),
     redeliverWebhook: vi.fn(),
 }));
 vi.mock('@/app/actions/webhooks', () => actions);
@@ -21,6 +25,14 @@ vi.mock('@/app/actions/webhooks', () => actions);
 import { WebhooksSettings, eventPatternOptions } from './WebhooksSettings';
 
 const ORG = { id: 'org-1', slug: 'acme', displayName: 'Acme' };
+
+function render(ui: ReactElement) {
+    return rtlRender(
+        <NextIntlClientProvider locale="en" messages={messages}>
+            {ui}
+        </NextIntlClientProvider>,
+    );
+}
 
 function sub(overrides: Partial<WebhookSubscription> = {}): WebhookSubscription {
     return {
@@ -182,5 +194,62 @@ describe('WebhooksSettings', () => {
         });
         expect(actions.redeliverWebhook).toHaveBeenCalledWith('dlv-1');
         expect(screen.getByText('Re-sent')).toBeTruthy();
+    });
+
+    it('keeps Redeliver after a failed redelivery and shows the error beside it', async () => {
+        actions.listWebhookDeliveries.mockResolvedValue({
+            success: true,
+            deliveries: [
+                {
+                    id: 'dlv-1',
+                    subscriptionId: 'wh-1',
+                    event: 'task.updated',
+                    status: 'failed',
+                    attempts: 3,
+                    lastResponseStatus: 500,
+                    lastOutcome: 'server_error',
+                    lastError: null,
+                    durationMs: 12,
+                    triggerRunId: null,
+                    lastAttemptAt: null,
+                    createdAt: '2026-10-16T00:00:00.000Z',
+                    updatedAt: '2026-10-16T00:00:00.000Z',
+                },
+            ],
+        });
+        actions.redeliverWebhook.mockResolvedValue({ success: false, error: 'Busy' });
+        render(<WebhooksSettings initialSubscriptions={[sub()]} organizations={[ORG]} />);
+        await act(async () => {
+            fireEvent.click(screen.getByText('Deliveries'));
+        });
+        await act(async () => {
+            fireEvent.click(screen.getByText('Redeliver'));
+        });
+        expect(screen.getByText('Redeliver failed: Busy')).toBeTruthy();
+        expect(screen.getByText('Redeliver')).toBeTruthy();
+    });
+
+    it('re-reads the subscription after a test fire (a failure can fail it)', async () => {
+        actions.testWebhook.mockResolvedValue({
+            success: false,
+            result: { ok: false, outcome: 'server_error', status: 500 },
+        });
+        actions.listWebhooks.mockResolvedValue({
+            success: true,
+            subscriptions: [sub({ status: 'failed', consecutiveFailures: 10 })],
+        });
+        render(<WebhooksSettings initialSubscriptions={[sub()]} organizations={[ORG]} />);
+        await act(async () => {
+            fireEvent.click(screen.getByText('Test'));
+        });
+        expect(screen.getByText('Failed: server_error (HTTP 500)')).toBeTruthy();
+        expect(screen.getByText('Resume')).toBeTruthy();
+        expect(screen.queryByText('Pause')).toBeNull();
+    });
+
+    it('says the list failed to load instead of "No webhooks yet"', () => {
+        render(<WebhooksSettings initialSubscriptions={[]} organizations={[ORG]} loadFailed />);
+        expect(screen.getByRole('alert').textContent).toContain('Could not load your webhooks');
+        expect(screen.queryByText('No webhooks yet.')).toBeNull();
     });
 });
