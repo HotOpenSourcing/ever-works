@@ -61,7 +61,15 @@ describe('WebhooksSettings', () => {
             <WebhooksSettings
                 initialSubscriptions={[
                     sub(),
-                    sub({ id: 'wh-2', url: 'https://legacy.example.com', version: 1, events: null, organizationIds: null, status: 'failed', consecutiveFailures: 10 }),
+                    sub({
+                        id: 'wh-2',
+                        url: 'https://legacy.example.com',
+                        version: 1,
+                        events: null,
+                        organizationIds: null,
+                        status: 'failed',
+                        consecutiveFailures: 10,
+                    }),
                 ]}
                 organizations={[ORG]}
             />,
@@ -75,8 +83,16 @@ describe('WebhooksSettings', () => {
     });
 
     it('resumes a failed subscription through PATCH status active', async () => {
-        actions.updateWebhook.mockResolvedValue({ success: true, subscription: sub({ status: 'active' }) });
-        render(<WebhooksSettings initialSubscriptions={[sub({ status: 'failed' })]} organizations={[ORG]} />);
+        actions.updateWebhook.mockResolvedValue({
+            success: true,
+            subscription: sub({ status: 'active' }),
+        });
+        render(
+            <WebhooksSettings
+                initialSubscriptions={[sub({ status: 'failed' })]}
+                organizations={[ORG]}
+            />,
+        );
         await act(async () => {
             fireEvent.click(screen.getByText('Resume'));
         });
@@ -116,7 +132,12 @@ describe('WebhooksSettings', () => {
     });
 
     it('refuses to submit without an organization', async () => {
-        render(<WebhooksSettings initialSubscriptions={[]} organizations={[ORG, { id: 'org-2', slug: 'b', displayName: 'B' }]} />);
+        render(
+            <WebhooksSettings
+                initialSubscriptions={[]}
+                organizations={[ORG, { id: 'org-2', slug: 'b', displayName: 'B' }]}
+            />,
+        );
         fireEvent.click(screen.getByText('New webhook'));
         fireEvent.change(screen.getByPlaceholderText('https://example.com/ever-works'), {
             target: { value: 'https://hooks.example.com/ever' },

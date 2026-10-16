@@ -148,7 +148,10 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
                         Store it now; it cannot be read again. Rotate it to get a new one.
                     </p>
                     <div className="mt-2 flex items-center gap-2">
-                        <code className="break-all rounded bg-background px-2 py-1" data-testid="webhook-secret">
+                        <code
+                            className="break-all rounded bg-background px-2 py-1"
+                            data-testid="webhook-secret"
+                        >
                             {secret.value}
                         </code>
                         <button
@@ -158,7 +161,11 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
                         >
                             Copy
                         </button>
-                        <button type="button" className="text-sm underline" onClick={() => setSecret(null)}>
+                        <button
+                            type="button"
+                            className="text-sm underline"
+                            onClick={() => setSecret(null)}
+                        >
                             Done
                         </button>
                     </div>
@@ -189,7 +196,9 @@ export function WebhooksSettings({ initialSubscriptions, organizations }: Props)
                                     busy={pending}
                                     deliveriesOpen={openDeliveries === sub.id}
                                     onToggleDeliveries={() =>
-                                        setOpenDeliveries((prev) => (prev === sub.id ? null : sub.id))
+                                        setOpenDeliveries((prev) =>
+                                            prev === sub.id ? null : sub.id,
+                                        )
                                     }
                                     onPause={() => setStatus(sub, 'paused')}
                                     onResume={() => setStatus(sub, 'active')}
@@ -262,7 +271,9 @@ function WebhookRow({
                     {sub.version === 2 ? (
                         <span className="text-xs">{(sub.events ?? []).join(', ')}</span>
                     ) : (
-                        <span className="text-xs text-muted-foreground">Work &amp; deployment (v1)</span>
+                        <span className="text-xs text-muted-foreground">
+                            Work &amp; deployment (v1)
+                        </span>
                     )}
                 </td>
                 <td className="py-2">
@@ -276,24 +287,43 @@ function WebhookRow({
                 <td className="py-2 text-right">
                     <div className="flex flex-wrap items-center justify-end gap-3">
                         {info && (
-                            <span className={info.ok ? 'text-xs text-green-600' : 'text-xs text-red-600'}>
+                            <span
+                                className={
+                                    info.ok ? 'text-xs text-green-600' : 'text-xs text-red-600'
+                                }
+                            >
                                 {info.message}
                             </span>
                         )}
                         {sub.status === 'active' && (
-                            <button type="button" className="text-sm" disabled={busy} onClick={onPause}>
+                            <button
+                                type="button"
+                                className="text-sm"
+                                disabled={busy}
+                                onClick={onPause}
+                            >
                                 Pause
                             </button>
                         )}
                         {canResume && (
-                            <button type="button" className="text-sm" disabled={busy} onClick={onResume}>
+                            <button
+                                type="button"
+                                className="text-sm"
+                                disabled={busy}
+                                onClick={onResume}
+                            >
                                 Resume
                             </button>
                         )}
                         <button type="button" className="text-sm" disabled={busy} onClick={onTest}>
                             Test
                         </button>
-                        <button type="button" className="text-sm" disabled={busy} onClick={onRotate}>
+                        <button
+                            type="button"
+                            className="text-sm"
+                            disabled={busy}
+                            onClick={onRotate}
+                        >
                             Rotate secret
                         </button>
                         <button type="button" className="text-sm" onClick={onToggleDeliveries}>
@@ -383,7 +413,11 @@ function DeliveriesPanel({ subscriptionId }: { subscriptionId: string }) {
                         <td className="py-1">{new Date(d.createdAt).toLocaleString()}</td>
                         <td className="py-1 text-right">
                             {redelivered[d.id] ?? (
-                                <button type="button" className="underline" onClick={() => redeliver(d.id)}>
+                                <button
+                                    type="button"
+                                    className="underline"
+                                    onClick={() => redeliver(d.id)}
+                                >
                                     Redeliver
                                 </button>
                             )}
@@ -407,7 +441,9 @@ function CreateWebhookDialog({
     const patterns = useMemo(() => eventPatternOptions(), []);
     const [url, setUrl] = useState('');
     const [description, setDescription] = useState('');
-    const [orgIds, setOrgIds] = useState<string[]>(organizations.length === 1 ? [organizations[0].id] : []);
+    const [orgIds, setOrgIds] = useState<string[]>(
+        organizations.length === 1 ? [organizations[0].id] : [],
+    );
     const [events, setEvents] = useState<string[]>(['task.*']);
     const [excludeTags, setExcludeTags] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -531,7 +567,11 @@ function CreateWebhookDialog({
                 >
                     {submitting ? 'Creating…' : 'Create'}
                 </button>
-                <button type="button" className="rounded-md border px-3 py-2 text-sm" onClick={onClose}>
+                <button
+                    type="button"
+                    className="rounded-md border px-3 py-2 text-sm"
+                    onClick={onClose}
+                >
                     Cancel
                 </button>
             </div>
