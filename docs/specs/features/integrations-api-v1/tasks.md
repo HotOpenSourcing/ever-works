@@ -50,9 +50,9 @@
       half-way keeps the steps before the failure); a crash between create and link leaves an unlinked record.
 - [ ] **T17b** OpenAPI request/response bodies (`@ApiProperty` or the Swagger CLI plugin under SWC); today the document
       lists every route, scope and summary, and the bodies are the contract JSON Schemas.
-- [ ] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through the record-visibility
-      service of EW-P1-3 3/4 (#2621); until it merges the value is validated (`private` → `422`) but not stored.
-      Reads already hide a row whose STORED visibility is `private`.
+- [x] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through
+      `RecordVisibilityService.setVisibility` (EW-P1-3, #2621); `private` → `422`. Reads hide a row whose STORED
+      visibility is `private`.
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 

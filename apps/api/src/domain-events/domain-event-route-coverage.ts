@@ -219,11 +219,22 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
 
     // ── Integration API v1 (`api/integrations/v1`, EW-P1-4) ───────────────────
     'POST /api/integrations/v1/tasks': {
-        // + extra teamIds as team resources, assignees as edges.
-        events: ['task.created', 'team.resource.added', 'task.updated', 'task.assignee.added'],
+        // + extra teamIds as team resources, assignees as edges, a hand-picked visibility.
+        events: [
+            'task.created',
+            'team.resource.added',
+            'task.updated',
+            'task.assignee.added',
+            'task.visibility_changed',
+        ],
     },
     'PATCH /api/integrations/v1/tasks/:id': {
-        events: ['task.updated', 'team.resource.added', 'team.resource.removed'],
+        events: [
+            'task.updated',
+            'team.resource.added',
+            'team.resource.removed',
+            'task.visibility_changed',
+        ],
     },
     'DELETE /api/integrations/v1/tasks/:id': { events: ['task.deleted'] },
     // One `task.transitioned` per hop of the sync walk (EW-P1-6).

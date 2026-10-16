@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
+import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
@@ -35,6 +36,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // events and notifications).
         TasksDomainModule,
         AgentTeamsModule,
+        // `visibility` on task writes (EW-P1-3).
+        RecordVisibilityModule,
     ],
     controllers: [
         IntegrationWhoamiController,

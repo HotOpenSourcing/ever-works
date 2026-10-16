@@ -70,6 +70,7 @@ describe('IntegrationTasksWriteController', () => {
             })),
         };
         const scope = { getScope: () => ({ tenantId: 'tenant-1', organizationId: ORG }) };
+        const visibility = { setVisibility: jest.fn().mockResolvedValue({}) };
         const controller = new IntegrationTasksWriteController(
             tasks as never,
             teamResources as never,
@@ -77,8 +78,9 @@ describe('IntegrationTasksWriteController', () => {
             idempotency as never,
             resources as never,
             scope as never,
+            visibility as never,
         );
-        return { controller, tasks, teamResources, links, idempotency, resources };
+        return { controller, tasks, teamResources, links, idempotency, resources, visibility };
     };
 
     it('creates a backlog task attributed to the integration, linked to its externalRef', async () => {
@@ -161,6 +163,14 @@ describe('IntegrationTasksWriteController', () => {
         expect(tasks.remove).toHaveBeenCalledWith('owner-1', 'task-1', expect.anything());
         expect(response.status).toHaveBeenCalledWith(200);
         expect(body).toMatchObject({ id: 'task-winner' });
+    });
+
+    it('applies a hand-picked team / organization visibility on create and PATCH', async () => {
+        const { controller, visibility } = setup();
+        await controller.create(user, { title: 'x', visibility: 'team' }, undefined, req(), res());
+        expect(visibility.setVisibility).toHaveBeenCalledWith('task', 'task-1', 'team');
+        await controller.update(user, 'task-1', { visibility: 'organization' }, undefined, res());
+        expect(visibility.setVisibility).toHaveBeenLastCalledWith('task', 'task-1', 'organization');
     });
 
     it("refuses an externalRef of another integration's source", async () => {

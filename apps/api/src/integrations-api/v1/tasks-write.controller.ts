@@ -5,6 +5,7 @@ import {
     Headers,
     HttpCode,
     HttpStatus,
+    Optional,
     Param,
     ParseUUIDPipe,
     Patch,
@@ -27,6 +28,7 @@ import {
     MaxLength,
     ValidateNested,
 } from 'class-validator';
+import { RecordVisibilityService } from '@ever-works/agent/record-visibility';
 import { TasksService, TaskPriority, TaskStatus } from '@ever-works/agent/tasks-domain';
 import { TeamResourcesService } from '@ever-works/agent/teams';
 import {
@@ -238,6 +240,9 @@ export class IntegrationTasksWriteController {
         private readonly idempotency: IntegrationIdempotencyService,
         private readonly resources: IntegrationResourcesService,
         private readonly scope: ScopeContextService,
+        // Record visibility (EW-P1-3): a hand-picked `team` / `organization`.
+        // Appended LAST + @Optional; absent, `visibility` is validated only.
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     @Post('tasks')
@@ -363,6 +368,9 @@ export class IntegrationTasksWriteController {
                     this.scope.getScope() as never,
                 );
             }
+            if (dto.visibility !== undefined) {
+                await this.visibility?.setVisibility('task', task.id, dto.visibility as never);
+            }
             const created = await this.resources.get('task', organizationId, task.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);
             return { status: 201, body: created.dto };
@@ -403,6 +411,9 @@ export class IntegrationTasksWriteController {
             }
             if (dto.teamIds !== undefined) {
                 await this.syncExtraTeams(user.userId, organizationId, id, dto.teamIds.slice(1));
+            }
+            if (dto.visibility !== undefined) {
+                await this.visibility?.setVisibility('task', id, dto.visibility as never);
             }
         });
         const updated = await this.resources.get('task', organizationId, id, source);
