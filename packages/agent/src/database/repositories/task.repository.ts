@@ -8,8 +8,18 @@ import {
     sanitizeLikePattern,
 } from '../utils';
 import { ownershipSqlPredicate, ownershipWhereWith, type OwnershipScope } from '../ownership-scope';
+import type { RecordListView } from '@ever-works/contracts';
+import type { RecordAccessContext } from '../../record-visibility/record-access.types';
+import { visibleToPredicate } from '../../record-visibility/visible-to';
 
 export interface ListTasksFilter {
+    /**
+     * Record visibility (EW-P1-3) list tab: `mine` (default, today's owner list),
+     * `shared` or `organization`. Only `TasksService.list` reads it: the repository's
+     * owner list ignores it, and {@link TaskRepository.findVisibleFiltered} takes the
+     * view as an argument.
+     */
+    view?: RecordListView;
     status?: TaskStatus | TaskStatus[];
     priority?: string | string[];
     missionId?: string;
@@ -182,6 +192,72 @@ export class TaskRepository {
             qb.andWhere(scopePredicate.clause, scopePredicate.parameters);
         }
 
+        return this.readFilteredPage(qb, filter);
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — the list through `visibleTo(principal)` instead of
+     * `userId = caller`: own rows, rows the caller takes part in, rows on their Teams /
+     * Works (`team` + `organization`) and, for an Organization member, every
+     * `organization` row. Same filters, order and paging as
+     * {@link findByUserIdFiltered}; `view = 'mine'` is identical to it.
+     */
+    async findVisibleFiltered(
+        context: RecordAccessContext,
+        view: RecordListView,
+        filter: ListTasksFilter = {},
+        scope?: OwnershipScope,
+    ): Promise<{ rows: Task[]; total: number }> {
+        const qb = this.repository.createQueryBuilder('task');
+        const predicate = visibleToPredicate({
+            alias: 'task',
+            aggregate: 'task',
+            context,
+            view,
+            escape: (identifier) => qb.connection.driver.escape(identifier),
+        });
+        qb.where(predicate.clause, predicate.parameters);
+
+        const scopePredicate = ownershipSqlPredicate('task', scope, 'taskScope');
+        if (scopePredicate) {
+            qb.andWhere(scopePredicate.clause, scopePredicate.parameters);
+        }
+
+        return this.readFilteredPage(qb, filter);
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — one Task by id when `visibleTo(principal)` admits
+     * it in the active scope. `null` (→ 404) otherwise, so existence never leaks.
+     */
+    async findVisibleById(
+        id: string,
+        context: RecordAccessContext,
+        scope?: OwnershipScope,
+    ): Promise<Task | null> {
+        const qb = this.repository.createQueryBuilder('task').where('task.id = :taskId', {
+            taskId: id,
+        });
+        const predicate = visibleToPredicate({
+            alias: 'task',
+            aggregate: 'task',
+            context,
+            view: 'organization',
+            escape: (identifier) => qb.connection.driver.escape(identifier),
+        });
+        qb.andWhere(predicate.clause, predicate.parameters);
+        const scopePredicate = ownershipSqlPredicate('task', scope, 'taskScope');
+        if (scopePredicate) {
+            qb.andWhere(scopePredicate.clause, scopePredicate.parameters);
+        }
+        return qb.getOne();
+    }
+
+    /** The shared filter / count / order / page tail of the two list reads. */
+    private async readFilteredPage(
+        qb: SelectQueryBuilder<Task>,
+        filter: ListTasksFilter,
+    ): Promise<{ rows: Task[]; total: number }> {
         if (filter.status) {
             if (Array.isArray(filter.status)) {
                 qb.andWhere('task.status IN (:...statuses)', { statuses: filter.status });

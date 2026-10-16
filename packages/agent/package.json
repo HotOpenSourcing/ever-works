@@ -205,6 +205,10 @@
             "types": "./dist/domain-events/index.d.ts",
             "default": "./dist/domain-events/index.js"
         },
+        "./record-visibility": {
+            "types": "./dist/record-visibility/index.d.ts",
+            "default": "./dist/record-visibility/index.js"
+        },
         "./schedules": {
             "types": "./dist/schedules/index.d.ts",
             "default": "./dist/schedules/index.js"
