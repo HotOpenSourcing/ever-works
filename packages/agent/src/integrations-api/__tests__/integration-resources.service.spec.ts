@@ -15,6 +15,7 @@ import { Agent } from '../../entities/agent.entity';
 import { Organization } from '../../entities/organization.entity';
 import { OrganizationMember } from '../../entities/organization-member.entity';
 import { Task } from '../../entities/task.entity';
+import { TaskChatMessage } from '../../entities/task-chat-message.entity';
 import { Team } from '../../entities/team.entity';
 import { User } from '../../entities/user.entity';
 import { ExternalRecordLinksService } from '../external-record-links.service';
@@ -63,6 +64,7 @@ describe('IntegrationResourcesService', () => {
 
     beforeEach(async () => {
         for (const table of [
+            'task_chat_messages',
             'tasks',
             'teams',
             'agents',
@@ -184,6 +186,58 @@ describe('IntegrationResourcesService', () => {
         expectValid('resources/team.schema.json', teams.data[0]);
         const agentDto = await resources.get('agent', ORG_A, agent.id, 'gauzy');
         expectValid('resources/agent.schema.json', agentDto.dto);
+    });
+
+    it("lists a task's comments with their links, and 404s for a task outside the organization", async () => {
+        const mine = await task(ORG_A, 'Ship the feed');
+        const other = await task(ORG_B, 'Not yours');
+        const messages = dataSource.getRepository(TaskChatMessage);
+        const first = await messages.save({
+            taskId: mine.id,
+            authorType: 'integration',
+            authorId: randomUUID(),
+            body: 'From Gauzy',
+            externalAuthor: { name: 'Ada', avatarUrl: null, source: 'gauzy' },
+        } as unknown as TaskChatMessage);
+        await messages.save({
+            taskId: mine.id,
+            authorType: 'user',
+            authorId: OWNER,
+            body: 'Thanks',
+        } as unknown as TaskChatMessage);
+        await links.create(
+            { organizationId: ORG_A, source: 'gauzy', installationId: null },
+            { entityType: 'task_comment', entityId: first.id, externalId: 'c-1' },
+        );
+
+        const page = await resources.comments(ORG_A, mine.id, { limit: 1 }, 'gauzy');
+        expect(page.hasMore).toBe(true);
+        const rest = await resources.comments(
+            ORG_A,
+            mine.id,
+            { limit: 1, cursor: page.nextCursor },
+            'gauzy',
+        );
+        const all = [...page.data, ...rest.data];
+        expect(all).toHaveLength(2);
+        for (const dto of all) expectValid('resources/task-comment.schema.json', dto);
+        const linked = all.find((dto) => dto.id === first.id);
+        expect(linked).toMatchObject({
+            organizationId: ORG_A,
+            authorType: 'integration',
+            externalLinks: [expect.objectContaining({ source: 'gauzy', externalId: 'c-1' })],
+        });
+
+        expect(await resources.comment(ORG_A, mine.id, first.id, 'gauzy')).toMatchObject({
+            id: first.id,
+            body: 'From Gauzy',
+        });
+        await expect(resources.comments(ORG_A, other.id, {}, 'gauzy')).rejects.toBeInstanceOf(
+            ResourceNotFoundError,
+        );
+        await expect(
+            resources.comment(ORG_A, mine.id, randomUUID(), 'gauzy'),
+        ).rejects.toBeInstanceOf(ResourceNotFoundError);
     });
 
     it('serves the organization and its members', async () => {

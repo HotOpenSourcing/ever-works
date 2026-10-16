@@ -8,13 +8,16 @@ import {
     buildTaskSnapshot,
     buildTeamSnapshot,
     buildWorkSnapshot,
+    toTaskCommentDto,
     type AggregateSnapshot,
 } from '../domain-events/domain-event-snapshots';
 import { Agent } from '../entities/agent.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
+import { TaskChatMessage } from '../entities/task-chat-message.entity';
 import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
+import type { ExternalLinkEntityType } from '../entities/external-record-link.entity';
 import { ExternalRecordLinksService, type ExternalLinkDto } from './external-record-links.service';
 import { etagFor } from './if-match';
 import { ResourceNotFoundError } from './integration-api.errors';
@@ -146,8 +149,56 @@ export class IntegrationResourcesService {
         return { data, nextCursor: page.nextCursor, hasMore: page.hasMore };
     }
 
+    /**
+     * `GET /tasks/:id/comments` — the task's comments, ordered by
+     * `(updatedAt, id)` (an edit moves a comment behind the cursor, so an
+     * `updatedSince` sync picks it up). The task must be one the caller sees.
+     */
+    async comments(
+        organizationId: string,
+        taskId: string,
+        query: KeysetQuery,
+        source: string,
+    ): Promise<KeysetPage<Record<string, unknown>>> {
+        await this.get('task', organizationId, taskId, source);
+        const qb = this.dataSource
+            .getRepository(TaskChatMessage)
+            .createQueryBuilder('row')
+            .where('row.taskId = :taskId', { taskId });
+        const page = await readKeysetPage(qb, 'row', query);
+        const dtos = page.data.map(
+            (row) => toTaskCommentDto(row, organizationId) as unknown as Record<string, unknown>,
+        );
+        return {
+            data: await this.withLinks('task_comment', organizationId, dtos, source),
+            nextCursor: page.nextCursor,
+            hasMore: page.hasMore,
+        };
+    }
+
+    /** One comment of a task the caller sees (`404` otherwise). */
+    async comment(
+        organizationId: string,
+        taskId: string,
+        commentId: string,
+        source: string,
+    ): Promise<Record<string, unknown>> {
+        await this.get('task', organizationId, taskId, source);
+        const row = await this.dataSource
+            .getRepository(TaskChatMessage)
+            .findOne({ where: { id: commentId, taskId } });
+        if (!row) throw notFound('task_comment', commentId);
+        const [dto] = await this.withLinks(
+            'task_comment',
+            organizationId,
+            [toTaskCommentDto(row, organizationId) as unknown as Record<string, unknown>],
+            source,
+        );
+        return dto;
+    }
+
     private async withLinks(
-        kind: IntegrationResourceKind,
+        kind: ExternalLinkEntityType,
         organizationId: string,
         dtos: Record<string, unknown>[],
         source: string,

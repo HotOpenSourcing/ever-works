@@ -448,6 +448,11 @@ export class TaskChatMessageRepository {
             editedAt: new Date(),
         });
     }
+    /** Integration API v1 (EW-P1-4): delete one message (`DELETE /tasks/:id/comments/:cid`). */
+    async delete(id: string, manager?: EntityManager): Promise<void> {
+        const repo = manager ? manager.getRepository(TaskChatMessage) : this.repo;
+        await repo.delete(id);
+    }
 }
 
 @Injectable()

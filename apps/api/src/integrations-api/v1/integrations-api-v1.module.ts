@@ -10,6 +10,8 @@ import { IntegrationExceptionFilter } from './integration-exception.filter';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
+import { IntegrationTaskSetsController } from './tasks-sets.controller';
+import { IntegrationTaskCommentsController } from './task-comments.controller';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -39,6 +41,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationResourcesController,
         IntegrationLinksController,
         IntegrationTasksWriteController,
+        IntegrationTaskSetsController,
+        IntegrationTaskCommentsController,
     ],
     providers: [
         IntegrationOnlyGuard,

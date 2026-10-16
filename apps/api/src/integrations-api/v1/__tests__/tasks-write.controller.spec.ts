@@ -158,7 +158,7 @@ describe('IntegrationTasksWriteController', () => {
     it('requires an Idempotency-Key, and refuses private visibility', async () => {
         const { controller } = setup();
         await expect(
-            controller.create(user, { title: 'x' }, undefined, req(undefined), res()),
+            controller.create(user, { title: 'x' }, undefined, req(''), res()),
         ).rejects.toMatchObject({
             code: 'validation_failed',
         });

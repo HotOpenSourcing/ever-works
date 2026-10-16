@@ -226,6 +226,24 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['task.updated', 'team.resource.added', 'team.resource.removed'],
     },
     'DELETE /api/integrations/v1/tasks/:id': { events: ['task.deleted'] },
+    'PUT /api/integrations/v1/tasks/:id/assignees': {
+        events: ['task.assignee.added', 'task.assignee.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/watchers': {
+        events: ['task.watcher.added', 'task.watcher.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/blocks': {
+        events: ['task.block.added', 'task.block.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/relations': {
+        events: ['task.relation.added', 'task.relation.removed'],
+    },
+    // + `task.comment.deleted` when a concurrent create won the externalRef.
+    'POST /api/integrations/v1/tasks/:id/comments': {
+        events: ['task.comment.created', 'task.comment.deleted'],
+    },
+    'PATCH /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.updated'] },
+    'DELETE /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.deleted'] },
 };
 
 /** The routes a list of events covers (for messages). */
