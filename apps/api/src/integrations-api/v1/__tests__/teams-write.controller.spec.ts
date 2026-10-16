@@ -30,7 +30,21 @@ describe('IntegrationTeamsWriteController', () => {
 
     const setup = () => {
         const teams = {
-            create: jest.fn().mockResolvedValue({ id: 'team-1' }),
+            // As TeamsService.create: `withinCreate` runs in the create's transaction (T17a).
+            create: jest.fn(
+                async (
+                    _userId: string,
+                    _orgId: string,
+                    _input: unknown,
+                    options?: {
+                        withinCreate?: (row: { id: string }, manager?: unknown) => Promise<void>;
+                    },
+                ) => {
+                    const row = { id: 'team-1' };
+                    if (options?.withinCreate) await options.withinCreate(row, 'tx-manager');
+                    return row;
+                },
+            ),
             update: jest.fn().mockResolvedValue({}),
             remove: jest.fn().mockResolvedValue(undefined),
             addMember: jest.fn().mockResolvedValue({}),
@@ -96,16 +110,23 @@ describe('IntegrationTeamsWriteController', () => {
             req(),
             response,
         );
-        expect(teams.create).toHaveBeenCalledWith('owner-1', ORG, {
-            name: 'Platform',
-            slug: 'platform',
-            description: null,
-            parentTeamId: null,
-            avatarIcon: null,
-        });
+        expect(teams.create).toHaveBeenCalledWith(
+            'owner-1',
+            ORG,
+            {
+                name: 'Platform',
+                slug: 'platform',
+                description: null,
+                parentTeamId: null,
+                avatarIcon: null,
+            },
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
+        );
+        // T17a — linked inside the create's transaction (its manager).
         expect(links.create).toHaveBeenCalledWith(
             expect.objectContaining({ organizationId: ORG, installationId: 'conn-1' }),
             expect.objectContaining({ entityType: 'team', entityId: 'team-1', externalId: 'gt-1' }),
+            'tx-manager',
         );
         expect(response.status).toHaveBeenCalledWith(201);
         expect(response.setHeader).toHaveBeenCalledWith('ETag', '"5"');

@@ -212,7 +212,8 @@ be `backlog` (default) or `todo`.
 ### 6.1 Creating with an external reference
 
 - Every create accepts `externalRef: {source:'gauzy', externalId, externalUrl}`.
-- The row and its `external_record_links` row are created **atomically**.
+- The row and its `external_record_links` row are created **atomically** (tasks and teams: one transaction, T17a;
+  comments, KB documents and folders: created, then linked, undone on a lost race).
 - A repeat with the same `externalRef` returns **200 with the existing entity**, not a duplicate. Together with
   `Idempotency-Key` this makes creates safe to retry.
 
