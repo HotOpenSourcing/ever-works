@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, type ReactNode } from 'react';
 import { HelpLink } from '@/components/help/HelpLink';
 import { Lightbulb, Settings as SettingsIcon, Search, PenLine } from 'lucide-react';
 import { Select } from '@/components/ui/select';
@@ -71,6 +71,8 @@ const IDEA_PLACEHOLDERS: ReadonlyArray<string> = [
 ];
 
 interface IdeasPageClientProps {
+    /** Record visibility (EW-P1-3): the Mine | Shared with me | Organization tabs. */
+    tabs?: ReactNode;
     initialIdeas: WorkProposal[];
     loadError?: string | null;
     /**
@@ -98,6 +100,7 @@ export function IdeasPageClient({
     initialIdeas,
     loadError = null,
     matchedWorkIds = {},
+    tabs,
     filters,
     pagination,
 }: IdeasPageClientProps) {
@@ -219,6 +222,7 @@ export function IdeasPageClient({
                     </DropdownMenu>
                 }
             />
+            {tabs}
 
             {/* Quick add — shared composer matches the marketing site. */}
             <div className="mb-6">

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Gauge, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
 import { Select } from '@/components/ui/select';
@@ -13,6 +13,8 @@ import type { Goal, GoalStatus } from '@/lib/api/goals';
 const GOAL_STATUSES: GoalStatus[] = ['draft', 'active', 'paused', 'completed'];
 
 interface GoalsListProps {
+    /** Record visibility (EW-P1-3): the Mine | Shared with me | Organization tabs. */
+    tabs?: ReactNode;
     goals: Goal[];
     loadError?: string | null;
     filters?: {
@@ -46,6 +48,7 @@ export function GoalsList({
     filters,
     archiveHrefs,
     pagination,
+    tabs,
 }: GoalsListProps) {
     const t = useTranslations('dashboard.goalsPage');
     const [statusFilter, setStatusFilter] = useState(filters?.status ?? '');
@@ -68,6 +71,7 @@ export function GoalsList({
                     </Button>
                 }
             />
+            {tabs}
 
             {archiveHrefs ? (
                 <nav

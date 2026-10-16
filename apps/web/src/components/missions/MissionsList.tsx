@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition, useEffect } from 'react';
+import { useState, useTransition, useEffect, type ReactNode } from 'react';
 import { HelpLink } from '@/components/help/HelpLink';
 import { Target, Search, PenLine } from 'lucide-react';
 import { Select } from '@/components/ui/select';
@@ -22,6 +22,8 @@ import type { Mission, MissionStatus } from '@/lib/api/missions';
 const MISSION_STATUSES: MissionStatus[] = ['active', 'paused', 'completed', 'failed'];
 
 interface MissionsListProps {
+    /** Record visibility (EW-P1-3): the Mine | Shared with me | Organization tabs. */
+    tabs?: ReactNode;
     missions: Mission[];
     loadError?: string | null;
     filters?: {
@@ -66,6 +68,7 @@ export function MissionsList({
     loadError = null,
     filters,
     pagination,
+    tabs,
 }: MissionsListProps) {
     const t = useTranslations('dashboard.missionsPage');
     const [draft, setDraft] = useState('');
@@ -125,6 +128,7 @@ export function MissionsList({
         <div className="w-full">
             {/* Header */}
             <PageHeader icon={Target} title={t('title')} subtitle={t('subtitle')} tone="mission" />
+            {tabs}
 
             {/* Quick-add composer — modeled on the marketing site's
                 landing prompt. Used by both empty and populated
