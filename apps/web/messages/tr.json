@@ -2655,6 +2655,7 @@
                 "appLauncher": "Uygulama başlatıcı",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Webhook'lar",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

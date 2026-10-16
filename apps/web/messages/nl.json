@@ -2655,6 +2655,7 @@
                 "appLauncher": "App-launcher",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Webhooks",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

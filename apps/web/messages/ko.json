@@ -2655,6 +2655,7 @@
                 "appLauncher": "앱 런처",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "웹훅",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

@@ -2723,6 +2723,7 @@
                 "appLauncher": "مشغّل التطبيقات",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "خطافات الويب",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",

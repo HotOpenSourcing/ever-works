@@ -4413,6 +4413,7 @@
                 "appLauncher": "App Launcher",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Webhooks",
                 "connections": "Connections",
                 "repositories": "Repositories",
                 "agentPlugins": "Agent Plugins",

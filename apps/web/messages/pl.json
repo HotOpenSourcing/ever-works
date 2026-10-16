@@ -2655,6 +2655,7 @@
                 "appLauncher": "Program uruchamiający aplikacje",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Webhooki",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",
