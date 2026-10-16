@@ -7,7 +7,7 @@ import { EmailAddressesSettings } from '@/components/settings/EmailAddressesSett
 export default async function EmailAddressesPage() {
     let initialAddresses: Awaited<ReturnType<typeof emailAddressesAPI.list>> = [];
     try {
-        initialAddresses = await emailAddressesAPI.list();
+        initialAddresses = await emailAddressesAPI.list(undefined, { includeDisabled: true });
     } catch {
         initialAddresses = [];
     }

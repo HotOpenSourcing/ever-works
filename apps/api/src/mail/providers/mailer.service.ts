@@ -81,6 +81,21 @@ export class MailerService {
         );
     }
 
+    /**
+     * EW-P4-3 — whether `sendMail` actually DELIVERS mail with the current
+     * configuration. `false` when it would only log: the faker provider
+     * (`MAILER_PROVIDER` unset or `none`), or `resend` with no client (no
+     * `RESEND_APIKEY`), which falls back to the faker. A flow whose whole point
+     * is that a person receives the email (an address confirmation link) must
+     * not report "sent" then.
+     */
+    canDeliver(): boolean {
+        const provider = config.mail.provider();
+        if (provider === 'smtp') return true;
+        if (provider === 'resend') return !!this.resend;
+        return false;
+    }
+
     async sendMail(data: SendMailOptions): Promise<void> {
         const provider = config.mail.provider();
         const recipient = data.to ? this.getDestination(data.to).join(', ') : 'unknown';

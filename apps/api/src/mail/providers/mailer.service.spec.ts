@@ -61,6 +61,22 @@ describe('MailerService', () => {
         jest.restoreAllMocks();
     });
 
+    // EW-P4-3 — a flow that needs the email to ARRIVE (an address
+    // confirmation link) asks whether the mailer delivers or only logs.
+    describe('canDeliver', () => {
+        it.each([
+            [undefined, undefined, false],
+            ['none', undefined, false],
+            ['smtp', undefined, true],
+            ['resend', undefined, false],
+            ['resend', 'client', true],
+        ])('MAILER_PROVIDER=%s with resend %s → %s', (provider, client, expected) => {
+            setEnv(provider);
+            const service = buildService(client ? (resend as unknown as Resend) : undefined);
+            expect(service.canDeliver()).toBe(expected);
+        });
+    });
+
     describe('SMTP provider', () => {
         beforeEach(() => setEnv('smtp'));
 

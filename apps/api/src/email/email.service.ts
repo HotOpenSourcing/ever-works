@@ -55,6 +55,13 @@ const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
  */
 export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000;
 
+/**
+ * EW-P4-3 — a verification token whose issue time is this close to the row's
+ * creation is the one `createAddress` mints (EW-711 #44), which is never
+ * mailed: it does not start the resend cooldown.
+ */
+const TOKEN_MINTED_AT_CREATE_SLACK_MS = 5 * 1000;
+
 /** EW-P4-3 — where the confirmation link lands (a public web page, see apps/web). */
 export const EMAIL_ADDRESS_VERIFY_PATH = '/email-address/verify';
 
@@ -237,7 +244,13 @@ export class EmailService {
     async listAddresses(
         userId: string,
         direction?: EmailAddressDirection,
+        options: { includeDisabled?: boolean } = {},
     ): Promise<TenantEmailAddress[]> {
+        // EW-P4-3 — the settings page lists disabled addresses too, so they
+        // can be enabled again; every other caller keeps active ones only.
+        if (options.includeDisabled) {
+            return this.addresses.findAllByUser(userId, direction);
+        }
         return this.addresses.findActiveByUser(userId, direction);
     }
 
@@ -310,13 +323,27 @@ export class EmailService {
         const issuedAt = row.verificationTokenExpiresAt
             ? new Date(row.verificationTokenExpiresAt).getTime() - VERIFICATION_TOKEN_TTL_MS
             : null;
-        if (issuedAt !== null && Date.now() - issuedAt < VERIFICATION_RESEND_COOLDOWN_MS) {
+        // The token `createAddress` minted was never mailed, so it does not
+        // count as "a confirmation email was just sent".
+        const createdAt = row.createdAt ? new Date(row.createdAt).getTime() : null;
+        const mintedAtCreate =
+            issuedAt !== null &&
+            createdAt !== null &&
+            Math.abs(issuedAt - createdAt) <= TOKEN_MINTED_AT_CREATE_SLACK_MS;
+        if (
+            issuedAt !== null &&
+            !mintedAtCreate &&
+            Date.now() - issuedAt < VERIFICATION_RESEND_COOLDOWN_MS
+        ) {
             throw new HttpException(
                 'A confirmation email was just sent to this address. Wait a minute before sending another.',
                 HttpStatus.TOO_MANY_REQUESTS,
             );
         }
-        if (!this.mail) {
+        // Never a silent "sent": with no mail module, or a mailer that only
+        // logs (MAILER_PROVIDER unset / `none`, or Resend without a key), the
+        // link would never arrive.
+        if (!this.mail || !this.mail.canDeliver()) {
             throw new ServiceUnavailableException(
                 'Platform email is not configured, so the confirmation email cannot be sent.',
             );

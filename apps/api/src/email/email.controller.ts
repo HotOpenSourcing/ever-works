@@ -102,8 +102,12 @@ export class EmailController {
     async listAddresses(
         @CurrentUser() auth: AuthenticatedUser,
         @Query('direction') direction?: EmailAddressDirection,
+        // EW-P4-3 — `includeDisabled=true` (exact string): the settings page.
+        @Query('includeDisabled') includeDisabled?: string,
     ) {
-        const addresses = await this.emailService.listAddresses(auth.userId, direction);
+        const addresses = await this.emailService.listAddresses(auth.userId, direction, {
+            includeDisabled: includeDisabled === 'true',
+        });
         return { addresses: toPublicEmailAddresses(addresses) };
     }
 

@@ -137,6 +137,71 @@ describe('EmailFacadeService.send — RFC threading (EW-P4-3)', () => {
     });
 });
 
+// EW-P4-3 — the sender name saved on the address reaches the provider on
+// every path (direct send, auto-sent draft, released draft all go through send).
+describe('EmailFacadeService.send — saved sender name', () => {
+    function facadeWithAddress(address: unknown) {
+        const { facade, plugin } = makeFacade();
+        (facade as unknown as { emailAddresses: unknown }).emailAddresses = {
+            findById: jest.fn().mockResolvedValue(address),
+        };
+        return { facade, plugin };
+    }
+
+    it("uses the address's providerSettings.fromName when the caller gives none", async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: { fromName: '  Nova Agent ' },
+        });
+        await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Nova Agent');
+    });
+
+    it("keeps the caller's own fromName", async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: { fromName: 'Saved' },
+        });
+        await facade.send(
+            { ...INPUT, fromName: 'Explicit' },
+            { userId: 'user-1', addressId: 'addr-1' },
+        );
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Explicit');
+    });
+
+    it('sends without a name when none is saved', async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: {},
+        });
+        await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBeUndefined();
+    });
+
+    it('looks the name up itself, best-effort, when sender verification is switched off', async () => {
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'false';
+        try {
+            const { facade, plugin } = facadeWithAddress({
+                id: 'addr-1',
+                verified: false,
+                providerSettings: { fromName: 'Saved' },
+            });
+            await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+            expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Saved');
+            (
+                facade as unknown as { emailAddresses: { findById: jest.Mock } }
+            ).emailAddresses.findById.mockRejectedValue(new Error('db down'));
+            await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+            expect(plugin.sendEmail.mock.calls[1][0].fromName).toBeUndefined();
+        } finally {
+            delete process.env.EMAIL_SENDER_VERIFICATION_REQUIRED;
+        }
+    });
+});
+
 describe('buildOutboundHeaders', () => {
     it('drops header injection attempts: CR/LF in a value, an illegal name', () => {
         const headers = buildOutboundHeaders('a@acme.test', {

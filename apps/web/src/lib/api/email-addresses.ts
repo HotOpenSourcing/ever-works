@@ -92,8 +92,16 @@ export interface EmailMessageDetail extends EmailMessageListItem {
 }
 
 export const emailAddressesAPI = {
-    list: async (direction?: EmailAddressDirection) => {
-        const query = direction ? `?direction=${direction}` : '';
+    list: async (
+        direction?: EmailAddressDirection,
+        options: { includeDisabled?: boolean } = {},
+    ) => {
+        const params = new URLSearchParams();
+        if (direction) params.set('direction', direction);
+        // EW-P4-3 — the settings page also lists disabled addresses, so they
+        // can be enabled again after a reload.
+        if (options.includeDisabled) params.set('includeDisabled', 'true');
+        const query = params.toString() ? `?${params.toString()}` : '';
         const data = await serverFetch<{ addresses: EmailAddress[] }>(`/email/addresses${query}`);
         return data.addresses;
     },

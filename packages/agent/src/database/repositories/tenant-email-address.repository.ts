@@ -42,6 +42,22 @@ export class TenantEmailAddressRepository {
     }
 
     /** Active (non-disabled) addresses owned by this user. */
+    /**
+     * EW-P4-3 — every address of the user, disabled ones included (the
+     * settings page, where a disabled address can be enabled again). Sending
+     * and receiving keep using {@link findActiveByUser}.
+     */
+    async findAllByUser(
+        userId: string,
+        direction?: EmailAddressDirection,
+    ): Promise<TenantEmailAddress[]> {
+        const where: Record<string, unknown> = { userId };
+        if (direction) {
+            where.direction = direction;
+        }
+        return this.repository.find({ where, order: { createdAt: 'ASC' } });
+    }
+
     async findActiveByUser(
         userId: string,
         direction?: EmailAddressDirection,

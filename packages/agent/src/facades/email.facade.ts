@@ -221,8 +221,11 @@ export class EmailFacadeService extends BaseFacadeService {
         // verified. Checked first, so a refused send reserves no capacity and
         // touches no provider. (EmailService refuses earlier with the same
         // error; this is the backstop every outbound path converges on.)
+        // `undefined` = not looked up here; the sender-name lookup below then
+        // loads it itself.
+        let sender: TenantEmailAddress | null | undefined;
         if (options.addressId && this.emailAddresses && emailSenderVerificationRequired()) {
-            const sender = await this.emailAddresses.findById(options.addressId);
+            sender = await this.emailAddresses.findById(options.addressId);
             if (sender && !sender.verified) {
                 throw new EmailSenderNotVerifiedException(sender.address);
             }
@@ -271,10 +274,15 @@ export class EmailFacadeService extends BaseFacadeService {
             const settings = await this.resolveSettings(plugin.id, options);
 
             const { bodyText, bodyHtml } = await this.renderBody(input);
+            // EW-P4-3 — the sender name saved on the address (Settings →
+            // Email addresses) when the caller gave none. Here, so direct
+            // sends, auto-sent drafts and released drafts all carry it.
+            const fromName =
+                input.fromName ?? (await this.savedFromName(options.addressId, sender));
 
             wireInput = {
                 from: input.from,
-                fromName: input.fromName,
+                fromName,
                 to: input.to,
                 cc: input.cc,
                 bcc: input.bcc,
@@ -316,6 +324,25 @@ export class EmailFacadeService extends BaseFacadeService {
         await this.recordUsage(plugin.id, 'sendEmail', options);
 
         return result;
+    }
+
+    /**
+     * EW-P4-3 — `providerSettings.fromName` of the sending address, when one
+     * was saved. Best-effort: a lookup failure sends without a name, as before.
+     */
+    private async savedFromName(
+        addressId: string | undefined,
+        loaded?: TenantEmailAddress | null,
+    ): Promise<string | undefined> {
+        if (!addressId || !this.emailAddresses) return undefined;
+        try {
+            const address =
+                loaded !== undefined ? loaded : await this.emailAddresses.findById(addressId);
+            const name = address?.providerSettings?.fromName;
+            return typeof name === 'string' && name.trim() ? name.trim().slice(0, 200) : undefined;
+        } catch {
+            return undefined;
+        }
     }
 
     /**

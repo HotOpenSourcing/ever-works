@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,6 +60,9 @@ export function AddEmailAddressWizard({ open, onClose, onCreated, apiOrigin }: P
     const [created, setCreated] = useState<EmailAddress | null>(null);
     const [confirmationSent, setConfirmationSent] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // Bumped on every close: a request that was still running when the wizard
+    // closed must not write its result into the next, fresh wizard.
+    const session = useRef(0);
 
     const providers = providersFor(direction);
     const provider = EMAIL_PROVIDERS.find((p) => p.id === pluginId);
@@ -80,6 +83,7 @@ export function AddEmailAddressWizard({ open, onClose, onCreated, apiOrigin }: P
     };
 
     const close = () => {
+        session.current += 1;
         reset();
         onClose();
     };
@@ -91,6 +95,7 @@ export function AddEmailAddressWizard({ open, onClose, onCreated, apiOrigin }: P
             setError('Enter a valid email address.');
             return;
         }
+        const started = session.current;
         startTransition(async () => {
             const providerSettings: Record<string, unknown> = {};
             if (sends && fromName.trim()) providerSettings.fromName = fromName.trim();
@@ -101,12 +106,16 @@ export function AddEmailAddressWizard({ open, onClose, onCreated, apiOrigin }: P
                 providerSettings,
                 defaultForReplies: sends ? defaultForReplies : false,
             });
+            if (result.success) {
+                // The address exists whether or not the wizard is still open.
+                onCreated(result.data);
+            }
+            if (started !== session.current) return; // closed meanwhile
             if (!result.success) {
                 setError(result.error);
                 return;
             }
             setCreated(result.data);
-            onCreated(result.data);
             setStep(4);
         });
     };
@@ -114,14 +123,19 @@ export function AddEmailAddressWizard({ open, onClose, onCreated, apiOrigin }: P
     const sendConfirmation = () => {
         if (!created) return;
         setError(null);
+        const started = session.current;
+        const target = created;
         startTransition(async () => {
-            const result = await sendEmailAddressVerificationAction(created.id);
+            const result = await sendEmailAddressVerificationAction(target.id);
+            if (result.success) {
+                toast.success(`Confirmation email sent to ${target.address}`);
+            }
+            if (started !== session.current) return; // closed meanwhile
             if (!result.success) {
                 setError(result.error);
                 return;
             }
             setConfirmationSent(true);
-            toast.success(`Confirmation email sent to ${created.address}`);
         });
     };
 

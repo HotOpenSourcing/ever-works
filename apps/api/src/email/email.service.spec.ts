@@ -665,7 +665,7 @@ describe('EmailService verification (EW-P4-3)', () => {
         verificationTokenExpiresAt: null as Date | null,
     };
     let addresses: { findByIdForUser: jest.Mock; update: jest.Mock };
-    let mail: { sendNotificationEmail: jest.Mock };
+    let mail: { sendNotificationEmail: jest.Mock; canDeliver: jest.Mock };
     let facade: { verifyAddress: jest.Mock; send: jest.Mock };
 
     function build(withMail = true) {
@@ -690,7 +690,10 @@ describe('EmailService verification (EW-P4-3)', () => {
             findByIdForUser: jest.fn().mockResolvedValue({ ...row }),
             update: jest.fn().mockResolvedValue(undefined),
         };
-        mail = { sendNotificationEmail: jest.fn().mockResolvedValue(true) };
+        mail = {
+            sendNotificationEmail: jest.fn().mockResolvedValue(true),
+            canDeliver: jest.fn().mockReturnValue(true),
+        };
         facade = {
             verifyAddress: jest.fn().mockRejectedValue(new Error('No email-outbound provider')),
             send: jest
@@ -752,6 +755,41 @@ describe('EmailService verification (EW-P4-3)', () => {
         expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
     });
 
+    it('the token createAddress minted (never mailed) does not start the cooldown', async () => {
+        const createdAt = new Date(Date.now() - 2_000);
+        addresses.findByIdForUser.mockResolvedValue({
+            ...row,
+            createdAt,
+            verificationTokenExpiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000),
+        });
+        await expect(build().triggerVerification('user-1', 'addr-1')).resolves.toMatchObject({
+            sent: true,
+        });
+        expect(mail.sendNotificationEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it('a link actually sent after creation does start the cooldown', async () => {
+        const createdAt = new Date(Date.now() - 30_000);
+        addresses.findByIdForUser.mockResolvedValue({
+            ...row,
+            createdAt,
+            // Issued 20 s after creation, 10 s ago.
+            verificationTokenExpiresAt: new Date(Date.now() - 10_000 + 24 * 60 * 60 * 1000),
+        });
+        await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
+            status: 429,
+        });
+    });
+
+    it('answers 503 when platform mail would only be logged (faker / no Resend key)', async () => {
+        mail.canDeliver.mockReturnValue(false);
+        await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
+            status: 503,
+        });
+        expect(addresses.update).not.toHaveBeenCalled();
+        expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
+    });
+
     it('answers 503 rather than pretending to send when platform mail is not wired', async () => {
         await expect(build(false).triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
             status: 503,
@@ -786,5 +824,28 @@ describe('EmailService verification (EW-P4-3)', () => {
         process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'false';
         await build().sendMessage('user-1', input);
         expect(facade.send).toHaveBeenCalled();
+    });
+});
+
+/** EW-P4-3 — the settings page lists disabled addresses; everything else active ones only. */
+describe('EmailService.listAddresses (EW-P4-3)', () => {
+    it('lists active addresses by default and every address with includeDisabled', async () => {
+        const addresses = {
+            findActiveByUser: jest.fn().mockResolvedValue([{ id: 'a' }]),
+            findAllByUser: jest.fn().mockResolvedValue([{ id: 'a' }, { id: 'b-disabled' }]),
+        };
+        const service = new EmailService(
+            addresses as never,
+            {} as never,
+            {} as never,
+            {} as never,
+            {} as never,
+        );
+        await expect(service.listAddresses('user-1')).resolves.toEqual([{ id: 'a' }]);
+        expect(addresses.findAllByUser).not.toHaveBeenCalled();
+        await expect(
+            service.listAddresses('user-1', 'outbound', { includeDisabled: true }),
+        ).resolves.toHaveLength(2);
+        expect(addresses.findAllByUser).toHaveBeenCalledWith('user-1', 'outbound');
     });
 });

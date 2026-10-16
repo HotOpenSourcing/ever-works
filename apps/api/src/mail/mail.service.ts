@@ -23,6 +23,16 @@ export class MailService {
     constructor(private readonly mailerService: MailerService) {}
 
     /**
+     * EW-P4-3 — whether platform mail is really delivered (not only logged by
+     * the development faker). See `MailerService.canDeliver`.
+     */
+    canDeliver(): boolean {
+        return typeof this.mailerService.canDeliver === 'function'
+            ? this.mailerService.canDeliver()
+            : true;
+    }
+
+    /**
      * EW-617 G2: anonymous users have no email and must never receive
      * transactional mail. All mail handlers early-return when the recipient
      * has no email; in practice they shouldn't fire for anon users at all
