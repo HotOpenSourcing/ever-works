@@ -3,9 +3,11 @@ import {
     ConflictException,
     Injectable,
     NotFoundException,
+    Optional,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { type EntityManager, In, Repository } from 'typeorm';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
 import { Agent } from '../entities/agent.entity';
 import { Goal } from '../entities/goal.entity';
 import { Mission } from '../entities/mission.entity';
@@ -65,9 +67,35 @@ export class TeamResourcesService {
         private readonly ideas: Repository<WorkProposal>,
         @InjectRepository(Task)
         private readonly tasks: Repository<Task>,
+        // Domain events (EW-P1-1 B2) — `team.resource.*`, plus `task.updated` /
+        // `work.updated` for an attached task or work (their `teamIds` change).
+        // Appended LAST + @Optional.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
+        // EW-P1-3: goals sit on Teams too (`team_resources` type `goal`). After the
+        // domain-event publisher so positional test fixtures keep their indices;
+        // @Optional() because a required parameter cannot follow an optional one.
+        @Optional()
         @InjectRepository(Goal)
-        private readonly goals: Repository<Goal>,
+        private readonly goals?: Repository<Goal>,
     ) {}
+
+    /** The resource-side event of a team resource change (its DTO's `teamIds` moved). */
+    private async recordResourceSide(
+        publisher: DomainEventPublisher,
+        manager: EntityManager,
+        resourceType: TeamResourceType,
+        resourceId: string,
+    ): Promise<void> {
+        if (resourceType === 'task') {
+            await publisher.changed(manager, 'task', resourceId, 'task.updated', {
+                changedFields: ['teamIds'],
+            });
+        } else if (resourceType === 'work') {
+            await publisher.changed(manager, 'work', resourceId, 'work.updated', {
+                changedFields: ['teamIds'],
+            });
+        }
+    }
 
     /**
      * Attach a resource to a Team. Validates the Team is in the org AND the
@@ -103,7 +131,27 @@ export class TeamResourcesService {
         });
 
         try {
-            const saved = await this.resources.save(row);
+            const publisher = this.domainEvents;
+            const saved = publisher
+                ? await publisher.transaction(async (manager) => {
+                      const added = await manager.getRepository(TeamResource).save(row);
+                      await publisher.child(
+                          manager,
+                          'team',
+                          team.id,
+                          'team.resource.added',
+                          { teamId: team.id, resourceType, resourceId: input.resourceId },
+                          { changedFields: ['resources'] },
+                      );
+                      await this.recordResourceSide(
+                          publisher,
+                          manager,
+                          resourceType,
+                          input.resourceId,
+                      );
+                      return added;
+                  })
+                : await this.resources.save(row);
             return this.toItem(saved, this.resolveRef(resourceType, resource));
         } catch (error) {
             if (this.isUniqueViolation(error)) {
@@ -122,7 +170,26 @@ export class TeamResourcesService {
     ): Promise<void> {
         const type = this.normalizeResourceType(resourceType);
         await this.getTeamOrThrow(orgId, teamId);
-        const result = await this.resources.delete({ teamId, resourceType: type, resourceId });
+        const publisher = this.domainEvents;
+        const result = publisher
+            ? await publisher.transaction(async (manager) => {
+                  const deleted = await manager
+                      .getRepository(TeamResource)
+                      .delete({ teamId, resourceType: type, resourceId });
+                  if (deleted.affected) {
+                      await publisher.child(
+                          manager,
+                          'team',
+                          teamId,
+                          'team.resource.removed',
+                          { teamId, resourceType: type, resourceId, deleted: true },
+                          { changedFields: ['resources'] },
+                      );
+                      await this.recordResourceSide(publisher, manager, type, resourceId);
+                  }
+                  return deleted;
+              })
+            : await this.resources.delete({ teamId, resourceType: type, resourceId });
         if (!result.affected) {
             throw new NotFoundException('Resource is not attached to this team');
         }
@@ -254,6 +321,9 @@ export class TeamResourcesService {
             case 'task':
                 return this.tasks as unknown as Repository<ScopedResourceRow>;
             case 'goal':
+                if (!this.goals) {
+                    throw new NotFoundException('Goals cannot be attached in this context');
+                }
                 return this.goals as unknown as Repository<ScopedResourceRow>;
         }
     }
