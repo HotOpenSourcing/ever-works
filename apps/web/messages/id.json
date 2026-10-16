@@ -8779,6 +8779,7 @@
             "app": "Aplikasi",
             "company": "Company",
             "campaign": "Kampanye",
+            "project": "Proyek",
             "default": "Work"
         },
         "meetingsPage": {

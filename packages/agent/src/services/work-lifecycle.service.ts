@@ -931,6 +931,46 @@ export class WorkLifecycleService {
     }
 
     /**
+     * EW-P2-4 — a repo-less Project Work (`kind: 'project'`): plain project
+     * tracking, and the Ever Works side of a Gauzy project. A bare row with
+     * ZERO repository / git / generation / deploy side-effects, exactly like
+     * `createCampaignWork` (`deployProvider: null`, so it does not count
+     * against the Deploy quota) — and nothing else ever provisions one: every
+     * repository role of the kind is off (`WORK_KIND_CAPABILITIES.project`).
+     *
+     * Behind `EVER_WORKS_PROJECT_WORKS_ENABLED` (exactly `'true'`, default
+     * OFF): refused with `400 project_works_disabled` otherwise.
+     */
+    async createProjectWork(
+        user: User,
+        params: { name: string; slug: string; description?: string },
+    ): Promise<Work> {
+        if (!config.everWorks.projectWorks.enabled()) {
+            throw new BadRequestException({
+                statusCode: 400,
+                code: 'project_works_disabled',
+                message:
+                    'Project Works are not enabled on this installation (EVER_WORKS_PROJECT_WORKS_ENABLED).',
+            });
+        }
+        const workData: Partial<Work> = {
+            slug: params.slug,
+            name: params.name,
+            description: params.description ?? params.name,
+            userId: user.id,
+            kind: 'project',
+            status: 'active',
+            deployProvider: null,
+        };
+
+        try {
+            return await this.workRepository.create(workData, user);
+        } catch (error) {
+            rethrowAsNormalized(error, this.logger, 'creating project work');
+        }
+    }
+
+    /**
      * Teams & Prebuilt Companies (spec §6.2) — bare DRAFT Work row with
      * zero repo/git/generation side-effects. The company-template importer
      * maps each `PROJECT.md` in a package onto one of these; a later

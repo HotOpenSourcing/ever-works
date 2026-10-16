@@ -59,7 +59,11 @@ import {
     parseRepoDeclaredCommands,
     RepoDeclaredCommandsError,
 } from './repo-declared-commands';
-import { resolveTaskRepository, taskRepositoryRole } from './task-repository';
+import {
+    requireTaskRepository,
+    resolveTaskRepository,
+    taskRepositoryRole,
+} from './task-repository';
 import { matchWorkRepoRoles } from '../works/work-repo-match';
 
 /** The ONE path a Work's config lives at; mirrors `WORKS_CONFIG_FILEPATHS`. */
@@ -267,7 +271,11 @@ export class TaskWorkspaceService {
         // v1 repo resolution: the Work's output (data) repo on the Work's
         // git provider. `taskIsolationTargetRepo='linked'` reserves the
         // linked-source-repo variant for the connectors wave.
-        const { owner, repo } = resolveTaskRepository(work);
+        const target = resolveTaskRepository(work);
+        // EW-P2-4 — a repo-less (Project) Work has nothing to isolate: the run
+        // goes ahead without a workspace, exactly like a run with isolation off.
+        if (!target) return null;
+        const { owner, repo } = target;
         const gitOptions = { userId, providerId: work.gitProvider, workId: work.id };
 
         const token = await this.gitFacade.getAccessToken(gitOptions);
@@ -378,7 +386,11 @@ export class TaskWorkspaceService {
             );
         }
 
-        const { owner, repo } = resolveTaskRepository(work);
+        // EW-P2-4 — a repo-less (Project) Work has no repository to describe:
+        // `null` is the planner's "no repository to work in" refusal.
+        const target = resolveTaskRepository(work);
+        if (!target) return null;
+        const { owner, repo } = target;
         if (!owner || !repo) return null;
         const gitOptions = { userId, providerId: work.gitProvider, workId: work.id };
         const repository = await this.gitFacade.getRepository(owner, repo, gitOptions);
@@ -652,7 +664,9 @@ export class TaskWorkspaceService {
                 `Work ${work.id} reads repository-declared commands, but no git facade is available in this runtime to read .works/works.yml`,
             );
         }
-        const { owner, repo } = resolveTaskRepository(work);
+        // EW-P2-4 — a repo-less (Project) Work has no `.works/works.yml` to
+        // read: the same configuration failure as unresolved coordinates.
+        const { owner, repo } = resolveTaskRepository(work) ?? { owner: '', repo: '' };
         if (!owner || !repo) {
             // NOT an empty set. Control only reaches here for a Work that
             // OPTED IN — the policy gate and the git-facade gate are both
@@ -1244,7 +1258,7 @@ export class TaskWorkspaceService {
                 match.roles.includes(taskRepositoryRole(match.work.kind)),
         );
         for (const { work } of appWorks) {
-            const target = resolveTaskRepository(work);
+            const target = requireTaskRepository(work, 'the App Work change gate');
             const gitOptions = { userId, providerId: work.gitProvider, workId: work.id };
             let verdict: AppWorkChangeGateVerdict;
             try {
@@ -1650,7 +1664,7 @@ export class TaskWorkspaceService {
             throw new Error(`Task ${task.id} lost its Work before finalize.`);
         }
 
-        const { owner, repo } = resolveTaskRepository(work);
+        const { owner, repo } = requireTaskRepository(work, "finalizing a run's workspace");
         const gitOptions = { userId, providerId: work.gitProvider, workId: work.id };
         const repository = await this.gitFacade.getRepository(owner, repo, gitOptions);
         const baseRef =
@@ -1891,7 +1905,7 @@ export class TaskWorkspaceService {
             // with nothing else in the way. The first wiring skipped this path
             // on the grounds that the Task "has already been through here";
             // that is true of the first push and false of every later one.
-            const target = resolveTaskRepository(work);
+            const target = requireTaskRepository(work, 'recording a pushed branch');
             const guarded = await this.guardAppChange({
                 input,
                 work,
@@ -1911,7 +1925,7 @@ export class TaskWorkspaceService {
             return { outcome: 'pr-opened', prNumber: task.prNumber, prUrl: task.prUrl };
         }
 
-        const { owner, repo } = resolveTaskRepository(work);
+        const { owner, repo } = requireTaskRepository(work, 'opening a pull request');
         const gitOptions = { userId, providerId: work.gitProvider, workId: work.id };
         const repository = await this.gitFacade.getRepository(owner, repo, gitOptions);
         const baseRef =
@@ -2223,7 +2237,10 @@ export class TaskWorkspaceService {
         const work = await this.works.findById(task.workId);
         if (!work) return undefined;
 
-        const { owner, repo } = resolveTaskRepository(work);
+        // EW-P2-4 — no repository, no pull request to merge.
+        const mergeTarget = resolveTaskRepository(work);
+        if (!mergeTarget) return undefined;
+        const { owner, repo } = mergeTarget;
         const gitOptions = {
             userId: task.userId,
             providerId: work.gitProvider,
@@ -2710,11 +2727,13 @@ export class TaskWorkspaceService {
         }
         if (task.branchRef && task.workId && this.gitFacade) {
             const work = await this.works.findById(task.workId);
-            if (work) {
+            // EW-P2-4 — a repo-less (Project) Work has no branch to delete.
+            const branchTarget = work ? resolveTaskRepository(work) : null;
+            if (work && branchTarget) {
                 try {
                     await this.gitFacade.deleteBranch(
-                        resolveTaskRepository(work).owner,
-                        resolveTaskRepository(work).repo,
+                        branchTarget.owner,
+                        branchTarget.repo,
                         task.branchRef,
                         { userId, providerId: work.gitProvider, workId: work.id },
                     );
@@ -2784,11 +2803,13 @@ export class TaskWorkspaceService {
     private async discardBranchForSweep(task: Task): Promise<void> {
         if (task.workId && this.gitFacade && task.branchRef) {
             const work = await this.works.findById(task.workId);
-            if (work && work.taskBranchCleanup !== 'manual') {
+            // EW-P2-4 — a repo-less (Project) Work has no branch to delete.
+            const branchTarget = work ? resolveTaskRepository(work) : null;
+            if (work && branchTarget && work.taskBranchCleanup !== 'manual') {
                 try {
                     await this.gitFacade.deleteBranch(
-                        resolveTaskRepository(work).owner,
-                        resolveTaskRepository(work).repo,
+                        branchTarget.owner,
+                        branchTarget.repo,
                         task.branchRef,
                         { userId: task.userId, providerId: work.gitProvider, workId: work.id },
                     );
@@ -3293,7 +3314,7 @@ export class TaskWorkspaceService {
                     reachedRemote: true,
                 });
             }
-            const { owner, repo } = resolveTaskRepository(work);
+            const { owner, repo } = requireTaskRepository(work, 'the App Work change gate');
             const guarded = await this.guardAppChange({
                 input: judged,
                 work,
@@ -3348,7 +3369,7 @@ export class TaskWorkspaceService {
         const branch = (task.branchRef ?? '').trim();
         if (!branch) return { allowed: false, reason: 'app-change-branch-unknown' };
         try {
-            const { owner, repo } = resolveTaskRepository(work);
+            const { owner, repo } = requireTaskRepository(work, 'the App Work merge gate');
             const gitOptions = {
                 userId: task.userId,
                 providerId: work.gitProvider,

@@ -8779,6 +8779,7 @@
             "app": "Uygulama",
             "company": "Company",
             "campaign": "Kampanya",
+            "project": "Proje",
             "default": "Work"
         },
         "meetingsPage": {

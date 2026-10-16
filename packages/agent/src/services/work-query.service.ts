@@ -106,8 +106,11 @@ export class WorkQueryService {
         private readonly workCustomDomainRepository?: WorkCustomDomainRepository,
     ) {}
 
-    async getWorks(options: { limit?: number; offset?: number; search?: string } = {}, user: User) {
-        const { limit = 20, offset = 0, search } = options;
+    async getWorks(
+        options: { limit?: number; offset?: number; search?: string; kind?: string } = {},
+        user: User,
+    ) {
+        const { limit = 20, offset = 0, search, kind } = options;
 
         let sanitizedSearch: string | undefined;
         if (search) {
@@ -125,6 +128,7 @@ export class WorkQueryService {
                 limit,
                 offset,
                 search: sanitizedSearch,
+                kind,
             });
 
             const workIds = works.map((work) => work.id);
@@ -147,6 +151,7 @@ export class WorkQueryService {
                     userId: user.id,
                     memberWorkIds,
                     search: sanitizedSearch,
+                    kind,
                 }),
             ]);
 
