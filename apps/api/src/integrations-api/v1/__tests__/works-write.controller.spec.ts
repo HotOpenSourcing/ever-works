@@ -69,7 +69,7 @@ describe('IntegrationWorksWriteController', () => {
             resources as never,
             scope as never,
         );
-        return { controller, lifecycle, teamResources, links };
+        return { controller, lifecycle, teamResources, links, resources };
     };
 
     it('creates a Project Work with a derived free slug, its Teams and its link', async () => {
@@ -118,6 +118,24 @@ describe('IntegrationWorksWriteController', () => {
                 res(),
             ),
         ).rejects.toMatchObject({ status: 422 });
+        expect(lifecycle.createProjectWork).not.toHaveBeenCalled();
+    });
+
+    it('checks every Team before it creates the Work (no orphan on a foreign Team)', async () => {
+        const { controller, lifecycle, resources } = setup();
+        resources.get.mockImplementation(async (kind: string, _org: string, id: string) => {
+            if (kind === 'team') throw Object.assign(new Error('Not found'), { status: 404 });
+            return { dto: { id, version: 1 }, etag: '"1"' };
+        });
+        await expect(
+            controller.create(
+                user,
+                { kind: 'project', name: 'Site', teamIds: ['foreign-team'] },
+                undefined,
+                req(),
+                res(),
+            ),
+        ).rejects.toMatchObject({ status: 404 });
         expect(lifecycle.createProjectWork).not.toHaveBeenCalled();
     });
 });

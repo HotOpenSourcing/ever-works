@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.13`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2), Missions (EW-P2-5) and organization create (EW-P2-6), P3 inbox, P4 email
+**Status**: `Draft` — contract `v1-draft.14`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2), Project Works (EW-P2-4), Missions (EW-P2-5) and organization create (EW-P2-6), P3 inbox, P4 email
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -137,7 +137,7 @@ phase, child / opt-in flags).
 | Organization  | `GET /organization` (the `X-Scope-Slug` org); P2: `POST /organizations` (`org:write`, §6.6)                                                                                                                                                                                                                     | `org:read`, `org:write` | [organization](./contract/schemas/resources/organization.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateOrganization` |
 | Agents        | `agent.created`, `agent.updated`, `agent.status_changed`, `agent.archived`, `agent.deleted`                                                                                                                                                                                                                     |
 | Teams         | `team.created`, `team.updated`, `team.deleted`, `team.member.added`, `team.member.updated`, `team.member.removed`, `team.resource.added`, `team.resource.removed`                                                                                                                                               |
-| Works         | `work.created`, `work.updated`, `work.archived`, `work.deleted`, `work.member.added`, `work.member.updated`, `work.member.removed`                                                                                                                                                                              |
+| Works         | `GET /works`, `GET /works/:id` (members, `repoUrls[]`, `website`, `kind`, `status`, `webUrl`); P2: `POST /works` with `kind:'project'` (§6.7)                                                                                                                                                                   | `works:*`               | [work](./contract/schemas/resources/work.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateWork`                         |
 | Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works` (§6.5)                                                                                                                           | `missions:*`            | [mission](./contract/schemas/resources/mission.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateMission`                |
 | Goals (P2)    | `goal.created`, `goal.updated`, `goal.status_changed`, `goal.progress_changed` (at most 1 per goal per 5 min), `goal.archived`, `goal.unarchived`, `goal.deleted`                                                                                                                                               |
 | Ideas (P2)    | `idea.created`, `idea.updated`, `idea.status_changed`, `idea.deleted`                                                                                                                                                                                                                                           |
@@ -346,6 +346,18 @@ legalName?, countryCode?}`, scope `org:write` — opt-in, not in the Ever Gauzy 
 - **`displayName`:** members now carry the optional `users.displayName` (null when the person set none; fall back to
   `username`). Profile fields are copied once by the consumer (plan 01 §3): changing them records no event.
 
+### 6.7 Project Works (Gauzy CR-6, EW-P2-4)
+
+`POST /works` ([`CreateWork`](./contract/schemas/requests.schema.json) `{kind:'project', name, description?, website?,
+teamIds?, visibility?, externalRef?}`, scope `works:write`) is Gauzy's "Create in Ever Works" for a project (plan D3):
+a repo-less **Project Work** — no repositories, no deploy, no generator, so nothing is provisioned and nothing spends
+(D9). Only `kind: 'project'` (anything else `400`). `Idempotency-Key` required; a repeated `externalRef` answers `200`
+with the existing Work. The owner is the act-as user, else the key's owner; the slug is derived from `name` (`<slug>-N`
+when taken). `teamIds` become `team_resources` rows (type `work`); a Work's visibility is derived from them (CR-1), so
+`visibility` is only validated (`private` → `422`). While `EVER_WORKS_PROJECT_WORKS_ENABLED` is off the route answers
+`422 domain_rule` with `details.reason: 'project_works_disabled'`. Answers `201` with the work DTO and records
+`work.created` (plus `team.resource.added` / `work.updated` per Team). `work` stays a served link type.
+
 ## 7. Acceptance criteria
 
 - [ ] Every DTO and event served under `/api/integrations/v1` validates against [`contract/`](./contract/README.md)
@@ -500,3 +512,11 @@ Additive. Recorded as CR-10 on the plan's STATUS board: `POST /organizations` (`
 type `organization.created` (`data` = the organization DTO); member `role` values `owner` / `admin` / `member`
 (`admin` may create integration keys for the Organizations it administers; such a key's usable pins follow the
 creator's current roles); member `displayName` from `users.displayName`; request body `CreateOrganization`.
+
+## 15. Changes in `v1-draft.14` (CR-6, EW-P2-4 Project Works)
+
+Additive. Answers the Gauzy request CR-6 on the plan's STATUS board: `POST /works` (§6.7, `works:write`) creates a
+repo-less Project Work (`kind: 'project'` only; no repositories, deploy or generator, so nothing is provisioned, D9)
+and records `work.created`; request body `CreateWork`. Teams are checked before the Work is created. While
+`EVER_WORKS_PROJECT_WORKS_ENABLED` is off the route answers `422 domain_rule` (`details.reason:
+'project_works_disabled'`).

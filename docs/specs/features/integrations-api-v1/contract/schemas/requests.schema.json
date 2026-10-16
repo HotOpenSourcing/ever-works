@@ -635,6 +635,21 @@
 			},
 			"additionalProperties": false
 		},
+		"CreateWork": {
+			"description": "POST /works (Gauzy CR-6, EW-P2-4; scope works:write; Idempotency-Key required; a repeated externalRef answers 200 with the existing work). Only kind 'project': a repo-less Project Work with no repositories, deploy or generator (nothing is provisioned, D9). Owner = the act-as user, else the key's owner; the slug is derived from name (`<slug>-N` when taken). teamIds become team_resources rows (type work); a work's visibility is derived from them (CR-1), so `visibility` is only validated (private -> 422 domain_rule). While EVER_WORKS_PROJECT_WORKS_ENABLED is off: 422 domain_rule with details.reason 'project_works_disabled'. Answers 201 with the work DTO and records work.created.",
+			"type": "object",
+			"required": ["kind", "name"],
+			"properties": {
+				"kind": { "const": "project" },
+				"name": { "type": "string", "minLength": 1, "maxLength": 255 },
+				"description": { "type": ["string", "null"], "maxLength": 2000 },
+				"website": { "type": ["string", "null"], "format": "uri", "maxLength": 2048 },
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
 		"PutLink": {
 			"description": "PUT /links/:entityType/:entityId. `source` comes from the key's integrationKind (ever-gauzy → gauzy).",
 			"type": "object",

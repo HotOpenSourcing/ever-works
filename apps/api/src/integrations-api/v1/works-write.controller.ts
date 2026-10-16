@@ -1,13 +1,4 @@
-import {
-    Body,
-    Controller,
-    Headers,
-    Post,
-    Req,
-    Res,
-    UseFilters,
-    UseGuards,
-} from '@nestjs/common';
+import { Body, Controller, Headers, Post, Req, Res, UseFilters, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
@@ -183,6 +174,12 @@ export class IntegrationWorksWriteController {
                 }
             }
 
+            // Every Team must be one of the pinned organization's (404) BEFORE the Work is
+            // created, so a foreign Team never leaves an orphan Project Work behind.
+            const teamIds = [...new Set(dto.teamIds ?? [])];
+            for (const teamId of teamIds) {
+                await this.resources.get('team', organizationId, teamId, source);
+            }
             const owner = await this.users.findById(user.userId);
             if (!owner) throw domainRule('The Work owner is not an active user.');
             const name = dto.name.trim();
@@ -232,7 +229,7 @@ export class IntegrationWorksWriteController {
                     throw error;
                 }
             }
-            for (const teamId of [...new Set(dto.teamIds ?? [])]) {
+            for (const teamId of teamIds) {
                 await this.teamResources.attach(user.userId, organizationId, teamId, {
                     resourceType: 'work',
                     resourceId: work.id,
