@@ -15,6 +15,7 @@ import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { Goal } from '../entities/goal.entity';
+import { Mission } from '../entities/mission.entity';
 import { getDomainEventContext, normalizeSyncOrigin } from './domain-event-context';
 import { newDomainEventId } from './domain-event-id';
 import { DOMAIN_EVENTS_NOTIFY_CHANNEL } from './domain-events.config';
@@ -61,6 +62,7 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         inbox_item: InboxItem,
         idea: WorkProposal,
         goal: Goal,
+        mission: Mission,
     };
 
 /** Thrown for a type outside the catalog: an event nobody can parse is a bug, not data. */

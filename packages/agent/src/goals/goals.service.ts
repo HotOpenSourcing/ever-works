@@ -10,7 +10,10 @@ import { RecordAccessPolicy } from '../record-visibility/record-access-policy.se
 import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository, type EntityManager, type FindOptionsWhere } from 'typeorm';
-import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import {
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '../domain-events/domain-event-publisher.service';
 import {
     isExternalMetricSource,
     recordGoalProgress,
@@ -775,6 +778,12 @@ export class GoalsService {
                     return this.missionGoals.save(primary);
                 }),
             );
+            // EW-P2-5 — a demoted Goal lost its primary Mission (`primaryMissionId`).
+            for (const demoted of currentPrimaries) {
+                if (demoted.goalId !== goalId) {
+                    await this.recordGoalMissionLink(missionId, demoted.goalId, false, 'demoted');
+                }
+            }
         }
 
         // Both endpoints were ownership-validated above; the edge itself is
@@ -788,6 +797,7 @@ export class GoalsService {
             if (link.isPrimary !== isPrimary) {
                 link.isPrimary = isPrimary;
                 link = await this.missionGoals.save(link);
+                await this.recordGoalMissionLink(missionId, goalId, isPrimary, 'linked');
             }
             return toMissionGoalLinkDto(link, goal);
         }
@@ -818,7 +828,47 @@ export class GoalsService {
             }
             throw err;
         }
+        await this.recordGoalMissionLink(missionId, goalId, isPrimary, 'linked');
         return toMissionGoalLinkDto(link, goal);
+    }
+
+    /**
+     * EW-P2-5 — a Mission ↔ Goal link change: `mission.goal.linked` / `.unlinked` (child:
+     * the link; aggregate: the Mission with its new version) and `goal.updated` (the Goal
+     * DTO's `missionIds` / `primaryMissionId`). Best-effort after the write; a demotion
+     * (another Goal became primary) records only the demoted Goal's `goal.updated`.
+     */
+    private async recordGoalMissionLink(
+        missionId: string,
+        goalId: string,
+        isPrimary: boolean,
+        change: 'linked' | 'unlinked' | 'demoted',
+    ): Promise<void> {
+        await recordAfterWrite(
+            this.domainEvents,
+            async (publisher, manager) => {
+                if (change !== 'demoted') {
+                    await publisher.child(
+                        manager,
+                        'mission',
+                        missionId,
+                        `mission.goal.${change}`,
+                        {
+                            missionId,
+                            goalId,
+                            isPrimary,
+                            ...(change === 'unlinked' ? { deleted: true } : {}),
+                        },
+                        { changedFields: ['goals'] },
+                    );
+                }
+                await publisher.changed(manager, 'goal', goalId, 'goal.updated', {
+                    changedFields: ['missionIds', 'primaryMissionId'],
+                });
+            },
+            (message) => this.logger.warn(message),
+            `mission.goal.${change} for mission ${missionId} / goal ${goalId}`,
+        );
     }
 
     /**
@@ -842,7 +892,9 @@ export class GoalsService {
         if (!link) {
             throw new NotFoundException(`Goal link not found`);
         }
+        const wasPrimary = link.isPrimary === true;
         await this.missionGoals.remove(link);
+        await this.recordGoalMissionLink(missionId, goalId, wasPrimary, 'unlinked');
         return { deleted: true };
     }
 

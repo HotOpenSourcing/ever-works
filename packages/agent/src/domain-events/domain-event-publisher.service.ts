@@ -11,6 +11,7 @@ import {
     buildGoalSnapshot,
     buildInboxItemSnapshot,
     buildIdeaSnapshot,
+    buildMissionSnapshot,
     buildOrganizationSnapshot,
     buildTaskSnapshot,
     buildTeamSnapshot,
@@ -36,6 +37,7 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
     goal: buildGoalSnapshot,
+    mission: buildMissionSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */

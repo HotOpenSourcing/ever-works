@@ -74,6 +74,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'work.updated',
             'idea.updated',
             'goal.updated',
+            'mission.updated',
         ],
     },
     'POST /api/organizations/:orgId/teams/:teamId/members': {
@@ -89,6 +90,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'work.updated',
             'idea.updated',
             'goal.updated',
+            'mission.updated',
         ],
     },
     'DELETE /api/organizations/:orgId/teams/:teamId/resources/:resourceType/:resourceId': {
@@ -98,6 +100,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'work.updated',
             'idea.updated',
             'goal.updated',
+            'mission.updated',
         ],
     },
 
@@ -250,6 +253,33 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/me/goals/:id/archive': { events: ['goal.archived'] },
     'POST /api/me/goals/:id/unarchive': { events: ['goal.unarchived'] },
 
+    // ── Missions (`api/me/missions`, EW-P2-5) ────────────────────────────────
+    'POST /api/me/missions': { events: ['mission.created'] },
+    'PATCH /api/me/missions/:id': { events: ['mission.updated'] },
+    'DELETE /api/me/missions/:id': { events: ['mission.deleted'] },
+    'POST /api/me/missions/:id/pause': { events: ['mission.status_changed'] },
+    'POST /api/me/missions/:id/resume': { events: ['mission.status_changed'] },
+    'POST /api/me/missions/:id/complete': { events: ['mission.status_changed'] },
+    // The clone and the Ideas it copies.
+    'POST /api/me/missions/:id/clone': { events: ['mission.created', 'idea.created'] },
+    // A tick: generated Ideas, the ones it queues for build, a fatal failure.
+    'POST /api/me/missions/:id/run-now': {
+        events: ['idea.created', 'idea.status_changed', 'mission.status_changed'],
+    },
+    'POST /api/me/missions/:id/works': { events: ['mission.work.linked'] },
+    'DELETE /api/me/missions/:id/works/:workId/:relation': { events: ['mission.work.unlinked'] },
+    'POST /api/me/missions/:id/attachments': {
+        exempt: 'Mission attachments (uploads) are not part of the mission integration DTO.',
+    },
+    'DELETE /api/me/missions/:id/attachments/:attachmentId': {
+        exempt: 'Mission attachments (uploads) are not part of the mission integration DTO.',
+    },
+    // The link (child of the Mission) and the Goal's `missionIds` / `primaryMissionId`.
+    'POST /api/me/missions/:id/goals': { events: ['mission.goal.linked', 'goal.updated'] },
+    'DELETE /api/me/missions/:id/goals/:goalId': {
+        events: ['mission.goal.unlinked', 'goal.updated'],
+    },
+
     // ── Works (`api`) ────────────────────────────────────────────────────────
     'POST /api/works': { events: ['work.created'] },
     'POST /api/works/quick-create': { events: ['work.created'] },
@@ -352,6 +382,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'work.updated',
             'idea.updated',
             'goal.updated',
+            'mission.updated',
         ],
     },
     'PUT /api/integrations/v1/teams/:id/members': {
@@ -365,6 +396,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'work.updated',
             'idea.updated',
             'goal.updated',
+            'mission.updated',
         ],
     },
 
@@ -389,6 +421,20 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PUT /api/integrations/v1/goals/:id/dod': { events: ['goal.updated'] },
     'POST /api/integrations/v1/goals/:id/samples': { events: ['goal.progress_changed'] },
     'DELETE /api/integrations/v1/goals/:id': { events: ['goal.deleted'] },
+
+    // ── Integration API v1 — Missions (EW-P2-5) ───────────────────────────────
+    // + `mission.deleted` when a concurrent create won the externalRef (ours is undone).
+    'POST /api/integrations/v1/missions': { events: ['mission.created', 'mission.deleted'] },
+    'PATCH /api/integrations/v1/missions/:id': {
+        events: ['mission.updated', 'mission.visibility_changed', 'mission.status_changed'],
+    },
+    'PUT /api/integrations/v1/missions/:id/goals': {
+        events: ['mission.goal.linked', 'mission.goal.unlinked', 'goal.updated'],
+    },
+    'PUT /api/integrations/v1/missions/:id/works': {
+        events: ['mission.work.linked', 'mission.work.unlinked'],
+    },
+    'DELETE /api/integrations/v1/missions/:id': { events: ['mission.deleted'] },
 };
 
 /** The routes a list of events covers (for messages). */

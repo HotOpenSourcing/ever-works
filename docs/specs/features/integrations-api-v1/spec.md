@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.6`; P1 resources live, P2 Ideas (EW-P2-1) and Goals (EW-P2-2) served, Missions next
+**Status**: `Draft` — contract `v1-draft.7`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2) and Missions (EW-P2-5) served
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -133,12 +133,12 @@ Machine-readable: [`contract/event-catalog.v1.json`](./contract/event-catalog.v1
 phase, child / opt-in flags).
 
 | Domain        | Events                                                                                                                                                                                                                                                                                                          |
-| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | Organization  | `organization.updated`, `organization.member.added`, `organization.member.updated`, `organization.member.removed`                                                                                                                                                                                               |
 | Agents        | `agent.created`, `agent.updated`, `agent.status_changed`, `agent.archived`, `agent.deleted`                                                                                                                                                                                                                     |
 | Teams         | `team.created`, `team.updated`, `team.deleted`, `team.member.added`, `team.member.updated`, `team.member.removed`, `team.resource.added`, `team.resource.removed`                                                                                                                                               |
 | Works         | `work.created`, `work.updated`, `work.archived`, `work.deleted`, `work.member.added`, `work.member.updated`, `work.member.removed`                                                                                                                                                                              |
-| Missions (P2) | `mission.created`, `mission.updated`, `mission.status_changed`, `mission.deleted`, `mission.goal.linked`, `mission.goal.unlinked`, `mission.work.linked`, `mission.work.unlinked`                                                                                                                               |
+| Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works` (§6.5)                                                                                                                           | `missions:*` | [mission](./contract/schemas/resources/mission.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateMission` |
 | Goals (P2)    | `goal.created`, `goal.updated`, `goal.status_changed`, `goal.progress_changed` (at most 1 per goal per 5 min), `goal.archived`, `goal.unarchived`, `goal.deleted`                                                                                                                                               |
 | Ideas (P2)    | `idea.created`, `idea.updated`, `idea.status_changed`, `idea.deleted`                                                                                                                                                                                                                                           |
 | Tasks         | `task.created`, `task.updated`, `task.transitioned`, `task.deleted`; `task.assignee.added/removed`, `task.watcher.added/removed`, `task.block.added/removed`, `task.relation.added/removed`; `task.comment.created/updated/deleted`; `task.attachment.added/removed` (P3); `task.runtime_updated` (opt-in only) |
@@ -289,6 +289,36 @@ sampledAt}`, `Idempotency-Key` required): appends a `goal_metric_samples` row. W
 - **Writes act as the Goal's owner** like the task writes (the key's owner, or `X-Act-As-User`): someone else's Goal
   answers `404 not_found`. `PUT /links/goal/:id` is served.
 
+### 6.5 Missions (EW-P2-5, plan D3b)
+
+An Ever Works Mission is a Gauzy Strategic Initiative: Goals 1:N (one primary), Works M:N (typed), owner = steward. The
+routes call the same `MissionsService` (and `GoalsService` for the Goal links) as the app, and record the same events.
+
+- **Reads:** every `team` / `organization` Mission of the pinned organization, in every status. The
+  [mission DTO](./contract/schemas/resources/mission.schema.json) embeds `goals [{goalId, isPrimary}]` (the primary
+  first), `works [{workId, relation}]`, and the EW-only `type`, `schedule`, `autoBuildWorks` (read-only).
+- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, teamIds?,
+visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always `status='paused'`,
+  `type='one-shot'`, no schedule, no auto-build (D9: only a person resumes a Mission in Ever Works, which is what
+  starts its ticks). A title is required (no generated title). `teamIds` + D11 apply in the create's transaction.
+- **`PATCH /missions/:id`** ([`UpdateMission`](./contract/schemas/requests.schema.json)): title, description,
+  `teamIds`, `visibility`, and `status`: `paused` pauses an active Mission, `completed` (+ `outcome`) completes an
+  active or paused one. `status: active` answers `422 domain_rule`; the status already reached is a no-op; any other
+  move (e.g. from `failed`) is `422`. `If-Match` optional, re-checked at the version bump.
+- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary, no repeats) and **`PUT
+/missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change records
+  `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
+  `mission.work.linked` / `unlinked`. Linked Goals and Works must be the caller's (404). Both answer the Mission DTO;
+  `If-Match` is a pre-check (the sets are not one transaction, T17a).
+- **`DELETE /missions/:id`**: the `mission.deleted` tombstone; its Ideas and clones are kept (their back-links are
+  cleared).
+- **Never here:** resume, run-now, clone (D9).
+- **Events:** `mission.created` (also for a clone, with `idea.created` for each Idea it copies), `mission.updated`
+  (fields, Teams), `mission.status_changed` (`previous.status`; also a fatal tick's `failed`), `mission.deleted`,
+  `mission.goal.*` / `mission.work.*` (children of the Mission: `data` = the link, `aggregate` = the Mission at its new
+  version), `mission.visibility_changed`.
+- **Writes act as the Mission's owner** (the key's owner, or `X-Act-As-User`); `PUT /links/mission/:id` is served.
+
 ## 7. Acceptance criteria
 
 - [ ] Every DTO and event served under `/api/integrations/v1` validates against [`contract/`](./contract/README.md)
@@ -333,3 +363,12 @@ request bodies `CreateGoal`, `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `Goa
 external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.progress_changed` is throttled to one
 per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
 read-only runtime.
+
+## 12. Changes in `v1-draft.7` (CR-7, EW-P2-5 Missions)
+
+Additive. Recorded as CR-7 on the plan's STATUS board: the Missions routes of §6.5 are served; the
+[mission DTO](./contract/schemas/resources/mission.schema.json) is the `data` of `mission.created` / `updated` /
+`status_changed` / `deleted`, and `MissionGoalLinkEvent` / `MissionWorkLinkEvent` of the link events, which the catalog
+now marks `child: goal` / `child: work`; the Goal DTO's `missionIds` / `primaryMissionId` change records `goal.updated`;
+request bodies `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; `mission` is a served link
+entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap).

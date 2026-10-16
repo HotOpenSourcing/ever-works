@@ -437,3 +437,52 @@ export interface IntegrationGoalDto extends IntegrationResourceBase {
 	readonly archivedAt: string | null;
 	readonly webUrl?: string | null;
 }
+
+/** Lifecycle of a Mission (Ever Works `missions.status`). Integration creates are always `paused` (D9). */
+export type IntegrationMissionStatus = 'active' | 'paused' | 'completed' | 'failed';
+
+/** How a completed Mission concluded (human judgment). */
+export type IntegrationMissionOutcome = 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'superseded';
+
+/** How a Mission relates to a Work (`mission_works.relation`). */
+export type IntegrationMissionWorkRelation = 'created' | 'improves' | 'operates' | 'markets' | 'researches' | 'retires';
+
+/** A Mission ↔ Goal link (`mission_goals`); also the `data` of `mission.goal.*` events. */
+export interface IntegrationMissionGoalLink {
+	readonly missionId: string;
+	readonly goalId: string;
+	readonly isPrimary: boolean;
+	/** Only on `mission.goal.unlinked`. */
+	readonly deleted?: true;
+}
+
+/** A Mission ↔ Work link (`mission_works`); also the `data` of `mission.work.*` events. */
+export interface IntegrationMissionWorkLink {
+	readonly missionId: string;
+	readonly workId: string;
+	readonly relation: IntegrationMissionWorkRelation;
+	/** Only on `mission.work.unlinked`. */
+	readonly deleted?: true;
+}
+
+/**
+ * Mission DTO (B.6, `GET /missions`, `GET /missions/:id`) and the `data` of
+ * `mission.*` events (plan D3b: a Gauzy Strategic Initiative). An integration
+ * creates Missions `paused` and can never set `active` (D9): only a person resumes a
+ * Mission in Ever Works, which is what starts its ticks.
+ */
+export interface IntegrationMissionDto extends IntegrationResourceBase {
+	readonly teamIds: readonly string[];
+	readonly title: string;
+	readonly description: string;
+	readonly type: 'one-shot' | 'scheduled';
+	readonly status: IntegrationMissionStatus;
+	readonly outcome: IntegrationMissionOutcome | null;
+	readonly completedAt: string | null;
+	readonly schedule: string | null;
+	readonly autoBuildWorks: boolean;
+	readonly goals: readonly Omit<IntegrationMissionGoalLink, 'missionId' | 'deleted'>[];
+	readonly works: readonly Omit<IntegrationMissionWorkLink, 'missionId' | 'deleted'>[];
+	readonly sourceMissionId: string | null;
+	readonly webUrl?: string | null;
+}

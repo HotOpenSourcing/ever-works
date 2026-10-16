@@ -65,12 +65,17 @@
 - [x] **T32** Goals (EW-P2-2): `GET /goals` (`includeArchived`), `GET /goals/:id`, `POST /goals` (draft; external
       metric source only, default `{pluginId:'external', metricId:'value'}`; Teams + D11 in the create transaction),
       `PATCH /goals/:id` (no status / outcome / source / kind), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST
-    /goals/:id/samples` (`currentValue`, baseline, re-score; throttled `goal.progress_changed`), `DELETE /goals/:id`
+  /goals/:id/samples` (`currentValue`, baseline, re-score; throttled `goal.progress_changed`), `DELETE /goals/:id`
       (not while the loop runs); `goal` link target; `goal_metric_samples.criterionId` (migration `1795140000000`);
       external sources are never read from a provider on evaluation; schemas `goal.schema.json`, `CreateGoal`,
       `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; contract `v1-draft.6` (CR-6). Recording points:
       [`domain-events`](../domain-events/tasks.md) T21.
-- [ ] **T33** Missions (EW-P2-5).
+- [x] **T33** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
+      no schedule / auto-build, title required; Teams + D11 in the create transaction), `PATCH /missions/:id` (content,
+      Teams, visibility; `status` paused / completed + `outcome`, never `active`), `PUT /missions/:id/goals`, `PUT
+    /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
+      `$defs`), `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; contract `v1-draft.7` (CR-7).
+      Recording points: [`domain-events`](../domain-events/tasks.md) T22.
 - [ ] **T34** Organization create + member roles (EW-P2-6).
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)

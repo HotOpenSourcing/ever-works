@@ -132,6 +132,11 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
   (`goal.updated`), `goal.archived` / `goal.unarchived` and a loop's terminal status. Loop control (start, pause,
   cancel, limits, spend) is runtime like `task.runtime_updated`'s fields, but records nothing and bumps nothing.
   `goal.progress_changed` is throttled to one per Goal per 5 minutes; inside the window only the version moves.
+- **Missions (EW-P2-5)**: `MissionsService` writes and records in one transaction (`mission.created`,
+  `mission.updated`, `mission.status_changed`, the `mission.deleted` tombstone); typed Work links (`mission.work.*`)
+  and Goal links (`mission.goal.*`, from `GoalsService`, with the Goal's `goal.updated`) are children of the Mission,
+  recorded best-effort after the write. The clone records `mission.created` and `idea.created` for every Idea it copies
+  in its own transaction, which closes the EW-P2-1 gap; a fatal tick records `mission.status_changed` to `failed`.
 
 ## 4. Aggregate `version` and `updatedAt`
 

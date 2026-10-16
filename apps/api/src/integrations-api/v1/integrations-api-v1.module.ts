@@ -7,6 +7,7 @@ import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { UserResearchModule } from '@ever-works/agent/user-research';
 import { GoalsModule } from '@ever-works/agent/goals';
+import { MissionsModule } from '@ever-works/agent/missions';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
@@ -20,6 +21,7 @@ import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
 import { IntegrationIdeasController } from './ideas.controller';
 import { IntegrationGoalsController } from './goals.controller';
+import { IntegrationMissionsController } from './missions.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
@@ -51,6 +53,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         UserResearchModule,
         // Goals (EW-P2-2): `GoalsService` + the orchestrator's Definition of Done.
         GoalsModule,
+        // Missions (EW-P2-5): `MissionsService` (createExternal, transitions, Work links).
+        MissionsModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -67,6 +71,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // P2 resources.
         IntegrationIdeasController,
         IntegrationGoalsController,
+        IntegrationMissionsController,
     ],
     providers: [
         IntegrationOnlyGuard,

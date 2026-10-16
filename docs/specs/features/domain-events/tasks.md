@@ -43,7 +43,12 @@
       runtime (no event, no version). `goal.progress_changed` is throttled to one per Goal per 5 minutes and the
       version still moves (`goal-domain-events.ts`). Goal Teams record `goal.updated`. `goal-recording.spec.ts`; the
       coverage gate scans `goals/goals.controller.ts` and `integrations-api/v1/goals.controller.ts`.
-- [ ] **T22** Missions (EW-P2-5), incl. the Ideas a Mission clone copies.
+- [x] **T22** Missions (EW-P2-5): `mission.*` recorded by `MissionsService` (create, update, transitions, delete
+      tombstone in the write's transaction; typed Work links as children, best-effort after the write), Mission ↔ Goal
+      links by `GoalsService` (`mission.goal.*` + the Goal's `goal.updated`), the clone (`mission.created` and the
+      copied Ideas' `idea.created`, in the clone's transaction) and a fatal tick (`mission.status_changed` to
+      `failed`). Mission Teams record `mission.updated`. `mission-recording.spec.ts`; the coverage gate scans
+      `missions/missions.controller.ts` and `integrations-api/v1/missions.controller.ts`.
 
 ## P3 — Inbox (EW-P3-1)
 

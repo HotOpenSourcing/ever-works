@@ -213,7 +213,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -221,7 +221,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -229,7 +229,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -237,7 +237,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -245,32 +245,36 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionGoalLinkEvent",
+			"phase": "P2",
+			"child": "goal"
 		},
 		{
 			"type": "mission.goal.unlinked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionGoalLinkEvent",
+			"phase": "P2",
+			"child": "goal"
 		},
 		{
 			"type": "mission.work.linked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionWorkLinkEvent",
+			"phase": "P2",
+			"child": "work"
 		},
 		{
 			"type": "mission.work.unlinked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionWorkLinkEvent",
+			"phase": "P2",
+			"child": "work"
 		},
 		{
 			"type": "goal.created",
