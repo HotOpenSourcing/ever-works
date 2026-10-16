@@ -88,6 +88,40 @@ export class EmailMessageRepository {
      * legitimate mail. A failure INSIDE `fn` (or its commit) is re-raised and
      * `fn` is never re-run, since it may already have reserved capacity.
      */
+    // ── EW-P4-2 — change notifications (domain events) ─────────────────
+
+    /**
+     * Set once at bootstrap by `EmailMessageDomainEventsBridge` (the one
+     * component that records `email.message.*`): this repository is the single
+     * writer of `email_messages`, so every row it creates or moves is reported
+     * here, after the write. Unset (unit tests, the worker) = nothing reported.
+     */
+    setChangeListener(listener: EmailMessageChangeListener | undefined): void {
+        this.changeListener = listener;
+    }
+
+    private changeListener?: EmailMessageChangeListener;
+
+    /** Set on the transaction-scoped twin {@link withSendAdmissionLock} hands out: changes wait for the commit. */
+    private deferredChanges?: EmailMessageChange[];
+
+    private async notify(change: EmailMessageChange): Promise<void> {
+        if (this.deferredChanges) {
+            this.deferredChanges.push(change);
+            return;
+        }
+        if (!this.changeListener) return;
+        try {
+            await this.changeListener(change);
+        } catch (error) {
+            this.logger.warn(
+                `email_messages change listener failed for ${change.id}: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        }
+    }
+
     async withSendAdmissionLock<T>(
         keys: EmailSendAdmissionLockKeys,
         fn: (messages: EmailMessageRepository) => Promise<T>,
@@ -113,8 +147,11 @@ export class EmailMessageRepository {
             return fn(this);
         }
         let entered = false;
+        // EW-P4-2 — what the locked unit of work writes is reported once it has
+        // committed (a rolled-back reservation reports nothing).
+        const deferred: EmailMessageChange[] = [];
         try {
-            return await connection.transaction(async (manager) => {
+            const result = await connection.transaction(async (manager) => {
                 for (const [classId, objectId] of locks) {
                     await manager.query('SELECT pg_advisory_xact_lock($1, $2)', [
                         classId,
@@ -122,8 +159,12 @@ export class EmailMessageRepository {
                     ]);
                 }
                 entered = true;
-                return fn(new EmailMessageRepository(manager.getRepository(EmailMessage)));
+                const scoped = new EmailMessageRepository(manager.getRepository(EmailMessage));
+                scoped.deferredChanges = deferred;
+                return fn(scoped);
             });
+            for (const change of deferred) await this.notify(change);
+            return result;
         } catch (error) {
             if (entered) throw error;
             this.logger.warn(
@@ -140,7 +181,16 @@ export class EmailMessageRepository {
     }
 
     async save(entry: EmailMessage): Promise<EmailMessage> {
-        return this.repository.save(entry);
+        const isNew = !entry.id;
+        const saved = await this.repository.save(entry);
+        if (saved?.id) {
+            await this.notify(
+                isNew
+                    ? { kind: 'created', id: saved.id }
+                    : { kind: 'status', id: saved.id, changedFields: ['status'], previous: {} },
+            );
+        }
+        return saved;
     }
 
     async findById(id: string): Promise<EmailMessage | null> {
@@ -186,7 +236,16 @@ export class EmailMessageRepository {
      */
     async linkTask(id: string, taskId: string): Promise<boolean> {
         const result = await this.repository.update({ id, taskId: IsNull() }, { taskId });
-        return (result.affected ?? 0) > 0;
+        const linked = (result.affected ?? 0) > 0;
+        if (linked) {
+            await this.notify({
+                kind: 'status',
+                id,
+                changedFields: ['taskId'],
+                previous: { taskId: null },
+            });
+        }
+        return linked;
     }
 
     async findByUser(
@@ -213,7 +272,15 @@ export class EmailMessageRepository {
     }
 
     async updateDeliveryStatus(id: string, deliveryStatus: string): Promise<void> {
-        await this.repository.update({ id }, { deliveryStatus });
+        const result = await this.repository.update({ id }, { deliveryStatus });
+        if ((result.affected ?? 0) > 0) {
+            await this.notify({
+                kind: 'status',
+                id,
+                changedFields: ['deliveryStatus'],
+                previous: {},
+            });
+        }
     }
 
     // ── AW-05 — send ceilings + draft lifecycle ─────────────────────
@@ -352,7 +419,17 @@ export class EmailMessageRepository {
             { id, status: In([...from]) },
             { ...patch, status: to },
         );
-        return result.affected ?? 0;
+        const moved = result.affected ?? 0;
+        if (moved > 0) {
+            await this.notify({
+                kind: 'status',
+                id,
+                to,
+                changedFields: ['status', ...Object.keys(patch)],
+                previous: from.length === 1 ? { status: from[0] } : {},
+            });
+        }
+        return moved;
     }
 
     private sentWindowWhere(
@@ -372,3 +449,21 @@ export class EmailMessageRepository {
         return where;
     }
 }
+
+/**
+ * EW-P4-2 — one write {@link EmailMessageRepository} made to `email_messages`:
+ * a new row (`created`), or a change to an existing one (`status`: its status,
+ * delivery status or Task link; `to` set when the lifecycle status moved).
+ */
+export type EmailMessageChange =
+    | { readonly kind: 'created'; readonly id: string }
+    | {
+          readonly kind: 'status';
+          readonly id: string;
+          readonly to?: EmailMessageStatus;
+          readonly changedFields: readonly string[];
+          readonly previous: Readonly<Record<string, unknown>>;
+      };
+
+/** Receives every {@link EmailMessageChange}, after the write. Must not throw into the write. */
+export type EmailMessageChangeListener = (change: EmailMessageChange) => Promise<void>;

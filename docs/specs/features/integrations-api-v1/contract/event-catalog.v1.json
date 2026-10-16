@@ -641,24 +641,27 @@
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-8)."
 		},
 		{
 			"type": "email.message.sent",
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-8)."
 		},
 		{
 			"type": "email.message.status_changed",
 			"version": 1,
 			"domain": "email",
 			"aggregateType": "email_message",
-			"dataSchema": null,
-			"phase": "P4"
+			"dataSchema": "schemas/resources/email-message.schema.json",
+			"phase": "P4",
+			"notes": "Recipient-scoped: served (feed, webhooks v2) only to a key that also holds email:read; never to a user-owned subscription (CR-8)."
 		},
 		{
 			"type": "task.visibility_changed",

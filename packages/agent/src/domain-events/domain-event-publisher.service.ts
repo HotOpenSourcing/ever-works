@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
+import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
@@ -34,6 +35,8 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     organization: buildOrganizationSnapshot,
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
+    // EW-P4-2 — agent email (recipient-scoped).
+    email_message: buildEmailMessageSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */
