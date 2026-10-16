@@ -53,15 +53,27 @@ export function TaskPlanningSection({ task }: { task: Task }) {
             }
             estimateMinutes = n;
         }
+        // Send only what the user changed: a date another system set with a
+        // time of day (e.g. a Gauzy due date at 10:00) must not be rewritten to
+        // the end of the local day — and re-arm its due-soon notice — just
+        // because the estimate was edited.
+        const patch: {
+            dueAt?: string | null;
+            startAt?: string | null;
+            estimateMinutes?: number | null;
+        } = {};
+        if (due !== toDateInput(task.dueAt)) patch.dueAt = dueAt ? dueAt.toISOString() : null;
+        if (start !== toDateInput(task.startAt)) {
+            patch.startAt = startAt ? startAt.toISOString() : null;
+        }
+        if (estimateMinutes !== (task.estimateMinutes ?? null))
+            patch.estimateMinutes = estimateMinutes;
         setError(null);
+        if (Object.keys(patch).length === 0) return;
         startTransition(() => {
             void (async () => {
                 try {
-                    await updateTaskAction(task.id, {
-                        dueAt: dueAt ? dueAt.toISOString() : null,
-                        startAt: startAt ? startAt.toISOString() : null,
-                        estimateMinutes,
-                    });
+                    await updateTaskAction(task.id, patch);
                     toast.success(t('saved'));
                     router.refresh();
                 } catch (err) {
