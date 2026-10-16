@@ -529,13 +529,33 @@ export function classifyReviewBotComment(input: {
     // severity marker, and an acknowledgement never carries one. Copilot's
     // untagged findings are first comments, never replies, so they are not
     // affected. The finding that started the thread was recorded when it was
-    // created.
+    // created. The marker must be in the reply's OWN text: an acknowledgement
+    // that quotes the original finding ("> _🟠 Major_ …", "the `P1` issue is
+    // fixed") is still an acknowledgement (review on #2632).
     if (
         typeof input.inReplyTo === 'number' &&
         input.inReplyTo > 0 &&
-        parseReviewBotSeverity(raw) === null
+        parseReviewBotSeverity(ownReplyText(raw)) === null
     ) {
         return ignore('thread-reply');
     }
     return { kind: 'findings' };
+}
+
+/** A block-quote line (`> …`, optionally indented). */
+const QUOTED_LINE = /^[ \t]*>.*$/gm;
+
+/** An inline code span: a run of backticks, its content, the same run again. */
+const INLINE_CODE_SPAN = /(`+)[^`]*?\1/g;
+
+/**
+ * What a reply SAYS itself: the body without fenced code, without
+ * block-quoted lines and without inline code spans, which is where a reply
+ * repeats the comment it answers.
+ */
+function ownReplyText(raw: string): string {
+    return raw
+        .replace(FENCED_CODE_BLOCK, '')
+        .replace(QUOTED_LINE, '')
+        .replace(INLINE_CODE_SPAN, '');
 }

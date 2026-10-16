@@ -355,6 +355,25 @@ describe('github-review-bots', () => {
                 ).toBe('findings');
             });
 
+            it('a reply that only QUOTES the original marker is still an acknowledgement (review on #2632)', () => {
+                expect(
+                    reply('> _🟠 Major_ | The retry path skips the guard.\n\nFixed, thanks!'),
+                ).toBe('ignore:thread-reply');
+                expect(reply('Thanks, the `_🟠 Major_` issue is fixed.')).toBe(
+                    'ignore:thread-reply',
+                );
+                expect(
+                    reply(
+                        '```\n<img alt="P1" src="https://greptile-static-assets.s3.amazonaws.com/badges/p1.svg">\n```\nResolved.',
+                    ),
+                ).toBe('ignore:thread-reply');
+                expect(
+                    reply(
+                        '> **![P1 Badge](https://img.shields.io/badge/P1-orange)** Unsafe.\n\nAddressed.',
+                    ),
+                ).toBe('ignore:thread-reply');
+            });
+
             it('the same untagged text as a thread-OPENING comment is unchanged (still a finding)', () => {
                 expect(reply('The retry loop never backs off.', null)).toBe('findings');
                 expect(created('The retry loop never backs off.')).toBe('findings');
