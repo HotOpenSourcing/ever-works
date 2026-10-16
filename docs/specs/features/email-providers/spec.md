@@ -554,16 +554,19 @@ Now:
   owned by the receiving address's owner and recorded in the address's tenant / organization (`user_uploads`). Every
   attachment is listed on the row (`filename`, `mimeType`, `size`, `cid`, `stored`, `uploadId`, `url`, `reason`): one
   the pipeline refused, one over the per-message limits (20 attachments, 25 MB decoded), an empty one, or any when no
-  store is bound, is listed with `stored: false` and why. A refused attachment never blocks the message.
+  store is bound, is listed with `stored: false` and why. A refused attachment never blocks the message. The list
+  itself is bounded for the column (a MySQL `TEXT` holds 65,535 bytes): at most 50 records and 48,000 serialized UTF-8
+  bytes; whatever does not fit is summed in one trailing record (`N more attachments`, total size, how many stored).
 - **Request size**: the inbound-email webhooks (`/api/email/inbound/*`) get their own body-parser limit, mounted ahead of
   the global 1 MB one (`BODY_LIMIT`, unchanged for every other route): **25 MB** by default — the `proxy-body-size` the
   ingress already allows on every environment — overridable with `INBOUND_EMAIL_BODY_LIMIT` up to a 50 MB ceiling
   (invalid or larger values fall back to the default). Base64 adds a third, so roughly 18 MB of attachments fit in one
   message by default; raising the limit means raising the ingress's `proxy-body-size` too.
-- **Cc and metadata**: `ccAddresses` and `metadata` are kept. Metadata is bounded to 32,000 serialized characters
+- **Cc and metadata**: `ccAddresses` (at most 100) and `metadata` are kept. Metadata is bounded to 32,000 serialized UTF-8 bytes
   (first the raw header list is dropped, marked `headersOmitted`; then only the keys are kept, marked `truncated`).
 - **Tenant / organization**: the inbound row — and a conversation it creates — is stamped with the **receiving
   address's** `tenantId` / `organizationId` (explicit values, so the scope-stamping subscriber's empty request scope
-  never applies). A Task spawned from it is created in that same scope (an address with no organization keeps the
-  personal scope, as before), and its description lists the attachments (names and types defused like the rest of the
+  never applies). A Task spawned from it is created in the scope of its assignee, **the receiving Agent** (an
+  address may be bound to an Agent of another scope, e.g. the owner's personal Agent on an organization address, and the
+  Agent must stay reachable from the Task; an Agent that cannot be resolved keeps the old unscoped create), and its description lists the attachments (names and types defused like the rest of the
   email text) with their upload ids.

@@ -1,9 +1,12 @@
 import { Test } from '@nestjs/testing';
 import {
+    boundAttachmentRecords,
     boundInboundMetadata,
     DefaultInboundEmailDispatcher,
+    MAX_INBOUND_ATTACHMENT_LIST_BYTES,
     MAX_INBOUND_ATTACHMENTS,
-    MAX_INBOUND_METADATA_CHARS,
+    MAX_INBOUND_METADATA_BYTES,
+    MAX_LISTED_INBOUND_ATTACHMENTS,
 } from './default-inbound-email-dispatcher.service';
 import {
     deriveThreadKey,
@@ -797,13 +800,65 @@ describe('boundInboundMetadata (EW-P4-3)', () => {
     });
 
     it('keeps only the keys when still too large', () => {
-        const bounded = boundInboundMetadata({ blob: 'x'.repeat(MAX_INBOUND_METADATA_CHARS + 1) });
+        const bounded = boundInboundMetadata({ blob: 'x'.repeat(MAX_INBOUND_METADATA_BYTES + 1) });
         expect(bounded).toEqual({ truncated: true, keys: ['blob'] });
+    });
+
+    // Review on #2612: `simple-json` is a MySQL TEXT (65,535 BYTES), so the
+    // bound is on UTF-8 bytes — multibyte text counts for what it weighs.
+    it('bounds by UTF-8 bytes, not characters', () => {
+        const chars = Math.floor(MAX_INBOUND_METADATA_BYTES / 2);
+        const bounded = boundInboundMetadata({ note: '€'.repeat(chars) });
+        expect(bounded).toEqual({ truncated: true, keys: ['note'] });
     });
 
     it('never throws on a value that cannot be serialized', () => {
         const cyclic: Record<string, unknown> = {};
         cyclic.self = cyclic;
         expect(boundInboundMetadata(cyclic)).toEqual({ truncated: true, keys: ['self'] });
+    });
+});
+
+/** Review on #2612 — the attachment list must fit a MySQL TEXT column. */
+describe('boundAttachmentRecords (EW-P4-3)', () => {
+    const record = (i: number, stored = false) => ({
+        filename: `${'f'.repeat(240)}-${i}.bin`,
+        mimeType: 'application/octet-stream',
+        size: 10,
+        cid: `${'c'.repeat(240)}-${i}`,
+        stored,
+        uploadId: stored ? `sha-${i}` : null,
+        reason: stored ? undefined : 'over the 20-attachment limit',
+    });
+
+    it('keeps a short list as it is', () => {
+        const list = [record(1, true), record(2)];
+        expect(boundAttachmentRecords(list)).toEqual(list);
+    });
+
+    it('lists at most the cap and sums the rest in one record', () => {
+        const list = Array.from({ length: 120 }, (_, i) => record(i, i < 3));
+        const bounded = boundAttachmentRecords(list);
+        const last = bounded[bounded.length - 1];
+        expect(bounded.length).toBeLessThanOrEqual(MAX_LISTED_INBOUND_ATTACHMENTS + 1);
+        expect(last.filename).toMatch(/^\d+ more attachments$/);
+        const listed = bounded.length - 1;
+        expect(Number(last.filename.split(' ')[0])).toBe(120 - listed);
+        expect(last.size).toBe((120 - listed) * 10);
+        expect(Buffer.byteLength(JSON.stringify(bounded), 'utf8')).toBeLessThanOrEqual(
+            MAX_INBOUND_ATTACHMENT_LIST_BYTES,
+        );
+    });
+
+    it('stays within the byte budget with multibyte names', () => {
+        const list = Array.from({ length: 50 }, (_, i) => ({
+            ...record(i),
+            filename: '名'.repeat(255),
+        }));
+        const bounded = boundAttachmentRecords(list);
+        expect(Buffer.byteLength(JSON.stringify(bounded), 'utf8')).toBeLessThanOrEqual(
+            MAX_INBOUND_ATTACHMENT_LIST_BYTES,
+        );
+        expect(bounded[bounded.length - 1].filename).toMatch(/more attachments?$/);
     });
 });

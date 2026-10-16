@@ -743,7 +743,12 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
     };
 
     function build(
-        agent: { id: string; slug: string } | null = { id: 'agent-1', slug: 'support-bot' },
+        agent: {
+            id: string;
+            slug: string;
+            tenantId?: string | null;
+            organizationId?: string | null;
+        } | null = { id: 'agent-1', slug: 'support-bot' },
     ) {
         const tasks = {
             create: jest.fn().mockResolvedValue({ id: 'task-new' }),
@@ -796,10 +801,15 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
         expect([...lookups.ownedAgentSlugs.entries()]).toEqual([['support-bot', 'agent-1']]);
     });
 
-    // EW-P4-3 — the Task lives in the receiving address's scope and names
-    // the attachments the email came with.
-    it("creates the Task in the receiving address's tenant / organization", async () => {
-        const { spawner, tasks } = build();
+    // EW-P4-3 — the Task lives where its assignee (the receiving Agent) lives,
+    // and names the attachments the email came with.
+    it("creates the Task in the receiving Agent's tenant / organization", async () => {
+        const { spawner, tasks } = build({
+            id: 'agent-1',
+            slug: 'support-bot',
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
         await spawner.spawnTaskForInboundEmail({
             ...input,
             tenantId: 'tenant-1',
@@ -817,9 +827,44 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
         const [, created, scope] = tasks.create.mock.calls[0];
         expect(scope).toEqual({ tenantId: 'tenant-1', organizationId: 'org-1' });
         expect(created.description).toContain('- a.pdf (application/pdf, 6 bytes, upload sha-1)');
+        expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
     });
 
-    it('keeps the personal scope for an address without tenant or organization', async () => {
+    // Review on #2612: an org address may be bound to the owner's PERSONAL
+    // Agent (or one of another org). The Task must follow the Agent, or
+    // `addAssignee` cannot reach the Agent from it and delivery stops.
+    it('follows the Agent, not the address, when their scopes differ', async () => {
+        const { spawner, tasks } = build({ id: 'agent-1', slug: 'support-bot' });
+        await spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
+        const other = build({
+            id: 'agent-1',
+            slug: 'support-bot',
+            tenantId: 'tenant-1',
+            organizationId: 'org-2',
+        });
+        await other.spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
+        expect(other.tasks.create.mock.calls[0][2]).toEqual({
+            tenantId: 'tenant-1',
+            organizationId: 'org-2',
+        });
+    });
+
+    it('keeps the old unscoped create when the Agent cannot be resolved', async () => {
+        const { spawner, tasks } = build(null);
+        await spawner.spawnTaskForInboundEmail({ ...input, organizationId: 'org-1' });
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
+    });
+
+    it('keeps the personal scope for a personal Agent', async () => {
         const { spawner, tasks } = build();
         await spawner.spawnTaskForInboundEmail(input);
         expect(tasks.create.mock.calls[0][2]).toBeUndefined();
