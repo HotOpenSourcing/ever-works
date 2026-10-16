@@ -1,17 +1,7 @@
-import { RequestMethod } from '@nestjs/common';
-import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import * as ts from 'typescript';
 import { isDomainEventType } from '@ever-works/contracts';
-import { TaskChatController } from '../tasks/task-chat.controller';
-import { TaskTemplatesController } from '../task-templates/task-templates.controller';
-import { TasksController } from '../tasks/tasks.controller';
-import { TeamsController } from '../teams/teams.controller';
-import { OrganizationInvitationsController } from '../organizations/organization-invitations.controller';
-import { OrganizationsController } from '../organizations/organizations.controller';
-import { OrgInviteController } from '../onboarding/org-invite.controller';
-import { AgentsController } from '../agents/agents.controller';
-import { AgentCollaboratorsController } from '../agents/agent-collaborators.controller';
-import { MembersController } from '../works/members.controller';
-import { WorksController } from '../works/works.controller';
 import { DOMAIN_EVENT_ROUTE_COVERAGE, describeCoverage } from './domain-event-route-coverage';
 
 /**
@@ -20,71 +10,119 @@ import { DOMAIN_EVENT_ROUTE_COVERAGE, describeCoverage } from './domain-event-ro
  * `DOMAIN_EVENT_ROUTE_COVERAGE` — with the catalog events it records, or the
  * reason it records none. A new POST/PUT/PATCH/DELETE route on one of these
  * controllers fails here until someone decides.
+ *
+ * The routes are read from the controllers' source with the TypeScript parser
+ * rather than by importing the classes: importing them pulls in the whole
+ * agent service graph, including ESM-only packages (`github-slugger`, `p-map`)
+ * this jest environment cannot load. Every `@Controller` / route decorator in
+ * scope takes a string literal (or nothing); anything else fails the first
+ * test so the gate cannot go silently blind.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const CONTROLLERS_IN_SCOPE: ReadonlyArray<new (...args: any[]) => unknown> = [
-    TasksController,
-    TaskChatController,
-    TaskTemplatesController,
-    TeamsController,
-    OrganizationInvitationsController,
-    OrgInviteController,
-    OrganizationsController,
-    AgentsController,
-    AgentCollaboratorsController,
-    MembersController,
-    WorksController,
+const CONTROLLER_FILES: readonly string[] = [
+    'tasks/tasks.controller.ts',
+    'tasks/task-chat.controller.ts',
+    'task-templates/task-templates.controller.ts',
+    'teams/teams.controller.ts',
+    'organizations/organization-invitations.controller.ts',
+    'organizations/organizations.controller.ts',
+    'onboarding/org-invite.controller.ts',
+    'agents/agents.controller.ts',
+    'agents/agent-collaborators.controller.ts',
+    'works/members.controller.ts',
+    'works/works.controller.ts',
 ];
 
-const MUTATING = new Map<number, string>([
-    [RequestMethod.POST, 'POST'],
-    [RequestMethod.PUT, 'PUT'],
-    [RequestMethod.PATCH, 'PATCH'],
-    [RequestMethod.DELETE, 'DELETE'],
+const MUTATING = new Map<string, string>([
+    ['Post', 'POST'],
+    ['Put', 'PUT'],
+    ['Patch', 'PATCH'],
+    ['Delete', 'DELETE'],
+    ['All', 'ALL'],
 ]);
 
-function joinPath(...parts: Array<string | string[] | undefined>): string {
+function joinPath(...parts: Array<string | undefined>): string {
     const segments = parts
-        .flatMap((part) => (Array.isArray(part) ? part[0] : part))
-        .filter((part): part is string => typeof part === 'string' && part.length > 0)
+        .filter((part): part is string => typeof part === 'string')
         .map((part) => part.replace(/^\/+|\/+$/g, ''))
         .filter((part) => part.length > 0);
     return `/${segments.join('/')}`;
 }
 
+interface DecoratorCall {
+    readonly name: string;
+    /** The literal path argument; `undefined` when there is none. */
+    readonly path: string | undefined;
+    /** True when an argument exists but is not a string literal. */
+    readonly dynamic: boolean;
+}
+
+function decoratorCalls(node: ts.Node): DecoratorCall[] {
+    const decorators = ts.canHaveDecorators(node) ? (ts.getDecorators(node) ?? []) : [];
+    const calls: DecoratorCall[] = [];
+    for (const decorator of decorators) {
+        const expression = decorator.expression;
+        if (!ts.isCallExpression(expression) || !ts.isIdentifier(expression.expression)) continue;
+        const [first] = expression.arguments;
+        const literal = first && ts.isStringLiteralLike(first) ? first.text : undefined;
+        calls.push({
+            name: expression.expression.text,
+            path: literal,
+            dynamic: first !== undefined && literal === undefined,
+        });
+    }
+    return calls;
+}
+
+interface ScannedRoutes {
+    readonly routes: string[];
+    readonly controllers: string[];
+    readonly unreadable: string[];
+}
+
 /** Every mutating route of the controllers in scope, as `METHOD /path`. */
-function mutatingRoutes(): string[] {
+function scanMutatingRoutes(): ScannedRoutes {
     const routes: string[] = [];
-    for (const controller of CONTROLLERS_IN_SCOPE) {
-        const base = Reflect.getMetadata(PATH_METADATA, controller) as
-            | string
-            | string[]
-            | undefined;
-        const proto = controller.prototype as Record<string, unknown>;
-        for (const name of Object.getOwnPropertyNames(proto)) {
-            if (name === 'constructor') continue;
-            const handler = proto[name];
-            if (typeof handler !== 'function') continue;
-            const method = Reflect.getMetadata(METHOD_METADATA, handler) as number | undefined;
-            const verb = method === undefined ? undefined : MUTATING.get(method);
-            if (!verb) continue;
-            const path = Reflect.getMetadata(PATH_METADATA, handler) as
-                | string
-                | string[]
-                | undefined;
-            routes.push(`${verb} ${joinPath(base, path)}`);
+    const controllers: string[] = [];
+    const unreadable: string[] = [];
+    for (const file of CONTROLLER_FILES) {
+        const source = ts.createSourceFile(
+            file,
+            readFileSync(join(__dirname, '..', file), 'utf8'),
+            ts.ScriptTarget.Latest,
+            true,
+        );
+        for (const statement of source.statements) {
+            if (!ts.isClassDeclaration(statement)) continue;
+            const controller = decoratorCalls(statement).find((call) => call.name === 'Controller');
+            if (!controller) continue;
+            const className = statement.name?.text ?? '<anonymous>';
+            controllers.push(className);
+            if (controller.dynamic) unreadable.push(`${file}: @Controller on ${className}`);
+            for (const member of statement.members) {
+                if (!ts.isMethodDeclaration(member)) continue;
+                for (const call of decoratorCalls(member)) {
+                    const verb = MUTATING.get(call.name);
+                    if (!verb) continue;
+                    const method = member.name.getText(source);
+                    if (call.dynamic) unreadable.push(`${file}: @${call.name} on ${method}`);
+                    routes.push(`${verb} ${joinPath(controller.path, call.path)}`);
+                }
+            }
         }
     }
-    return routes;
+    return { routes, controllers, unreadable };
 }
 
 describe('domain event route coverage', () => {
-    const routes = mutatingRoutes();
+    const { routes, controllers, unreadable } = scanMutatingRoutes();
 
-    it('finds the routes at all (a silent zero would make the gate useless)', () => {
+    it('reads every controller in scope (a silent zero would make the gate useless)', () => {
+        expect(controllers).toHaveLength(CONTROLLER_FILES.length);
+        expect(unreadable).toEqual([]);
         expect(routes.length).toBeGreaterThan(20);
         expect(routes).toContain('POST /api/tasks');
         expect(routes).toContain('PATCH /api/task-chat-messages/:id');
+        expect(routes).toContain('POST /api/organizations/:orgId/teams');
     });
 
     it('lists every mutating route in scope with its events or an exemption', () => {

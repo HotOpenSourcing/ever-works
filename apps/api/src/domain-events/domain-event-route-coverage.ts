@@ -4,7 +4,7 @@
  * Every mutating route (POST / PUT / PATCH / DELETE) of a controller in the
  * domain-event scope must appear here, either with the catalog events it
  * records or with the reason it records none. `domain-event-route-coverage.spec.ts`
- * reflects the routes from the controllers' Nest metadata and fails CI when a
+ * reads the routes from the controllers' decorators and fails CI when a
  * route is missing from this table — so a new mutating route cannot ship
  * without someone deciding what event it records.
  *
