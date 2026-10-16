@@ -1,5 +1,6 @@
 import {
     getWorkCapabilities,
+    RECIPIENT_EVENT_VISIBILITY,
     type IntegrationAgentDto,
     type IntegrationInboxItemDto,
     type IntegrationIdeaDto,
@@ -536,7 +537,8 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
         workId: row.workId ?? null,
         escalationId: row.escalationId ?? null,
         proposalId: row.proposalId ?? null,
-        webUrl: webUrl('/inbox'),
+        // The Inbox deep link the bell and channel messages use (`/inbox?id=`).
+        webUrl: webUrl(`/inbox?id=${encodeURIComponent(row.id)}`),
     };
 }
 
@@ -546,12 +548,14 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
  * organization), else `null` (a personal-scope message: recorded for
  * in-process listeners, never served to integrations).
  *
- * Recorded `private`: an inbox item is ONE person's message (the question an
- * agent asked them, their approval, their answer). An organization-scoped
- * event would reach every key with `events:read` on the organization and
- * every webhook on it, not just the recipient. Until delivery is scoped to
- * the recipient (T21: `inbox:*` + act-as = the recipient), these events stay
- * off the integration feed and webhooks v2.
+ * Recorded `recipient` ({@link RECIPIENT_EVENT_VISIBILITY}): an inbox item is
+ * ONE person's message (the question an agent asked them, their approval, their
+ * answer). An ordinary organization event would reach every key with
+ * `events:read` on the organization and every webhook on it. A `recipient`
+ * event reaches only an integration key that also holds `inbox:read` (the
+ * scope that reads every recipient's messages through `GET /inbox/items`), and
+ * never a user-owned webhook subscription; in-process listeners get them all.
+ * (It was recorded `private` until those routes existed, #2644.)
  */
 export async function buildInboxItemSnapshot(
     manager: EntityManager,
@@ -570,6 +574,6 @@ export async function buildInboxItemSnapshot(
         dto: toIntegrationInboxItemDto(row),
         tenantId,
         organizationId: row.organizationId ?? null,
-        visibility: 'private',
+        visibility: RECIPIENT_EVENT_VISIBILITY,
     };
 }

@@ -200,9 +200,9 @@ visibility is derived (`team` when it sits on a team).
 | Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works`                                                                                                                                         | `missions:*`   | P2                                                                                                                      |
 | Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}`                                                                                   | `goals:*`      | P2                                                                                                                      |
 | Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id`, `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore`                                                                                                                                                              | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json)                                                                   |
-| Inbox (P3)    | `GET /inbox/items`, `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` (act-as = the recipient; returns `{routed, restart}`), `PATCH /inbox/items/:id/state {unread?, archived?}`                                                                                                                | `inbox:*`      | P3                                                                                                                      |
+| Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
 | KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST`/`PATCH`/`DELETE /kb/folders`                                                                                                                                              | `kb:*`         | P3                                                                                                                      |
-| Email (P4)    | `GET /email/messages?updatedSince=&agentId=`, `POST /email/inbound`                                                                                                                                                                                                                                                    | `email:*`      | P4                                                                                                                      |
+| Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                           |
 
 Request bodies for the P1 writes: [`contract/schemas/requests.schema.json`](./contract/schemas/requests.schema.json).
 PUT-set routes take an object (`{members:[…]}`, `{resources:[…]}`, `{assignees:[…]}`, `{userIds:[…]}`,
@@ -248,3 +248,93 @@ always set; PUT-set bodies are objects and answer the parent DTO; the
 webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation; task create status `backlog|todo`; link
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.
+
+## 9. Inbox (P3, EW-P3-1) — `v1-draft.4`, CR-4
+
+An inbox item is **one human's message** (its recipient): a question an agent run asked, an approval request, an
+escalation mirror or a system notice ([`inbox-item`](./contract/schemas/resources/inbox-item.schema.json)). It is not
+an organization resource, so it has no `visibility`, owner, teams or `externalLinks`; the consumer keys it by its Ever
+Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
+
+- **Reads** (`inbox:read`): `GET /inbox/items` lists every recipient's messages in the pinned organization, ordered by
+  `(updatedAt, id)` like every v1 list. Filters: `recipientUserId`, `status` and `kind` (comma-separated or repeated,
+  closed vocabularies; anything else is `400`), `updatedSince`, `cursor`, `limit`. Without `status`, archived messages
+  are left out unless `includeArchived=true`. A message outside any organization (personal scope) is never served, and
+  one of another organization answers `404`. `GET /inbox/items/:id` carries `ETag: "<version>"`.
+- **Writes act as the recipient only** (`inbox:write`): `X-Act-As-User` must name the item's `recipientUserId`, or the
+  write answers `403 act_as_forbidden` (`details.reason: not_the_recipient`). The integration key's own identity, or
+  another member, never answers somebody's message.
+- `POST /inbox/items/:id/reply` [`InboxReply`](./contract/schemas/requests.schema.json) goes through the app's own Inbox
+  reply, so it does exactly what the recipient answering in Ever Works does: a question steers the live run or resumes
+  the parked one, an approval decides its proposal, an escalation resolves. It answers
+  [`{item, routed, restart, runId?}`](./contract/schemas/resources/inbox-reply-result.schema.json). An item already
+  answered or archived answers `409 conflict`; a lost race answers `200` with `routed: "already-decided"` and the
+  winning answer. `Idempotency-Key` is optional (a reply creates nothing); with one, a retry replays the first answer.
+  The resumed run is the recipient's own decision on their own run, not autonomous spend the integration starts (D9).
+- `PATCH /inbox/items/:id/state` [`InboxStateChange`](./contract/schemas/requests.schema.json) `{unread?, archived?}`
+  (at least one): read / unread, archive / restore (an answered item comes back `answered`, else `open`). Archiving an
+  OPEN fleet question releases the run parked on it, as in the app. `If-Match` is optional (`412`); it is checked
+  against the version read at the start of the request. Answers the item DTO and its `ETag`.
+- **Who receives the events.** `inbox.item.*` are recipient-scoped (one person's messages): the feed serves them only
+  to a key that holds `inbox:read` on top of `events:read`, and webhooks v2 deliver them only to a subscription owned
+  by such a key, never to a user-owned subscription (another member would otherwise receive somebody else's messages).
+  The outbox records them `visibility: recipient`. The same rule will cover `email.*` with `email:read` (P4).
+- **Events** (`inbox.item.*`, `data` = the same DTO): `created` from every producer, `answered` once per answer whichever
+  door it came through (Inbox reply, escalation resolve, approval decide), `state_changed` for a real read / archive
+  flip (also when a reply whose routing failed leaves the item read), `deleted` with the last snapshot. `webUrl` is the
+  Inbox deep link `/inbox?id=<id>`.
+
+## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — `v1-draft.10`, CR-11
+
+An agent email ([`email-message`](./contract/schemas/resources/email-message.schema.json)) is mail an Ever Works agent
+received (`inbound`) or sent / drafted (`outbound`), in its owner's mailbox. Like the Inbox it is **recipient-scoped**:
+
+- `GET` needs `email:read`.
+- The `email.message.*` events are served by the feed only to a key that also holds `email:read`.
+- Webhooks v2 deliver them only to a subscription owned by such a key, never to a user-owned subscription.
+
+Bcc, provider metadata, approval bookkeeping and failure reasons are never exposed.
+
+**Reads.** `GET /email/messages` lists the pinned organization's agent mail.
+
+- Filters: `agentId`, `direction=inbound|outbound`, `status` (the lifecycle vocabulary).
+- Supports `updatedSince` and keyset paging by `(updatedAt, id)`.
+- `updatedAt` moves on every write, so status and delivery changes are caught.
+- `GET /email/messages/:id` answers with an `ETag`.
+
+**`POST /email/inbound`** ([`InboundEmail`](./contract/schemas/requests.schema.json); `email:write`, an opt-in scope
+outside the Ever Gauzy preset) pushes an email a Gauzy mailbox received to an Ever Works agent of the pinned
+organization:
+
+1. The message is stored as `email_messages(direction=inbound)` on the **agent's own inbound address**: its first
+   inbound assignment, the same choice the provider path makes.
+2. It goes through the **same dispatcher as provider mail**:
+    - the assignment's mode decides between task-spawn and conversation;
+    - `In-Reply-To` / `References` join an existing thread.
+3. It answers [`{message, dispatch}`](./contract/schemas/resources/email-inbound-result.schema.json) with `201`.
+
+Edge cases:
+
+- **No inbound assignment.** An agent without an active inbound assignment answers `422 domain_rule`. Its owner opts in
+  by giving it one; that is also what starts any agent work on the mail.
+- **Address of another organization.** The stored message takes its address's organization, so an inbound address of
+  another organization, or of none, answers `422 domain_rule`: its mail would be invisible to the key.
+- **Repeated push.** `Idempotency-Key` is required. A push repeated with the same Message-ID into the same organization
+  answers `200` with the message already delivered. The de-duplication key is per integration key **and** pinned
+  organization, so one key pushing the same mail into two organizations delivers it to each.
+- **Attachments.** They are recorded with their `url` and **never fetched**: Ever Works makes no request to a
+  caller-supplied URL.
+
+**Events** (`data` = the same DTO):
+
+| Event                          | When                                                                                                 |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `email.message.received`       | An inbound message is stored.                                                                        |
+| `email.message.sent`           | An outbound message reaches `sent`.                                                                  |
+| `email.message.status_changed` | Any other change: a draft filed, `sending`, `failed`, `discarded`, a delivery status, the Task link. |
+
+`changedFields` names DTO fields (`to`, `text`, `messageId` …) and lists only what the write really changed; a write
+that changes nothing the DTO shows (Bcc, provider bookkeeping, metadata) records no event and keeps `version`.
+
+An event whose text + HTML exceed 262144 UTF-8 bytes carries `text: null, html: null, bodyOmitted: true`. A message
+outside any organization records none.

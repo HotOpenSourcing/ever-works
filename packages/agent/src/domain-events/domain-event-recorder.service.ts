@@ -8,6 +8,7 @@ import {
 import type { EntityManager, EntityTarget, ObjectLiteral } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { DomainEvent } from '../entities/domain-event.entity';
+import { EmailMessage } from '../entities/email-message.entity';
 import { InboxItem } from '../entities/inbox-item.entity';
 import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
@@ -59,6 +60,7 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         organization: Organization,
         inbox_item: InboxItem,
         idea: WorkProposal,
+        email_message: EmailMessage,
     };
 
 /** Thrown for a type outside the catalog: an event nobody can parse is a bug, not data. */

@@ -36,9 +36,8 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'DELETE /api/tasks/:id/assignees/:assigneeId': { events: ['task.assignee.removed'] },
     'POST /api/tasks/:id/reviewers': { events: ['task.updated'] },
     'POST /api/tasks/:id/reject': { events: ['task.updated'] },
-    'POST /api/tasks/:id/escalations/:escalationId/resolve': {
-        exempt: 'Writes agent_escalations (the inbox domain, P3: inbox.item.*), not the task aggregate.',
-    },
+    // Resolving the escalation closes its Inbox mirror (EW-P3-1 `escalationResolved`).
+    'POST /api/tasks/:id/escalations/:escalationId/resolve': { events: ['inbox.item.answered'] },
     'POST /api/tasks/:id/approvers': { events: ['task.updated'] },
     'POST /api/tasks/:id/blocks': { events: ['task.block.added'] },
     'DELETE /api/tasks/:id/blocks/:blockId': { events: ['task.block.removed'] },
@@ -243,6 +242,29 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/works/:id/comparisons/generate': { exempt: WORK_CONTENT },
     'POST /api/works/:id/comparisons/generate-manual': { exempt: WORK_CONTENT },
     'DELETE /api/works/:id/comparisons/:slug': { exempt: WORK_CONTENT },
+
+    // ── Inbox (`api/inbox`, `api/escalations`, `api/agent-approvals`; EW-P3-1) ──
+    // + `inbox.item.state_changed` when routing fails after the claim marked the item read.
+    'POST /api/inbox/:id/reply': { events: ['inbox.item.answered', 'inbox.item.state_changed'] },
+    'PATCH /api/inbox/:id/read': { events: ['inbox.item.state_changed'] },
+    'POST /api/inbox/:id/archive': { events: ['inbox.item.state_changed'] },
+    'POST /api/inbox/:id/unarchive': { events: ['inbox.item.state_changed'] },
+    'DELETE /api/inbox/:id': { events: ['inbox.item.deleted'] },
+    // A decision taken through another door closes the Inbox mirror (`escalationResolved` /
+    // `proposalDecided`).
+    'POST /api/escalations/:id/resolve': { events: ['inbox.item.answered'] },
+    'POST /api/agent-approvals/approve-all': { events: ['inbox.item.answered'] },
+    'POST /api/agent-approvals/:id/approve': { events: ['inbox.item.answered'] },
+    'POST /api/agent-approvals/:id/reject': { events: ['inbox.item.answered'] },
+    // Integration API v1 Inbox: the same `InboxService` writes, as the recipient.
+    'POST /api/integrations/v1/inbox/items/:id/reply': {
+        events: ['inbox.item.answered', 'inbox.item.state_changed'],
+    },
+    'PATCH /api/integrations/v1/inbox/items/:id/state': { events: ['inbox.item.state_changed'] },
+    // Integration API v1 agent email (EW-P4-1): the provider path's dispatcher; + the Task link.
+    'POST /api/integrations/v1/email/inbound': {
+        events: ['email.message.received', 'email.message.status_changed'],
+    },
 
     // ── Integration API v1 (`api/integrations/v1`, EW-P1-4) ───────────────────
     'POST /api/integrations/v1/tasks': {
