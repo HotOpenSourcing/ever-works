@@ -60,9 +60,10 @@
 - [x] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags` — `WebhookDomainEventFanoutService` (cursor
       `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
 - [x] **T20** `t=,v1=` signer + rotation grace + vector contract test — `webhook-signature-v2.ts` (all 22 vectors).
-- [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily, and a
-  key-owned subscription needs `kind = integration`; the `/api/integrations/v1/webhooks` routes for key-owned
-  subscriptions are next).
+- [x] **T21** PATCH resume; key-owned subscriptions at `/api/integrations/v1/webhooks` (`webhooks:manage`: list /
+      create / PATCH / rotate-secret / test / delete, only the key's own, only its pinned organizations); revoking the
+      key disables them at once (`IntegrationKeyRevokedWebhooksListener`), and the fan-out and the sender re-check the
+      owner before each delivery.
 - [ ] **T22** Settings → Webhooks UI.
 
 ## Phase 4 — Transitions (EW-P1-6)

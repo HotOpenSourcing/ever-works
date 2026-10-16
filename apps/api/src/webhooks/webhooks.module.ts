@@ -24,6 +24,7 @@ import { WebhooksService } from './webhooks.service';
 import { WebhookSecretService } from './webhook-secret.service';
 import { WebhookEventDispatcherService } from './webhook-event-dispatcher.service';
 import { WebhooksDeliveriesService } from './webhooks-deliveries.service';
+import { IntegrationKeyRevokedWebhooksListener } from './integration-key-revoked.listener';
 import { TenantJobRuntimeModule } from '../account/tenant-job-runtime/tenant-job-runtime.module';
 import { TriggerWebhookController } from './trigger-webhook.controller';
 import { TriggerWebhookEventRouterService } from './trigger-webhook-event-router.service';
@@ -73,6 +74,8 @@ import { TriggerRunFailureSentryBreadcrumbSubscriber } from './subscribers/trigg
         WebhookSubscriptionDeliveryService,
         WebhookEventDispatcherService,
         WebhooksDeliveriesService,
+        // EW-P1-5: revoking an integration key disables the webhooks it owns.
+        IntegrationKeyRevokedWebhooksListener,
         // Webhooks v2 (EW-P1-5) — domain events → v2 subscriptions, enqueued on
         // the same delivery pipeline as every other webhook.
         WebhookDomainEventFanoutService,
@@ -103,6 +106,8 @@ import { TriggerRunFailureSentryBreadcrumbSubscriber } from './subscribers/trigg
     ],
     exports: [
         WebhooksService,
+        // `/api/integrations/v1/webhooks/:id/test` (EW-P1-5).
+        WebhooksDeliveriesService,
         WebhookSecretService,
         WebhookDeliveryService,
         WebhookSubscriptionDeliveryService,
