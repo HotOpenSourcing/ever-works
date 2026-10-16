@@ -31,6 +31,7 @@ import {
     TaskReviewerRepository,
     TaskBlockRepository,
     TaskRelationRepository,
+    TaskWatcherRepository,
     UserTaskCounterRepository,
 } from '../database/repositories/task-side.repositories';
 import {
@@ -393,6 +394,10 @@ export class TasksService {
         // Record visibility (EW-P1-3) — automatic Team <-> Organization scope when a
         // Task's teamId is set or cleared. Appended LAST + @Optional.
         @Optional() private readonly visibility?: RecordVisibilityService,
+        // Integration API v1 (EW-P1-4) — task watchers (`PUT /tasks/:id/watchers`).
+        // Appended LAST + @Optional per the positional-spec arity rule; absent,
+        // the watcher methods refuse.
+        @Optional() private readonly watchers?: TaskWatcherRepository,
     ) {}
 
     /** Per-process run-now claims, used only when `runNowLock` is unbound. */
@@ -2282,6 +2287,116 @@ export class TasksService {
                 ),
             `Task ${taskId} already has a relation to ${relatedTaskId}.`,
         );
+    }
+
+    /** Remove one relation of a task (records `task.relation.removed`). */
+    async removeRelation(
+        userId: string,
+        taskId: string,
+        relationId: string,
+        ownershipScope?: OwnershipScope,
+    ) {
+        await this.getOne(userId, taskId, ownershipScope);
+        const existing = (await this.relations.findByTaskId(taskId)).find(
+            (row) => row.id === relationId,
+        );
+        const removed = await this.withTaskEvent(
+            (manager) => this.relations.removeForTask(taskId, relationId, manager),
+            async (publisher, manager, gone) => {
+                if (!gone || !existing) return;
+                await publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.relation.removed',
+                    {
+                        taskId,
+                        relatedTaskId: existing.relatedTaskId,
+                        kind: existing.kind,
+                        deleted: true,
+                    },
+                    { changedFields: ['relations'] },
+                );
+            },
+        );
+        if (!removed) {
+            throw new NotFoundException(`Relation ${relationId} not found.`);
+        }
+        return { deleted: true } as const;
+    }
+
+    // ── Watchers (EW-P1-4) ────────────────────────────────────────
+
+    /** The users watching a task. */
+    async listWatchers(userId: string, taskId: string, ownershipScope?: OwnershipScope) {
+        await this.getOne(userId, taskId, ownershipScope);
+        return this.requireWatchers().findByTaskId(taskId);
+    }
+
+    /**
+     * Add a watcher (records `task.watcher.added`). The watcher must be an
+     * active user of the task's tenant — the same rule as a user assignee.
+     */
+    async addWatcher(
+        userId: string,
+        taskId: string,
+        watcherUserId: string,
+        ownershipScope?: OwnershipScope,
+    ) {
+        const task = await this.getOne(userId, taskId, ownershipScope);
+        await this.assertActorIsValid(userId, 'user', watcherUserId, task);
+        const watchers = this.requireWatchers();
+        const already = (await watchers.findByTaskId(taskId)).find(
+            (row) => row.userId === watcherUserId,
+        );
+        if (already) return already;
+        return this.withTaskEvent(
+            (manager) => watchers.add(taskId, watcherUserId, manager),
+            (publisher, manager) =>
+                publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.watcher.added',
+                    { taskId, userId: watcherUserId },
+                    { changedFields: ['watchers'] },
+                ),
+        );
+    }
+
+    /** Remove a watcher (records `task.watcher.removed`); a no-op when not watching. */
+    async removeWatcher(
+        userId: string,
+        taskId: string,
+        watcherUserId: string,
+        ownershipScope?: OwnershipScope,
+    ): Promise<{ removed: boolean }> {
+        await this.getOne(userId, taskId, ownershipScope);
+        const watchers = this.requireWatchers();
+        const existing = (await watchers.findByTaskId(taskId)).find(
+            (row) => row.userId === watcherUserId,
+        );
+        if (!existing) return { removed: false };
+        await this.withTaskEvent(
+            (manager) => watchers.remove(existing.id, taskId, manager),
+            (publisher, manager) =>
+                publisher.child(
+                    manager,
+                    'task',
+                    taskId,
+                    'task.watcher.removed',
+                    { taskId, userId: watcherUserId, deleted: true },
+                    { changedFields: ['watchers'] },
+                ),
+        );
+        return { removed: true };
+    }
+
+    private requireWatchers(): TaskWatcherRepository {
+        if (!this.watchers) {
+            throw new BadRequestException('Task watchers are not available in this deployment.');
+        }
+        return this.watchers;
     }
 
     // ── Phase 13.5 — attachments ──────────────────────────────────

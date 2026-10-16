@@ -8,6 +8,7 @@
  * | {@link DuplicateExternalRefError} | 409    | `duplicate_external_ref` |
  * | {@link IdempotencyConflictError}  | 409    | `conflict`               |
  * | {@link InvalidCursorError}        | 400    | `validation_failed`      |
+ * | {@link ResourceNotFoundError}     | 404    | `not_found`              |
  */
 
 /** `If-Match` named a version the aggregate no longer has. */
@@ -54,5 +55,16 @@ export class InvalidCursorError extends Error {
     constructor() {
         super('cursor is not a cursor this API issued; pass nextCursor back unchanged');
         this.name = 'InvalidCursorError';
+    }
+}
+
+/** No such record in the caller's organization (or not one it may see). */
+export class ResourceNotFoundError extends Error {
+    constructor(
+        readonly kind: string,
+        readonly id: string,
+    ) {
+        super(`No ${kind} ${id} in this organization`);
+        this.name = 'ResourceNotFoundError';
     }
 }

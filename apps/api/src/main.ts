@@ -6,6 +6,7 @@ import './load-env';
 import { NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { SwaggerModule } from '@nestjs/swagger';
+import { serveIntegrationOpenApi } from './integrations-api/v1/integration-openapi';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { apiReference } from '@scalar/nestjs-api-reference';
 import { ApiModule } from './api.module';
@@ -252,6 +253,11 @@ async function bootstrap() {
             }),
         );
     }
+
+    // EW-P1-4 — the integration API's own OpenAPI document. Unlike the full
+    // spec above it describes only the published `/api/integrations/v1`
+    // contract, so it is served in production too.
+    serveIntegrationOpenApi(app);
 
     await app.listen(process.env.PORT ?? 3100);
 }

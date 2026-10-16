@@ -2105,6 +2105,19 @@ describe('api-side AgentsModule — AGENT_GIT_FACADE Work repository resolution 
             expectNoGitWork(git);
         });
 
+        // EW-P2-4 — a repo-less Project Work has nothing to commit to.
+        it('refuses a Project Work (no repository) before resolving any repository name', async () => {
+            const work = makeWork({ kind: 'project' });
+            const { facade, git } = build({ work });
+
+            await expect(facade.commitToRepo(commitInput({ branch: 'feature/x' }))).rejects.toThrow(
+                /no repository/i,
+            );
+            expect(work.getDataRepo).not.toHaveBeenCalled();
+            expect(work.getWebsiteRepo).not.toHaveBeenCalled();
+            expectNoGitWork(git);
+        });
+
         it('fails closed when the Work cannot be found', async () => {
             const { facade, git } = build({ work: null });
 

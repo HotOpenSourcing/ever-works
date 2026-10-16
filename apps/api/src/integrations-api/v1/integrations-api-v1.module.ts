@@ -1,7 +1,20 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
+import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
+import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
+import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
+import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
+import { IntegrationEventsController } from './events.controller';
+import { IntegrationExceptionFilter } from './integration-exception.filter';
+import { IntegrationLinksController } from './links.controller';
+import { IntegrationResourcesController } from './resources.controller';
+import { IntegrationTasksWriteController } from './tasks-write.controller';
+import { IntegrationTaskSetsController } from './tasks-sets.controller';
+import { IntegrationTaskCommentsController } from './task-comments.controller';
+import { IntegrationBatchController } from './batch.controller';
+import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -15,10 +28,32 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
  * links, batch) are EW-P1-4 and land in this module.
  */
 @Module({
-    imports: [DatabaseModule, DomainEventsModule],
-    controllers: [IntegrationWhoamiController],
+    imports: [
+        DatabaseModule,
+        DomainEventsModule,
+        IntegrationsApiFoundationModule,
+        // The domain services the write routes delegate to (the app's own rules,
+        // events and notifications).
+        TasksDomainModule,
+        AgentTeamsModule,
+        // `visibility` on task writes (EW-P1-3).
+        RecordVisibilityModule,
+    ],
+    controllers: [
+        IntegrationWhoamiController,
+        // EW-P1-4 — the change feed and the P1 resource reads.
+        IntegrationEventsController,
+        IntegrationResourcesController,
+        IntegrationLinksController,
+        IntegrationTasksWriteController,
+        IntegrationTaskSetsController,
+        IntegrationTaskCommentsController,
+        IntegrationTeamsWriteController,
+        IntegrationBatchController,
+    ],
     providers: [
         IntegrationOnlyGuard,
+        IntegrationExceptionFilter,
         // `whoami.feedHead` — the GLOBAL change-feed head (EW-P1-1): feed
         // positions are assigned by the relay across every organization, so
         // there is no per-organization head and the pins are not needed here.
