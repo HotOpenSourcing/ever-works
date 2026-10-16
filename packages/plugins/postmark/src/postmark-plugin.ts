@@ -77,12 +77,46 @@ function angleAddress(value: string): string | null {
 	return null;
 }
 
+/**
+ * EW-P4-3 — split a raw address-list header (`To` / `Cc`) on the commas that
+ * SEPARATE mailboxes, not the ones inside a quoted display name or an angle
+ * address: `"Doe, John" <john@x>, jane@x` is two mailboxes. Linear time (the
+ * header is sender-written and read before verification).
+ */
+function splitAddressList(raw: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let inQuote = false;
+	let inAngle = false;
+	for (let i = 0; i < raw.length; i += 1) {
+		const ch = raw[i];
+		if (ch === '\\' && inQuote && i + 1 < raw.length) {
+			current += ch + raw[i + 1];
+			i += 1;
+			continue;
+		}
+		if (ch === '"' && !inAngle) inQuote = !inQuote;
+		else if (ch === '<' && !inQuote) inAngle = true;
+		else if (ch === '>' && !inQuote) inAngle = false;
+		if (ch === ',' && !inQuote && !inAngle) {
+			parts.push(current);
+			current = '';
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current);
+	return parts;
+}
+
 interface PostmarkInboundPayload {
 	readonly MessageID: string;
 	readonly From: string;
 	readonly FromName?: string;
 	readonly ToFull?: Array<{ readonly Email: string; readonly Name?: string }>;
 	readonly To?: string;
+	readonly CcFull?: Array<{ readonly Email: string; readonly Name?: string }>;
+	readonly Cc?: string;
 	readonly Subject: string;
 	readonly TextBody?: string;
 	readonly HtmlBody?: string;
@@ -272,6 +306,14 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 		// The same bare mailboxes `extractInboundRecipients` names (the raw
 		// `To` fallback may carry a display name).
 		const to = payload.ToFull?.map((t) => t.Email) ?? (payload.To ? [parseEmailAddress(payload.To)] : []);
+		// EW-P4-3 — Cc is recorded (never routed on). `CcFull` is bare;
+		// the raw `Cc` header fallback may carry display names.
+		const cc = (
+			payload.CcFull?.map((c) => c.Email) ??
+			(payload.Cc ? splitAddressList(payload.Cc).map((part) => parseEmailAddress(part)) : [])
+		).filter(
+			(address): address is string => typeof address === 'string' && address.length > 0 && address.includes('@')
+		);
 		const attachments: EmailAttachment[] =
 			payload.Attachments?.map((a) => ({
 				filename: a.Name,
@@ -284,6 +326,7 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 			providerMessageId: payload.MessageID,
 			from: payload.From,
 			to,
+			...(cc.length > 0 ? { cc } : {}),
 			subject: payload.Subject,
 			bodyText: payload.TextBody ?? '',
 			bodyHtml: payload.HtmlBody,

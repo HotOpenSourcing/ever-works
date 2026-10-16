@@ -64,6 +64,12 @@ import { DecisionConflictService } from '@ever-works/agent/services';
 import { CurrentUser } from '../auth/decorators/user.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { ScopeContextService } from '../scope/scope-context.service';
+import { RequireScopes } from '../auth/integration/integration.decorators';
+import { IntegrationHttpException } from '../auth/integration/integration-http.exception';
+import {
+    isIntegrationPrincipal,
+    writeAttribution,
+} from '../auth/integration/integration-attribution';
 import {
     AddApproverDto,
     AddAssigneeDto,
@@ -153,6 +159,50 @@ function refuseRunTokenApproverPolicy(
     if (policy !== undefined && policy !== true) {
         throw new ForbiddenException(
             "A fleet-run credential cannot relax a Task's approver policy.",
+        );
+    }
+}
+
+/**
+ * EW-P1-2 — what an integration key may NOT ask for when it creates a Task.
+ *
+ * Spend safety (plan decision D9): an integration write never starts Ever
+ * Works autonomous work, so it cannot schedule a run (`scheduledAt`), and it
+ * cannot relax the approver gate (`requireAllApprovers: false`) any more than
+ * a fleet-run token can. A new Task starts in `backlog` or `todo` (contract
+ * v1); later moves go through `/transition`.
+ */
+function refuseIntegrationCreateFields(
+    body: { scheduledAt?: unknown; requireAllApprovers?: unknown; status?: unknown },
+    auth: AuthenticatedUser,
+): void {
+    if (!isIntegrationPrincipal(auth)) return;
+    if (body.scheduledAt) {
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            'An integration cannot schedule a Task run.',
+            { field: 'scheduledAt' },
+        );
+    }
+    if (body.requireAllApprovers !== undefined && body.requireAllApprovers !== true) {
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            "An integration cannot relax a Task's approver policy.",
+            { field: 'requireAllApprovers' },
+        );
+    }
+    if (
+        body.status !== undefined &&
+        body.status !== TaskStatus.BACKLOG &&
+        body.status !== TaskStatus.TODO
+    ) {
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            'A Task created by an integration starts in backlog or todo; move it with /transition.',
+            { field: 'status' },
         );
     }
 }
@@ -329,6 +379,9 @@ export class TasksController {
     @ApiOperation({ summary: 'Create a Task.' })
     @HttpCode(HttpStatus.CREATED)
     @Throttle({ long: { limit: 60, ttl: 60_000 } })
+    // EW-P1-2 — open to integration keys holding `tasks:write` (pinned org,
+    // optional X-Act-As-User). Sessions and personal keys are unaffected.
+    @RequireScopes('tasks:write')
     async create(
         @CurrentUser() auth: AuthenticatedUser,
         @Body() body: CreateTaskDto,
@@ -337,6 +390,8 @@ export class TasksController {
     ) {
         if (!body?.title) throw new BadRequestException('title is required.');
         refuseRunTokenApproverPolicy(body, req);
+        refuseIntegrationCreateFields(body, auth);
+        const createdBy = writeAttribution(auth);
         return this.service.create(
             auth.userId,
             {
@@ -353,8 +408,8 @@ export class TasksController {
                 agentId: body.agentId ?? null,
                 goalId: body.goalId ?? null,
                 parentTaskId: body.parentTaskId ?? null,
-                createdByType: 'user',
-                createdById: auth.userId,
+                createdByType: createdBy.type,
+                createdById: createdBy.id,
                 requireAllApprovers: body.requireAllApprovers,
                 acceptanceChecks: body.acceptanceChecks ?? null,
                 maxGateAttempts: body.maxGateAttempts ?? null,
@@ -645,6 +700,8 @@ export class TasksController {
     @ApiOperation({ summary: 'State-machine transition.' })
     @HttpCode(HttpStatus.OK)
     @Throttle({ long: { limit: 60, ttl: 60_000 } })
+    // EW-P1-6 — open to integration keys holding `tasks:write`, sync mode only.
+    @RequireScopes('tasks:write')
     async transition(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
@@ -665,6 +722,36 @@ export class TasksController {
             throw new ForbiddenException(
                 'A fleet-run credential cannot force a Task transition past its approver gate.',
             );
+        }
+        // EW-P1-6 — an integration mirrors a status: it moves in sync mode only
+        // (no agent work started, D9) and can never force the approver gate.
+        if (isIntegrationPrincipal(auth)) {
+            if (body.force === true) {
+                throw new IntegrationHttpException(
+                    422,
+                    'domain_rule',
+                    'An integration cannot force a Task transition past its approver gate.',
+                    { field: 'force' },
+                );
+            }
+            if (body.mode !== 'sync') {
+                throw new IntegrationHttpException(
+                    422,
+                    'domain_rule',
+                    "Integrations move Tasks with mode 'sync'.",
+                    { field: 'mode' },
+                );
+            }
+        }
+        if (body.mode === 'sync') {
+            const result = await this.service.syncTransition(
+                auth.userId,
+                id,
+                body.to,
+                { force: body.force === true },
+                this.scopeContext.getScope(),
+            );
+            return result.task;
         }
         return this.service.transition(
             auth.userId,
@@ -1204,6 +1291,8 @@ export class TasksController {
     })
     @HttpCode(HttpStatus.CREATED)
     @Throttle({ long: { limit: 60, ttl: 60_000 } })
+    // EW-P1-2 — open to integration keys holding `tasks:write`.
+    @RequireScopes('tasks:write')
     async postChat(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
@@ -1219,13 +1308,19 @@ export class TasksController {
         // posture). Known-user-slugs + known-kb-slugs maps land in
         // a follow-up once those domains expose lookup helpers.
         const scope = this.scopeContext.getScope();
-        const lookups = await this.buildMentionLookups(auth.userId, scope);
+        // EW-P1-2 / D9 — an integration's comment never fans out to an agent:
+        // with no agent lookups an `@agent` token is stripped like any unknown
+        // mention, so no `agent-chat-reply` run (autonomous spend) is started.
+        const lookups = isIntegrationPrincipal(auth)
+            ? {}
+            : await this.buildMentionLookups(auth.userId, scope);
+        const author = writeAttribution(auth);
         return this.chat.post(
             auth.userId,
             {
                 taskId: id,
-                authorType: 'user',
-                authorId: auth.userId,
+                authorType: author.type,
+                authorId: author.id,
                 body: body.body,
                 attachments: body.attachments,
             },

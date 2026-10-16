@@ -105,6 +105,8 @@ export const AGENT_ENTITY_NAMES: ReadonlyArray<string> = [
     'ExternalIdentity',
     // Event-ingest spine — external tracker issue → platform Task mapping
     'ExternalIssueLink',
+    // Integration API v1 (EW-P1-4) — Ever Works record ↔ external record links.
+    'ExternalRecordLink',
     'FleetAgentNodeAffinity',
     'FleetAudit',
     // Fleet local-runner routing — local-vs-cloud execution preference
@@ -130,6 +132,8 @@ export const AGENT_ENTITY_NAMES: ReadonlyArray<string> = [
     'IngestInstallBinding',
     // Event-ingest spine (Wave 6) — normalized external events
     'IngestedEvent',
+    // Integration API v1 (EW-P1-4) — stored responses for `Idempotency-Key` (24 h).
+    'IntegrationIdempotencyKey',
     // Memory eval loop (memory upgrades M10) — append-only retrieval log
     'KbRetrievalLog',
     // Knowledge library — per-person read state + pins on KB documents
