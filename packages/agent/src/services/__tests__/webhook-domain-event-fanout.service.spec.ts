@@ -359,6 +359,16 @@ describe('WebhookDomainEventFanoutService', () => {
                 .map(([id]) => id)
                 .sort(),
         ).toEqual([withInbox.id, withoutInbox.id, userOwned.id].sort());
+
+        // The send-time re-check applies the same rule (a queued or retried
+        // delivery is not sent after the key lost the scope).
+        const access = new WebhookOwnerAccessService(dataSource);
+        const verdict = async (id: string, type: string) =>
+            (await access.canReceive((await subscriptions.findById(id))!, ORG_A, type)).allowed;
+        expect(await verdict(withInbox.id, 'inbox.item.answered')).toBe(true);
+        expect(await verdict(withoutInbox.id, 'inbox.item.answered')).toBe(false);
+        expect(await verdict(userOwned.id, 'inbox.item.answered')).toBe(false);
+        expect(await verdict(withoutInbox.id, 'task.updated')).toBe(true);
     });
 
     it('ignores v1 subscriptions and paused v2 ones', async () => {

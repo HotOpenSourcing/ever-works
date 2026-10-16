@@ -228,6 +228,9 @@ export class WebhookSubscriptionDeliveryService {
                 ? await this.ownerAccess.canReceive(
                       sub,
                       typeof organizationId === 'string' ? organizationId : null,
+                      // EW-P3-1 — a recipient-scoped event (inbox, email) also needs
+                      // the key's read scope at send time.
+                      input.event,
                   )
                 : { allowed: false, disable: false };
             if (!access.allowed) {
