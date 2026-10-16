@@ -30,6 +30,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'agents/agent-collaborators.controller.ts',
     'works/members.controller.ts',
     'works/works.controller.ts',
+    'work-proposals/work-proposals.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([

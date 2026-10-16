@@ -66,7 +66,14 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PATCH /api/organizations/:orgId/teams/:teamId': { events: ['team.updated'] },
     'DELETE /api/organizations/:orgId/teams/:teamId': {
         // + child teams re-parented, agents / tasks / works losing the team from `teamIds`.
-        events: ['team.deleted', 'team.updated', 'agent.updated', 'task.updated', 'work.updated'],
+        events: [
+            'team.deleted',
+            'team.updated',
+            'agent.updated',
+            'task.updated',
+            'work.updated',
+            'idea.updated',
+        ],
     },
     'POST /api/organizations/:orgId/teams/:teamId/members': {
         events: ['team.member.added', 'agent.updated'],
@@ -75,10 +82,10 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['team.member.removed', 'agent.updated'],
     },
     'POST /api/organizations/:orgId/teams/:teamId/resources': {
-        events: ['team.resource.added', 'task.updated', 'work.updated'],
+        events: ['team.resource.added', 'task.updated', 'work.updated', 'idea.updated'],
     },
     'DELETE /api/organizations/:orgId/teams/:teamId/resources/:resourceType/:resourceId': {
-        events: ['team.resource.removed', 'task.updated', 'work.updated'],
+        events: ['team.resource.removed', 'task.updated', 'work.updated', 'idea.updated'],
     },
 
     // ── Organization roster (`api/organizations/:orgId`, `api/org-invite`) ──
@@ -167,6 +174,26 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PUT /api/works/:workId/members/:memberId': { events: ['work.member.updated'] },
     'DELETE /api/works/:workId/members/:memberId': { events: ['work.member.removed'] },
     'POST /api/works/:workId/members/leave': { events: ['work.member.removed'] },
+
+    // ── Ideas (`api/me/work-proposals`, EW-P2-1) ─────────────────────────────
+    // Recorded by `WorkProposalRepository`, the write path every Idea change takes.
+    'POST /api/me/work-proposals': { events: ['idea.created'] },
+    'POST /api/me/work-proposals/refresh': { events: ['idea.created'] },
+    'PUT /api/me/work-proposals/preferences': {
+        exempt: "The caller's Idea-generation preferences (work_agent_preferences), not an Idea.",
+    },
+    'PATCH /api/me/work-proposals/:id/dismiss': { events: ['idea.status_changed'] },
+    'DELETE /api/me/work-proposals/:id': { events: ['idea.deleted'] },
+    'POST /api/me/work-proposals/:id/build': { events: ['idea.status_changed'] },
+    'POST /api/me/work-proposals/:id/retry': { events: ['idea.status_changed'] },
+    'POST /api/me/work-proposals/:id/rebuild': { events: ['idea.status_changed'] },
+    'POST /api/me/work-proposals/:id/accept': { events: ['idea.status_changed'] },
+    'POST /api/me/work-proposals/:id/attachments': {
+        exempt: 'Idea attachments are not part of the idea integration DTO.',
+    },
+    'DELETE /api/me/work-proposals/:id/attachments/:attachmentId': {
+        exempt: 'Idea attachments are not part of the idea integration DTO.',
+    },
 
     // ── Works (`api`) ────────────────────────────────────────────────────────
     'POST /api/works': { events: ['work.created'] },

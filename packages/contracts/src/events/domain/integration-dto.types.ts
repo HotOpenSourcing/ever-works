@@ -259,3 +259,34 @@ export interface IntegrationVisibilityPrivateData {
 	readonly id: string;
 	readonly visibility: 'private';
 }
+
+/** Lifecycle of an Idea (Ever Works `work_proposals.status`). */
+export type IntegrationIdeaStatus = 'pending' | 'dismissed' | 'accepted' | 'queued' | 'building' | 'failed';
+
+/** Where an Idea came from; integration creates are always `external` (EW-P2-1). */
+export type IntegrationIdeaSource =
+	| 'auto-signup'
+	| 'user-refresh'
+	| 'discover'
+	| 'scheduled'
+	| 'user-manual'
+	| 'mission'
+	| 'external';
+
+/**
+ * Idea DTO (B.6, `GET /ideas`, `GET /ideas/:id`) and the `data` of `idea.*` events.
+ * An integration creates Ideas `pending` with `source = 'external'` and never builds
+ * them (spend safety D9): building stays a user action in Ever Works.
+ */
+export interface IntegrationIdeaDto extends IntegrationResourceBase {
+	readonly teamIds: readonly string[];
+	readonly title: string;
+	readonly description: string;
+	readonly status: IntegrationIdeaStatus;
+	readonly source: IntegrationIdeaSource;
+	readonly missionId: string | null;
+	readonly targetWorkId: string | null;
+	readonly acceptedWorkId: string | null;
+	readonly failureMessage: string | null;
+	readonly webUrl?: string | null;
+}

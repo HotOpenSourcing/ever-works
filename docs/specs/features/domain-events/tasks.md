@@ -30,6 +30,14 @@
 - [x] **T18** Work recording points (incl. members) (`work-recording.spec.ts`; claim-accept member is a follow-up).
 - [x] **T19** Event-coverage contract test (`apps/api/src/domain-events/domain-event-route-coverage.spec.ts`).
 
+## P2 — Recording points
+
+- [x] **T20** Ideas (EW-P2-1): `version` + `createdBy` columns (migration `1795100000000`), `idea.*` recorded by
+      `WorkProposalRepository`, `WorkProposalService.createExternal` / `updateContent` / `restore`, idea DTO schema
+      (`idea-recording.spec.ts`; the coverage gate now scans `work-proposals.controller.ts`).
+- [ ] **T21** Goals (EW-P2-2).
+- [ ] **T22** Missions (EW-P2-5), incl. the Ideas a Mission clone copies.
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked

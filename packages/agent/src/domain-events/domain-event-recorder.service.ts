@@ -12,6 +12,7 @@ import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
 import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
 import { getDomainEventContext, normalizeSyncOrigin } from './domain-event-context';
 import { newDomainEventId } from './domain-event-id';
 import { DOMAIN_EVENTS_NOTIFY_CHANNEL } from './domain-events.config';
@@ -47,7 +48,7 @@ export interface RecordDomainEventInput {
 /** The fallback actor of a change no request or job attributed. */
 export const SYSTEM_ACTOR: DomainEventActor = { type: 'system', id: 'system', label: null };
 
-/** The P1 aggregates that carry a `version` column, by aggregate type. */
+/** The aggregates that carry a `version` column, by aggregate type (P1, then P2 as they record). */
 const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarget<ObjectLiteral>>> =
     {
         task: Task,
@@ -55,6 +56,7 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         agent: Agent,
         work: Work,
         organization: Organization,
+        idea: WorkProposal,
     };
 
 /** Thrown for a type outside the catalog: an event nobody can parse is a bug, not data. */
