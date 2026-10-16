@@ -65,12 +65,24 @@ export const MODEL_CLI_REQUIRED_FLAGS: Readonly<Record<ModelCliProvider, readonl
 
 /**
  * Flags passed only on SOME runs — a model override, a multi-repo grant,
- * an allowed-tools list, the skip-permissions opt-in. Missing one does not
+ * an allowed-tools list, the skip-permissions opt-in, the event stream
+ * (`--verbose`, which `-p --output-format stream-json` requires; sent
+ * whenever run evidence is recorded, i.e. unless the transcript is off)
+ * and session continuity (`--resume <id> --fork-session`, slice AU, sent
+ * only when a run continues an earlier session). Missing one does not
  * affect every run, so `doctor` reports it separately: "runs that need X
  * will fail here".
  */
 export const MODEL_CLI_CONDITIONAL_FLAGS: Readonly<Record<ModelCliProvider, readonly string[]>> = {
-	'claude-code': ['--model', '--add-dir', '--allowedTools', '--dangerously-skip-permissions'],
+	'claude-code': [
+		'--model',
+		'--add-dir',
+		'--allowedTools',
+		'--dangerously-skip-permissions',
+		'--verbose',
+		'--resume',
+		'--fork-session'
+	],
 	codex: ['--add-dir', '-c', '-m', '--dangerously-bypass-approvals-and-sandbox']
 };
 

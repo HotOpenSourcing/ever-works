@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { Agent } from '../entities/agent.entity';
 import { Mission } from '../entities/mission.entity';
 import { Organization } from '../entities/organization.entity';
@@ -25,6 +26,8 @@ import { TeamsService } from './teams.service';
  */
 @Module({
     imports: [
+        // Domain events (EW-P1-1 B2) — the publisher the team services record through.
+        DomainEventsModule,
         TypeOrmModule.forFeature([
             Team,
             TeamMember,

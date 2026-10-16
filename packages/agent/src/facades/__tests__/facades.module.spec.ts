@@ -305,6 +305,12 @@ describe('FacadesModule + barrel re-exports', () => {
                     // Notifications v2 (EW-650 + EW-663) — email + notification channels.
                     'EmailFacadeError',
                     'EmailFacadeService',
+                    // EW-P4-3 — RFC threading helpers (leaf module `email-threading.ts`),
+                    // used by apps/api (`replyHeadersFor`) and the agent draft loop.
+                    // `EmailThreadingFields` is type-only and correctly absent.
+                    'buildOutboundHeaders',
+                    'replyHeadersFor',
+                    'threadingFieldsOf',
                     'NotificationChannelFacadeError',
                     'NotificationChannelFacadeService',
                     'NOTIFICATION_CHANNEL_DELIVERY_DISPATCHER',

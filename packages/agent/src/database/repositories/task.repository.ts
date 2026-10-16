@@ -1,6 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, LessThanOrEqual, Repository, type SelectQueryBuilder } from 'typeorm';
+import {
+    Brackets,
+    type EntityManager,
+    LessThanOrEqual,
+    Repository,
+    type SelectQueryBuilder,
+} from 'typeorm';
 import { Task, TaskStatus } from '../../entities/task.entity';
 import {
     buildCaseInsensitiveLikeClause,
@@ -347,13 +353,17 @@ export class TaskRepository {
         }
     }
 
-    async create(data: Partial<Task>): Promise<Task> {
-        const entity = this.repository.create(data);
-        return this.repository.save(entity);
+    // `manager` (domain events, EW-P1-1): pass the transaction's EntityManager to
+    // write inside it, so the change and its outbox row commit together.
+    async create(data: Partial<Task>, manager?: EntityManager): Promise<Task> {
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        const entity = repository.create(data);
+        return repository.save(entity);
     }
 
-    async updateById(id: string, data: Partial<Task>): Promise<void> {
-        await this.repository.update(id, data);
+    async updateById(id: string, data: Partial<Task>, manager?: EntityManager): Promise<void> {
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        await repository.update(id, data);
     }
 
     /**
@@ -535,8 +545,10 @@ export class TaskRepository {
         id: string,
         expectedStatus: Task['status'],
         data: Partial<Task>,
+        manager?: EntityManager,
     ): Promise<boolean> {
-        const result = await this.repository.update({ id, status: expectedStatus }, data);
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        const result = await repository.update({ id, status: expectedStatus }, data);
         return (result.affected ?? 0) === 1;
     }
 
@@ -571,8 +583,9 @@ export class TaskRepository {
         return (result.affected ?? 0) > 0;
     }
 
-    async deleteById(id: string): Promise<void> {
-        await this.repository.delete(id);
+    async deleteById(id: string, manager?: EntityManager): Promise<void> {
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        await repository.delete(id);
     }
 
     /**
