@@ -145,6 +145,7 @@ export class ExternalRecordLinksService {
      * the caller's source (all installations), grouped by entity id.
      */
     async linksFor(
+        organizationId: string,
         entityType: ExternalLinkEntityType,
         entityIds: readonly string[],
         source: string,
@@ -152,8 +153,9 @@ export class ExternalRecordLinksService {
     ): Promise<Map<string, ExternalLinkDto[]>> {
         const byEntity = new Map<string, ExternalLinkDto[]>();
         if (entityIds.length === 0) return byEntity;
+        // Org-scoped: a member id (a user id) is the same in every organization.
         const rows = await this.repo(manager).find({
-            where: { entityType, entityId: In([...new Set(entityIds)]), source },
+            where: { organizationId, entityType, entityId: In([...new Set(entityIds)]), source },
             order: { createdAt: 'ASC' },
         });
         for (const row of rows) {
@@ -173,6 +175,11 @@ export class ExternalRecordLinksService {
         target: LinkTarget,
         manager?: EntityManager,
     ): Promise<ExternalRecordLink> {
+        // Check both sides FIRST: inside the caller's Postgres transaction a
+        // unique violation aborts the transaction, so nothing could be read
+        // after it to say which side collided.
+        const duplicate = await this.findDuplicate(scope, target, manager);
+        if (duplicate) throw duplicate;
         const repo = this.repo(manager);
         try {
             return await repo.save(
@@ -189,8 +196,10 @@ export class ExternalRecordLinksService {
                 }),
             );
         } catch (error) {
+            // A concurrent request linked one side in between: report it
+            // without another query (the transaction may be aborted).
             if (isUniqueConstraintError(error)) {
-                throw await this.duplicateOf(scope, target, manager);
+                throw new DuplicateExternalRefError('external', target.entityId, target.externalId);
             }
             throw error;
         }
@@ -225,6 +234,17 @@ export class ExternalRecordLinksService {
         ) {
             return existing;
         }
+        if (existing.externalId !== target.externalId) {
+            const taken = await this.findByExternal(
+                scope,
+                target.entityType,
+                target.externalId,
+                manager,
+            );
+            if (taken && taken.entityId !== target.entityId) {
+                throw new DuplicateExternalRefError('external', taken.entityId, taken.externalId);
+            }
+        }
         existing.externalId = target.externalId;
         existing.externalUrl = target.externalUrl ?? null;
         existing.integrationKeyId = scope.integrationKeyId ?? existing.integrationKeyId ?? null;
@@ -232,7 +252,7 @@ export class ExternalRecordLinksService {
             return await repo.save(existing);
         } catch (error) {
             if (isUniqueConstraintError(error)) {
-                throw await this.duplicateOf(scope, target, manager);
+                throw new DuplicateExternalRefError('external', target.entityId, target.externalId);
             }
             throw error;
         }
@@ -257,21 +277,27 @@ export class ExternalRecordLinksService {
         return result.affected ?? 0;
     }
 
-    /** Drop every link of a deleted record (any source), in the delete's transaction. */
+    /**
+     * Drop every link (any source) of a record removed from ONE organization,
+     * in the removal's transaction. Org-scoped: a member's id is a user id, and
+     * the same user's links in other organizations stay.
+     */
     async removeAllFor(
+        organizationId: string,
         entityType: ExternalLinkEntityType,
         entityId: string,
         manager?: EntityManager,
     ): Promise<number> {
-        const result = await this.repo(manager).delete({ entityType, entityId });
+        const result = await this.repo(manager).delete({ organizationId, entityType, entityId });
         return result.affected ?? 0;
     }
 
-    private async duplicateOf(
+    /** The {@link DuplicateExternalRefError} a new link would hit, if any (either side). */
+    private async findDuplicate(
         scope: LinkScope,
         target: LinkTarget,
         manager?: EntityManager,
-    ): Promise<DuplicateExternalRefError> {
+    ): Promise<DuplicateExternalRefError | null> {
         const repo = this.repo(manager);
         const installationKey = toInstallationKey(scope.installationId);
         const byExternal = await repo.findOne({
@@ -299,10 +325,8 @@ export class ExternalRecordLinksService {
                 entityId: target.entityId,
             },
         });
-        return new DuplicateExternalRefError(
-            'entity',
-            target.entityId,
-            byEntity?.externalId ?? target.externalId,
-        );
+        return byEntity
+            ? new DuplicateExternalRefError('entity', byEntity.entityId, byEntity.externalId)
+            : null;
     }
 }
