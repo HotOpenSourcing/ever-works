@@ -1,7 +1,7 @@
 # Feature Specification: Domain Events
 
 **Feature ID**: `domain-events`
-**Status**: `Draft` — implementation in progress (EW-P1-1)
+**Status**: `In progress` — B1 (catalog, outbox, recorder, relay, feed reader, plugin delivery, retention) implemented; B2 (recording points) next
 **Created**: 2026-10-15
 **Last updated**: 2026-10-15
 **Owner**: Product (Ruslan); implementation: the Ever Works integration lane

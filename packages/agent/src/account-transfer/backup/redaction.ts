@@ -102,6 +102,12 @@ export const BACKUP_DROPPED_ENTITIES: readonly string[] = Object.freeze([
     'EverInstance',
     'EverStatsReport',
     'EverStatsLease',
+    // Domain events (EW-P1-1) — a delivery outbox, the relay's lease row and the
+    // plugin delivery cursors: transient plumbing that a restore must never
+    // replay (a restored outbox row would re-announce an old change).
+    'DomainEvent',
+    'DomainEventRelayState',
+    'PluginEventCursor',
     // Encrypted runtime credentials and their per-version snapshots.
     'TenantCredentialSnapshot',
     // Derived and regenerated on demand — an archive of them would be

@@ -655,6 +655,117 @@ describe('api-side AgentsModule — AGENT_EMAIL_FACADE approve-before-send', () 
         );
         expect(result).toMatchObject({ held: true, messageId: 'm-2', targetAddress: 'peer@x.com' });
     });
+
+    // EW-P4-3 — reply in thread.
+    it('passes inReplyToMessageId through to the send', async () => {
+        const sendMessage = jest.fn().mockResolvedValue({
+            messageRef: 'ref',
+            providerMessageId: 'pm-2',
+            accepted: ['ada@x.com'],
+            rejected: [],
+        });
+        await build(sendMessage).sendEmail({
+            userId: 'user-1',
+            agentId: 'agent-1',
+            to: ['ada@x.com'],
+            subject: 'Re: Hi',
+            bodyText: 'Hello again',
+            inReplyToMessageId: 'msg-in-1',
+        });
+        expect(sendMessage).toHaveBeenCalledWith(
+            'user-1',
+            expect.objectContaining({ inReplyToMessageId: 'msg-in-1' }),
+            { origin: 'agent' },
+        );
+    });
+});
+
+/**
+ * EW-P4-3 — the inbound-email Task spawner: a spawned Task names the email
+ * message id (so the agent can reply in thread), and a reply that threads onto
+ * an existing Task is posted on that Task's chat with only the receiving
+ * agent's mention live.
+ */
+describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
+    type Spawner = {
+        spawnTaskForInboundEmail: (
+            input: Record<string, unknown>,
+        ) => Promise<{ taskId: string } | null>;
+        appendInboundEmailToTask: (
+            input: Record<string, unknown>,
+        ) => Promise<{ taskId: string } | null>;
+    };
+
+    const input = {
+        agentId: 'agent-1',
+        userId: 'user-1',
+        emailMessageId: 'msg-in-1',
+        subject: 'Need help',
+        bodyText: 'Please @other-bot do it',
+        from: 'ada@x.com',
+    };
+
+    function build(
+        agent: { id: string; slug: string } | null = { id: 'agent-1', slug: 'support-bot' },
+    ) {
+        const tasks = {
+            create: jest.fn().mockResolvedValue({ id: 'task-new' }),
+            addAssignee: jest.fn().mockResolvedValue(undefined),
+        };
+        const chat = { post: jest.fn().mockResolvedValue({ id: 'chat-1' }) };
+        const agents = { findByIdAndUser: jest.fn().mockResolvedValue(agent) };
+        const spawner = findProvider('INBOUND_EMAIL_TASK_SPAWNER')?.useFactory?.(
+            tasks,
+            chat,
+            agents,
+        ) as Spawner;
+        return { spawner, tasks, chat, agents };
+    }
+
+    it('spawns a Task whose description names the email message id', async () => {
+        const { spawner, tasks } = build();
+        await expect(spawner.spawnTaskForInboundEmail(input)).resolves.toEqual({
+            taskId: 'task-new',
+        });
+        expect(tasks.create).toHaveBeenCalledWith(
+            'user-1',
+            expect.objectContaining({
+                title: 'Need help',
+                labels: ['inbound-email'],
+                description: expect.stringContaining('inReplyToMessageId=msg-in-1'),
+            }),
+        );
+        expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
+    });
+
+    it('appends a threaded reply to the existing Task chat, mentioning only the receiving agent', async () => {
+        const { spawner, chat, tasks, agents } = build();
+        await expect(
+            spawner.appendInboundEmailToTask({ ...input, taskId: 'task-original' }),
+        ).resolves.toEqual({ taskId: 'task-original' });
+        expect(agents.findByIdAndUser).toHaveBeenCalledWith('agent-1', 'user-1');
+        expect(tasks.create).not.toHaveBeenCalled();
+        const [userId, post, lookups] = chat.post.mock.calls[0];
+        expect(userId).toBe('user-1');
+        expect(post).toMatchObject({
+            taskId: 'task-original',
+            authorType: 'user',
+            authorId: 'user-1',
+        });
+        expect(post.body.startsWith('@support-bot ')).toBe(true);
+        expect([...String(post.body).matchAll(/@([a-z0-9-]{1,80})\b/g)].map((m) => m[1])).toEqual([
+            'support-bot',
+        ]);
+        expect([...lookups.ownedAgentSlugs.entries()]).toEqual([['support-bot', 'agent-1']]);
+    });
+
+    it("does not append when the receiving agent is not the owner's", async () => {
+        const { spawner, chat } = build(null);
+        await expect(
+            spawner.appendInboundEmailToTask({ ...input, taskId: 'task-original' }),
+        ).resolves.toBeNull();
+        expect(chat.post).not.toHaveBeenCalled();
+    });
 });
 
 /**

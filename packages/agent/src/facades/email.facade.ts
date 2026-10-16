@@ -38,6 +38,19 @@ import {
     type EmailSendReservation,
 } from '../email/email-send-policy.port';
 import { BaseFacadeService, FacadeError, NoProviderError } from './base.facade';
+// EW-P4-3 — RFC threading helpers (a leaf module: no Nest, no repositories).
+import {
+    buildOutboundHeaders,
+    threadingFieldsOf,
+    type EmailThreadingFields,
+} from './email-threading';
+
+export {
+    buildOutboundHeaders,
+    replyHeadersFor,
+    threadingFieldsOf,
+    type EmailThreadingFields,
+} from './email-threading';
 
 /**
  * AW-05 — provisional `pluginId` on a send reservation (the row is written
@@ -101,6 +114,13 @@ export interface AuthenticatedInboundEmail extends EmailInboundMessage {
 export interface EmailFacadeSendOptions extends FacadeOptions {
     /** Specific tenant_email_addresses.id to send from. Else uses Agent default. */
     readonly addressId?: string;
+    /**
+     * EW-P4-3 — the `email_conversations` thread this send belongs to (a
+     * reply in a conversation). Recorded on the row, so the recipient's next
+     * reply threads back into the same conversation. Mutually exclusive with
+     * `taskId`, like on the row.
+     */
+    readonly conversationId?: string;
     /**
      * AW-05 — who asked for this send. SERVER-SET at the call site, never
      * copied from a request body: `agent` sends are held when the Agent's
@@ -172,6 +192,12 @@ export class EmailFacadeService extends BaseFacadeService {
         input: EmailFacadeSendInput,
         options: EmailFacadeSendOptions,
     ): Promise<EmailSendResult> {
+        // EW-P4-3 — RFC threading: every send carries a Message-ID (and the
+        // caller's In-Reply-To / References), recorded on its row so a reply
+        // can be matched back to it.
+        const headers = buildOutboundHeaders(input.from, input.headers);
+        const threading = threadingFieldsOf(headers);
+
         // AW-05 — the gate runs before plugin resolution, so a refused send
         // never touches a provider (or its credentials).
         let reservedMessageId: string | null = null;
@@ -191,7 +217,7 @@ export class EmailFacadeService extends BaseFacadeService {
                 // so a concurrent burst cannot overshoot a hard stop.
                 const admission = await this.sendPolicy.admitSend(
                     attempt,
-                    await this.reservationFor(input, options),
+                    await this.reservationFor(input, options, threading),
                 );
                 reservedMessageId = admission?.reservedMessageId ?? null;
             } else {
@@ -223,6 +249,7 @@ export class EmailFacadeService extends BaseFacadeService {
                 attachments: input.attachments,
                 metadata: input.metadata,
                 messageRef: input.messageRef,
+                headers,
             };
 
             const emailOpts: EmailOptions = {
@@ -242,7 +269,14 @@ export class EmailFacadeService extends BaseFacadeService {
             throw error;
         }
 
-        await this.persistOutboundMessage(input, wireInput, result, options, reservedMessageId);
+        await this.persistOutboundMessage(
+            input,
+            wireInput,
+            result,
+            options,
+            reservedMessageId,
+            threading,
+        );
         await this.recordUsage(plugin.id, 'sendEmail', options);
 
         return result;
@@ -256,6 +290,7 @@ export class EmailFacadeService extends BaseFacadeService {
     private async reservationFor(
         input: EmailFacadeSendInput,
         options: EmailFacadeSendOptions,
+        threading: EmailThreadingFields,
     ): Promise<EmailSendReservation | null> {
         if (!this.emailMessages || !options.userId || !options.addressId) return null;
         if (options.draftMessageId) return { kind: 'draft' };
@@ -267,6 +302,7 @@ export class EmailFacadeService extends BaseFacadeService {
                 userId: options.userId,
                 agentId: options.agentId ?? null,
                 taskId: options.taskId ?? null,
+                conversationId: options.conversationId ?? null,
                 emailAddressId: options.addressId,
                 // Provisional — replaced by the provider that actually sends.
                 pluginId: EMAIL_SEND_RESERVATION_PENDING_PLUGIN_ID,
@@ -279,6 +315,7 @@ export class EmailFacadeService extends BaseFacadeService {
                 bodyHtml: bodyHtml ?? null,
                 metadata: input.metadata ? { ...input.metadata } : null,
                 messageRef: input.messageRef ?? null,
+                ...threading,
             },
         };
     }
@@ -770,6 +807,11 @@ export class EmailFacadeService extends BaseFacadeService {
         result: EmailSendResult,
         options: EmailFacadeSendOptions,
         reservedMessageId: string | null = null,
+        threading: EmailThreadingFields = {
+            messageIdHeader: null,
+            inReplyTo: null,
+            references: null,
+        },
     ): Promise<void> {
         if (!this.emailMessages || !options.userId || !options.addressId) return;
         const existingRowId = options.draftMessageId ?? reservedMessageId;
@@ -783,6 +825,9 @@ export class EmailFacadeService extends BaseFacadeService {
                 sentAt: new Date(),
                 deliveryStatus: 'accepted',
                 failureReason: null,
+                // EW-P4-3 — the ids THIS send carried (a released draft
+                // gets its Message-ID only now).
+                ...threading,
             });
             return;
         }
@@ -790,7 +835,7 @@ export class EmailFacadeService extends BaseFacadeService {
             userId: options.userId,
             agentId: options.agentId ?? null,
             taskId: options.taskId ?? null,
-            conversationId: null,
+            conversationId: options.conversationId ?? null,
             emailAddressId: options.addressId,
             direction: 'outbound',
             pluginId: result.provider,
@@ -804,6 +849,7 @@ export class EmailFacadeService extends BaseFacadeService {
             bodyHtml: wire.bodyHtml ?? null,
             metadata: input.metadata ? { ...input.metadata } : null,
             messageRef: input.messageRef ?? null,
+            ...threading,
             sentAt: new Date(),
             deliveryStatus: 'accepted',
             status: 'sent',

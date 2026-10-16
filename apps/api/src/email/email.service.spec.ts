@@ -9,6 +9,10 @@ jest.mock('@ever-works/agent/database', () => ({
 }));
 jest.mock('@ever-works/agent/facades', () => ({
     EmailFacadeService: class EmailFacadeService {},
+    // EW-P4-3 — the REAL threading helpers, from their leaf module.
+    ...jest.requireActual<Record<string, unknown>>(
+        '../../../../packages/agent/src/facades/email-threading',
+    ),
 }));
 jest.mock('@ever-works/agent/email', () => ({
     EmailDraftService: class EmailDraftService {},
@@ -487,5 +491,136 @@ describe('EmailService.sendMessage pinned sending address (AW-05)', () => {
             expect.objectContaining({ from: 'primary@x.com' }),
             expect.anything(),
         );
+    });
+});
+
+/**
+ * EW-P4-3 — reply in thread. `inReplyToMessageId` names one of the caller's
+ * own messages; the send then carries its `In-Reply-To` / `References` and
+ * belongs to the same Task. Another account's message answers 404.
+ */
+describe('EmailService.sendMessage inReplyToMessageId (EW-P4-3)', () => {
+    const address = { id: 'addr-1', address: 'nova@x.com', userId: 'user-1', pluginId: 'postmark' };
+    const parent = {
+        id: '6f1c2e8a-5d0b-4b7e-9a51-3c8f2d9e1a01',
+        userId: 'user-1',
+        taskId: 'task-7',
+        messageIdHeader: 'in-2@client.test',
+        inReplyTo: 'out-1@nova.x.com',
+        references: ['root@client.test', 'out-1@nova.x.com'],
+    };
+    let emailFacade: { send: jest.Mock };
+    let drafts: { submit: jest.Mock };
+    let messages: { findByIdAndUserId: jest.Mock };
+
+    function build(withDrafts = false) {
+        return new EmailService(
+            { findByIdForUser: jest.fn().mockResolvedValue(address) } as never,
+            {
+                findPrimaryOutboundForAgent: jest
+                    .fn()
+                    .mockResolvedValue({ emailAddressId: 'addr-1' }),
+            } as never,
+            messages as never,
+            emailFacade as never,
+            { findByIdAndUser: jest.fn().mockResolvedValue({ id: 'agent-1' }) } as never,
+            (withDrafts ? drafts : undefined) as never,
+        );
+    }
+
+    const input = {
+        agentId: 'agent-1',
+        to: ['ada@client.test'],
+        subject: 'Re: Hi',
+        bodyText: 'Answer',
+        inReplyToMessageId: parent.id,
+    };
+
+    beforeEach(() => {
+        emailFacade = {
+            send: jest.fn().mockResolvedValue({
+                provider: 'postmark',
+                providerMessageId: 'pm-1',
+                accepted: ['ada@client.test'],
+                rejected: [],
+            }),
+        };
+        drafts = {
+            submit: jest.fn().mockResolvedValue({
+                held: true,
+                reason: 'awaiting-approval',
+                messageId: 'm-1',
+                approvalId: null,
+            }),
+        };
+        messages = {
+            findByIdAndUserId: jest.fn(async (id: string, userId: string) =>
+                id === parent.id && userId === parent.userId ? parent : null,
+            ),
+        };
+    });
+
+    it('threads the reply and keeps it on the same Task', async () => {
+        await build().sendMessage('user-1', input);
+        expect(messages.findByIdAndUserId).toHaveBeenCalledWith(parent.id, 'user-1');
+        expect(emailFacade.send).toHaveBeenCalledWith(
+            expect.objectContaining({
+                headers: {
+                    'In-Reply-To': '<in-2@client.test>',
+                    References: '<root@client.test> <out-1@nova.x.com> <in-2@client.test>',
+                },
+            }),
+            expect.objectContaining({ taskId: 'task-7', addressId: 'addr-1' }),
+        );
+    });
+
+    it("hands the thread to the draft loop for an Agent's message", async () => {
+        await build(true).sendMessage('user-1', input, { origin: 'agent' });
+        expect(drafts.submit).toHaveBeenCalledWith(
+            expect.objectContaining({
+                taskId: 'task-7',
+                headers: expect.objectContaining({ 'In-Reply-To': '<in-2@client.test>' }),
+            }),
+        );
+    });
+
+    // Review (Greptile, #2607): a reply in a conversation stays in it, so the
+    // recipient's next reply threads back into the same conversation.
+    it("keeps a reply in the parent's conversation", async () => {
+        messages.findByIdAndUserId.mockResolvedValue({
+            ...parent,
+            taskId: null,
+            conversationId: 'conv-3',
+        });
+        await build().sendMessage('user-1', input);
+        expect(emailFacade.send).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ conversationId: 'conv-3', taskId: undefined }),
+        );
+        await build(true).sendMessage('user-1', input, { origin: 'agent' });
+        expect(drafts.submit).toHaveBeenCalledWith(
+            expect.objectContaining({ conversationId: 'conv-3', taskId: undefined }),
+        );
+    });
+
+    it("answers 404 for another account's message and sends nothing", async () => {
+        await expect(build().sendMessage('user-2', input)).rejects.toBeInstanceOf(
+            NotFoundException,
+        );
+        expect(emailFacade.send).not.toHaveBeenCalled();
+    });
+
+    it('sends without threading headers when the parent has no Message-ID on record', async () => {
+        messages.findByIdAndUserId.mockResolvedValue({ ...parent, messageIdHeader: null });
+        await build().sendMessage('user-1', input);
+        expect(emailFacade.send.mock.calls[0][0].headers).toBeUndefined();
+    });
+
+    it('sends exactly as before without inReplyToMessageId', async () => {
+        const { inReplyToMessageId: _omit, ...plain } = input;
+        await build().sendMessage('user-1', plain);
+        expect(messages.findByIdAndUserId).not.toHaveBeenCalled();
+        expect(emailFacade.send.mock.calls[0][0].headers).toBeUndefined();
+        expect(emailFacade.send.mock.calls[0][1].taskId).toBeUndefined();
     });
 });

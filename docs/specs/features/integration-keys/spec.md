@@ -124,8 +124,8 @@ into Gauzy. One-click connect waits for Ever ID; when it comes, only how the pri
 }
 ```
 
-`/api/integrations/v1/*` answers only integration principals (`401 invalid_key` otherwise). `feedHead` is `'0'` until
-the change feed (EW-P1-1 / EW-P1-4) binds the `INTEGRATION_FEED_HEAD` provider.
+`/api/integrations/v1/*` answers only integration principals (`401 invalid_key` otherwise). `feedHead` is the global
+change-feed head (`DomainEventFeedService.head()`, EW-P1-1, `'0'` while no event has been relayed).
 
 ### 3.4 Scope vocabulary v1
 
