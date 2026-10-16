@@ -46,6 +46,12 @@
       Until T21 lands, `inbox.item.*` events are recorded `visibility: private` (an inbox item is one person's
       message), so the organization feed and webhooks v2 never serve them; in-process listeners still get them.
 
+## P3 — Knowledge Base (EW-P3-2)
+
+- [x] **T25** `work_knowledge_documents.version` + `memory_folders.version` (`AddKbAggregateVersions1795130200000`),
+      `kb_document` / `kb_folder` snapshots, recording in `KnowledgeBaseService`, `KnowledgeLibraryService` and
+      `MemoryFoldersService` (`kb-recording.spec.ts`), coverage gate over the KB controllers.
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked

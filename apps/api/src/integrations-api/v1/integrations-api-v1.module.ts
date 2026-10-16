@@ -3,11 +3,13 @@ import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
 import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
+import { KnowledgeBaseModule, KnowledgeLibraryModule } from '@ever-works/agent/services';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
+import { IntegrationKbController } from './kb.controller';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
@@ -17,6 +19,7 @@ import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
+import { OrganizationsModule } from '../../organizations/organizations.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
@@ -42,6 +45,11 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         RecordVisibilityModule,
         // Key-owned webhook subscriptions (EW-P1-5).
         WebhooksModule,
+        // The KB routes (EW-P3-2) delegate to the Knowledge Base and the
+        // Knowledge library; organization admin comes from the membership service.
+        KnowledgeBaseModule,
+        KnowledgeLibraryModule,
+        OrganizationsModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -55,6 +63,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTeamsWriteController,
         IntegrationBatchController,
         IntegrationWebhooksController,
+        // EW-P3-2 — the Knowledge Base (`kb:*`).
+        IntegrationKbController,
     ],
     providers: [
         IntegrationOnlyGuard,

@@ -5,6 +5,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
+import { buildKbDocumentSnapshot, buildKbFolderSnapshot } from './domain-event-kb-snapshots';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
@@ -34,6 +35,9 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     organization: buildOrganizationSnapshot,
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
+    // EW-P3-2 — Knowledge Base documents and organization library folders.
+    kb_document: buildKbDocumentSnapshot,
+    kb_folder: buildKbFolderSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */

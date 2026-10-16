@@ -130,6 +130,8 @@ describe('integration contract v1 (published schemas)', () => {
             ['member.json', 'resources/member.schema.json'],
             ['organization.json', 'resources/organization.schema.json'],
             ['inbox-item.json', 'resources/inbox-item.schema.json'],
+            ['kb-document.json', 'resources/kb-document.schema.json'],
+            ['kb-folder.json', 'resources/kb-folder.schema.json'],
             ['events-page.json', 'resources/events-page.schema.json'],
             ['error.transition_blocked.json', 'error.schema.json'],
             ['error.version_mismatch.json', 'error.schema.json'],

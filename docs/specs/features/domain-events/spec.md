@@ -109,6 +109,13 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       `inbox.item.deleted` with a tombstone claimed before the delete. `data` is the inbox-item DTO
       (`resources/inbox-item.schema.json`; `data.recipientUserId` is always set, fleet `sourceMeta` is never exposed).
       Pinned by `inbox-recording.spec.ts`.
+    - The same mode records the **Knowledge Base** (P3, EW-P3-2): `kb.document.*` in `KnowledgeBaseService` (create,
+      edit, lock, decision, accept, archive / restore, delete with a tombstone, for Work and organization documents) and
+      `KnowledgeLibraryService` (`moved` when documents are filed, or unfiled by a folder delete); `kb.folder.*` in
+      `MemoryFoldersService` for organization library folders (a rename or a move records `updated` for the whole
+      rewritten subtree; a delete records `deleted` per folder, tombstones claimed before it). A document of a
+      personal Work records none. Background writers that go straight to the repository (Git-mirror reconcile,
+      consolidation markers) record nothing; the integration's reconcile covers them. Pinned by `kb-recording.spec.ts`.
 - **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
   added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
   direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of

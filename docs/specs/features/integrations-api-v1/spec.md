@@ -201,7 +201,7 @@ visibility is derived (`team` when it sits on a team).
 | Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}`                                                                                   | `goals:*`      | P2                                                                                                                      |
 | Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id`, `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore`                                                                                                                                                              | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json)                                                                   |
 | Inbox (P3)    | `GET /inbox/items`, `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` (act-as = the recipient; returns `{routed, restart}`), `PATCH /inbox/items/:id/state {unread?, archived?}`                                                                                                                | `inbox:*`      | P3                                                                                                                      |
-| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST`/`PATCH`/`DELETE /kb/folders`                                                                                                                                              | `kb:*`         | P3                                                                                                                      |
+| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                    |
 | Email (P4)    | `GET /email/messages?updatedSince=&agentId=`, `POST /email/inbound`                                                                                                                                                                                                                                                    | `email:*`      | P4                                                                                                                      |
 
 Request bodies for the P1 writes: [`contract/schemas/requests.schema.json`](./contract/schemas/requests.schema.json).
@@ -247,3 +247,80 @@ always set; PUT-set bodies are objects and answer the parent DTO; the
 webhook HMAC key is the secret's UTF-8 bytes, with multiple `v1` during rotation; task create status `backlog|todo`; link
 `source` derived from the key's `integrationKind`; subscription status `disabled` after key revocation; member DTO adds
 `organizationId`, `updatedAt`, `isActive`.
+
+## 10. Knowledge Base (P3, EW-P3-2) — `v1-draft.5`, CR-5
+
+The integration sees the Knowledge Base the way the Knowledge library does:
+
+- documents: the organization's own, plus those of every Work in the organization (never a personal Work's);
+- folders: the organization library folders (never a person's own Memory folders).
+
+Documents are Markdown with `[[path]]` wikilinks ([`kb-document`](./contract/schemas/resources/kb-document.schema.json)).
+Folders form a tree ([`kb-folder`](./contract/schemas/resources/kb-folder.schema.json)).
+
+**Reads** (`kb:read`). Each answers with `ETag: "<version>"`.
+
+| Route                   | Notes                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /kb/documents`     | Filters: `scope=organization\|work`, `workId`, `folderId=<id>\|unfiled`, `class`, `status`, `includeArchived`. Keyset by `(updatedAt, id)`. |
+| `GET /kb/documents/:id` | Always carries the full body.                                                                                                               |
+| `GET /kb/folders`       |                                                                                                                                             |
+| `GET /kb/folders/:id`   |                                                                                                                                             |
+
+**Change detection.**
+
+- `revision` moves only on a real change to the title, description, tags, class or body.
+- `normalizedContentHash` fingerprints the body.
+- `version` moves on every recorded change (status, review, lock, folder) and is the `ETag`.
+
+**Writes** (`kb:write`) go through the app's Knowledge Base and Knowledge library. The Git mirror, embeddings, the
+organization overlay into Works, locks, revisions and the activity trail therefore behave as they do in the app.
+
+- **Who writes:** the `X-Act-As-User` person, else the key's owner.
+- **What they may change** is decided by the app's rules:
+    - a Work's documents need edit access to that Work;
+    - organization documents and library folders need organization admin.
+- **A refusal** answers `422 domain_rule`.
+
+Document routes:
+
+| Route                              | Body                                                                                                                                         | Behaviour                                                                                                                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /kb/documents`               | [`CreateKbDocument`](./contract/schemas/requests.schema.json): `scope {type, id}`, `folderId?`, `path`, `title`, `class`, `body`, `tags?`, … | `scope.type` is `organization` (the pinned organization) or `work` (one of its Works). `Idempotency-Key` is required. A repeated `externalRef` answers `200` with the existing document. |
+| `PATCH /kb/documents/:id`          | `UpdateKbDocument`                                                                                                                           | `If-Match` is optional. A fully locked document answers `422`.                                                                                                                           |
+| `DELETE /kb/documents/:id`         | —                                                                                                                                            | Deletes a Work document. An organization document answers `422 domain_rule`: organization documents are archived, never deleted.                                                         |
+| `POST /kb/documents/:id/accept`    | —                                                                                                                                            | The review.                                                                                                                                                                              |
+| `POST /kb/documents/:id/archive`   | —                                                                                                                                            |                                                                                                                                                                                          |
+| `POST /kb/documents/:id/unarchive` | —                                                                                                                                            |                                                                                                                                                                                          |
+| `POST /kb/documents/:id/move`      | `{folderId}`                                                                                                                                 | `null` means Unfiled.                                                                                                                                                                    |
+
+**Every class may live at organization scope.** Only `legal`, `style` and `seo` are inherited into Works.
+
+Folder routes:
+
+| Route                    | Body                 | Behaviour                                                                                       |
+| ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| `POST /kb/folders`       | `CreateKbFolder`     | `Idempotency-Key` is required. A repeated `externalRef` answers `200` with the existing folder. |
+| `PATCH /kb/folders/:id`  | `{name?, parentId?}` | Rename, move, or both.                                                                          |
+| `DELETE /kb/folders/:id` | —                    | Its subfolders are deleted too. Their documents move to Unfiled; no document is deleted.        |
+
+**Events.** `data` carries the same DTOs.
+
+| Event                        | Recorded when                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| `kb.document.created`        | A document is created.                                                                      |
+| `kb.document.updated`        | Content, lock or decision changes.                                                          |
+| `kb.document.moved`          | A document is filed or unfiled.                                                             |
+| `kb.document.archived`       | A document is archived.                                                                     |
+| `kb.document.unarchived`     | A document is restored.                                                                     |
+| `kb.document.review_changed` | A document is accepted, or a decision is accepted.                                          |
+| `kb.document.deleted`        | A document is deleted; `data` is the last snapshot.                                         |
+| `kb.folder.created`          | A folder is created.                                                                        |
+| `kb.folder.updated`          | A rename or a move. One event per folder of the rewritten subtree.                          |
+| `kb.folder.deleted`          | One event per folder of the subtree. The unfiled documents each record `kb.document.moved`. |
+
+- When a body exceeds 262144 UTF-8 bytes, the event carries `body: null, bodyOmitted: true`. `GET` the document for the body.
+- A document of a personal Work records no events.
+
+**Links.** `PUT /links/kb_document|kb_folder/...` still answers `400`. The consumer keys documents and folders by their
+Ever Works id; creates still de-duplicate on `externalRef`.
