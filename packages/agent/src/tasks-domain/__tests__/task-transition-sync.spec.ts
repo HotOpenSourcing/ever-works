@@ -388,6 +388,30 @@ describe('TaskTransitionService.transitionSync', () => {
         });
     });
 
+    it('never walks on from a status another writer set between the CAS and the re-read (409 conflict)', async () => {
+        // The first hop's CAS lands (backlog → todo); before transition() re-reads
+        // the row, someone moves it to blocked. The walk must stop, not continue
+        // blocked → in_progress → done over the other writer's choice.
+        const realCas = tasks.casUpdateStatus.getMockImplementation();
+        tasks.casUpdateStatus.mockImplementationOnce(async (...args: unknown[]) => {
+            const won = await realCas(...args);
+            row = { ...row, status: TaskStatus.BLOCKED } as Task;
+            return won;
+        });
+        const err = (await svc
+            .transitionSync(row, TaskStatus.DONE)
+            .catch((e) => e)) as TaskTransitionConflictException;
+        expect(err).toBeInstanceOf(TaskTransitionConflictException);
+        expect(err.details).toEqual({
+            from: TaskStatus.BACKLOG,
+            to: TaskStatus.DONE,
+            path: [TaskStatus.TODO],
+            currentStatus: TaskStatus.BLOCKED,
+        });
+        expect(tasks.casUpdateStatus).toHaveBeenCalledTimes(1);
+        expect(row.status).toBe(TaskStatus.BLOCKED);
+    });
+
     it('a refused hop whose Task did not move stays the ordinary 400', async () => {
         tasks.casUpdateStatus.mockResolvedValueOnce(false);
         await expect(svc.transitionSync(row, TaskStatus.TODO)).rejects.toBeInstanceOf(

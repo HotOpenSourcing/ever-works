@@ -598,6 +598,17 @@ export class TaskTransitionService {
             }
             await onHop?.({ from: walked.length > 0 ? walked[walked.length - 1] : from, to: hop });
             walked.push(hop);
+            // Review of EW-P1-6 (Greptile P1): `transition()` re-reads the row
+            // after its compare-and-set. If another writer moved the Task in
+            // between (todo → blocked), the next hop would start from THEIR
+            // status and quietly undo it. Stop instead: the hop we wrote
+            // landed, theirs came after, and the caller re-reads and decides.
+            if (walked.length < path.length && current.status !== hop) {
+                throw new TaskTransitionConflictException(
+                    `Task moved to ${current.status} while the sync walk was at ${hop}; re-read it and retry.`,
+                    { from, to, path: [...walked], currentStatus: current.status },
+                );
+            }
         }
         return { task: current, from, path: walked };
     }
