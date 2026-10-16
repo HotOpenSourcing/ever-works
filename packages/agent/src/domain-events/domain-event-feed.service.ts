@@ -77,7 +77,13 @@ export class DomainEventFeedService {
     }
 
     async readPage(query: DomainEventFeedQuery): Promise<DomainEventFeedPage> {
-        const limit = Math.min(Math.max(Math.trunc(query.limit ?? DEFAULT_LIMIT), 1), MAX_LIMIT);
+        // A non-finite limit (e.g. `Number('abc')` from a query string) falls back
+        // to the default: NaN would make the page loop scan nothing and report
+        // `hasMore` forever.
+        const requested = Number.isFinite(query.limit)
+            ? Math.trunc(query.limit as number)
+            : DEFAULT_LIMIT;
+        const limit = Math.min(Math.max(requested, 1), MAX_LIMIT);
         const after = seqToBigInt(query.after || '0');
         const state = await this.dataSource
             .getRepository(DomainEventRelayState)
