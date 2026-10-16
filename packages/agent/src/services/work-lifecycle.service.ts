@@ -10,6 +10,10 @@ import {
     ServiceUnavailableException,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import {
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '../domain-events/domain-event-publisher.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { WorkRepository } from '@src/database/repositories/work.repository';
@@ -224,6 +228,11 @@ export class WorkLifecycleService {
         // and the delete is unchanged. Only `kind: 'app'` ever reads it.
         @Optional()
         private readonly appWorksTelemetry?: AppWorksTelemetryService,
+        // Domain events (EW-P1-1 B2) — `work.updated` / `work.deleted`, recorded
+        // right after the write (`work.created` and status changes come from
+        // the existing `work.created` / `work.status.changed` events through
+        // `DomainEventWorkBridge`). Appended LAST + @Optional.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -882,7 +891,17 @@ export class WorkLifecycleService {
         };
 
         try {
-            return await this.workRepository.create(workData, user);
+            const created = await this.workRepository.create(workData, user);
+            // This path emits no `work.created` app event, so the domain event is
+            // recorded here (the main create path is covered by DomainEventWorkBridge).
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.created(manager, 'work', created.id, 'work.created'),
+                (message) => this.logger.warn(message),
+                `work.created for ${created.id}`,
+            );
+            return created;
         } catch (error) {
             rethrowAsNormalized(error, this.logger, 'creating company work');
         }
@@ -924,7 +943,17 @@ export class WorkLifecycleService {
         };
 
         try {
-            return await this.workRepository.create(workData, user);
+            const created = await this.workRepository.create(workData, user);
+            // This path emits no `work.created` app event, so the domain event is
+            // recorded here (the main create path is covered by DomainEventWorkBridge).
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.created(manager, 'work', created.id, 'work.created'),
+                (message) => this.logger.warn(message),
+                `work.created for ${created.id}`,
+            );
+            return created;
         } catch (error) {
             rethrowAsNormalized(error, this.logger, 'creating campaign work');
         }
@@ -965,7 +994,17 @@ export class WorkLifecycleService {
         }
 
         try {
-            return await this.workRepository.create(workData, user);
+            const created = await this.workRepository.create(workData, user);
+            // This path emits no `work.created` app event, so the domain event is
+            // recorded here (the main create path is covered by DomainEventWorkBridge).
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.created(manager, 'work', created.id, 'work.created'),
+                (message) => this.logger.warn(message),
+                `work.created for ${created.id}`,
+            );
+            return created;
         } catch (error) {
             rethrowAsNormalized(error, this.logger, 'creating draft work');
         }
@@ -1311,6 +1350,15 @@ export class WorkLifecycleService {
             if (!updatedWork) {
                 throw new NotFoundException({ status: 'error', message: 'Work not found' });
             }
+            await recordAfterWrite(
+                this.domainEvents,
+                (publisher, manager) =>
+                    publisher.changed(manager, 'work', id, 'work.updated', {
+                        changedFields: workDtoFieldsOf(updateData),
+                    }),
+                (message) => this.logger.warn(message),
+                `work.updated for ${id}`,
+            );
 
             updatedWork.owner = updatedWork.getRepoOwner();
 
@@ -1899,7 +1947,23 @@ export class WorkLifecycleService {
                 };
             }
 
+            const workTombstone = this.domainEvents
+                ? await this.domainEvents
+                      .transaction((manager) =>
+                          this.domainEvents!.beforeDelete(manager, 'work', work.id),
+                      )
+                      .catch(() => null)
+                : null;
             await this.workRepository.delete(work.id);
+            if (workTombstone) {
+                await recordAfterWrite(
+                    this.domainEvents,
+                    (publisher, manager) =>
+                        publisher.deleted(manager, workTombstone, 'work.deleted'),
+                    (message) => this.logger.warn(message),
+                    `work.deleted for ${work.id}`,
+                );
+            }
             this.trackAppWorkDeleted(work, workRepositoryDeleted, user);
 
             // Local checkouts are keyed by `owner/repo`, not by Work. Nothing
@@ -2245,4 +2309,28 @@ function describeFailureCode(error: unknown): string {
     }
     const name = (error as { name?: unknown } | null)?.name;
     return typeof name === 'string' && name.length > 0 && name !== 'Error' ? name : 'unknown';
+}
+
+/** Work entity column → integration DTO field (integration contract v1, B.6). */
+const WORK_COLUMN_TO_DTO_FIELD: Readonly<Record<string, string>> = {
+    name: 'name',
+    slug: 'slug',
+    description: 'description',
+    kind: 'kind',
+    status: 'status',
+    website: 'website',
+    owner: 'repoUrls',
+    gitProvider: 'repoUrls',
+    sourceRepository: 'repoUrls',
+};
+
+/** The integration DTO fields a work update touches (domain events, EW-P1-1). */
+function workDtoFieldsOf(patch: object): string[] {
+    return [
+        ...new Set(
+            Object.keys(patch)
+                .map((key) => WORK_COLUMN_TO_DTO_FIELD[key])
+                .filter((field): field is string => Boolean(field)),
+        ),
+    ];
 }
