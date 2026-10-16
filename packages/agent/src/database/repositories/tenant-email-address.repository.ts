@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Repository } from 'typeorm';
+import { IsNull, LessThan, Repository } from 'typeorm';
 import {
     TenantEmailAddress,
     EmailAddressDirection,
@@ -100,6 +100,24 @@ export class TenantEmailAddressRepository {
      */
     async update(id: string, patch: Partial<TenantEmailAddress>): Promise<void> {
         await this.repository.update({ id }, patch);
+    }
+
+    /**
+     * EW-P4-3 — claim the right to send a confirmation email now: stamps
+     * `verificationSentAt = sentAt` only when no email was sent at or after
+     * `notBefore` (compare-and-set), so concurrent requests send one email.
+     * Answers whether this caller won. Trusted-internal, like {@link update}:
+     * the caller has already checked ownership.
+     */
+    async claimVerificationSend(id: string, notBefore: Date, sentAt: Date): Promise<boolean> {
+        const result = await this.repository.update(
+            [
+                { id, verificationSentAt: IsNull() },
+                { id, verificationSentAt: LessThan(notBefore) },
+            ] as never,
+            { verificationSentAt: sentAt },
+        );
+        return (result.affected ?? 0) > 0;
     }
 
     async delete(id: string, userId: string): Promise<void> {

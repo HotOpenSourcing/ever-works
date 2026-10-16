@@ -592,8 +592,13 @@ Now:
   `GET /api/email/verify/:token`), so a mail scanner that prefetches the link confirms nothing; it is in
   `PUBLIC_ROUTES`, since the link is usually opened from the mailbox without a session.
     - Already verified → nothing sent (`alreadyVerified: true`). Disabled → 400. A second email within 60 s → 429
-      (the address is the caller's to type; the route is also throttled to 5/min per caller). No platform mail wired →
-      503, never a silent "sent". The provider plugin's own `verifyAddress` still runs, best-effort.
+      (the address is the caller's to type; the route is also throttled to 5/min per caller). The send is recorded in
+      `tenant_email_addresses.verificationSentAt` (migration `1795061550000-AddTenantEmailAddressVerificationSentAt`)
+      and claimed with a compare-and-set, so concurrent clicks send one email; the token `createAddress` mints is never
+      mailed and never starts the cooldown. No platform mail, or a mailer that would only log (`MAILER_PROVIDER`
+      unset/`none`, Resend without a key) → 503, never a silent "sent". The email is sent `strict`: a provider refusal
+      (Resend answers errors without throwing) → 503 and the cooldown is given back. The provider plugin's own
+      `verifyAddress` still runs, best-effort.
     - Response (additive): `{ messageRef, sent, alreadyVerified?, expiresAt? }`.
 - **`verified` is enforced for sending**: `EmailService.sendMessage` refuses an unverified sending address up front
   (before a draft is held) and `EmailFacadeService.send` refuses it as the backstop every outbound path converges on —

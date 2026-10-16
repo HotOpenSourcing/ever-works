@@ -77,6 +77,37 @@ describe('MailerService', () => {
         });
     });
 
+    // EW-P4-3 — the Resend SDK RESOLVES with `{ error }` on an API error.
+    describe('Resend errors', () => {
+        const data = { to: 'ada@x.test', subject: 'Hi', template: 'notification', context: {} };
+
+        beforeEach(() => {
+            setEnv('resend');
+            (fs.readFile as jest.Mock).mockResolvedValue('<p>{{title}}</p>');
+            resend.emails.send.mockResolvedValue({
+                data: null,
+                error: { name: 'validation_error', message: 'Invalid `from` field' },
+            });
+        });
+
+        it('logs the refusal and returns for existing callers (unchanged behaviour)', async () => {
+            const service = buildService(resend as unknown as Resend);
+            const errorSpy = jest
+                .spyOn((service as any).logger, 'error')
+                .mockImplementation(() => undefined);
+            await expect(service.sendMail(data as never)).resolves.toBeUndefined();
+            expect(errorSpy).toHaveBeenCalledWith(expect.stringMatching(/Invalid `from` field/));
+        });
+
+        it('throws for a strict caller', async () => {
+            const service = buildService(resend as unknown as Resend);
+            jest.spyOn((service as any).logger, 'error').mockImplementation(() => undefined);
+            await expect(service.sendMail(data as never, { strict: true })).rejects.toThrow(
+                /Resend refused the email/,
+            );
+        });
+    });
+
     describe('SMTP provider', () => {
         beforeEach(() => setEnv('smtp'));
 

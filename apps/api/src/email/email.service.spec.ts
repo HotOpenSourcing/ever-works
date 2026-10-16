@@ -664,7 +664,11 @@ describe('EmailService verification (EW-P4-3)', () => {
         disabledAt: null,
         verificationTokenExpiresAt: null as Date | null,
     };
-    let addresses: { findByIdForUser: jest.Mock; update: jest.Mock };
+    let addresses: {
+        findByIdForUser: jest.Mock;
+        update: jest.Mock;
+        claimVerificationSend: jest.Mock;
+    };
     let mail: { sendNotificationEmail: jest.Mock; canDeliver: jest.Mock };
     let facade: { verifyAddress: jest.Mock; send: jest.Mock };
 
@@ -689,6 +693,7 @@ describe('EmailService verification (EW-P4-3)', () => {
         addresses = {
             findByIdForUser: jest.fn().mockResolvedValue({ ...row }),
             update: jest.fn().mockResolvedValue(undefined),
+            claimVerificationSend: jest.fn().mockResolvedValue(true),
         };
         mail = {
             sendNotificationEmail: jest.fn().mockResolvedValue(true),
@@ -741,10 +746,8 @@ describe('EmailService verification (EW-P4-3)', () => {
     });
 
     it('refuses a resend within the cooldown (429) and a disabled address (400)', async () => {
-        addresses.findByIdForUser.mockResolvedValue({
-            ...row,
-            verificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000 - 5_000),
-        });
+        // The compare-and-set on verificationSentAt lost: a link went out < 60 s ago.
+        addresses.claimVerificationSend.mockResolvedValue(false);
         await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
             status: 429,
         });
@@ -755,30 +758,40 @@ describe('EmailService verification (EW-P4-3)', () => {
         expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
     });
 
-    it('the token createAddress minted (never mailed) does not start the cooldown', async () => {
-        const createdAt = new Date(Date.now() - 2_000);
+    it('claims the send with a compare-and-set over the last minute (one email for concurrent clicks)', async () => {
+        const before = Date.now();
+        await build().triggerVerification('user-1', 'addr-1');
+        const [id, notBefore, sentAt] = addresses.claimVerificationSend.mock.calls[0];
+        expect(id).toBe('addr-1');
+        expect(sentAt.getTime() - notBefore.getTime()).toBe(60_000);
+        expect(sentAt.getTime()).toBeGreaterThanOrEqual(before);
+    });
+
+    it('the first send right after adding an address is not refused (nothing was mailed yet)', async () => {
+        // createAddress mints a token (EW-711 #44) but never mails it, and
+        // never stamps verificationSentAt, so the claim succeeds.
         addresses.findByIdForUser.mockResolvedValue({
             ...row,
-            createdAt,
-            verificationTokenExpiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000),
+            createdAt: new Date(),
+            verificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+            verificationSentAt: null,
         });
         await expect(build().triggerVerification('user-1', 'addr-1')).resolves.toMatchObject({
             sent: true,
         });
-        expect(mail.sendNotificationEmail).toHaveBeenCalledTimes(1);
     });
 
-    it('a link actually sent after creation does start the cooldown', async () => {
-        const createdAt = new Date(Date.now() - 30_000);
-        addresses.findByIdForUser.mockResolvedValue({
-            ...row,
-            createdAt,
-            // Issued 20 s after creation, 10 s ago.
-            verificationTokenExpiresAt: new Date(Date.now() - 10_000 + 24 * 60 * 60 * 1000),
-        });
+    it('a refused email answers 503 and gives the cooldown back', async () => {
+        const previous = new Date('2026-10-15T10:00:00Z');
+        addresses.findByIdForUser.mockResolvedValue({ ...row, verificationSentAt: previous });
+        mail.sendNotificationEmail.mockRejectedValue(new Error('Resend refused the email: x'));
         await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
-            status: 429,
+            status: 503,
         });
+        expect(addresses.update).toHaveBeenLastCalledWith('addr-1', {
+            verificationSentAt: previous,
+        });
+        expect(mail.sendNotificationEmail.mock.calls[0][3]).toEqual({ strict: true });
     });
 
     it('answers 503 when platform mail would only be logged (faker / no Resend key)', async () => {
@@ -787,6 +800,7 @@ describe('EmailService verification (EW-P4-3)', () => {
             status: 503,
         });
         expect(addresses.update).not.toHaveBeenCalled();
+        expect(addresses.claimVerificationSend).not.toHaveBeenCalled();
         expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
     });
 

@@ -55,13 +55,6 @@ const VERIFICATION_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
  */
 export const VERIFICATION_RESEND_COOLDOWN_MS = 60 * 1000;
 
-/**
- * EW-P4-3 — a verification token whose issue time is this close to the row's
- * creation is the one `createAddress` mints (EW-711 #44), which is never
- * mailed: it does not start the resend cooldown.
- */
-const TOKEN_MINTED_AT_CREATE_SLACK_MS = 5 * 1000;
-
 /** EW-P4-3 — where the confirmation link lands (a public web page, see apps/web). */
 export const EMAIL_ADDRESS_VERIFY_PATH = '/email-address/verify';
 
@@ -320,26 +313,6 @@ export class EmailService {
         if (row.disabledAt) {
             throw new BadRequestException('This address is disabled. Enable it first.');
         }
-        const issuedAt = row.verificationTokenExpiresAt
-            ? new Date(row.verificationTokenExpiresAt).getTime() - VERIFICATION_TOKEN_TTL_MS
-            : null;
-        // The token `createAddress` minted was never mailed, so it does not
-        // count as "a confirmation email was just sent".
-        const createdAt = row.createdAt ? new Date(row.createdAt).getTime() : null;
-        const mintedAtCreate =
-            issuedAt !== null &&
-            createdAt !== null &&
-            Math.abs(issuedAt - createdAt) <= TOKEN_MINTED_AT_CREATE_SLACK_MS;
-        if (
-            issuedAt !== null &&
-            !mintedAtCreate &&
-            Date.now() - issuedAt < VERIFICATION_RESEND_COOLDOWN_MS
-        ) {
-            throw new HttpException(
-                'A confirmation email was just sent to this address. Wait a minute before sending another.',
-                HttpStatus.TOO_MANY_REQUESTS,
-            );
-        }
         // Never a silent "sent": with no mail module, or a mailer that only
         // logs (MAILER_PROVIDER unset / `none`, or Resend without a key), the
         // link would never arrive.
@@ -349,23 +322,62 @@ export class EmailService {
             );
         }
 
+        // One email per cooldown, even for concurrent clicks: the send is
+        // claimed with a compare-and-set on `verificationSentAt` (NULL = never
+        // sent; the token `createAddress` mints is never mailed).
+        const sentAt = new Date();
+        const claimed = await this.addresses.claimVerificationSend(
+            row.id,
+            new Date(sentAt.getTime() - VERIFICATION_RESEND_COOLDOWN_MS),
+            sentAt,
+        );
+        if (!claimed) {
+            throw new HttpException(
+                'A confirmation email was just sent to this address. Wait a minute before sending another.',
+                HttpStatus.TOO_MANY_REQUESTS,
+            );
+        }
+
         const verificationToken = randomBytes(24).toString('base64url');
         const expiresAt = new Date(Date.now() + VERIFICATION_TOKEN_TTL_MS);
         await this.addresses.update(row.id, {
             verificationToken,
             verificationTokenExpiresAt: expiresAt,
         });
-        await this.mail.sendNotificationEmail(row.address, row.address, {
-            title: 'Confirm this email address',
-            message:
-                `${row.address} was added as an email address for AI agents on your workspace. ` +
-                'Confirm it to let agents send from it. The link works for 24 hours. ' +
-                'If you did not expect this email, ignore it: nothing will be sent from this address.',
-            eventTitle: 'Email address confirmation',
-            actionUrl: `${EMAIL_ADDRESS_VERIFY_PATH}/${verificationToken}`,
-            actionLabel: 'Confirm this address',
-            settingsPath: '/settings/integrations/emails',
-        });
+        try {
+            await this.mail.sendNotificationEmail(
+                row.address,
+                row.address,
+                {
+                    title: 'Confirm this email address',
+                    message:
+                        `${row.address} was added as an email address for AI agents on your workspace. ` +
+                        'Confirm it to let agents send from it. The link works for 24 hours. ' +
+                        'If you did not expect this email, ignore it: nothing will be sent from this address.',
+                    eventTitle: 'Email address confirmation',
+                    actionUrl: `${EMAIL_ADDRESS_VERIFY_PATH}/${verificationToken}`,
+                    actionLabel: 'Confirm this address',
+                    settingsPath: '/settings/integrations/emails',
+                },
+                // A refused email must not read as sent (Resend answers errors
+                // without throwing).
+                { strict: true },
+            );
+        } catch (error) {
+            // Nothing went out: give the cooldown back so the owner can retry
+            // at once, and say why instead of "sent".
+            await this.addresses
+                .update(row.id, { verificationSentAt: row.verificationSentAt ?? null })
+                .catch(() => undefined);
+            this.logger.warn(
+                `Confirmation email for address ${row.id} was not sent: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            throw new ServiceUnavailableException(
+                'The confirmation email could not be sent. Check the platform email settings and try again.',
+            );
+        }
 
         try {
             await this.emailFacade.verifyAddress(row.address, { userId, addressId: row.id });
