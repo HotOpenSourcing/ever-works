@@ -27,6 +27,7 @@ import {
     type TerminalSessionStarter,
 } from './task-dispatcher';
 import { TaskNotificationService } from './task-notification.service';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
 import { TaskRunDenormService } from './task-run-denorm.service';
 // Value import (not `import type`): Nest resolves the @Optional() class
 // injection below via emitted design:paramtypes metadata, which needs the
@@ -200,6 +201,10 @@ export class TaskTransitionService {
         // meets the same admission gate, credits precheck and kill switch
         // as every other run and this slice adds no `createQueued` site.
         @Optional() private readonly agentReviews?: TaskAgentReviewService,
+        // Domain events (EW-P1-1 B2) — `task.transitioned`, recorded in the
+        // same transaction as the status compare-and-set. Appended LAST +
+        // @Optional (positional-spec arity rule); absent, nothing is recorded.
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -315,7 +320,23 @@ export class TaskTransitionService {
         // the winner already advanced the status, so they get the same
         // read-time "Cannot transition" 400 a sequential stale caller would —
         // never a silent double-write or a 5xx.
-        const won = await this.tasks.casUpdateStatus(task.id, from, patch);
+        const publisher = this.domainEvents;
+        const won = publisher
+            ? await publisher.transaction(async (manager) => {
+                  const landed = await this.tasks.casUpdateStatus(task.id, from, patch, manager);
+                  if (landed) {
+                      await publisher.changed(manager, 'task', task.id, 'task.transitioned', {
+                          changedFields: ['status'],
+                          previous: { status: from },
+                          actor:
+                              opts.actorType === 'agent' && task.agentId
+                                  ? { type: 'agent', id: task.agentId, label: null }
+                                  : undefined,
+                      });
+                  }
+                  return landed;
+              })
+            : await this.tasks.casUpdateStatus(task.id, from, patch);
         if (!won) {
             throw new BadRequestException(`Cannot transition Task from ${from} to ${to}.`);
         }

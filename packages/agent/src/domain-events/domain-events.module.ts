@@ -10,6 +10,7 @@ import { Team } from '../entities/team.entity';
 import { Tenant } from '../entities/tenant.entity';
 import { Work } from '../entities/work.entity';
 import { DomainEventFeedService } from './domain-event-feed.service';
+import { DomainEventPublisher } from './domain-event-publisher.service';
 import { DomainEventRecorder } from './domain-event-recorder.service';
 
 /**
@@ -17,7 +18,9 @@ import { DomainEventRecorder } from './domain-event-recorder.service';
  *
  * Import it wherever a service records events: it provides the
  * {@link DomainEventRecorder} (write the outbox row inside the caller's
- * transaction) and the {@link DomainEventFeedService} (read the change feed).
+ * transaction), the {@link DomainEventPublisher} (version bump + snapshot +
+ * record at a recording point) and the {@link DomainEventFeedService} (read
+ * the change feed).
  * It starts nothing: the relay lives in {@link DomainEventsRelayModule}, which
  * only the API process imports, so a worker that records events never relays.
  */
@@ -35,7 +38,7 @@ import { DomainEventRecorder } from './domain-event-recorder.service';
             Organization,
         ]),
     ],
-    providers: [DomainEventRecorder, DomainEventFeedService],
-    exports: [DomainEventRecorder, DomainEventFeedService],
+    providers: [DomainEventRecorder, DomainEventFeedService, DomainEventPublisher],
+    exports: [DomainEventRecorder, DomainEventFeedService, DomainEventPublisher],
 })
 export class DomainEventsModule {}

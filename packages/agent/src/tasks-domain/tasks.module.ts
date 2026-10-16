@@ -78,6 +78,7 @@ import { AppWorkChangeGateService } from '../app-works/app-work-change-gate.serv
 import { AppSpecModule } from '../app-spec/app-spec.module';
 import { APP_WORK_CHANGE_GATE } from './app-work-change-gate.port';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 
 /**
  * Tasks feature — Phases 11 + 12 + 13.
@@ -89,6 +90,9 @@ import { DistributedTaskLockService } from '../cache/distributed-task-lock.servi
 @Module({
     imports: [
         DatabaseModule,
+        // Domain events (EW-P1-1 B2) — the publisher the task services record
+        // `task.*` events through (recorder only: the relay runs in the API).
+        DomainEventsModule,
         TypeOrmModule.forFeature([
             Task,
             TaskAssignee,
