@@ -40,7 +40,9 @@ const { StripeRelayDeadLetterNotFoundError } = require('../stripe-relay.service'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { IsPlatformAdminGuard } = require('@src/auth/guards/platform-admin.guard');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { IntegrationForbiddenGuard } = require('../../../auth/integration/integration-forbidden.guard');
+const {
+    IntegrationForbiddenGuard,
+} = require('../../../auth/integration/integration-forbidden.guard');
 
 function relayService(overrides: Record<string, unknown> = {}) {
     return {
