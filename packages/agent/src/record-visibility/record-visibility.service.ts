@@ -49,6 +49,8 @@ interface VisibilityRecord {
     visibility: RecordVisibility;
     visibilityExplicit: boolean;
     teamId?: string | null;
+    /** Tasks only: the sub-task hierarchy `setTeams` must keep consistent. */
+    parentTaskId?: string | null;
 }
 
 export interface VisibilityState {
@@ -212,15 +214,15 @@ export class RecordVisibilityService {
             hasTeam: teamIds.length > 0,
         });
         if (visibility === row.visibility) return false;
-        await this.apply(
+        return this.apply(
             manager,
             aggregate,
             row,
             { visibility, visibilityExplicit: false },
             teamIds,
             options.recordEvent ?? true,
+            true,
         );
-        return true;
     }
 
     /**
@@ -307,6 +309,9 @@ export class RecordVisibilityService {
             let resourceTeamIds = unique;
             if (shape.teamColumn) {
                 const first = unique[0] ?? null;
+                if ((row.teamId ?? null) !== first) {
+                    await this.assertTaskTreeAllowsTeam(manager, row, first);
+                }
                 await manager
                     .getRepository(ENTITY_OF[aggregate])
                     .update({ id }, { [shape.teamColumn]: first });
@@ -350,6 +355,36 @@ export class RecordVisibilityService {
 
     // ── internals ─────────────────────────────────────────────────────
 
+    /**
+     * The rule `TasksService.update` applies to a Task's owners: a sub-task agrees with
+     * its parent on every owner (`teamId` included), and a parent with sub-tasks cannot
+     * change owners without stranding them. `teamId` is the only owner `setTeams` moves.
+     */
+    private async assertTaskTreeAllowsTeam(
+        manager: EntityManager,
+        row: VisibilityRecord,
+        teamId: string | null,
+    ): Promise<void> {
+        const tasks = manager.getRepository(Task);
+        if (row.parentTaskId) {
+            const parent = await tasks.findOne({
+                where: { id: row.parentTaskId },
+                select: { id: true, teamId: true },
+            });
+            if (parent && (parent.teamId ?? null) !== teamId) {
+                throw new BadRequestException(
+                    "A sub-task's first Team must match its parent Task's Team: change the parent's Teams, or detach the sub-task first.",
+                );
+            }
+        }
+        const children = await tasks.count({ where: { parentTaskId: row.id } });
+        if (children > 0) {
+            throw new BadRequestException(
+                `This Task has ${children} sub-task(s); re-file or detach them before changing its first Team so parent and child scopes cannot diverge.`,
+            );
+        }
+    }
+
     private async load(
         manager: EntityManager,
         aggregate: VisibilityAggregate,
@@ -388,6 +423,13 @@ export class RecordVisibilityService {
         return [...new Set(ids)];
     }
 
+    /**
+     * Write the new visibility (and record its event). `automatic` makes the write a
+     * compare-and-set on the state this change was computed from (`visibilityExplicit
+     * = false` and the old `visibility`): an owner's concurrent choice by hand — say
+     * `private` — always wins, and the automatic change then records nothing.
+     * Answers whether the row changed.
+     */
     private async apply(
         manager: EntityManager,
         aggregate: VisibilityAggregate,
@@ -395,22 +437,26 @@ export class RecordVisibilityService {
         next: { visibility: RecordVisibility; visibilityExplicit: boolean },
         teamIds: string[],
         recordEvent = true,
-    ): Promise<void> {
+        automatic = false,
+    ): Promise<boolean> {
         if (
             next.visibility === row.visibility &&
             next.visibilityExplicit === row.visibilityExplicit
         ) {
-            return;
+            return false;
         }
-        await manager
-            .getRepository(ENTITY_OF[aggregate])
-            .update(
-                { id: row.id },
-                { visibility: next.visibility, visibilityExplicit: next.visibilityExplicit },
-            );
+        const criteria: Record<string, unknown> = automatic
+            ? { id: row.id, visibilityExplicit: false, visibility: row.visibility }
+            : { id: row.id };
+        const result = await manager.getRepository(ENTITY_OF[aggregate]).update(criteria, {
+            visibility: next.visibility,
+            visibilityExplicit: next.visibilityExplicit,
+        });
+        if (automatic && result.affected === 0) return false;
         if (recordEvent && next.visibility !== row.visibility) {
             await this.recordChange(manager, aggregate, row, next, teamIds);
         }
+        return true;
     }
 
     /**

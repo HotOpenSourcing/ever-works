@@ -309,7 +309,6 @@ export class WorkProposalsApiService {
         scope?: OwnershipScope,
     ): Promise<WorkProposal[]> {
         if (!this.accessPolicy) return [];
-        const search = opts.search?.trim().toLowerCase();
         const { rows } = await this.accessPolicy.listVisible<WorkProposal>({
             aggregate: 'idea',
             userId,
@@ -329,13 +328,8 @@ export class WorkProposalsApiService {
                         ideaMissionId: opts.missionId,
                     });
                 }
-                if (search) {
-                    qb.andWhere(
-                        `(LOWER(${alias}.title) LIKE :ideaSearch OR LOWER(${alias}.description) LIKE :ideaSearch)`,
-                        { ideaSearch: `%${search}%` },
-                    );
-                }
             },
+            search: { term: opts.search, columns: ['title', 'description'] },
         });
         return rows;
     }

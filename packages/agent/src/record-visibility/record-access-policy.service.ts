@@ -23,6 +23,10 @@ import { Work } from '../entities/work.entity';
 import { WorkMember } from '../entities/work-member.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { ownershipSqlPredicate, type OwnershipScope } from '../database/ownership-scope';
+import {
+    buildCaseInsensitiveLikeClause,
+    prepareCaseInsensitiveContainsPattern,
+} from '../database/utils';
 import type { RecordAccessContext, VisibilityPrincipal } from './record-access.types';
 import { visibleToPredicate } from './visible-to';
 
@@ -102,6 +106,18 @@ export class RecordAccessPolicy {
         }
     }
 
+    /**
+     * `contextFor` answers, memoized per (user, organization) for a moment: a board
+     * reads every column through the list path, and each column would otherwise run
+     * the roster / Team / Work lookups again. Short enough that a membership change is
+     * visible on the next request.
+     */
+    private readonly contextMemo = new Map<
+        string,
+        { at: number; value: Promise<RecordAccessContext> }
+    >();
+    private static readonly CONTEXT_MEMO_MS = 2_000;
+
     /** Normalize a `?view=` query value; unknown or missing = `mine`. */
     static view(value?: string | null): RecordListView {
         return normalizeRecordListView(value);
@@ -127,6 +143,29 @@ export class RecordAccessPolicy {
         };
         if (principal.kind !== 'user' || !organizationId) return base;
 
+        const key = `${principal.userId}:${organizationId}`;
+        const now = Date.now();
+        const memo = this.contextMemo.get(key);
+        if (memo && now - memo.at < RecordAccessPolicy.CONTEXT_MEMO_MS) return memo.value;
+        const value = this.resolveUserContext(base, principal.userId, organizationId);
+        this.contextMemo.set(key, { at: now, value });
+        value.catch(() => this.contextMemo.delete(key));
+        if (this.contextMemo.size > 500) {
+            for (const [entryKey, entry] of this.contextMemo) {
+                if (now - entry.at >= RecordAccessPolicy.CONTEXT_MEMO_MS) {
+                    this.contextMemo.delete(entryKey);
+                }
+            }
+        }
+        return value;
+    }
+
+    private async resolveUserContext(
+        base: RecordAccessContext,
+        userId: string,
+        organizationId: string,
+    ): Promise<RecordAccessContext> {
+        const principal = { kind: 'user' as const, userId };
         const [isOrganizationMember, teamIds, workIds] = await Promise.all([
             this.isOrganizationMember(organizationId, principal.userId),
             this.teamIdsFor(organizationId, principal.userId),
@@ -213,6 +252,12 @@ export class RecordAccessPolicy {
         scope?: OwnershipScope | null;
         view: RecordListView;
         refine?: (qb: SelectQueryBuilder<T>, alias: string) => void;
+        /**
+         * Free-text search over these columns, case-insensitive with LIKE wildcards
+         * escaped — the same rule as the owner lists, so switching tabs never turns a
+         * literal `%` / `_` into a wildcard.
+         */
+        search?: { term?: string; columns: readonly string[] };
         orderBy?: { column: string; direction: 'ASC' | 'DESC' };
         take?: number;
         skip?: number;
@@ -227,6 +272,17 @@ export class RecordAccessPolicy {
             input.view,
         );
         input.refine?.(qb, alias);
+        const pattern = prepareCaseInsensitiveContainsPattern(input.search?.term);
+        if (pattern && input.search && input.search.columns.length > 0) {
+            qb.andWhere(
+                `(${input.search.columns
+                    .map((column) =>
+                        buildCaseInsensitiveLikeClause(`${alias}.${column}`, 'visSearch'),
+                    )
+                    .join(' OR ')})`,
+                { visSearch: pattern },
+            );
+        }
         const total = await qb.getCount();
         const order = input.orderBy ?? { column: 'updatedAt', direction: 'DESC' as const };
         qb.orderBy(`${alias}.${order.column}`, order.direction).addOrderBy(`${alias}.id`, 'ASC');

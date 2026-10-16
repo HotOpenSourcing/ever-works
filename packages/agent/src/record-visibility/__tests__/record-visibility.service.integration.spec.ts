@@ -331,6 +331,70 @@ describe('RecordVisibilityService (better-sqlite3)', () => {
         });
     });
 
+    describe('review fixes (Greptile, #2621)', () => {
+        it('an automatic change never overwrites a concurrent choice by hand (compare-and-set)', async () => {
+            const task = await newTask();
+            await repo(TeamResource).save(
+                repo(TeamResource).create({
+                    teamId: ids.team,
+                    resourceType: 'task',
+                    resourceId: task.id,
+                    tenantId: ids.tenant,
+                    organizationId: ids.org,
+                    createdAt: new Date(),
+                }),
+            );
+            // The recompute read the row, then the owner chose private before it wrote.
+            const stale = await reload(task.id);
+            await service.setVisibility('task', task.id, 'private');
+            const changed = await dataSource.transaction(async (manager) => {
+                const internals = service as unknown as {
+                    apply(
+                        manager: unknown,
+                        aggregate: string,
+                        row: unknown,
+                        next: unknown,
+                        teamIds: string[],
+                        recordEvent: boolean,
+                        automatic: boolean,
+                    ): Promise<boolean>;
+                };
+                return internals.apply(
+                    manager,
+                    'task',
+                    stale,
+                    { visibility: 'team', visibilityExplicit: false },
+                    [ids.team],
+                    true,
+                    true,
+                );
+            });
+            expect(changed).toBe(false);
+            const after = await reload(task.id);
+            expect(after.visibility).toBe('private');
+            expect(after.visibilityExplicit).toBe(true);
+            expect((await events(task.id)).map((event) => event.data)).toEqual([
+                { id: task.id, visibility: 'private' },
+            ]);
+        });
+
+        it('setTeams keeps the sub-task tree consistent (same rule as the Task form)', async () => {
+            const parent = await newTask({ teamId: ids.team });
+            const child = await newTask({ teamId: ids.team, parentTaskId: parent.id });
+            await expect(
+                service.setTeams('task', child.id, [ids.team2], ids.user),
+            ).rejects.toBeInstanceOf(BadRequestException);
+            await expect(
+                service.setTeams('task', parent.id, [ids.team2], ids.user),
+            ).rejects.toBeInstanceOf(BadRequestException);
+            // Extra Teams beyond the first are not an owner change: allowed.
+            await expect(
+                service.setTeams('task', child.id, [ids.team, ids.team2], ids.user),
+            ).resolves.toEqual(expect.objectContaining({ teamIds: [ids.team, ids.team2] }));
+            expect((await reload(child.id)).teamId).toBe(ids.team);
+        });
+    });
+
     describe('integration principal rules', () => {
         it('private → 422 domain_rule; team / organization pass; anything else 400', () => {
             expect(() => RecordVisibilityService.assertIntegrationVisibility('private')).toThrow(

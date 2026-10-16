@@ -114,6 +114,28 @@ describe('Task visibility rules (EW-P1-3)', () => {
             expect(tasks.findVisibleFiltered).not.toHaveBeenCalled();
         });
 
+        it('a shared row embeds its run, loaded under the Task owner (never the caller)', async () => {
+            const { service, tasks } = build();
+            tasks.findVisibleFiltered.mockResolvedValueOnce({
+                rows: [{ ...shared, latestRunId: 'run-1' }],
+                total: 1,
+            });
+            const agentRuns = {
+                findByIds: jest.fn().mockResolvedValue([{ id: 'run-1', status: 'running' }]),
+            };
+            (service as unknown as { agentRuns: unknown }).agentRuns = agentRuns;
+            const result = await service.list(
+                'reader-1',
+                { view: 'organization' },
+                { includeRun: true },
+                scope,
+            );
+            expect(agentRuns.findByIds).toHaveBeenCalledWith(['run-1'], 'owner-1', scope);
+            expect(result.rows[0]).toEqual(
+                expect.objectContaining({ run: expect.objectContaining({ id: 'run-1' }) }),
+            );
+        });
+
         it.each(['shared', 'organization'] as const)('%s reads through visibleTo', async (view) => {
             const { service, tasks } = build();
             const result = await service.list('reader-1', { view }, {}, scope);
