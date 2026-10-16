@@ -3,6 +3,7 @@ import { DomainEventsModule } from './domain-events.module';
 import { DomainEventPluginDeliveryService } from './domain-event-plugin-delivery.service';
 import { DomainEventRelayService } from './domain-event-relay.service';
 import { DomainEventRetentionService } from './domain-event-retention.service';
+import { DomainEventWorkBridge } from './domain-event-work-bridge';
 
 /**
  * Domain events — relay side (EW-P1-1). Imported by the API process ONLY.
@@ -23,6 +24,8 @@ import { DomainEventRetentionService } from './domain-event-retention.service';
         DomainEventRelayService,
         DomainEventRetentionService,
         DomainEventPluginDeliveryService,
+        // Existing `work.created` / `work.status.changed` events → `work.*` domain events.
+        DomainEventWorkBridge,
     ],
     exports: [DomainEventRelayService],
 })
