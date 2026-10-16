@@ -1,3 +1,4 @@
+import { normalizeRecordListView } from '@ever-works/contracts';
 import {
     BadRequestException,
     Body,
@@ -297,6 +298,13 @@ export class TasksController {
     })
     @ApiQuery({ name: 'label', required: false, description: 'Filter by label' })
     @ApiQuery({
+        name: 'view',
+        required: false,
+        enum: ['mine', 'shared', 'organization'],
+        description:
+            "Record visibility tab (EW-P1-3): 'mine' (default) = own Tasks, unchanged; 'shared' = Tasks of others the caller takes part in or reaches through a Team / Work; 'organization' = every Task of the active Organization the caller may read",
+    })
+    @ApiQuery({
         name: 'search',
         required: false,
         description: 'Free-text search over title/description',
@@ -336,8 +344,11 @@ export class TasksController {
         // Task Triggers — reveal Tasks a trigger with `showOnBoard: false`
         // kept off the board. Off by default so the Kanban stays human-sized.
         @Query('includeHidden') includeHidden?: string,
+        // Record visibility (EW-P1-3) — the list tab. Unknown or missing = `mine`.
+        @Query('view') view?: string,
     ) {
         const filter: ListTasksFilter = {
+            view: normalizeRecordListView(view),
             status: this.parseStatusList(status),
             priority: this.parsePriorityList(priority),
             missionId,
@@ -474,10 +485,15 @@ export class TasksController {
     }
 
     @Get(':id')
-    @ApiOperation({ summary: 'Get one Task.' })
+    @ApiOperation({
+        summary:
+            'Get one Task — the owner, or anyone its visibility admits (participants, Team / Work members, Organization members for an organization-wide Task).',
+    })
     @HttpCode(HttpStatus.OK)
     async getOne(@CurrentUser() auth: AuthenticatedUser, @Param('id', ParseUUIDPipe) id: string) {
-        return this.service.getOne(auth.userId, id, this.scopeContext.getScope());
+        // Record visibility (EW-P1-3): READ through the access policy; every write
+        // route keeps the owner-only `service.getOne`.
+        return this.service.getReadable(auth.userId, id, this.scopeContext.getScope());
     }
 
     @Get(':id/decision-conflicts')
@@ -1178,6 +1194,7 @@ export class TasksController {
             includeTemplates: query.includeTemplates === 'true',
             includeHidden: query.includeHidden === 'true',
             includeCancelled: query.includeCancelled === 'true',
+            view: normalizeRecordListView(query.view),
         };
     }
 

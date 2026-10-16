@@ -129,6 +129,10 @@ export { TasksFacadeService, TasksFacadeError } from './tasks.facade';
 export {
     EmailFacadeService,
     EmailFacadeError,
+    // EW-P4-3 — the verified-sender rule.
+    EmailSenderNotVerifiedException,
+    emailSenderVerificationRequired,
+    EMAIL_SENDER_VERIFICATION_REQUIRED_ENV,
     // EW-P4-3 — RFC threading helpers.
     buildOutboundHeaders,
     replyHeadersFor,

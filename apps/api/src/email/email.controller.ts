@@ -102,8 +102,12 @@ export class EmailController {
     async listAddresses(
         @CurrentUser() auth: AuthenticatedUser,
         @Query('direction') direction?: EmailAddressDirection,
+        // EW-P4-3 — `includeDisabled=true` (exact string): the settings page.
+        @Query('includeDisabled') includeDisabled?: string,
     ) {
-        const addresses = await this.emailService.listAddresses(auth.userId, direction);
+        const addresses = await this.emailService.listAddresses(auth.userId, direction, {
+            includeDisabled: includeDisabled === 'true',
+        });
         return { addresses: toPublicEmailAddresses(addresses) };
     }
 
@@ -145,7 +149,10 @@ export class EmailController {
     @UseGuards(AuthSessionGuard)
     @ApiBearerAuth('JWT-auth')
     @Post('addresses/:id/verify')
-    @ApiOperation({ summary: 'Trigger verification email for an address' })
+    // EW-P4-3 — this now really mails the address (which the caller typed):
+    // bound per caller as well as per address (the service's cooldown).
+    @Throttle({ long: { limit: 5, ttl: 60_000 } })
+    @ApiOperation({ summary: 'Send the confirmation email for an address' })
     async triggerVerification(@CurrentUser() auth: AuthenticatedUser, @Param('id') id: string) {
         return this.emailService.triggerVerification(auth.userId, id);
     }

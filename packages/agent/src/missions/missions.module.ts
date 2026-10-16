@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RecordVisibilityModule } from '../record-visibility/record-visibility.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Mission } from '../entities/mission.entity';
 import { MissionAttachment } from '../entities/mission-attachment.entity';
@@ -35,6 +36,8 @@ import { MissionTickService } from './mission-tick.service';
  */
 @Module({
     imports: [
+        // Record visibility (EW-P1-3) — RecordAccessPolicy for the shared reads.
+        RecordVisibilityModule,
         // Phase 3 PR HH — MissionCloneService injects
         // Repository<WorkProposal> for the Idea-copy half of Full
         // Fork, so the entity is registered here as well as via

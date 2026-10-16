@@ -2,6 +2,7 @@ import 'server-only';
 import type {
     DecisionConflictReportDto,
     GateStatus,
+    RecordListView,
     TaskAcceptanceCheck,
     TaskBoardSort,
     TaskBoardTerminalWindow,
@@ -276,6 +277,11 @@ export interface Task {
 }
 
 export interface ListTasksQuery {
+    /**
+     * Record visibility (EW-P1-3) list tab, sent as `view`: `mine` (default — omitted),
+     * `shared` or `organization`.
+     */
+    view?: RecordListView;
     status?: TaskStatus | TaskStatus[];
     priority?: TaskPriority | TaskPriority[];
     missionId?: string;
@@ -304,6 +310,7 @@ function buildQuery(q: ListTasksQuery = {}): string {
     if (q.limit !== undefined) params.set('limit', String(q.limit));
     if (q.offset !== undefined) params.set('offset', String(q.offset));
     if (q.includeRun) params.set('includeRun', 'true');
+    if (q.view && q.view !== 'mine') params.set('view', q.view);
     const s = params.toString();
     return s ? `?${s}` : '';
 }
@@ -316,6 +323,11 @@ export type TaskBoardLayout = 'status' | 'focus';
  * optional; the API clamps the bounds and defaults the rest.
  */
 export interface TaskBoardQuery {
+    /**
+     * Record visibility (EW-P1-3) list tab, sent as `view`: `mine` (default — omitted),
+     * `shared` or `organization`.
+     */
+    view?: RecordListView;
     layout?: TaskBoardLayout;
     /** Cards per column (API default 50, clamped 1..100). */
     columnLimit?: number;
@@ -368,6 +380,7 @@ export interface TaskBoardResult {
 function buildBoardQuery(q: TaskBoardQuery = {}, extra: Record<string, string> = {}): string {
     const params = new URLSearchParams();
     if (q.layout) params.set('layout', q.layout);
+    if (q.view && q.view !== 'mine') params.set('view', q.view);
     if (q.columnLimit !== undefined) params.set('columnLimit', String(q.columnLimit));
     if (q.terminalWindowDays !== undefined)
         params.set('terminalWindowDays', String(q.terminalWindowDays));
