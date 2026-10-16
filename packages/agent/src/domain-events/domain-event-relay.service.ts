@@ -3,7 +3,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { domainEventEmitterName, type DomainEventEnvelope } from '@ever-works/contracts';
 import { randomBytes } from 'node:crypto';
-import { DataSource, In, IsNull } from 'typeorm';
+import { DataSource, type EntityManager, In, IsNull } from 'typeorm';
+import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import { DomainEvent } from '../entities/domain-event.entity';
 import {
     DOMAIN_EVENT_RELAY_STATE_ID,
@@ -312,41 +313,15 @@ export class DomainEventRelayService {
         if (pending.length === 0) return [];
 
         const outboxSeqs = pending.map((row) => row.outboxSeq);
-        await this.dataSource.transaction(async (manager) => {
-            const state = await manager
-                .getRepository(DomainEventRelayState)
-                .findOne({ where: { id: DOMAIN_EVENT_RELAY_STATE_ID } });
-            if (!state) throw new RelayFencedError('relay state row missing');
-            const previous = seqToBigInt(state.lastSeq);
-            let next = previous;
-            for (const outboxSeq of outboxSeqs) {
-                next += 1n;
-                const updated = await manager
-                    .createQueryBuilder()
-                    .update(DomainEvent)
-                    .set({ seq: next.toString(), dispatchedAt: now })
-                    .where(`${this.column('outboxSeq')} = :outboxSeq`, { outboxSeq })
-                    .andWhere(`${this.column('dispatchedAt')} IS NULL`)
-                    .execute();
-                if ((updated.affected ?? 0) !== 1) {
-                    throw new RelayFencedError(`row ${outboxSeq} was dispatched concurrently`);
-                }
-            }
-            const fenced = await manager
-                .createQueryBuilder()
-                .update(DomainEventRelayState)
-                .set({ lastSeq: next.toString() })
-                .where(`${this.column('id')} = :id`, { id: DOMAIN_EVENT_RELAY_STATE_ID })
-                .andWhere(`${this.column('holder')} = :holder`, { holder: this.holderId })
-                .andWhere(`${this.column('leaseExpiresAt')} > :now`, { now })
-                .andWhere(`${this.column('lastSeq')} = :previous`, {
-                    previous: previous.toString(),
-                })
-                .execute();
-            if ((fenced.affected ?? 0) !== 1) {
-                throw new RelayFencedError('lease lost or lastSeq moved during assignment');
-            }
-        });
+        // better-sqlite3 runs a whole DataSource on ONE connection, where
+        // overlapping transactions nest as savepoints of each other: queue this
+        // one behind the platform's other serialized writes (see
+        // single-connection-write-queue.ts). Pooled drivers run it at once.
+        await serializeOnSingleConnection(this.dataSource.manager, () =>
+            this.dataSource.transaction(async (manager) => {
+                await this.assignPositions(manager, outboxSeqs, now);
+            }),
+        );
 
         const rows = await this.dataSource.getRepository(DomainEvent).find({
             where: { outboxSeq: In(outboxSeqs) },
@@ -354,6 +329,57 @@ export class DomainEventRelayService {
         return rows
             .sort((a, b) => (seqToBigInt(a.seq) < seqToBigInt(b.seq) ? -1 : 1))
             .map((row) => toDomainEventEnvelope(row));
+    }
+
+    /** Give `outboxSeqs` the next positions and advance `lastSeq`, fenced by the lease. */
+    private async assignPositions(
+        manager: EntityManager,
+        outboxSeqs: ReadonlyArray<number | string>,
+        now: Date,
+    ): Promise<void> {
+        const state = await manager
+            .getRepository(DomainEventRelayState)
+            .findOne({ where: { id: DOMAIN_EVENT_RELAY_STATE_ID } });
+        if (!state) throw new RelayFencedError('relay state row missing');
+        const stored = seqToBigInt(state.lastSeq);
+        // Self-heal: never hand out a position at or below one already
+        // assigned (a restored backup or a hand edit could leave lastSeq
+        // behind), which would otherwise wedge the relay on the unique index.
+        const maxAssigned = (await manager
+            .getRepository(DomainEvent)
+            .createQueryBuilder('event')
+            .select('MAX(event.seq)', 'max')
+            .getRawOne()) as { max?: string | number | null } | undefined;
+        const assigned = seqToBigInt(maxAssigned?.max ?? 0);
+        const previous = assigned > stored ? assigned : stored;
+        let next = previous;
+        for (const outboxSeq of outboxSeqs) {
+            next += 1n;
+            const updated = await manager
+                .createQueryBuilder()
+                .update(DomainEvent)
+                .set({ seq: next.toString(), dispatchedAt: now })
+                .where(`${this.column('outboxSeq')} = :outboxSeq`, { outboxSeq })
+                .andWhere(`${this.column('dispatchedAt')} IS NULL`)
+                .execute();
+            if ((updated.affected ?? 0) !== 1) {
+                throw new RelayFencedError(`row ${outboxSeq} was dispatched concurrently`);
+            }
+        }
+        const fenced = await manager
+            .createQueryBuilder()
+            .update(DomainEventRelayState)
+            .set({ lastSeq: next.toString() })
+            .where(`${this.column('id')} = :id`, { id: DOMAIN_EVENT_RELAY_STATE_ID })
+            .andWhere(`${this.column('holder')} = :holder`, { holder: this.holderId })
+            .andWhere(`${this.column('leaseExpiresAt')} > :now`, { now })
+            .andWhere(`${this.column('lastSeq')} = :stored`, {
+                stored: stored.toString(),
+            })
+            .execute();
+        if ((fenced.affected ?? 0) !== 1) {
+            throw new RelayFencedError('lease lost or lastSeq moved during assignment');
+        }
     }
 
     // ── delivery ───────────────────────────────────────────────────────────

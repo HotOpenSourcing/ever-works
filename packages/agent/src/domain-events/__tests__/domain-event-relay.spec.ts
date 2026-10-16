@@ -157,6 +157,21 @@ describe('DomainEventRelayService', () => {
         expect(await leader.keepLease()).toBe(false);
     });
 
+    it('self-heals a lastSeq left behind the assigned positions instead of wedging on the unique index', async () => {
+        const leader = relay();
+        await recordMany(dataSource, 2);
+        await leader.tick();
+        // A restored backup or a hand edit puts lastSeq back to 0.
+        await dataSource
+            .getRepository(DomainEventRelayState)
+            .update({ id: DOMAIN_EVENT_RELAY_STATE_ID }, { lastSeq: 0 });
+        await recordMany(dataSource, 1);
+        const result = await leader.tick();
+        expect(result.dispatched).toBe(1);
+        expect(await positions()).toEqual(['1', '2', '3']);
+        expect(await lastSeq()).toBe('3');
+    });
+
     it('lets exactly one of two replicas lead', async () => {
         const first = relay();
         const second = relay();
