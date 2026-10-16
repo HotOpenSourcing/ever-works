@@ -42,8 +42,8 @@
 
 ## Phase 4 — Transitions (EW-P1-6)
 
-- [ ] **T23** Sync transition path-walk + `409 transition_blocked`.
-- [ ] **T24** `cancelled → backlog | todo` reopen (+ web board).
+- [x] **T23** Sync transition path-walk + `409 transition_blocked` (EW-P1-6: `TaskTransitionService.transitionSync` on `POST /api/tasks/:id/transition {to, mode:'sync'}`; the `/integrations/v1` route delegates to it in EW-P1-4).
+- [x] **T24** `cancelled → backlog | todo` reopen (+ web board) (EW-P1-6: `TASK_STATUS_TRANSITIONS` / `TASK_BOARD_TRANSITIONS`, Task detail page, Kanban).
 
 ## Phase 5 — Tests (EW-P1-8)
 
