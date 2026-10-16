@@ -1,4 +1,4 @@
-import type { EntitySubscriberInterface, InsertEvent } from 'typeorm';
+import { EventSubscriber, type EntitySubscriberInterface, type InsertEvent } from 'typeorm';
 import { automaticRecordVisibility, type RecordVisibility } from '@ever-works/contracts';
 
 /**
@@ -60,6 +60,9 @@ export function hasVisibilityColumns(propertyNames: readonly string[]): boolean 
  * entity class would drop out of `{ ...task }` spreads and break the structural row
  * types built from them (`TaskWithRun`, `TaskSubtaskRow`).
  */
+// `@EventSubscriber()` is required: TypeORM only instantiates the classes listed in the
+// DataSource `subscribers` option that carry it.
+@EventSubscriber()
 export class RecordVisibilitySubscriber implements EntitySubscriberInterface {
     beforeInsert(event: InsertEvent<unknown>): void {
         const entity = event.entity as (VisibilityRow & { teamId?: string | null }) | undefined;
