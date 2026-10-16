@@ -30,6 +30,12 @@
 - [x] **T18** Work recording points (incl. members) (`work-recording.spec.ts`; claim-accept member is a follow-up).
 - [x] **T19** Event-coverage contract test (`apps/api/src/domain-events/domain-event-route-coverage.spec.ts`).
 
+## P3 — Inbox (EW-P3-1)
+
+- [x] **T20** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`).
+- [ ] **T21** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
+      (act-as = the recipient only) + coverage gate entries.
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked

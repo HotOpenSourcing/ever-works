@@ -102,6 +102,13 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       never fails the write): agents, works (incl. members), organization roster and organization fields. These writes
       are multi-step or go through repositories that take no `EntityManager` yet. The integration's hourly reconcile
       (`updatedSince`) repairs a missed event. Moving them into the write's transaction is a follow-up.
+    - The same mode records the **Inbox** (P3, EW-P3-1) in `InboxService`: `inbox.item.created` from every producer
+      (`askHuman`, fleet `questionRaised`, `escalationRaised`, `proposalPending`, `notice`); `inbox.item.answered` once
+      per answer, from whichever door won the `markAnswered` claim (`reply`, `escalationResolved`,
+      `proposalDecided`); `inbox.item.state_changed` for a real read / unread or archive / restore flip;
+      `inbox.item.deleted` with a tombstone claimed before the delete. `data` is the inbox-item DTO
+      (`resources/inbox-item.schema.json`; `data.recipientUserId` is always set, fleet `sourceMeta` is never exposed).
+      Pinned by `inbox-recording.spec.ts`.
 - **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
   added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
   direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of
@@ -115,7 +122,8 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
 ## 4. Aggregate `version` and `updatedAt`
 
 - `version int NOT NULL DEFAULT 1` on the P1 aggregates `tasks`, `teams`, `agents`, `works` and `organizations`
-  (later phases add `goals`, `missions`, `work_proposals`, `inbox_items`, `work_knowledge_documents`).
+  (later phases add `goals`, `missions`, `work_proposals`, `work_knowledge_documents`). P3 added `inbox_items`
+  (`AddInboxItemVersion1795090000000`).
 - Incremented on **every** change to the aggregate, **including edge/child changes**: assignees, watchers, approvers,
   reviewers, blocks, relations, attachments and chat on a task; members and resources on a team; members on a work;
   roster rows on an organization.

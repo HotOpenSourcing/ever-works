@@ -525,7 +525,7 @@
 			"version": 1,
 			"domain": "inbox",
 			"aggregateType": "inbox_item",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
 			"notes": "data.recipientUserId is always set."
 		},
@@ -534,7 +534,7 @@
 			"version": 1,
 			"domain": "inbox",
 			"aggregateType": "inbox_item",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
 			"notes": "data.recipientUserId is always set."
 		},
@@ -543,7 +543,7 @@
 			"version": 1,
 			"domain": "inbox",
 			"aggregateType": "inbox_item",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
 			"notes": "data.recipientUserId is always set."
 		},
@@ -552,7 +552,7 @@
 			"version": 1,
 			"domain": "inbox",
 			"aggregateType": "inbox_item",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/inbox-item.schema.json",
 			"phase": "P3",
 			"notes": "data.recipientUserId is always set."
 		},

@@ -1,6 +1,7 @@
 import {
     getWorkCapabilities,
     type IntegrationAgentDto,
+    type IntegrationInboxItemDto,
     type IntegrationMemberDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
@@ -12,6 +13,7 @@ import {
 import type { EntityManager } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { ExternalIdentity } from '../entities/external-identity.entity';
+import { InboxItem } from '../entities/inbox-item.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
@@ -425,5 +427,78 @@ export async function buildMemberSnapshot(
         joinedAt: isoRequired(member.joinedAt),
         updatedAt: isoRequired(member.updatedAt ?? member.joinedAt),
         everIdSubjects: identities.map((row) => ({ issuer: row.issuer, subject: row.subject })),
+    };
+}
+
+/**
+ * EW-P3-1 — one inbox row as the integration DTO (`inbox.item.*` event
+ * `data`, `GET /inbox/items[/:id]`). Pure: the GET and the event of the same
+ * version are built by this one mapper, so they are identical. `sourceMeta`
+ * (fleet provenance: node names, branches, mount directories) is not exposed.
+ */
+export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemDto {
+    const options = Array.isArray(row.options)
+        ? row.options.map((option) => {
+              const out: {
+                  id: string;
+                  label: string;
+                  description?: string;
+                  recommended?: boolean;
+              } = { id: option.id, label: option.label };
+              if (typeof option.description === 'string') out.description = option.description;
+              if (typeof option.recommended === 'boolean') out.recommended = option.recommended;
+              return out;
+          })
+        : null;
+    return {
+        id: row.id,
+        organizationId: row.organizationId ?? null,
+        version: Number(row.version) || 1,
+        createdAt: isoRequired(row.createdAt),
+        updatedAt: isoRequired(row.updatedAt ?? row.createdAt),
+        recipientUserId: row.userId,
+        kind: row.kind,
+        title: row.title,
+        body: row.body,
+        options,
+        sourceType: row.sourceType,
+        status: row.status,
+        unread: !!row.unread,
+        answeredAt: iso(row.answeredAt),
+        answerText: row.answerText ?? null,
+        answerOptionId: row.answerOptionId ?? null,
+        agentId: row.agentId ?? null,
+        agentRunId: row.agentRunId ?? null,
+        taskId: row.taskId ?? null,
+        workId: row.workId ?? null,
+        escalationId: row.escalationId ?? null,
+        proposalId: row.proposalId ?? null,
+        webUrl: webUrl('/inbox'),
+    };
+}
+
+/**
+ * EW-P3-1 — `inbox_item` snapshot. The tenant is the row's own, else its
+ * organization's (inbox rows written before tenancy stamping carry only the
+ * organization), else `null` (a personal-scope message: recorded for
+ * in-process listeners, never served to integrations).
+ */
+export async function buildInboxItemSnapshot(
+    manager: EntityManager,
+    id: string,
+): Promise<AggregateSnapshot<IntegrationInboxItemDto> | null> {
+    const row = await manager.getRepository(InboxItem).findOne({ where: { id } });
+    if (!row) return null;
+    let tenantId = row.tenantId ?? null;
+    if (!tenantId && row.organizationId) {
+        const org = await manager
+            .getRepository(Organization)
+            .findOne({ where: { id: row.organizationId } });
+        tenantId = org?.tenantId ?? null;
+    }
+    return {
+        dto: toIntegrationInboxItemDto(row),
+        tenantId,
+        organizationId: row.organizationId ?? null,
     };
 }
