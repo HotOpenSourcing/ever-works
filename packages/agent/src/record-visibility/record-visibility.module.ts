@@ -16,7 +16,9 @@ import { Tenant } from '../entities/tenant.entity';
 import { Work } from '../entities/work.entity';
 import { WorkMember } from '../entities/work-member.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { RecordAccessPolicy } from './record-access-policy.service';
+import { RecordVisibilityService } from './record-visibility.service';
 
 /**
  * Record visibility (EW-P1-3) — the access policy shared by the task, goal, mission,
@@ -25,6 +27,8 @@ import { RecordAccessPolicy } from './record-access-policy.service';
  */
 @Module({
     imports: [
+        // `<aggregate>.visibility_changed` goes through the domain-event recorder.
+        DomainEventsModule,
         TypeOrmModule.forFeature([
             OrganizationMember,
             Organization,
@@ -44,7 +48,7 @@ import { RecordAccessPolicy } from './record-access-policy.service';
             Agent,
         ]),
     ],
-    providers: [RecordAccessPolicy],
-    exports: [RecordAccessPolicy],
+    providers: [RecordAccessPolicy, RecordVisibilityService],
+    exports: [RecordAccessPolicy, RecordVisibilityService],
 })
 export class RecordVisibilityModule {}

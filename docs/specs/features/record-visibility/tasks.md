@@ -12,8 +12,9 @@
 - [x] **T5** Tasks list/board/get through the policy (`?view=`, `getReadable`).
 - [x] **T6** Goals, missions, ideas, agents list/get through the policy.
 - [x] **T7** Participant transition, reader comments (no agent dispatch for non-owners).
-- [ ] **T8** Automatic team ↔ organization scope.
-- [ ] **T9** `visibility_changed` events.
+- [x] **T8** Automatic team ↔ organization scope (`RecordVisibilityService.recomputeAutomatic`; by hand: `setVisibility`).
+- [x] **T9** `visibility_changed` events — tasks + agents through the real recorder; goals / missions / ideas with P2
+      versions (hook in `recordChange`).
 - [ ] **T10** Visibility control on forms.
 - [ ] **T11** Mine | Shared with me | Organization tabs.
 - [ ] **T12** Goal form teams.
