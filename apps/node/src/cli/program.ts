@@ -4,6 +4,7 @@ import { describeSelf } from '../core/capabilities';
 import { clearConfig, loadConfig, saveConfig, type ConfigFileSystem } from '../core/config-store';
 import { resolveModelCliPaths } from '../core/model-cli-probe';
 import { FleetClientError } from '../core/fleet-client';
+import { untilHeartbeatAccepted } from '../core/heartbeat';
 import {
 	createNodeRuntime,
 	enrollNode,
@@ -566,16 +567,52 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 	}
 
 	await loop.start();
-	if (worker) {
-		await worker.start();
-	}
-	if (attendedWorker) {
-		await attendedWorker.start();
-		deps.out(
-			runtime.attended?.captureBackend
-				? 'Live view enabled — the owner can watch this machine from the dashboard (screen and terminal)'
-				: 'Live view enabled — terminal only: no browser was found here to show a screen'
-		);
+	// The lanes lease only after a heartbeat has been ACCEPTED (#2628): its
+	// answer carries the owner's limit ceiling and the version verdict, and
+	// the lease API uses this node's `max` as sent. `loop.start()` resolves
+	// after the first ATTEMPT, accepted or not. When the first beat was
+	// accepted (the usual case) this is exactly the old sequence. When it was
+	// not, the lanes start in the background on the first accepted beat, and
+	// a shutdown before that ends the wait without starting them.
+	let shuttingDown = false;
+	const startLanes = async (): Promise<void> => {
+		if (worker) {
+			await worker.start();
+		}
+		if (attendedWorker) {
+			await attendedWorker.start();
+			deps.out(
+				runtime.attended?.captureBackend
+					? 'Live view enabled — the owner can watch this machine from the dashboard (screen and terminal)'
+					: 'Live view enabled — terminal only: no browser was found here to show a screen'
+			);
+		}
+	};
+	let lanesStarted: Promise<void> = Promise.resolve();
+	if (worker || attendedWorker) {
+		if (loop.getState().state === 'connected') {
+			await startLanes();
+		} else {
+			deps.out(
+				'Waiting for the platform to accept a heartbeat before leasing work (its answer carries this node’s limits and version verdict)'
+			);
+			lanesStarted = untilHeartbeatAccepted(loop, () => !shuttingDown)
+				.then(async (accepted) => {
+					if (!accepted || shuttingDown) return;
+					deps.io.logger.info('Heartbeat accepted — starting the worker lanes');
+					await startLanes();
+				})
+				.catch((error: unknown) => {
+					// A lane that cannot start leaves a node that beats but never
+					// works: fail closed and let the supervisor restart it.
+					deps.io.logger.error(
+						`Worker lanes failed to start after the first accepted heartbeat: ${
+							error instanceof Error ? error.message : String(error)
+						} — shutting down`
+					);
+					requestShutdown();
+				});
+		}
 	}
 	// The workspace reaper rides with the worker: it is the process that
 	// creates worktrees, so it is the one that reclaims them. A
@@ -629,8 +666,12 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 	await (deps.waitForShutdown?.() ?? (deps.signals ? signalled : Promise.resolve()));
 
 	reaper?.stop();
+	shuttingDown = true;
 	loop.stop();
 	await loop.settled();
+	// A start that was waiting for an accepted beat ends here (the loop is
+	// stopped), and one already under way finishes before the drain below.
+	await lanesStarted;
 	if (attendedWorker) {
 		// A live view is open-ended, so draining would wait for ever: end each
 		// one now (the executor tells its viewers this machine went away), then

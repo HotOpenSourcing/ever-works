@@ -504,6 +504,78 @@ describe('ever-works-node pause / resume', () => {
 		expect(h.logged()).not.toContain(SECRET);
 	});
 
+	it('#2628: a FAILED first heartbeat starts no lane; the first ACCEPTED beat does', async () => {
+		let beats = 0;
+		let leaseCalls = 0;
+		const timers: Array<() => void> = [];
+		const h = harness({
+			files: { [CONFIG_PATH]: storedConfig },
+			fetchFn: async (url) => {
+				if (url.endsWith('/api/fleet/jobs/lease')) {
+					leaseCalls += 1;
+					return { ok: true, status: 200, text: async () => JSON.stringify({ jobs: [] }) };
+				}
+				if (url.endsWith('/api/fleet/heartbeat')) {
+					beats += 1;
+					if (beats === 1) return { ok: false, status: 503, text: async () => '{"message":"down"}' };
+				}
+				return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, node: apiNode }) };
+			}
+		});
+		h.deps.io.scheduler = {
+			setTimeout: (callback: () => void) => {
+				timers.push(callback);
+				return timers.length;
+			},
+			clearTimeout: () => undefined
+		};
+		let shutdown!: () => void;
+		h.deps.waitForShutdown = () =>
+			new Promise<void>((resolve) => {
+				shutdown = resolve;
+			});
+		const flush = async (): Promise<void> => {
+			for (let i = 0; i < 30; i += 1) await new Promise((resolve) => setImmediate(resolve));
+		};
+
+		const run = runCli(['start', '--work'], h.deps);
+		await flush();
+		expect(beats).toBe(1);
+		expect(leaseCalls).toBe(0);
+		expect(h.output()).toContain('Waiting for the platform to accept a heartbeat before leasing work');
+
+		// The retried beat is accepted: only now may the worker lease.
+		for (const fire of timers.splice(0)) fire();
+		await flush();
+		expect(beats).toBe(2);
+		expect(leaseCalls).toBeGreaterThanOrEqual(1);
+
+		shutdown();
+		expect(await run).toBe(EXIT_OK);
+		expect(h.output()).toContain('Stopped.');
+	});
+
+	it('#2628: a shutdown while waiting out failed heartbeats exits cleanly and never leases', async () => {
+		let leaseCalls = 0;
+		const h = harness({
+			files: { [CONFIG_PATH]: storedConfig },
+			fetchFn: async (url) => {
+				if (url.endsWith('/api/fleet/jobs/lease')) {
+					leaseCalls += 1;
+					return { ok: true, status: 200, text: async () => JSON.stringify({ jobs: [] }) };
+				}
+				return { ok: false, status: 503, text: async () => '{"message":"down"}' };
+			}
+		});
+		h.deps.io.scheduler = { setTimeout: () => 1, clearTimeout: () => undefined };
+		h.deps.waitForShutdown = () => Promise.resolve();
+
+		expect(await runCli(['start', '--work'], h.deps)).toBe(EXIT_OK);
+		expect(leaseCalls).toBe(0);
+		expect(h.output()).toContain('Waiting for the platform to accept a heartbeat before leasing work');
+		expect(h.output()).toContain('Stopped.');
+	});
+
 	it('start comes back paused when the config says so, and says so loudly', async () => {
 		const paused = JSON.stringify({ ...JSON.parse(storedConfig), paused: true });
 		const h = harness({
