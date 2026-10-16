@@ -24,7 +24,11 @@ describe('TeamResourcesService — goal resources (EW-P1-3)', () => {
         };
     }
 
-    function build(goals: Array<Record<string, unknown>>, resources = repo()) {
+    function build(
+        goals: Array<Record<string, unknown>>,
+        resources = repo(),
+        visibility?: { recomputeAutomatic: jest.Mock },
+    ) {
         const service = new TeamResourcesService(
             resources as never,
             repo([team]) as never,
@@ -36,6 +40,7 @@ describe('TeamResourcesService — goal resources (EW-P1-3)', () => {
             repo() as never,
             undefined, // domain-event publisher (EW-P1-1 B2)
             repo(goals) as never,
+            visibility as never,
         );
         return { service, resources };
     }
@@ -88,6 +93,24 @@ describe('TeamResourcesService — goal resources (EW-P1-3)', () => {
         expect(Object.keys(grouped)).toEqual(['work', 'task', 'agent', 'mission', 'idea', 'goal']);
         expect(grouped.goal).toEqual([
             expect.objectContaining({ resourceId: 'goal-1', name: 'Grow MRR', slug: null }),
+        ]);
+    });
+
+    it('re-applies automatic visibility after an attach and a detach (EW-P1-3)', async () => {
+        const visibility = { recomputeAutomatic: jest.fn().mockResolvedValue(undefined) };
+        const { service } = build(
+            [{ id: 'goal-1', title: 'Grow MRR', tenantId: 'tenant-1', organizationId: 'org-1' }],
+            repo(),
+            visibility,
+        );
+        await service.attach('user-1', 'org-1', 'team-1', {
+            resourceType: 'goal',
+            resourceId: 'goal-1',
+        });
+        await service.detach('org-1', 'team-1', 'goal', 'goal-1');
+        expect(visibility.recomputeAutomatic.mock.calls).toEqual([
+            ['goal', 'goal-1'],
+            ['goal', 'goal-1'],
         ]);
     });
 });

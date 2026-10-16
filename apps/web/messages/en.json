@@ -10777,7 +10777,8 @@
                 "resourceGroupAgent": "Agents",
                 "resourceGroupMission": "Missions",
                 "resourceGroupIdea": "Ideas",
-                "resourceGroupTask": "Tasks"
+                "resourceGroupTask": "Tasks",
+                "resourceGroupGoal": "Goals"
             },
             "settings": {
                 "title": "Team Settings",
@@ -11876,6 +11877,38 @@
                 "bodyRequired": "Message body is required.",
                 "sendFailed": "Send failed."
             }
+        }
+    },
+    "recordVisibility": {
+        "tabs": {
+            "label": "Show",
+            "mine": "Mine",
+            "shared": "Shared with me",
+            "organization": "Organization"
+        },
+        "control": {
+            "label": "Visibility",
+            "automatic": "Automatic",
+            "automaticWith": "Automatic ({value})",
+            "private": "Private",
+            "team": "Team",
+            "organization": "Organization",
+            "automaticHint": "Team while it sits on a Team, otherwise the whole organization.",
+            "privateHint": "Only you and the people taking part.",
+            "teamHint": "Also the members of its Teams and its Work.",
+            "organizationHint": "Everyone in the organization.",
+            "saving": "Saving…",
+            "error": "Could not change the visibility.",
+            "loadError": "Could not load the visibility."
+        },
+        "teams": {
+            "label": "Teams",
+            "none": "This organization has no Teams yet.",
+            "noneSet": "Not on a Team.",
+            "count": "On {count, plural, one {# Team} other {# Teams}}.",
+            "save": "Save Teams",
+            "saved": "Teams saved.",
+            "error": "Could not save the Teams."
         }
     }
 }

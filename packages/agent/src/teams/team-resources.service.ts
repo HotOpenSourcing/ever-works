@@ -5,6 +5,8 @@ import {
     NotFoundException,
     Optional,
 } from '@nestjs/common';
+import type { VisibilityAggregate } from '@ever-works/contracts';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, In, Repository } from 'typeorm';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
@@ -77,6 +79,10 @@ export class TeamResourcesService {
         @Optional()
         @InjectRepository(Goal)
         private readonly goals?: Repository<Goal>,
+        // Record visibility (EW-P1-3) — attaching a record's first Team narrows it to
+        // `team`, detaching its last widens it to `organization` (while not chosen
+        // by hand). @Optional(): absent means no automatic change.
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     /** The resource-side event of a team resource change (its DTO's `teamIds` moved). */
@@ -143,6 +149,7 @@ export class TeamResourcesService {
                           { teamId: team.id, resourceType, resourceId: input.resourceId },
                           { changedFields: ['resources'] },
                       );
+                      await this.recomputeVisibilityIn(manager, resourceType, input.resourceId);
                       await this.recordResourceSide(
                           publisher,
                           manager,
@@ -152,6 +159,7 @@ export class TeamResourcesService {
                       return added;
                   })
                 : await this.resources.save(row);
+            await this.recomputeVisibility(resourceType, input.resourceId);
             return this.toItem(saved, this.resolveRef(resourceType, resource));
         } catch (error) {
             if (this.isUniqueViolation(error)) {
@@ -185,6 +193,7 @@ export class TeamResourcesService {
                           { teamId, resourceType: type, resourceId, deleted: true },
                           { changedFields: ['resources'] },
                       );
+                      await this.recomputeVisibilityIn(manager, type, resourceId);
                       await this.recordResourceSide(publisher, manager, type, resourceId);
                   }
                   return deleted;
@@ -192,6 +201,48 @@ export class TeamResourcesService {
             : await this.resources.delete({ teamId, resourceType: type, resourceId });
         if (!result.affected) {
             throw new NotFoundException('Resource is not attached to this team');
+        }
+        await this.recomputeVisibility(type, resourceId);
+    }
+
+    /** Record visibility (EW-P1-3): re-apply D11 to a record whose Teams changed. */
+    private async recomputeVisibility(
+        resourceType: TeamResourceType,
+        resourceId: string,
+    ): Promise<void> {
+        const aggregate = this.visibilityAggregateOf(resourceType);
+        if (this.visibility && aggregate) {
+            await this.visibility.recomputeAutomatic(aggregate, resourceId);
+        }
+    }
+
+    /**
+     * The same, inside the team-event transaction and BEFORE `recordResourceSide`, so the
+     * task's `task.updated` snapshot already carries the new visibility (and no separate
+     * notice is needed for it). Other aggregates get their own `visibility_changed`.
+     */
+    private async recomputeVisibilityIn(
+        manager: EntityManager,
+        resourceType: TeamResourceType,
+        resourceId: string,
+    ): Promise<void> {
+        const aggregate = this.visibilityAggregateOf(resourceType);
+        if (!this.visibility || !aggregate) return;
+        await this.visibility.recomputeAutomaticIn(manager, aggregate, resourceId, {
+            recordEvent: aggregate !== 'task',
+        });
+    }
+
+    private visibilityAggregateOf(resourceType: TeamResourceType): VisibilityAggregate | null {
+        switch (resourceType) {
+            case 'task':
+            case 'goal':
+            case 'mission':
+            case 'idea':
+            case 'agent':
+                return resourceType;
+            default:
+                return null;
         }
     }
 

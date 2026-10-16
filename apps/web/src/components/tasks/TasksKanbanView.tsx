@@ -1,5 +1,6 @@
 'use client';
 
+import type { RecordListView } from '@/lib/record-visibility';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -755,6 +756,8 @@ export interface TasksKanbanViewProps {
         status: TaskStatus,
         offset: number,
     ) => Promise<{ total: number; cards: Task[] } | null>;
+    /** Record visibility (EW-P1-3) tab the board shows; run polling reads the same one. */
+    view?: RecordListView;
 }
 
 /**
@@ -778,6 +781,7 @@ export function TasksKanbanView({
     sort = 'priority',
     pageSize,
     loadColumn,
+    view = 'mine',
 }: TasksKanbanViewProps) {
     const t = useTranslations('dashboard.tasksPage');
     const [tasks, setTasks] = useState(initialTasks);
@@ -846,7 +850,7 @@ export function TasksKanbanView({
             }),
         );
     }, []);
-    useTaskRunPolling(tasks, mergeRunData);
+    useTaskRunPolling(tasks, mergeRunData, view);
 
     const grouped = useMemo(() => {
         const map = new Map<TaskStatus, Task[]>(COLUMNS.map((c) => [c.key, []]));
