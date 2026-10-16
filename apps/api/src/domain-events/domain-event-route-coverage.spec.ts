@@ -43,6 +43,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/goals.controller.ts',
     'integrations-api/v1/missions.controller.ts',
     'integrations-api/v1/organizations-write.controller.ts',
+    'integrations-api/v1/works-write.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([
