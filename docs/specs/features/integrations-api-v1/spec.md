@@ -297,21 +297,25 @@ routes call the same `MissionsService` (and `GoalsService` for the Goal links) a
 - **Reads:** every `team` / `organization` Mission of the pinned organization, in every status. The
   [mission DTO](./contract/schemas/resources/mission.schema.json) embeds `goals [{goalId, isPrimary}]` (the primary
   first), `works [{workId, relation}]`, and the EW-only `type`, `schedule`, `autoBuildWorks` (read-only).
-- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, teamIds?,
-visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always `status='paused'`,
-  `type='one-shot'`, no schedule, no auto-build (D9: only a person resumes a Mission in Ever Works, which is what
-  starts its ticks). A title is required (no generated title). `teamIds` + D11 apply in the create's transaction.
+- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, type?,
+schedule?, teamIds?, visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always
+  `status='paused'` with no auto-build (D9: only a person resumes a Mission in Ever Works, which is what starts its
+  ticks); `type` defaults to `one-shot`, a `scheduled` one needs `schedule`. A title is required (no generated title).
+  `teamIds` + D11 apply in the create's transaction.
 - **`PATCH /missions/:id`** ([`UpdateMission`](./contract/schemas/requests.schema.json)): title, description,
   `teamIds`, `visibility`, and `status`: `paused` pauses an active Mission, `completed` (+ `outcome`) completes an
-  active or paused one. `status: active` answers `422 domain_rule`; the status already reached is a no-op; any other
-  move (e.g. from `failed`) is `422`. `If-Match` optional, re-checked at the version bump.
-- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary, no repeats) and **`PUT
-/missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change records
-  `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
-  `mission.work.linked` / `unlinked`. Linked Goals and Works must be the caller's (404). Both answer the Mission DTO;
+  active or paused one, `failed` fails an active or paused one (its ticks stop; a person can resume it). `status:
+active` answers `422 domain_rule`; the status already reached is a no-op; any other move is `422`. `If-Match`
+  optional, re-checked at the version bump.
+- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary — else `422 domain_rule` —,
+  no repeats) and **`PUT /missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change
+  records `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
+  `mission.work.linked` / `unlinked`. Every newly linked Goal or Work must be the caller's (404, checked before the
+  first change); a link to a Goal outside the caller's scope is neither shown nor touched. Both answer the Mission DTO;
   `If-Match` is a pre-check (the sets are not one transaction, T17a).
 - **`DELETE /missions/:id`**: the `mission.deleted` tombstone; its Ideas and clones are kept (their back-links are
-  cleared).
+  cleared), and in the same transaction each linked Goal records `goal.updated`, each Idea `idea.updated` and each
+  clone `mission.updated`.
 - **Never here:** resume, run-now, clone (D9).
 - **Events:** `mission.created` (also for a clone, with `idea.created` for each Idea it copies), `mission.updated`
   (fields, Teams), `mission.status_changed` (`previous.status`; also a fatal tick's `failed`), `mission.deleted`,
@@ -461,4 +465,8 @@ Additive. Answers the Gauzy request CR-8 on the plan's STATUS board: the Mission
 `status_changed` / `deleted`, and `MissionGoalLinkEvent` / `MissionWorkLinkEvent` of the link events, which the catalog
 now marks `child: goal` / `child: work`; the Goal DTO's `missionIds` / `primaryMissionId` change records `goal.updated`;
 request bodies `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; `mission` is a served link
-entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap).
+entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap). As the request asked:
+`CreateMission` takes `type` / `schedule` (still created `paused`, so a `scheduled` Mission ticks only once a person
+resumes it), `PATCH {status: 'failed'}` fails an active or paused Mission, and a second primary Goal is
+`422 domain_rule`. A Mission delete also records what its cascade changes (`goal.updated`, `idea.updated`,
+`mission.updated`).

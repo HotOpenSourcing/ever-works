@@ -541,12 +541,18 @@
 			"additionalProperties": false
 		},
 		"CreateMission": {
-			"description": "POST /missions (EW-P2-5, plan D3b: a Gauzy Strategic Initiative). Always created status='paused', type 'one-shot', no schedule, no auto-build: an integration never starts a Mission's ticks (spend safety D9). A title is required (no generated title). `teamIds` decide the scope (D11) unless `visibility` is set by hand. Goals and Works are linked with PUT /missions/:id/goals and /works.",
+			"description": "POST /missions (EW-P2-5, plan D3b: a Gauzy Strategic Initiative). Always created status='paused' with no auto-build (type defaults to 'one-shot'): an integration never starts a Mission's ticks (spend safety D9). A title is required (no generated title). `teamIds` decide the scope (D11) unless `visibility` is set by hand. Goals and Works are linked with PUT /missions/:id/goals and /works.",
 			"type": "object",
 			"required": ["title", "description"],
 			"properties": {
 				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
 				"description": { "type": "string", "minLength": 1, "maxLength": 100000 },
+				"type": {
+					"description": "Default one-shot. A scheduled Mission needs `schedule` and ticks only once a person resumes it.",
+					"type": "string",
+					"enum": ["one-shot", "scheduled"]
+				},
+				"schedule": { "type": ["string", "null"], "minLength": 1, "maxLength": 64 },
 				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
 				"visibility": { "$ref": "#/$defs/WritableVisibility" },
 				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
@@ -554,13 +560,13 @@
 			"additionalProperties": false
 		},
 		"UpdateMission": {
-			"description": "PATCH /missions/:id (EW-P2-5, If-Match optional). `status` may pause an active Mission or complete an active / paused one (with `outcome`); `active` answers 422 domain_rule (D9: only a person resumes a Mission); the target status already reached is a no-op; any other move is 422.",
+			"description": "PATCH /missions/:id (EW-P2-5, If-Match optional). `status` may pause an active Mission, complete an active / paused one (with `outcome`) or fail it (stops its ticks; a person can resume it); `active` answers 422 domain_rule (D9: only a person resumes a Mission); the target status already reached is a no-op; any other move is 422.",
 			"type": "object",
 			"minProperties": 1,
 			"properties": {
 				"title": { "type": "string", "minLength": 1, "maxLength": 200 },
 				"description": { "type": "string", "minLength": 1, "maxLength": 100000 },
-				"status": { "type": "string", "enum": ["paused", "completed"] },
+				"status": { "type": "string", "enum": ["paused", "completed", "failed"] },
 				"outcome": {
 					"description": "Only with status 'completed'.",
 					"type": ["string", "null"],
@@ -572,7 +578,7 @@
 			"additionalProperties": false
 		},
 		"PutMissionGoals": {
-			"description": "PUT /missions/:id/goals (If-Match pre-checked): the full set of Goal links, at most one primary, no repeated goalId. Each link change records mission.goal.linked / unlinked and the Goal's goal.updated. The Goals must be the caller's (404). Answers the Mission DTO.",
+			"description": "PUT /missions/:id/goals (If-Match pre-checked): the full set of Goal links, at most one primary (else 422 domain_rule), no repeated goalId (400). Each link change records mission.goal.linked / unlinked and the Goal's goal.updated. The Goals must be the caller's (404). Answers the Mission DTO.",
 			"type": "object",
 			"required": ["goals"],
 			"properties": {

@@ -255,7 +255,11 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     // ── Missions (`api/me/missions`, EW-P2-5) ────────────────────────────────
     'POST /api/me/missions': { events: ['mission.created'] },
     'PATCH /api/me/missions/:id': { events: ['mission.updated'] },
-    'DELETE /api/me/missions/:id': { events: ['mission.deleted'] },
+    // + the cascade's changes: a linked Goal's links, an Idea's `missionId`, a clone's
+    // `sourceMissionId`.
+    'DELETE /api/me/missions/:id': {
+        events: ['mission.deleted', 'goal.updated', 'idea.updated', 'mission.updated'],
+    },
     'POST /api/me/missions/:id/pause': { events: ['mission.status_changed'] },
     'POST /api/me/missions/:id/resume': { events: ['mission.status_changed'] },
     'POST /api/me/missions/:id/complete': { events: ['mission.status_changed'] },
@@ -456,7 +460,11 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PUT /api/integrations/v1/missions/:id/works': {
         events: ['mission.work.linked', 'mission.work.unlinked'],
     },
-    'DELETE /api/integrations/v1/missions/:id': { events: ['mission.deleted'] },
+    // + the cascade's changes: a linked Goal's links, an Idea's `missionId`, a clone's
+    // `sourceMissionId`.
+    'DELETE /api/integrations/v1/missions/:id': {
+        events: ['mission.deleted', 'goal.updated', 'idea.updated', 'mission.updated'],
+    },
 };
 
 /** The routes a list of events covers (for messages). */

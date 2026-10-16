@@ -92,6 +92,18 @@ export class IntegrationCreateMissionDto {
     @Length(1, 100_000)
     description!: string;
 
+    /** `one-shot` (default) or `scheduled` (needs `schedule`). Paused either way. */
+    @IsOptional()
+    @IsIn(['one-shot', 'scheduled'])
+    type?: 'one-shot' | 'scheduled';
+
+    /** The cron of a `scheduled` Mission; it ticks only once a person resumes it. */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsString()
+    @Length(1, 64)
+    schedule?: string | null;
+
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
@@ -110,7 +122,7 @@ export class IntegrationCreateMissionDto {
 
 /**
  * Contract v1 `requests.schema.json#/$defs/UpdateMission` (If-Match optional).
- * `status` may only pause or complete a Mission; `active` answers `422 domain_rule`
+ * `status` may only pause, complete or fail a Mission; `active` answers `422 domain_rule`
  * (D9: only a person resumes a Mission in Ever Works).
  */
 export class IntegrationUpdateMissionDto {
@@ -294,6 +306,8 @@ export class IntegrationMissionsController {
                 {
                     title: dto.title,
                     description: dto.description,
+                    type: dto.type,
+                    schedule: dto.schedule ?? null,
                     teamIds: dto.teamIds,
                     visibility: dto.visibility as 'team' | 'organization' | undefined,
                     createdBy: writeAttribution(user),
@@ -376,7 +390,7 @@ export class IntegrationMissionsController {
                     user,
                     id,
                     String(current.status),
-                    dto.status as 'paused' | 'completed',
+                    dto.status as 'paused' | 'completed' | 'failed',
                     dto.outcome,
                 );
             }
@@ -396,16 +410,27 @@ export class IntegrationMissionsController {
     ): Promise<Record<string, unknown>> {
         const source = linkSourceOf(principalOf(user));
         if (dto.goals.filter((link) => link.isPrimary === true).length > 1) {
-            throw validationFailed('goals', 'may name at most one primary Goal');
+            throw domainRule('A Mission has at most one primary Goal.', { field: 'goals' });
         }
         const ids = dto.goals.map((link) => link.goalId);
         if (new Set(ids).size !== ids.length) {
             throw validationFailed('goals', 'must not repeat a goalId');
         }
-        const { current } = await this.precondition(user, id, ifMatch, source);
+        await this.precondition(user, id, ifMatch, source);
         const scope = this.ownership();
         const wanted = new Map(dto.goals.map((link) => [link.goalId, link.isPrimary === true]));
-        const existing = (current.goals as Array<{ goalId: string; isPrimary: boolean }>) ?? [];
+        // The links whose Goal the caller sees in this scope (a link to a Goal outside it
+        // is neither disclosed nor touched), so no unlink 404s halfway through the set.
+        const existing = (await this.goals.listForMission(user.userId, id, scope)).map((link) => ({
+            goalId: link.goalId,
+            isPrimary: link.isPrimary,
+        }));
+        // Every new Goal must be the caller's (404) BEFORE the first write.
+        for (const goalId of wanted.keys()) {
+            if (!existing.some((link) => link.goalId === goalId)) {
+                await this.goals.getForUser(user.userId, goalId, scope);
+            }
+        }
         for (const link of existing) {
             if (!wanted.has(link.goalId)) {
                 await this.goals.unlinkFromMission(user.userId, id, link.goalId, scope);
@@ -467,7 +492,7 @@ export class IntegrationMissionsController {
         user: AuthenticatedUser,
         id: string,
         from: string,
-        to: 'paused' | 'completed',
+        to: 'paused' | 'completed' | 'failed',
         outcome: (typeof OUTCOMES)[number] | null | undefined,
     ): Promise<void> {
         if (from === to) return;
@@ -479,9 +504,14 @@ export class IntegrationMissionsController {
             return;
         }
         if (from !== 'active' && from !== 'paused') {
-            throw domainRule('Only an active or paused Mission can be completed.', {
+            throw domainRule(`Only an active or paused Mission can be ${to}.`, {
                 status: from,
             });
+        }
+        if (to === 'failed') {
+            // Stops the ticks like a fatal tick failure would; a person can resume it.
+            await this.missions.fail(user.userId, id, this.ownership());
+            return;
         }
         await this.missions.complete(
             user.userId,
@@ -534,15 +564,17 @@ export class IntegrationMissionsController {
     }
 }
 
-/** PATCH may pause or complete a Mission; `active` (or anything else) is refused. */
-function assertWritableMissionStatus(status: string): asserts status is 'paused' | 'completed' {
+/** PATCH may pause, complete or fail a Mission; `active` (or anything else) is refused. */
+function assertWritableMissionStatus(
+    status: string,
+): asserts status is 'paused' | 'completed' | 'failed' {
     if (status === 'active') {
         throw domainRule(
             'An integration cannot set a Mission active: a person resumes it in Ever Works.',
             { field: 'status' },
         );
     }
-    if (status !== 'paused' && status !== 'completed') {
-        throw validationFailed('status', 'must be paused or completed');
+    if (status !== 'paused' && status !== 'completed' && status !== 'failed') {
+        throw validationFailed('status', 'must be paused, completed or failed');
     }
 }
