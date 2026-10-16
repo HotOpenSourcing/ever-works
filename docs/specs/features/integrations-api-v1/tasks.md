@@ -51,8 +51,10 @@
   routes write the `externalRef` link there, so a lost race rolls the create back instead of undoing it and a crash
   can no longer leave an unlinked task or team. Still step by step: a `PUT` set, and a create's extra teams /
   assignees / visibility after the row (each step commits on its own; the reconcile covers a half-applied set).
-- [ ] **T17b** OpenAPI request/response bodies (`@ApiProperty` or the Swagger CLI plugin under SWC); today the document
-      lists every route, scope and summary, and the bodies are the contract JSON Schemas.
+- [x] **T17b** OpenAPI request bodies: every property of every request DTO carries `@ApiProperty`, written from its
+      contract schema (required, enum, format, limits, description), so `/api/integrations/v1/openapi.json` shows whole
+      bodies; `integration-contract.spec.ts` fails on a property without it. Response bodies stay the contract JSON
+      Schemas (each route's `@ApiResponse` names its shape).
 - [x] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through
       `RecordVisibilityService.setVisibility` (EW-P1-3, #2621); `private` → `422`. Reads hide a row whose STORED
       visibility is `private`.
@@ -76,8 +78,18 @@
 
 ## Phase 5 — Tests (EW-P1-8)
 
-- [ ] **T25** Contract test suite over `contract/`.
-- [ ] **T26** Idempotency / `If-Match` / act-as tests.
+- [x] **T25** Contract test suite over `contract/`:
+    - `domain-event-contract.spec.ts` — every schema compiles, the catalog is the TypeScript one, every example and a
+      recorded envelope validate, the webhook signature vectors;
+    - the recording specs (`*-recording.spec.ts`) and the integration services' specs validate every event `data` and
+      resource DTO they build against its schema;
+    - `apps/api/.../integration-contract.spec.ts` — every request body schema has the properties and the required ones
+      of the DTO its route validates with (`forbidNonWhitelisted`: drift would `400` a valid request), a new body
+      without a DTO fails; every error the routes answer is a valid envelope with a listed status ↔ code pair; scopes,
+      error codes and integration kinds are the TypeScript vocabularies; `GET /whoami` answers its schema.
+- [x] **T26** Idempotency / `If-Match` / act-as tests — the `Idempotency-Key` store and `If-Match` in
+      `integrations-api-foundation.spec.ts`, the routes' replay / `412` / `act_as_forbidden` paths in the controller
+      specs, act-as resolution in `integration-keys.http.spec.ts`.
 
 ## Phase 6 — Inbox (EW-P3-1)
 
