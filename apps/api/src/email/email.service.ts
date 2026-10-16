@@ -343,13 +343,16 @@ export class EmailService {
         // account answers 404, exactly like a missing one.
         let headers: Record<string, string> | undefined;
         let replyTaskId: string | undefined;
+        let replyConversationId: string | undefined;
         if (input.inReplyToMessageId) {
             const parent = await this.messages.findByIdAndUserId(input.inReplyToMessageId, userId);
             if (!parent) throw new NotFoundException('Message to reply to not found');
             const replyHeaders = replyHeadersFor(parent);
             headers = Object.keys(replyHeaders).length > 0 ? replyHeaders : undefined;
-            // The reply belongs to the same Task as the message it answers.
+            // The reply belongs to the same Task, or the same conversation,
+            // as the message it answers — so the next reply threads back there.
             replyTaskId = parent.taskId ?? undefined;
+            replyConversationId = replyTaskId ? undefined : (parent.conversationId ?? undefined);
         }
 
         // AW-05 — an Agent's message goes through the draft loop, which
@@ -369,6 +372,7 @@ export class EmailService {
                 messageRef,
                 runId: options.runId,
                 taskId: replyTaskId,
+                conversationId: replyConversationId,
                 headers,
             });
             if (outcome.held === false) {
@@ -396,7 +400,14 @@ export class EmailService {
                 messageRef,
                 headers,
             },
-            { userId, agentId: input.agentId, addressId: address.id, origin, taskId: replyTaskId },
+            {
+                userId,
+                agentId: input.agentId,
+                addressId: address.id,
+                origin,
+                taskId: replyTaskId,
+                conversationId: replyConversationId,
+            },
         );
         return { messageRef, ...result };
     }

@@ -42,6 +42,8 @@ export interface SubmitAgentEmailInput {
     messageRef: string;
     workId?: string;
     taskId?: string;
+    /** EW-P4-3 — the conversation a reply belongs to (kept on a held draft). */
+    conversationId?: string;
     runId?: string;
     /**
      * EW-P4-3 — RFC threading headers (`In-Reply-To` / `References`) when the
@@ -115,6 +117,7 @@ export class EmailDraftService {
                     agentId: input.agentId,
                     workId: input.workId,
                     taskId: input.taskId,
+                    conversationId: input.conversationId,
                     addressId: input.emailAddressId,
                     origin: 'agent',
                 },
@@ -130,7 +133,7 @@ export class EmailDraftService {
             userId: input.userId,
             agentId: input.agentId,
             taskId: input.taskId ?? null,
-            conversationId: null,
+            conversationId: input.conversationId ?? null,
             emailAddressId: input.emailAddressId,
             direction: 'outbound',
             pluginId: input.pluginId,

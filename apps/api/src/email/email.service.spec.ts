@@ -584,6 +584,25 @@ describe('EmailService.sendMessage inReplyToMessageId (EW-P4-3)', () => {
         );
     });
 
+    // Review (Greptile, #2607): a reply in a conversation stays in it, so the
+    // recipient's next reply threads back into the same conversation.
+    it("keeps a reply in the parent's conversation", async () => {
+        messages.findByIdAndUserId.mockResolvedValue({
+            ...parent,
+            taskId: null,
+            conversationId: 'conv-3',
+        });
+        await build().sendMessage('user-1', input);
+        expect(emailFacade.send).toHaveBeenCalledWith(
+            expect.anything(),
+            expect.objectContaining({ conversationId: 'conv-3', taskId: undefined }),
+        );
+        await build(true).sendMessage('user-1', input, { origin: 'agent' });
+        expect(drafts.submit).toHaveBeenCalledWith(
+            expect.objectContaining({ conversationId: 'conv-3', taskId: undefined }),
+        );
+    });
+
     it("answers 404 for another account's message and sends nothing", async () => {
         await expect(build().sendMessage('user-2', input)).rejects.toBeInstanceOf(
             NotFoundException,

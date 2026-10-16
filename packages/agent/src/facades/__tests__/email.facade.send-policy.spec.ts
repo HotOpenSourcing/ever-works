@@ -198,6 +198,8 @@ describe('EmailFacadeService.send — send policy gate (AW-05)', () => {
                         userId: 'user-1',
                         agentId: 'agent-1',
                         taskId: 'task-1',
+                        // EW-P4-3 — a reply in a conversation stays in it (none here).
+                        conversationId: null,
                         emailAddressId: 'addr-1',
                         pluginId: EMAIL_SEND_RESERVATION_PENDING_PLUGIN_ID,
                         from: 'nova@agents.example.com',

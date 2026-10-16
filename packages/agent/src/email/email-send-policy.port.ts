@@ -49,6 +49,8 @@ export interface EmailSendReservationRow {
     readonly userId: string;
     readonly agentId: string | null;
     readonly taskId: string | null;
+    /** EW-P4-3 — the conversation a reply belongs to. */
+    readonly conversationId?: string | null;
     readonly emailAddressId: string;
     /** Provisional; replaced by the provider that actually sends. */
     readonly pluginId: string;
