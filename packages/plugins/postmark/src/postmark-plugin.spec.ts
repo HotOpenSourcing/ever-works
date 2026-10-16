@@ -159,6 +159,77 @@ describe('PostmarkPlugin', () => {
 			expect(msg.references).toEqual(['root@client.test', 'out-1@acme.test']);
 		});
 
+		it('parses Cc from CcFull, or from the raw Cc header (EW-P4-3)', async () => {
+			const full = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm1',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						CcFull: [{ Email: 'c1@b.test', Name: 'C One' }, { Email: 'c2@b.test' }],
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(full.cc).toEqual(['c1@b.test', 'c2@b.test']);
+			const raw = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm2',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						Cc: '"C One" <c1@b.test>, c2@b.test',
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(raw.cc).toEqual(['c1@b.test', 'c2@b.test']);
+		});
+
+		// Review (#2612): a quoted display name may contain a comma.
+		it('keeps a quoted display name with a comma in one Cc mailbox', async () => {
+			const msg = await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm3',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						Cc: '"Doe, John" <john@example.com>, jane@example.com, "a\\"b, c" <q@example.com>',
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(msg.cc).toEqual(['john@example.com', 'jane@example.com', 'q@example.com']);
+		});
+
+		it('splits a hostile Cc header in linear time', async () => {
+			const started = Date.now();
+			await plugin.parseInboundWebhook(
+				Buffer.from(
+					JSON.stringify({
+						MessageID: 'm4',
+						From: 'x@y.test',
+						To: 'a@b.test',
+						Cc: '"'.repeat(100_000) + '<'.repeat(100_000),
+						Subject: 's',
+						Date: '2026-10-15T10:00:00Z'
+					})
+				),
+				{},
+				{}
+			);
+			expect(Date.now() - started).toBeLessThan(2000);
+		});
+
 		it('leaves the threading fields out when the headers are absent', async () => {
 			const msg = await plugin.parseInboundWebhook(
 				Buffer.from(
