@@ -19,6 +19,7 @@ import {
     RecordAccessPolicy,
     RecordVisibilityService,
     VISIBILITY_CHOICES,
+    type OrganizationTeamOption,
     type VisibilityChoice,
     type VisibilityState,
 } from '@ever-works/agent/record-visibility';
@@ -52,6 +53,8 @@ export class SetRecordTeamsDto {
 export interface RecordVisibilityView extends VisibilityState {
     /** Only the owner may change visibility or Teams (spec §4). */
     canEdit: boolean;
+    /** The record's Organization's Teams (owner only; for the Team picker). */
+    organizationTeams?: OrganizationTeamOption[];
 }
 
 interface OwnedRow {
@@ -103,7 +106,12 @@ export class RecordVisibilityController {
         }
         const state = await this.visibility.getState(type, id);
         if (!state) throw new NotFoundException('Record not found');
-        return { ...state, canEdit: Boolean(owned) };
+        if (!owned) return { ...state, canEdit: false };
+        return {
+            ...state,
+            canEdit: true,
+            organizationTeams: await this.visibility.organizationTeamsOf(type, id),
+        };
     }
 
     @Put(':aggregate/:id')

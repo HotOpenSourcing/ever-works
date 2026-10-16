@@ -57,6 +57,13 @@ export interface VisibilityState {
     teamIds: string[];
 }
 
+/** A Team the record could sit on (its Organization's Teams), for the form's picker. */
+export interface OrganizationTeamOption {
+    id: string;
+    name: string;
+    slug: string;
+}
+
 const ENTITY_OF: Record<VisibilityAggregate, EntityTarget<ObjectLiteral>> = {
     task: Task,
     goal: Goal,
@@ -195,6 +202,24 @@ export class RecordVisibilityService {
                 `Automatic visibility for ${aggregate} ${id} failed: ${(error as Error).message}`,
             );
         }
+    }
+
+    /**
+     * The Teams of the record's Organization, for the form's Team picker. Empty for a
+     * personal record (it cannot sit on a Team). Teams are visible org-wide already.
+     */
+    async organizationTeamsOf(
+        aggregate: VisibilityAggregate,
+        id: string,
+    ): Promise<OrganizationTeamOption[]> {
+        const row = await this.load(this.dataSource.manager, aggregate, id);
+        if (!row?.organizationId) return [];
+        const teams = await this.dataSource.manager.getRepository(Team).find({
+            where: { organizationId: row.organizationId },
+            select: { id: true, name: true, slug: true },
+            order: { name: 'ASC' },
+        });
+        return teams.map((team) => ({ id: team.id, name: team.name, slug: team.slug }));
     }
 
     /** {@link recomputeAutomatic} for every record of a Team (before it is deleted). */

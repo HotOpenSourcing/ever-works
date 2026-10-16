@@ -28,6 +28,9 @@ describe('RecordVisibilityController', () => {
         };
         const visibility = {
             getState: jest.fn().mockResolvedValue(state),
+            organizationTeamsOf: jest
+                .fn()
+                .mockResolvedValue([{ id: 'team-1', name: 'Core', slug: 'core' }]),
             setVisibility: jest.fn().mockResolvedValue({ ...state, visibilityExplicit: true }),
             setTeams: jest.fn().mockResolvedValue(state),
         };
@@ -45,6 +48,7 @@ describe('RecordVisibilityController', () => {
         await expect(controller.get(owner, 'task', 'task-1')).resolves.toEqual({
             ...state,
             canEdit: true,
+            organizationTeams: [{ id: 'team-1', name: 'Core', slug: 'core' }],
         });
     });
 
