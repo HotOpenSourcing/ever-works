@@ -91,6 +91,9 @@ import { UsersModule } from './users/users.module';
 import { ScopeModule } from './scope/scope.module';
 import { ScopeOwnershipGuard } from './scope/scope-ownership.guard';
 import { SessionScopeGuard } from './scope/session-scope.guard';
+import { IntegrationPrincipalGuard } from './auth/integration/integration-principal.guard';
+import { IntegrationAuditInterceptor } from './auth/integration/integration-audit.interceptor';
+import { IntegrationsApiV1Module } from './integrations-api/v1/integrations-api-v1.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { SharedViewsApiModule } from './shared-views/shared-views.module';
 import { SafetyApiModule } from './safety/safety.module';
@@ -431,6 +434,10 @@ import { DatabaseModule } from '@ever-works/agent/database';
         // in the graph only when EVER_STATS_ENABLED is `true` (off by default;
         // read once, here, at boot). Nothing above moves.
         ...instanceStatsModuleImports(),
+        // EW-P1-2 — Integration API v1 (`/api/integrations/v1/*`), the stable
+        // contract integrations such as Ever Gauzy code against. Additive;
+        // reachable only with an `ew_int_` integration key.
+        IntegrationsApiV1Module,
     ],
     providers: [
         {
@@ -449,6 +456,15 @@ import { DatabaseModule } from '@ever-works/agent/database';
         {
             provide: APP_GUARD,
             useClass: SessionScopeGuard,
+        },
+        // EW-P1-2 — integration keys (`ew_int_…`). Runs AFTER SessionScopeGuard
+        // (the scope a slug resolved is visible) and BEFORE ScopeOwnershipGuard.
+        // Admits an integration key only on `@RequireScopes(...)` routes, checks
+        // its scopes and org pin, and validates `X-Act-As-User` on writes. A
+        // no-op for every other credential.
+        {
+            provide: APP_GUARD,
+            useClass: IntegrationPrincipalGuard,
         },
         // EW-659 (Phase 7) — runs AFTER AuthSessionGuard (guard order
         // matches providers-array order) so request.user is set. Rejects
@@ -474,6 +490,12 @@ import { DatabaseModule } from '@ever-works/agent/database';
         {
             provide: APP_INTERCEPTOR,
             useClass: PostHogInterceptor,
+        },
+        // EW-P1-2 — one `integration_write` activity row (actorKind 'external')
+        // per successful write made with an integration key. No-op otherwise.
+        {
+            provide: APP_INTERCEPTOR,
+            useClass: IntegrationAuditInterceptor,
         },
         // Maps the `@ever-works/agent` FacadeError hierarchy (git / deploy /
         // oauth / content-extractor "no provider / not connected / not found"

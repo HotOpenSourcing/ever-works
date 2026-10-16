@@ -23,6 +23,7 @@ import * as hitl from '../hitl/index.js';
 import * as home from '../home/index.js';
 import * as inbox from '../inbox/index.js';
 import * as ingest from '../ingest/index.js';
+import * as integrations from '../integrations/index.js';
 import * as item from '../item/index.js';
 import * as kb from '../kb/index.js';
 import * as memory from '../memory/index.js';
@@ -78,6 +79,7 @@ const AREAS: Array<[string, Record<string, unknown>]> = [
 	['home', home],
 	['inbox', inbox],
 	['ingest', ingest],
+	['integrations', integrations],
 	['item', item],
 	['kb', kb],
 	['memory', memory],
@@ -152,7 +154,12 @@ describe('src/index.ts — the package root barrel', () => {
 		// added the `events` area: develop stood at 35 areas and this change adds
 		// exactly one (`events`, re-exported from `src/events/index.ts`);
 		// re-counting the array gives 36.
-		expect(exportLines).toBe(36);
+		// 37 is COUNTED the same way after EW-P1-2 (integration keys) added the
+		// `integrations` area on top of that develop (36 areas, `events`
+		// included): exactly one more (`integrations`, re-exported from
+		// `src/integrations/index.ts`);
+		// re-counting the array gives 37.
+		expect(exportLines).toBe(37);
 	});
 
 	it('has no name exported by two different areas', () => {
