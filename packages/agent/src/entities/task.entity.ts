@@ -1,5 +1,4 @@
 import {
-    BeforeInsert,
     Column,
     CreateDateColumn,
     Entity,
@@ -10,7 +9,6 @@ import {
     UpdateDateColumn,
 } from 'typeorm';
 import type { RecordVisibility } from '@ever-works/contracts';
-import { applyInsertVisibilityDefault } from './_record-visibility';
 import { User } from './user.entity';
 import { PortableDateColumn } from './_types';
 import type { TaskExtraRepo } from '@ever-works/contracts';
@@ -639,14 +637,4 @@ export class Task {
      */
     @Column({ type: 'int', default: 1 })
     version: number;
-
-    /**
-     * Insert-time visibility default (owner decision D11): personal rows stay
-     * `private`; org rows start `team` when created with a `teamId`, else
-     * `organization`.
-     */
-    @BeforeInsert()
-    applyDefaultVisibility(): void {
-        applyInsertVisibilityDefault(this, Boolean(this.teamId));
-    }
 }

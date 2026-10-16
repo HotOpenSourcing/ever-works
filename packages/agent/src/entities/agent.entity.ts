@@ -11,7 +11,6 @@ import {
     UpdateDateColumn,
 } from 'typeorm';
 import type { RecordVisibility } from '@ever-works/contracts';
-import { applyInsertVisibilityDefault } from './_record-visibility';
 import type { AgentHaltDetailDto, MergePolicyOverride } from '@ever-works/contracts';
 import { User } from './user.entity';
 import { PortableDateColumn } from './_types';
@@ -631,15 +630,5 @@ export class Agent {
     @BeforeUpdate()
     syncScopeTargetId(): void {
         this.scopeTargetId = this.missionId ?? this.ideaId ?? this.workId ?? '';
-    }
-
-    /**
-     * Insert-time visibility default (owner decision D11): personal rows stay
-     * `private`; org rows start `organization` (Teams attach later and narrow it
-     * to `team` while `visibilityExplicit` is false).
-     */
-    @BeforeInsert()
-    applyDefaultVisibility(): void {
-        applyInsertVisibilityDefault(this, false);
     }
 }
