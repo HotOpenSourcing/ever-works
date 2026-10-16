@@ -774,7 +774,7 @@ export class TasksService {
                         scheduleClaimedAt: null,
                         hiddenFromBoard: input.hiddenFromBoard ?? false,
                     },
-                    manager,
+                    ...managerArg(manager),
                 ),
             (publisher, manager, row) =>
                 publisher.created(manager, 'task', row.id, 'task.created', {
@@ -979,7 +979,7 @@ export class TasksService {
                 const tombstone = manager
                     ? await this.domainEvents?.beforeDelete(manager, 'task', id)
                     : null;
-                await this.tasks.deleteById(id, manager);
+                await this.tasks.deleteById(id, ...managerArg(manager));
                 return tombstone ?? null;
             },
             (publisher, manager, tombstone) =>
@@ -1712,7 +1712,7 @@ export class TasksService {
     /** `updateById` + `task.updated` (changed fields described against `before`). */
     private async updateTaskRow(id: string, patch: Partial<Task>, before?: Task): Promise<void> {
         await this.withTaskEvent(
-            (manager) => this.tasks.updateById(id, patch, manager),
+            (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
             (publisher, manager) =>
                 publisher.changed(
                     manager,
@@ -1768,7 +1768,13 @@ export class TasksService {
         const row = await this.insertOrConflict(
             () =>
                 this.withTaskEvent(
-                    (manager) => this.assignees.add(taskId, assigneeType, assigneeId, manager),
+                    (manager) =>
+                        this.assignees.add(
+                            taskId,
+                            assigneeType,
+                            assigneeId,
+                            ...managerArg(manager),
+                        ),
                     (publisher, manager, added) =>
                         publisher.child(
                             manager,
@@ -1819,7 +1825,7 @@ export class TasksService {
             ? (await this.assignees.findByTaskId(taskId)).find((row) => row.id === assigneeId)
             : undefined;
         const removed = await this.withTaskEvent(
-            (manager) => this.assignees.removeForTask(taskId, assigneeId, manager),
+            (manager) => this.assignees.removeForTask(taskId, assigneeId, ...managerArg(manager)),
             async (publisher, manager, gone) => {
                 if (!gone || !existing) return;
                 await publisher.child(
@@ -1857,7 +1863,13 @@ export class TasksService {
         return this.insertOrConflict(
             () =>
                 this.withTaskEvent(
-                    (manager) => this.reviewers.add(taskId, reviewerType, reviewerId, manager),
+                    (manager) =>
+                        this.reviewers.add(
+                            taskId,
+                            reviewerType,
+                            reviewerId,
+                            ...managerArg(manager),
+                        ),
                     (publisher, manager) =>
                         publisher.changed(manager, 'task', taskId, 'task.updated', {
                             changedFields: ['reviewers'],
@@ -1880,7 +1892,13 @@ export class TasksService {
         return this.insertOrConflict(
             () =>
                 this.withTaskEvent(
-                    (manager) => this.approvers.add(taskId, approverType, approverId, manager),
+                    (manager) =>
+                        this.approvers.add(
+                            taskId,
+                            approverType,
+                            approverId,
+                            ...managerArg(manager),
+                        ),
                     (publisher, manager) =>
                         publisher.changed(manager, 'task', taskId, 'task.updated', {
                             changedFields: ['approvers'],
@@ -1910,7 +1928,7 @@ export class TasksService {
         let row;
         try {
             row = await this.withTaskEvent(
-                (manager) => this.blocks.add(taskId, blockedByTaskId, manager),
+                (manager) => this.blocks.add(taskId, blockedByTaskId, ...managerArg(manager)),
                 (publisher, manager) =>
                     publisher.child(
                         manager,
@@ -1950,7 +1968,7 @@ export class TasksService {
             ? (await this.blocks.findByTaskId(taskId)).find((row) => row.id === blockId)
             : undefined;
         const removed = await this.withTaskEvent(
-            (manager) => this.blocks.removeForTask(taskId, blockId, manager),
+            (manager) => this.blocks.removeForTask(taskId, blockId, ...managerArg(manager)),
             async (publisher, manager, gone) => {
                 if (!gone || !existingBlock) return;
                 await publisher.child(
@@ -2000,7 +2018,8 @@ export class TasksService {
         return this.insertOrConflict(
             () =>
                 this.withTaskEvent(
-                    (manager) => this.relations.add(taskId, relatedTaskId, kind, manager),
+                    (manager) =>
+                        this.relations.add(taskId, relatedTaskId, kind, ...managerArg(manager)),
                     (publisher, manager) =>
                         publisher.child(
                             manager,
@@ -2061,7 +2080,7 @@ export class TasksService {
         const attachments = this.attachments;
         try {
             return await this.withTaskEvent(
-                (manager) => attachments.add(taskId, uploadId, role, manager),
+                (manager) => attachments.add(taskId, uploadId, role, ...managerArg(manager)),
                 (publisher, manager) =>
                     publisher.child(
                         manager,
@@ -2099,7 +2118,7 @@ export class TasksService {
             ? (await attachments.findByTaskId(taskId)).find((row) => row.id === attachmentId)
             : undefined;
         const removed = await this.withTaskEvent(
-            (manager) => attachments.removeForTask(taskId, attachmentId, manager),
+            (manager) => attachments.removeForTask(taskId, attachmentId, ...managerArg(manager)),
             async (publisher, manager, gone) => {
                 if (!gone || !existingAttachment) return;
                 await publisher.child(
@@ -2282,4 +2301,13 @@ export class TasksService {
             this.logger.warn(`Failed to log activity ${args.actionType}: ${err}`);
         }
     }
+}
+
+/**
+ * The trailing `EntityManager` argument of a repository write, present only
+ * when there is one — so a graph without domain events calls each repository
+ * method with exactly the arguments it always did.
+ */
+function managerArg(manager?: EntityManager): [] | [EntityManager] {
+    return manager ? [manager] : [];
 }

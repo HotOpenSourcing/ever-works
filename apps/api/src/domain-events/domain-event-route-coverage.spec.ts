@@ -4,6 +4,14 @@ import { isDomainEventType } from '@ever-works/contracts';
 import { TaskChatController } from '../tasks/task-chat.controller';
 import { TaskTemplatesController } from '../task-templates/task-templates.controller';
 import { TasksController } from '../tasks/tasks.controller';
+import { TeamsController } from '../teams/teams.controller';
+import { OrganizationInvitationsController } from '../organizations/organization-invitations.controller';
+import { OrganizationsController } from '../organizations/organizations.controller';
+import { OrgInviteController } from '../onboarding/org-invite.controller';
+import { AgentsController } from '../agents/agents.controller';
+import { AgentCollaboratorsController } from '../agents/agent-collaborators.controller';
+import { MembersController } from '../works/members.controller';
+import { WorksController } from '../works/works.controller';
 import { DOMAIN_EVENT_ROUTE_COVERAGE, describeCoverage } from './domain-event-route-coverage';
 
 /**
@@ -18,6 +26,14 @@ const CONTROLLERS_IN_SCOPE: ReadonlyArray<new (...args: any[]) => unknown> = [
     TasksController,
     TaskChatController,
     TaskTemplatesController,
+    TeamsController,
+    OrganizationInvitationsController,
+    OrgInviteController,
+    OrganizationsController,
+    AgentsController,
+    AgentCollaboratorsController,
+    MembersController,
+    WorksController,
 ];
 
 const MUTATING = new Map<number, string>([

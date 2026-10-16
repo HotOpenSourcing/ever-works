@@ -10,6 +10,7 @@ export * from './domain-event-relay.service';
 export * from './domain-event-retention.service';
 export * from './domain-event-snapshots';
 export * from './domain-event-task-fields';
+export * from './domain-event-work-bridge';
 export * from './domain-events.config';
 export * from './domain-events.module';
 export * from './domain-events-relay.module';

@@ -218,3 +218,25 @@ export class DomainEventPublisher {
         return builder;
     }
 }
+
+/**
+ * Record domain events in their own transaction AFTER a write that could not
+ * join one (multi-step writes whose steps tolerate their own failures, or
+ * services whose repositories take no `EntityManager` yet). Best-effort: a
+ * failure is logged through `warn`, never thrown, so it can never fail the
+ * write it describes. The integration's hourly reconcile repairs a missed
+ * event. A no-op without a publisher.
+ */
+export async function recordAfterWrite(
+    publisher: DomainEventPublisher | undefined,
+    record: (publisher: DomainEventPublisher, manager: EntityManager) => Promise<unknown>,
+    warn: (message: string) => void,
+    label: string,
+): Promise<void> {
+    if (!publisher) return;
+    try {
+        await publisher.transaction((manager) => record(publisher, manager));
+    } catch (err) {
+        warn(`Could not record ${label}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+}
