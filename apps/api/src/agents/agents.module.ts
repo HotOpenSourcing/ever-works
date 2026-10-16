@@ -680,6 +680,7 @@ async function assertRealWriteTarget(
                     subject,
                     bodyText,
                     from,
+                    attachments,
                 }) {
                     const agent = await agents.findByIdAndUser(agentId, userId);
                     if (!agent?.slug) return null;
@@ -697,6 +698,7 @@ async function assertRealWriteTarget(
                                 from,
                                 subject,
                                 bodyText,
+                                attachments,
                             }),
                         },
                         { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) },

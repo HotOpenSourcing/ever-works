@@ -104,6 +104,38 @@ function angleAddress(value: string): string | null {
 	return null;
 }
 
+/**
+ * EW-P4-3 — split a raw address-list header (`To` / `Cc`) on the commas that
+ * SEPARATE mailboxes, not the ones inside a quoted display name or an angle
+ * address: `"Doe, John" <john@x>, jane@x` is two mailboxes. Linear time (the
+ * header is sender-written and read before verification).
+ */
+function splitAddressList(raw: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let inQuote = false;
+	let inAngle = false;
+	for (let i = 0; i < raw.length; i += 1) {
+		const ch = raw[i];
+		if (ch === '\\' && inQuote && i + 1 < raw.length) {
+			current += ch + raw[i + 1];
+			i += 1;
+			continue;
+		}
+		if (ch === '"' && !inAngle) inQuote = !inQuote;
+		else if (ch === '<' && !inQuote) inAngle = true;
+		else if (ch === '>' && !inQuote) inAngle = false;
+		if (ch === ',' && !inQuote && !inAngle) {
+			parts.push(current);
+			current = '';
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current);
+	return parts;
+}
+
 interface MailgunSignature {
 	readonly timestamp: string;
 	readonly token: string;
@@ -325,7 +357,10 @@ export class MailgunPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin 
 			return undefined;
 		};
 		const messageIdHeader = normalizeMessageId(header('message-id'));
-		const cc = parseAddressList(header('cc') ?? '');
+		// Quote-aware: a display name may itself contain a comma.
+		const cc = splitAddressList(header('cc') ?? '')
+			.map((part) => (angleAddress(part.trim()) ?? part).trim())
+			.filter((address) => address.length > 0 && address.includes('@'));
 		const inReplyTo = parseMessageIdList(header('in-reply-to'))[0];
 		const references = parseMessageIdList(header('references'));
 		return {
