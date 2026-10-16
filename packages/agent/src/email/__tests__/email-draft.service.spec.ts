@@ -443,6 +443,14 @@ describe('EmailDraftService', () => {
             );
         });
 
+        it("keeps a held reply in its parent's conversation", async () => {
+            const { service, rows } = makeHarness('draft-review');
+            const outcome = await service.submit({ ...REPLY, conversationId: 'conv-3' });
+            expect(rows.get((outcome as { messageId: string }).messageId)).toMatchObject({
+                conversationId: 'conv-3',
+            });
+        });
+
         it('releases a draft that replies to nothing without threading headers', async () => {
             const { service, facade } = makeHarness('draft-review');
             const outcome = await service.submit(INPUT);

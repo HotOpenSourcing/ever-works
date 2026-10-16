@@ -115,6 +115,13 @@ export interface EmailFacadeSendOptions extends FacadeOptions {
     /** Specific tenant_email_addresses.id to send from. Else uses Agent default. */
     readonly addressId?: string;
     /**
+     * EW-P4-3 — the `email_conversations` thread this send belongs to (a
+     * reply in a conversation). Recorded on the row, so the recipient's next
+     * reply threads back into the same conversation. Mutually exclusive with
+     * `taskId`, like on the row.
+     */
+    readonly conversationId?: string;
+    /**
      * AW-05 — who asked for this send. SERVER-SET at the call site, never
      * copied from a request body: `agent` sends are held when the Agent's
      * inbox is in `draft-review`. Absent = `system` (the pre-gate behaviour).
@@ -295,6 +302,7 @@ export class EmailFacadeService extends BaseFacadeService {
                 userId: options.userId,
                 agentId: options.agentId ?? null,
                 taskId: options.taskId ?? null,
+                conversationId: options.conversationId ?? null,
                 emailAddressId: options.addressId,
                 // Provisional — replaced by the provider that actually sends.
                 pluginId: EMAIL_SEND_RESERVATION_PENDING_PLUGIN_ID,
@@ -827,7 +835,7 @@ export class EmailFacadeService extends BaseFacadeService {
             userId: options.userId,
             agentId: options.agentId ?? null,
             taskId: options.taskId ?? null,
-            conversationId: null,
+            conversationId: options.conversationId ?? null,
             emailAddressId: options.addressId,
             direction: 'outbound',
             pluginId: result.provider,

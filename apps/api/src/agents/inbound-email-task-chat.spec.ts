@@ -76,6 +76,21 @@ describe('inbound-email-task-chat', () => {
         expect(post).toContain('[… truncated]');
     });
 
+    // Review (Greptile, #2607): the cap must hold AFTER defusing, which grows
+    // the text — a body of 9,000 `@`s would otherwise reach ~18,000 chars and
+    // be refused by the chat (16,384-character limit), losing the thread.
+    it('stays under the chat limit when defusing grows the body', () => {
+        const post = formatInboundEmailChatPost({
+            agentSlug: 'a',
+            emailMessageId: 'msg-1',
+            from: '@'.repeat(400),
+            subject: '@'.repeat(400),
+            bodyText: '@'.repeat(9_000),
+        });
+        expect(post.length).toBeLessThanOrEqual(16 * 1024);
+        expect(Buffer.byteLength(post, 'utf8')).toBeLessThan(16 * 1024);
+    });
+
     it('capUtf8Bytes never cuts a surrogate pair in half', () => {
         const capped = capUtf8Bytes('😀'.repeat(100), 10);
         expect(

@@ -98,6 +98,18 @@ describe('EmailFacadeService.send — RFC threading (EW-P4-3)', () => {
         );
     });
 
+    it('records the conversation a reply belongs to', async () => {
+        const { facade, emailMessages } = makeFacade();
+        await facade.send(INPUT, {
+            userId: 'user-1',
+            addressId: 'addr-1',
+            conversationId: 'conv-3',
+        });
+        expect(emailMessages.save).toHaveBeenCalledWith(
+            expect.objectContaining({ conversationId: 'conv-3', taskId: null }),
+        );
+    });
+
     it("keeps a caller's own Message-ID instead of generating one", async () => {
         const { facade, plugin } = makeFacade();
         await facade.send(
