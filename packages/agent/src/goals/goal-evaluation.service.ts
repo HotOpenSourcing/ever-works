@@ -30,6 +30,7 @@ import {
     DomainEventPublisher,
     recordAfterWrite,
 } from '../domain-events/domain-event-publisher.service';
+import { withoutAggregateVersion } from '../domain-events/domain-event-context';
 import {
     isExternalMetricSource,
     latestExternalCriterionValues,
@@ -259,7 +260,7 @@ export class GoalEvaluationService {
 
         // Invariant I-4: only the Goal row is written — linked
         // Missions are NEVER auto-completed from here.
-        await this.goals.save(goal);
+        await this.goals.save(withoutAggregateVersion(goal));
         await this.recordEvaluation(goal, before);
 
         // Escalate-on-hard (G1's stated behavior). AFTER the save so the
@@ -345,7 +346,7 @@ export class GoalEvaluationService {
             outcome = 'missed';
         }
 
-        await this.goals.save(goal);
+        await this.goals.save(withoutAggregateVersion(goal));
         await this.recordEvaluation(goal, before);
         return { goalId: goal.id, outcome };
     }

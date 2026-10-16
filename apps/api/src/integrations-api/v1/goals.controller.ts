@@ -530,6 +530,11 @@ export class IntegrationGoalsController {
         if (dto.deadline !== undefined) {
             patch.deadline = dto.deadline === null ? null : new Date(dto.deadline);
         }
+        // Every Team must be one of the pinned organization's (404 otherwise) BEFORE the
+        // first write, so a foreign Team never leaves a half-applied PATCH behind.
+        for (const teamId of dto.teamIds ?? []) {
+            await this.resources.get('team', this.organizationId(), teamId, source);
+        }
         await withExpectedVersion('goal', id, expected, async () => {
             if (Object.keys(patch).length > 0) {
                 await this.goals.update(user.userId, id, patch, this.ownership());
@@ -557,7 +562,15 @@ export class IntegrationGoalsController {
         const source = linkSourceOf(principalOf(user));
         const expected = await this.precondition(user, id, ifMatch, source);
         const criteria = dto.criteria as GoalCriterion[];
-        GoalsService.assertExternalSources({ criteria });
+        // A criterion without its own source reads the Goal's: on an app-created Goal that
+        // reads a provider it would add metered reads per evaluation tick (D9), so every
+        // criterion's RESOLVED source must be the external one.
+        const goal = await this.goals.getForUser(user.userId, id, this.ownership());
+        GoalsService.assertExternalSources({
+            criteria: criteria.map((criterion) => ({
+                metricSource: criterion.metricSource ?? goal.metricSource ?? undefined,
+            })),
+        });
         await withExpectedVersion('goal', id, expected, () =>
             this.goals.update(
                 user.userId,

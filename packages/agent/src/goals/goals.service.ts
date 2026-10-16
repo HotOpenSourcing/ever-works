@@ -11,6 +11,7 @@ import { RecordVisibilityService } from '../record-visibility/record-visibility.
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, IsNull, Not, Repository, type EntityManager, type FindOptionsWhere } from 'typeorm';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import { withoutAggregateVersion } from '../domain-events/domain-event-context';
 import {
     isExternalMetricSource,
     recordGoalProgress,
@@ -228,7 +229,12 @@ export class GoalsService {
      * unknown kind is refused. `validateGoalKindInput` then re-checks the
      * chosen shape as one rule shared with the specs.
      */
-    async create(userId: string, input: CreateGoalInput, scope?: OwnershipScope): Promise<GoalDto> {
+    async create(
+        userId: string,
+        input: CreateGoalInput,
+        scope?: OwnershipScope,
+        options: { automaticVisibility?: boolean } = {},
+    ): Promise<GoalDto> {
         const goalKind = this.resolveWriteKind(input.goalKind);
 
         let metricSource: GoalMetricSource | null = null;
@@ -295,17 +301,23 @@ export class GoalsService {
                     : {}),
             }),
             async (publisher, manager, row) => {
-                if (input.teamIds && input.teamIds.length > 0) {
+                const hasTeams = !!input.teamIds && input.teamIds.length > 0;
+                // An integration create always derives its scope (D11): without Teams or a
+                // hand-set visibility an Organization's Goal is `organization`, never the
+                // column default `private` (which no integration could then read back).
+                if (hasTeams || options.automaticVisibility) {
                     if (!this.recordVisibility) {
                         throw new Error('Goal teamIds need RecordVisibilityModule');
                     }
-                    await this.recordVisibility.setTeamsIn(
-                        manager,
-                        'goal',
-                        row.id,
-                        input.teamIds,
-                        userId,
-                    );
+                    if (hasTeams) {
+                        await this.recordVisibility.setTeamsIn(
+                            manager,
+                            'goal',
+                            row.id,
+                            input.teamIds as string[],
+                            userId,
+                        );
+                    }
                     await this.recordVisibility.recomputeAutomaticIn(manager, 'goal', row.id, {
                         recordEvent: false,
                     });
@@ -344,6 +356,7 @@ export class GoalsService {
                 teamIds: input.teamIds ? [...new Set(input.teamIds)] : undefined,
             },
             scope,
+            { automaticVisibility: true },
         );
     }
 
@@ -424,32 +437,40 @@ export class GoalsService {
         }
 
         const apply = async (manager: EntityManager) => {
+            // Re-read the Goal in the write's transaction (row-locked where the driver has
+            // row locks; SQLite already serializes writers), so two samples racing on one
+            // Goal never apply their observation / score to a stale copy.
+            const current = await this.reloadForUpdate(manager, goal);
             await manager.getRepository(GoalMetricSample).insert({
                 goalId,
                 criterionId,
                 sampledAt: input.sampledAt,
                 value: input.value,
             });
-            const before = { currentValue: goal.currentValue ?? null, score: goal.resolvedScore };
+            const before = {
+                currentValue: current.currentValue ?? null,
+                score: current.resolvedScore,
+            };
             const changedFields: string[] = [];
             if (
                 !criterionId &&
-                (!goal.currentValueAt || input.sampledAt.getTime() >= goal.currentValueAt.getTime())
+                (!current.currentValueAt ||
+                    input.sampledAt.getTime() >= current.currentValueAt.getTime())
             ) {
-                goal.currentValue = input.value;
-                goal.currentValueAt = input.sampledAt;
+                current.currentValue = input.value;
+                current.currentValueAt = input.sampledAt;
                 changedFields.push('currentValue', 'currentValueAt');
-                if (goal.baselineValue === null || goal.baselineValue === undefined) {
-                    goal.baselineValue = input.value;
+                if (current.baselineValue === null || current.baselineValue === undefined) {
+                    current.baselineValue = input.value;
                     changedFields.push('baselineValue');
                 }
             }
-            if (Array.isArray(goal.criteria) && goal.criteria.length > 0) {
-                goal.resolvedScore = await rescoreFromExternalValues(manager, goal);
+            if (Array.isArray(current.criteria) && current.criteria.length > 0) {
+                current.resolvedScore = await rescoreFromExternalValues(manager, current);
                 changedFields.push('resolvedScore');
             }
             changedFields.push('progress');
-            const saved = await manager.getRepository(Goal).save(goal);
+            const saved = await manager.getRepository(Goal).save(withoutAggregateVersion(current));
             return { saved, before, changedFields };
         };
 
@@ -862,12 +883,27 @@ export class GoalsService {
         ) => Promise<unknown>,
     ): Promise<Goal> {
         const publisher = this.domainEvents;
-        if (!publisher) return this.goals.save(goal);
+        if (!publisher) return this.goals.save(withoutAggregateVersion(goal));
         return publisher.transaction(async (manager) => {
-            const row = await manager.getRepository(Goal).save(goal);
+            const row = await manager.getRepository(Goal).save(withoutAggregateVersion(goal));
             await record(publisher, manager, row);
             return row;
         });
+    }
+
+    /**
+     * The Goal's current row inside `manager`'s transaction — `FOR UPDATE` on Postgres and
+     * MySQL; SQLite has no row locks and serializes its writers on one connection. Falls
+     * back to `goal` when the row is gone (the write then fails on its own terms).
+     */
+    private async reloadForUpdate(manager: EntityManager, goal: Goal): Promise<Goal> {
+        const type = manager.connection.options.type;
+        const locks = type === 'postgres' || type === 'mysql' || type === 'mariadb';
+        const row = await manager.getRepository(Goal).findOne({
+            where: { id: goal.id },
+            ...(locks ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+        });
+        return row ?? goal;
     }
 
     private archivedPredicate(archived: ListGoalsFilter['archived']): FindOptionsWhere<Goal> {
