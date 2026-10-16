@@ -85,7 +85,7 @@ export function toIntegrationKbDocumentDto(
         revision: Number(row.revision) || 1,
         revisionAt: iso(row.revisionAt),
         normalizedContentHash: row.normalizedContentHash ?? null,
-        decision: (row.decision ?? null) as IntegrationKbDocumentDto['decision'],
+        decision: (row.decision ?? null) as unknown as IntegrationKbDocumentDto['decision'],
         createdById: row.createdById ?? null,
         updatedById: row.updatedById ?? null,
         archivedAt: iso(row.archivedAt),
