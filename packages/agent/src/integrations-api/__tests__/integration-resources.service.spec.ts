@@ -105,6 +105,10 @@ describe('IntegrationResourcesService', () => {
             createdById: OWNER,
             tenantId: TENANT,
             organizationId,
+            // What the record-visibility subscriber stamps on an org row in the app
+            // (the bare test DataSource has no subscriber, so the column default
+            // `private` would apply).
+            visibility: 'organization',
         } as unknown as Task);
 
     it('lists only the pinned organization tasks, as contract task DTOs with externalLinks', async () => {
@@ -200,6 +204,7 @@ describe('IntegrationResourcesService', () => {
             permissions: {},
             tenantId: TENANT,
             organizationId: ORG_A,
+            visibility: 'organization',
         } as unknown as Agent);
         const teams = await resources.list('team', ORG_A, {}, 'gauzy');
         expect(teams.data.map((dto) => dto.id)).toEqual([team.id]);
