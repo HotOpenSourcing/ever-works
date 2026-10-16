@@ -140,15 +140,15 @@
 		},
 		"webUrl": { "type": ["string", "null"], "format": "uri" },
 		"dueAt": {
-			"description": "P2 (EW-P2-3). Absent until then.",
+			"description": "EW-P2-3 (live). null when unset.",
 			"$ref": "../common.schema.json#/$defs/NullableDateTime"
 		},
 		"startAt": {
-			"description": "P2 (EW-P2-3). Absent until then.",
+			"description": "EW-P2-3 (live). null when unset.",
 			"$ref": "../common.schema.json#/$defs/NullableDateTime"
 		},
 		"estimateMinutes": {
-			"description": "P2 (EW-P2-3). Absent until then.",
+			"description": "EW-P2-3 (live). null when unset.",
 			"type": ["integer", "null"],
 			"minimum": 0
 		},

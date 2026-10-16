@@ -207,6 +207,12 @@ function refuseIntegrationCreateFields(
     }
 }
 
+/** `undefined` stays untouched, `null` clears, an ISO string becomes a `Date`. */
+function toOptionalDate(value: string | null | undefined): Date | null | undefined {
+    if (value === undefined) return undefined;
+    return value === null ? null : new Date(value);
+}
+
 @ApiTags('tasks')
 @Controller('api/tasks')
 export class TasksController {
@@ -415,6 +421,10 @@ export class TasksController {
                 maxGateAttempts: body.maxGateAttempts ?? null,
                 extraRepos: body.extraRepos ?? null,
                 scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : null,
+                // EW-P2-3 — planning dates + estimate.
+                dueAt: body.dueAt ? new Date(body.dueAt) : null,
+                startAt: body.startAt ? new Date(body.startAt) : null,
+                estimateMinutes: body.estimateMinutes ?? null,
             },
             this.scopeContext.getScope(),
         );
@@ -546,6 +556,9 @@ export class TasksController {
                         : body.scheduledAt === null
                           ? null
                           : new Date(body.scheduledAt),
+                // EW-P2-3 — same three states: absent / null (clear) / ISO string.
+                dueAt: toOptionalDate(body.dueAt),
+                startAt: toOptionalDate(body.startAt),
             },
             this.scopeContext.getScope(),
         );

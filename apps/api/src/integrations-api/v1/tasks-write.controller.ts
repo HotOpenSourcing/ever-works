@@ -20,12 +20,17 @@ import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
     IsArray,
+    IsDateString,
     IsIn,
+    IsInt,
     IsOptional,
     IsString,
     IsUUID,
     Length,
+    Max,
     MaxLength,
+    Min,
+    ValidateIf,
     ValidateNested,
 } from 'class-validator';
 import { RecordVisibilityService } from '@ever-works/agent/record-visibility';
@@ -155,6 +160,26 @@ export class IntegrationCreateTaskDto {
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
     externalRef?: IntegrationExternalRefDto;
+
+    /** EW-P2-3 — when the task is due (ISO datetime; planning only). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — planned start (ISO datetime; never after dueAt). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 /** Contract v1 `requests.schema.json#/$defs/TransitionTask`. */
@@ -206,6 +231,26 @@ export class IntegrationUpdateTaskDto {
     @IsOptional()
     @IsUUID()
     parentTaskId?: string | null;
+
+    /** EW-P2-3 — when the task is due (ISO datetime; planning only). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — planned start (ISO datetime; never after dueAt). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 type Response = IdempotentResponse & { setHeader(name: string, value: string): unknown };
@@ -314,6 +359,10 @@ export class IntegrationTasksWriteController {
                     parentTaskId: dto.parentTaskId ?? null,
                     createdByType: createdBy.type,
                     createdById: createdBy.id,
+                    // EW-P2-3 — planning dates + estimate (contract v1 B.6).
+                    dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+                    startAt: dto.startAt ? new Date(dto.startAt) : null,
+                    estimateMinutes: dto.estimateMinutes ?? null,
                 },
                 this.scope.getScope() as never,
             );
@@ -405,6 +454,12 @@ export class IntegrationTasksWriteController {
         if (dto.workId !== undefined) patch.workId = dto.workId;
         if (dto.parentTaskId !== undefined) patch.parentTaskId = dto.parentTaskId;
         if (dto.teamIds !== undefined) patch.teamId = dto.teamIds[0] ?? null;
+        // EW-P2-3 — absent leaves untouched, null clears.
+        if (dto.dueAt !== undefined) patch.dueAt = dto.dueAt === null ? null : new Date(dto.dueAt);
+        if (dto.startAt !== undefined) {
+            patch.startAt = dto.startAt === null ? null : new Date(dto.startAt);
+        }
+        if (dto.estimateMinutes !== undefined) patch.estimateMinutes = dto.estimateMinutes;
         await withExpectedVersion('task', id, expected, async () => {
             if (Object.keys(patch).length > 0) {
                 await this.tasks.update(user.userId, id, patch, this.scope.getScope() as never);

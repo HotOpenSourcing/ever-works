@@ -101,6 +101,10 @@ export interface CreateTaskInput {
     /** Schedule mode "Scheduled": run once at this instant (must be in
      *  the future). Omitted/null = not scheduled. */
     scheduledAt?: Date | null;
+    /** EW-P2-3 — planning dates + estimate (all optional, all nullable). */
+    dueAt?: Date | null;
+    startAt?: Date | null;
+    estimateMinutes?: number | null;
     requireAllApprovers?: boolean;
     /** Quality gates: `null` = inherit the Work's `checkDefaults` untouched. */
     acceptanceChecks?: TaskAcceptanceCheck[] | null;
@@ -155,6 +159,10 @@ export interface UpdateTaskInput {
      * Task does not need a second round-trip.
      */
     scheduledAt?: Date | null;
+    /** EW-P2-3 — `null` clears; absent leaves untouched. */
+    dueAt?: Date | null;
+    startAt?: Date | null;
+    estimateMinutes?: number | null;
 }
 
 /**
@@ -164,6 +172,9 @@ export interface UpdateTaskInput {
  * by an Agent, and belonging to a Work is one Task with three associations,
  * not three Tasks. Each owner is independently filterable.
  */
+/** EW-P2-3 — the largest estimate a Task accepts: one year, in minutes. */
+export const TASK_ESTIMATE_MAX_MINUTES = 525_600;
+
 export const TASK_OWNER_KEYS = [
     'workId',
     'missionId',
@@ -871,6 +882,11 @@ export class TasksService {
         }
 
         if (input.scheduledAt) this.assertFutureSchedule(input.scheduledAt);
+        this.assertPlanning(
+            input.startAt ?? null,
+            input.dueAt ?? null,
+            input.estimateMinutes ?? null,
+        );
 
         const nextNumber = await this.counter.nextSlug(userId);
         const slug = `T-${nextNumber}`;
@@ -905,6 +921,10 @@ export class TasksService {
                         delegationDepth: input.delegationDepth ?? null,
                         scheduledAt: input.scheduledAt ?? null,
                         scheduleClaimedAt: null,
+                        dueAt: input.dueAt ?? null,
+                        startAt: input.startAt ?? null,
+                        estimateMinutes: input.estimateMinutes ?? null,
+                        dueSoonNotifiedAt: null,
                         hiddenFromBoard: input.hiddenFromBoard ?? false,
                     },
                     ...managerArg(manager),
@@ -978,6 +998,44 @@ export class TasksService {
                 patch.scheduledAt = input.scheduledAt;
             }
             patch.scheduleClaimedAt = null;
+        }
+
+        // EW-P2-3 — planning dates + estimate. Validated against the values
+        // the row will hold AFTER the patch (a PATCH may move only one end).
+        // When it moves only one end to a date, the write is guarded on the
+        // other end still holding the value validated here, so two PATCHes
+        // moving opposite ends cannot together save `startAt` > `dueAt`.
+        let planningGuard: { field: 'startAt' | 'dueAt'; expected: Date | null } | undefined;
+        if (input.startAt && input.dueAt === undefined) {
+            planningGuard = { field: 'dueAt', expected: task.dueAt ? new Date(task.dueAt) : null };
+        } else if (input.dueAt && input.startAt === undefined) {
+            planningGuard = {
+                field: 'startAt',
+                expected: task.startAt ? new Date(task.startAt) : null,
+            };
+        }
+        if (
+            input.dueAt !== undefined ||
+            input.startAt !== undefined ||
+            input.estimateMinutes !== undefined
+        ) {
+            const nextStart = input.startAt !== undefined ? input.startAt : (task.startAt ?? null);
+            const nextDue = input.dueAt !== undefined ? input.dueAt : (task.dueAt ?? null);
+            const nextEstimate =
+                input.estimateMinutes !== undefined
+                    ? input.estimateMinutes
+                    : (task.estimateMinutes ?? null);
+            this.assertPlanning(nextStart, nextDue, nextEstimate);
+            if (input.startAt !== undefined) patch.startAt = input.startAt;
+            if (input.estimateMinutes !== undefined) patch.estimateMinutes = input.estimateMinutes;
+            if (input.dueAt !== undefined) {
+                patch.dueAt = input.dueAt;
+                // A new due date is a new deadline: let the due-soon scan
+                // notice it again. Re-sending the same date changes nothing.
+                const before = task.dueAt ? new Date(task.dueAt).getTime() : null;
+                const after = input.dueAt ? input.dueAt.getTime() : null;
+                if (before !== after) patch.dueSoonNotifiedAt = null;
+            }
         }
 
         // Re-filing a Task under different owners. Each owner is set
@@ -1090,7 +1148,7 @@ export class TasksService {
             }
         }
 
-        await this.updateTaskRow(id, patch, task);
+        await this.updateTaskRow(id, patch, task, planningGuard);
         // Record visibility (EW-P1-3): a first Team narrows an automatic
         // `organization` Task to `team`; clearing its last widens it back.
         if ('teamId' in ownerPatch) {
@@ -1875,9 +1933,31 @@ export class TasksService {
     }
 
     /** `updateById` + `task.updated` (changed fields described against `before`). */
-    private async updateTaskRow(id: string, patch: Partial<Task>, before?: Task): Promise<void> {
+    private async updateTaskRow(
+        id: string,
+        patch: Partial<Task>,
+        before?: Task,
+        planningGuard?: { field: 'startAt' | 'dueAt'; expected: Date | null },
+    ): Promise<void> {
         await this.withTaskEvent(
-            (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
+            async (manager) => {
+                if (!planningGuard) {
+                    await this.tasks.updateById(id, patch, ...managerArg(manager));
+                    return;
+                }
+                const written = await this.tasks.updateByIdIfUnchanged(
+                    id,
+                    patch,
+                    planningGuard,
+                    ...managerArg(manager),
+                );
+                if (!written) {
+                    // The other planning date moved since this request read it.
+                    throw new ConflictException(
+                        `Task ${id}'s ${planningGuard.field} changed meanwhile; re-read the Task and retry.`,
+                    );
+                }
+            },
             async (publisher, manager) => {
                 // Record visibility (EW-P1-3): a teamId change moves an automatic
                 // visibility first, so the task.updated snapshot carries it.
@@ -2557,11 +2637,51 @@ export class TasksService {
             'labels',
             'parentTaskId',
             'requireAllApprovers',
+            'estimateMinutes',
         ];
         for (const k of keys) {
             if (before[k] !== after[k]) out[k as string] = { before: before[k], after: after[k] };
         }
+        // EW-P2-3 — dates compare by instant, not by object identity.
+        for (const k of ['dueAt', 'startAt'] as const) {
+            const b = before[k] ? new Date(before[k] as Date).toISOString() : null;
+            const a = after[k] ? new Date(after[k] as Date).toISOString() : null;
+            if (b !== a) out[k] = { before: b, after: a };
+        }
         return out;
+    }
+
+    /**
+     * EW-P2-3 — planning sanity: a start after the due date is a typo, and an
+     * estimate is whole minutes between 0 and a year. Dates in the past are
+     * allowed (a Task can be overdue, and a mirrored Task can be late).
+     */
+    private assertPlanning(
+        startAt: Date | null,
+        dueAt: Date | null,
+        estimateMinutes: number | null,
+    ): void {
+        for (const [name, value] of [
+            ['startAt', startAt],
+            ['dueAt', dueAt],
+        ] as const) {
+            if (value && Number.isNaN(new Date(value).getTime())) {
+                throw new BadRequestException(`${name} must be a valid date.`);
+            }
+        }
+        if (startAt && dueAt && new Date(startAt).getTime() > new Date(dueAt).getTime()) {
+            throw new BadRequestException('startAt must not be after dueAt.');
+        }
+        if (
+            estimateMinutes !== null &&
+            (!Number.isInteger(estimateMinutes) ||
+                estimateMinutes < 0 ||
+                estimateMinutes > TASK_ESTIMATE_MAX_MINUTES)
+        ) {
+            throw new BadRequestException(
+                `estimateMinutes must be a whole number between 0 and ${TASK_ESTIMATE_MAX_MINUTES}.`,
+            );
+        }
     }
 
     private async logActivity(args: {

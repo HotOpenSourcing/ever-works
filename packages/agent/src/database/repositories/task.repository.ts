@@ -858,6 +858,88 @@ export class TaskRepository {
     }
 
     /**
+     * EW-P2-3 — Tasks due inside `[now, until]` whose due-soon notice has not
+     * gone out for the current `dueAt`, oldest deadline first. Done, cancelled
+     * and recurring templates are skipped (a template's instances carry their
+     * own dates).
+     *
+     * @internal CRON-ONLY — reads across all tenants by design.
+     */
+    async findDueSoonTasks(limit: number, now: Date, until: Date): Promise<Task[]> {
+        return this.repository
+            .createQueryBuilder('task')
+            .where('task.dueAt IS NOT NULL')
+            .andWhere('task.dueAt >= :now', { now })
+            .andWhere('task.dueAt <= :until', { until })
+            .andWhere('task.dueSoonNotifiedAt IS NULL')
+            .andWhere('task.status NOT IN (:...closed)', { closed: ['done', 'cancelled'] })
+            .andWhere('task.isRecurring = :recurring', { recurring: false })
+            .orderBy('task.dueAt', 'ASC')
+            .take(limit)
+            .getMany();
+    }
+
+    /**
+     * EW-P2-3 — give a due-soon claim back (the notice did not reach everyone),
+     * so the next scan retries. Only the claim stamped at `claimedAt` is
+     * released, never a later one.
+     */
+    async releaseDueSoonClaim(taskId: string, claimedAt: Date): Promise<boolean> {
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(Task)
+            .set({ dueSoonNotifiedAt: null })
+            .where('id = :id', { id: taskId })
+            .andWhere('dueSoonNotifiedAt = :claimedAt', { claimedAt })
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * EW-P2-3 — update a Task only while one planning date still holds the
+     * value the caller validated against (`startAt` ≤ `dueAt` is a rule over
+     * BOTH columns; a PATCH that moves one end must not race a PATCH moving the
+     * other). Answers whether the row was written.
+     */
+    async updateByIdIfUnchanged(
+        id: string,
+        data: Partial<Task>,
+        guard: { field: 'startAt' | 'dueAt'; expected: Date | null },
+        manager?: EntityManager,
+    ): Promise<boolean> {
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        const query = repository
+            .createQueryBuilder()
+            .update(Task)
+            .set(data)
+            .where('id = :id', { id });
+        if (guard.expected === null) {
+            query.andWhere(`${guard.field} IS NULL`);
+        } else {
+            query.andWhere(`${guard.field} = :expected`, { expected: guard.expected });
+        }
+        const result = await query.execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * EW-P2-3 — claim the due-soon notice for one Task: only the tick that
+     * stamps `dueSoonNotifiedAt` while it is still NULL (and `dueAt` is still
+     * the date it read) sends it, so two ticks or replicas never notify twice.
+     */
+    async casClaimDueSoon(taskId: string, expectedDueAt: Date, now: Date): Promise<boolean> {
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(Task)
+            .set({ dueSoonNotifiedAt: now })
+            .where('id = :id', { id: taskId })
+            .andWhere('dueAt = :expected', { expected: expectedDueAt })
+            .andWhere('dueSoonNotifiedAt IS NULL')
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
      * CAS-claim a due one-shot for dispatch. Atomic: stamps
      * `scheduleClaimedAt` only while the row still carries the expected
      * `scheduledAt` AND is unclaimed, so two concurrent dispatcher ticks

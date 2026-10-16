@@ -202,6 +202,49 @@ export class CreateTaskDto {
     @IsOptional()
     @IsDateString()
     scheduledAt?: string;
+
+    /** EW-P2-3 — when the Task is due (ISO datetime; planning only, nothing runs then). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: String,
+        format: 'date-time',
+        description:
+            'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — when work is planned to start (ISO datetime; not after dueAt). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: String,
+        format: 'date-time',
+        description: 'When work on the Task is planned to start (ISO datetime, not after dueAt).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: Number,
+        minimum: 0,
+        maximum: 525600,
+        description: 'Estimated effort in whole minutes (0..525600).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 export class UpdateTaskDto {
@@ -367,6 +410,49 @@ export class UpdateTaskDto {
     @ValidateIf((_, value) => value !== null)
     @IsDateString()
     scheduledAt?: string | null;
+
+    /** EW-P2-3 — when the Task is due (ISO datetime; planning only, nothing runs then). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: String,
+        format: 'date-time',
+        description:
+            'When the Task is due (ISO datetime). Planning only; drives the due-soon notice.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — when work is planned to start (ISO datetime; not after dueAt). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: String,
+        format: 'date-time',
+        description: 'When work on the Task is planned to start (ISO datetime, not after dueAt).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        type: Number,
+        minimum: 0,
+        maximum: 525600,
+        description: 'Estimated effort in whole minutes (0..525600).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 export class SetTaskRecurringDto {

@@ -152,6 +152,20 @@
 				},
 				"externalRef": {
 					"$ref": "common.schema.json#/$defs/ExternalRef"
+				},
+				"dueAt": {
+					"description": "EW-P2-3 — when the Task is due (planning only).",
+					"$ref": "common.schema.json#/$defs/NullableDateTime"
+				},
+				"startAt": {
+					"description": "EW-P2-3 — planned start; never after dueAt.",
+					"$ref": "common.schema.json#/$defs/NullableDateTime"
+				},
+				"estimateMinutes": {
+					"description": "EW-P2-3 — estimated effort in whole minutes.",
+					"type": ["integer", "null"],
+					"minimum": 0,
+					"maximum": 525600
 				}
 			},
 			"additionalProperties": false
@@ -194,6 +208,20 @@
 				},
 				"parentTaskId": {
 					"$ref": "common.schema.json#/$defs/NullableUuid"
+				},
+				"dueAt": {
+					"description": "EW-P2-3 — when the Task is due (planning only).",
+					"$ref": "common.schema.json#/$defs/NullableDateTime"
+				},
+				"startAt": {
+					"description": "EW-P2-3 — planned start; never after dueAt.",
+					"$ref": "common.schema.json#/$defs/NullableDateTime"
+				},
+				"estimateMinutes": {
+					"description": "EW-P2-3 — estimated effort in whole minutes.",
+					"type": ["integer", "null"],
+					"minimum": 0,
+					"maximum": 525600
 				}
 			},
 			"additionalProperties": false

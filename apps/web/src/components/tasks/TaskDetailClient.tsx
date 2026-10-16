@@ -24,6 +24,7 @@ import type {
 import type { AgentRunSession } from '@/lib/api/agents.shared';
 import { postTaskChatAction, transitionTaskAction, updateTaskAction } from '@/app/actions/tasks';
 import { TaskScheduleSection } from './TaskScheduleSection';
+import { TaskPlanningSection } from './TaskPlanningSection';
 import { TaskSubtasksSection } from './TaskSubtasksSection';
 import { TaskActivitySection } from './TaskActivitySection';
 import { TaskAttachmentsSection } from './TaskAttachmentsSection';
@@ -811,6 +812,7 @@ export function TaskDetailClient({
                     {/* Tasks upgrades — Schedule section: Run once |
                         Scheduled (one-shot) | Recurring (Phase 17.8 panel,
                         rendered by the section for the recurring mode). */}
+                    <TaskPlanningSection task={task} />
                     <TaskScheduleSection task={task} />
                 </aside>
             </div>
