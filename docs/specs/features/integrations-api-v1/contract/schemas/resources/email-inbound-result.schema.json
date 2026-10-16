@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ever.works/schemas/integrations/v1/resources/email-inbound-result.schema.json",
 	"title": "Inbound email result (P4, POST /email/inbound)",
-	"description": "What pushing an email to an agent did (CR-8): the stored message (direction inbound, on the agent's own inbound address) and how the agent's inbound assignment dispatched it. 201 for a new message, 200 (dispatch.mode null) for a push already delivered (same Message-ID or Idempotency-Key).",
+	"description": "What pushing an email to an agent did (CR-11): the stored message (direction inbound, on the agent's own inbound address) and how the agent's inbound assignment dispatched it. 201 for a new message, 200 (dispatch.mode null) for a push already delivered (same Message-ID or Idempotency-Key).",
 	"type": "object",
 	"required": ["message", "dispatch"],
 	"properties": {

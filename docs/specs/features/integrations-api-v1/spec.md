@@ -283,7 +283,7 @@ Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
   flip (also when a reply whose routing failed leaves the item read), `deleted` with the last snapshot. `webUrl` is the
   Inbox deep link `/inbox?id=<id>`.
 
-## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — CR-8
+## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — `v1-draft.10`, CR-11
 
 An agent email ([`email-message`](./contract/schemas/resources/email-message.schema.json)) is mail an Ever Works agent
 received (`inbound`) or sent / drafted (`outbound`), in its owner's mailbox. Like the Inbox it is **recipient-scoped**:

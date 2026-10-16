@@ -2,7 +2,7 @@
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ever.works/schemas/integrations/v1/resources/email-message.schema.json",
 	"title": "Agent email message DTO (P4, GET /email/messages, GET /email/messages/:id)",
-	"description": "One agent email: mail an Ever Works agent received (inbound) or sent / drafted (outbound). Also the data of email.message.* events. Recipient-scoped like the Inbox: the feed and webhooks v2 serve these events only to a key that also holds email:read, never to a user-owned subscription. Bcc, provider metadata, approval bookkeeping and failure reasons are never exposed. An event whose text + html exceed 262144 UTF-8 bytes carries text: null, html: null, bodyOmitted: true; GET always carries the bodies. The html is the raw message HTML: sanitize it before rendering (CR-8).",
+	"description": "One agent email: mail an Ever Works agent received (inbound) or sent / drafted (outbound). Also the data of email.message.* events. Recipient-scoped like the Inbox: the feed and webhooks v2 serve these events only to a key that also holds email:read, never to a user-owned subscription. Bcc, provider metadata, approval bookkeeping and failure reasons are never exposed. An event whose text + html exceed 262144 UTF-8 bytes carries text: null, html: null, bodyOmitted: true; GET always carries the bodies. The html is the raw message HTML: sanitize it before rendering (CR-11).",
 	"type": "object",
 	"required": [
 		"id",

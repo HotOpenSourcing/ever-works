@@ -96,7 +96,7 @@
       (`email:read`) — `IntegrationEmailService`.
 - [x] **T34** `POST /email/inbound` (`email:write`, opt-in): stored on the agent's own inbound address and dispatched
       through `AGENT_INBOUND_EMAIL_DISPATCHER` like provider mail; Message-ID / Idempotency-Key de-duplication;
-      attachments recorded, never fetched. Contract CR-8 (`email-message`, `email-inbound-result`, `InboundEmail`).
+      attachments recorded, never fetched. Contract CR-11 (`email-message`, `email-inbound-result`, `InboundEmail`).
 
 ## Status legend
 
