@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RecordVisibilityModule } from '../record-visibility/record-visibility.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Agent } from '../entities/agent.entity';
 import { AgentAttachment } from '../entities/agent-attachment.entity';
@@ -69,6 +70,8 @@ import { FacadesModule } from '../facades/facades.module';
  */
 @Module({
     imports: [
+        // Record visibility (EW-P1-3) — RecordAccessPolicy for the shared reads.
+        RecordVisibilityModule,
         TypeOrmModule.forFeature([
             Agent,
             AgentAttachment,

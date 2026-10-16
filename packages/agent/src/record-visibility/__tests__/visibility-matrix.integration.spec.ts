@@ -309,6 +309,11 @@ describe('record visibility matrix (visibleTo, better-sqlite3)', () => {
             repo(TaskApprover),
             repo(TaskReviewer),
             repo(TaskWatcher),
+            repo(Task),
+            repo(Goal),
+            repo(Mission),
+            repo(WorkProposal),
+            repo(Agent),
         );
     });
 
@@ -340,13 +345,23 @@ describe('record visibility matrix (visibleTo, better-sqlite3)', () => {
     }
 
     const userContext = (userId: string) =>
-        policy.contextFor({ kind: 'user', userId }, { tenantId: ids.tenant, organizationId: ids.org });
+        policy.contextFor(
+            { kind: 'user', userId },
+            { tenantId: ids.tenant, organizationId: ids.org },
+        );
 
     const ALL: RecordVisibility[] = ['private', 'team', 'organization'];
     const CONNECTED: RecordVisibility[] = ['team', 'organization'];
     const ORG_ONLY: RecordVisibility[] = ['organization'];
 
-    type Who = 'owner' | 'participant' | 'teamMember' | 'workMember' | 'orgMember' | 'tenantOwner' | 'outsider';
+    type Who =
+        | 'owner'
+        | 'participant'
+        | 'teamMember'
+        | 'workMember'
+        | 'orgMember'
+        | 'tenantOwner'
+        | 'outsider';
 
     const EXPECTED: Record<VisibilityAggregate, Record<Who, RecordVisibility[]>> = {
         task: {
@@ -414,9 +429,7 @@ describe('record visibility matrix (visibleTo, better-sqlite3)', () => {
     describe.each(AGGREGATES)('%s', (aggregate) => {
         it.each(WHO)('%s reads exactly the expected visibilities', async (who) => {
             const context = await userContext(ids[who]);
-            expect(await visibleVisibilities(aggregate, context)).toEqual(
-                EXPECTED[aggregate][who],
-            );
+            expect(await visibleVisibilities(aggregate, context)).toEqual(EXPECTED[aggregate][who]);
         });
 
         it('integration principal pinned to the org reads team + organization, never private', async () => {

@@ -116,7 +116,11 @@ export class TaskChatService {
         lookups: MentionLookups = {},
         ownershipScope?: OwnershipScope,
     ): Promise<TaskChatMessage> {
-        const task = await this.requireReadableTask(userId, input.taskId, ownershipScope);
+        const { task, owned } = await this.resolveReadableTask(
+            userId,
+            input.taskId,
+            ownershipScope,
+        );
         this.assertBody(input.body);
 
         const mentions = this.parseMentions(input.body, lookups);
@@ -167,7 +171,7 @@ export class TaskChatService {
         // Record visibility (EW-P1-3): a reader who does not own the Task may comment,
         // but their @agent mentions only stay on the message — they never start a run
         // on somebody else's Task (no spend, no agent work in their repository).
-        if (this.chatDispatcher && task.userId === userId) {
+        if (this.chatDispatcher && owned) {
             const agentMentions = mentions.records.filter(
                 (m): m is { type: 'agent'; id: string; slug?: string } =>
                     m.type === 'agent' && typeof m.id === 'string',
@@ -494,15 +498,24 @@ export class TaskChatService {
         taskId: string,
         ownershipScope?: OwnershipScope,
     ): Promise<Task> {
-        const owned = await this.tasks.findByIdAndUser(taskId, userId, ownershipScope);
-        if (owned) return owned;
+        return (await this.resolveReadableTask(userId, taskId, ownershipScope)).task;
+    }
+
+    /** {@link requireReadableTask}, also saying whether the caller owns the Task. */
+    private async resolveReadableTask(
+        userId: string,
+        taskId: string,
+        ownershipScope?: OwnershipScope,
+    ): Promise<{ task: Task; owned: boolean }> {
+        const own = await this.tasks.findByIdAndUser(taskId, userId, ownershipScope);
+        if (own) return { task: own, owned: true };
         if (this.accessPolicy && ownershipScope?.organizationId) {
             const context = await this.accessPolicy.contextFor(
                 { kind: 'user', userId },
                 ownershipScope,
             );
             const visible = await this.tasks.findVisibleById(taskId, context, ownershipScope);
-            if (visible) return visible;
+            if (visible) return { task: visible, owned: false };
         }
         throw new NotFoundException(`Task ${taskId} not found.`);
     }

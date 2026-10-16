@@ -6,8 +6,12 @@ import {
     type RecordListView,
     type VisibilityAggregate,
 } from '@ever-works/contracts';
+import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
+import { Mission } from '../entities/mission.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
+import { Task } from '../entities/task.entity';
 import { TaskApprover } from '../entities/task-approver.entity';
 import { TaskAssignee } from '../entities/task-assignee.entity';
 import { TaskReviewer } from '../entities/task-reviewer.entity';
@@ -17,7 +21,8 @@ import { TeamMember } from '../entities/team-member.entity';
 import { Tenant } from '../entities/tenant.entity';
 import { Work } from '../entities/work.entity';
 import { WorkMember } from '../entities/work-member.entity';
-import type { OwnershipScope } from '../database/ownership-scope';
+import { WorkProposal } from '../entities/work-proposal.entity';
+import { ownershipSqlPredicate, type OwnershipScope } from '../database/ownership-scope';
 import type { RecordAccessContext, VisibilityPrincipal } from './record-access.types';
 import { visibleToPredicate } from './visible-to';
 
@@ -69,7 +74,33 @@ export class RecordAccessPolicy {
         private readonly reviewers: Repository<TaskReviewer>,
         @InjectRepository(TaskWatcher)
         private readonly watchers: Repository<TaskWatcher>,
+        @InjectRepository(Task)
+        private readonly taskRows: Repository<Task>,
+        @InjectRepository(Goal)
+        private readonly goalRows: Repository<Goal>,
+        @InjectRepository(Mission)
+        private readonly missionRows: Repository<Mission>,
+        @InjectRepository(WorkProposal)
+        private readonly ideaRows: Repository<WorkProposal>,
+        @InjectRepository(Agent)
+        private readonly agentRows: Repository<Agent>,
     ) {}
+
+    /** The table of an aggregate. */
+    repositoryFor(aggregate: VisibilityAggregate): Repository<ObjectLiteral> {
+        switch (aggregate) {
+            case 'task':
+                return this.taskRows as unknown as Repository<ObjectLiteral>;
+            case 'goal':
+                return this.goalRows as unknown as Repository<ObjectLiteral>;
+            case 'mission':
+                return this.missionRows as unknown as Repository<ObjectLiteral>;
+            case 'idea':
+                return this.ideaRows as unknown as Repository<ObjectLiteral>;
+            case 'agent':
+                return this.agentRows as unknown as Repository<ObjectLiteral>;
+        }
+    }
 
     /** Normalize a `?view=` query value; unknown or missing = `mine`. */
     static view(value?: string | null): RecordListView {
@@ -170,6 +201,89 @@ export class RecordAccessPolicy {
         return qb.andWhere(predicate.clause, predicate.parameters);
     }
 
+    /**
+     * A list through `visibleTo(principal)` in the active scope — the shared / org tabs
+     * of goals, missions, ideas and agents. `refine` adds the caller's own filters; the
+     * order is the caller's (default `updatedAt DESC`), always ending on `id ASC` so
+     * offset pages never overlap.
+     */
+    async listVisible<T extends ObjectLiteral>(input: {
+        aggregate: VisibilityAggregate;
+        userId: string;
+        scope?: OwnershipScope | null;
+        view: RecordListView;
+        refine?: (qb: SelectQueryBuilder<T>, alias: string) => void;
+        orderBy?: { column: string; direction: 'ASC' | 'DESC' };
+        take?: number;
+        skip?: number;
+    }): Promise<{ rows: T[]; total: number }> {
+        const alias = 'rec';
+        const qb = await this.visibleQuery<T>(
+            this.repositoryFor(input.aggregate) as unknown as Repository<T>,
+            alias,
+            input.aggregate,
+            input.userId,
+            input.scope,
+            input.view,
+        );
+        input.refine?.(qb, alias);
+        const total = await qb.getCount();
+        const order = input.orderBy ?? { column: 'updatedAt', direction: 'DESC' as const };
+        qb.orderBy(`${alias}.${order.column}`, order.direction).addOrderBy(`${alias}.id`, 'ASC');
+        if (input.take !== undefined) qb.take(input.take);
+        if (input.skip !== undefined) qb.skip(input.skip);
+        return { rows: await qb.getMany(), total };
+    }
+
+    /**
+     * One row by id that the user may READ but does not own (the get-by-id fallback
+     * after the owner lookup 404s). `null` → the caller answers 404, so existence
+     * never leaks. Personal scope always answers `null`.
+     */
+    async findVisibleNotOwned<T extends ObjectLiteral>(input: {
+        aggregate: VisibilityAggregate;
+        userId: string;
+        id: string;
+        scope?: OwnershipScope | null;
+    }): Promise<T | null> {
+        if (!input.scope?.organizationId) return null;
+        const alias = 'rec';
+        const qb = await this.visibleQuery<T>(
+            this.repositoryFor(input.aggregate) as unknown as Repository<T>,
+            alias,
+            input.aggregate,
+            input.userId,
+            input.scope,
+            'shared-or-org',
+        );
+        qb.andWhere(`${alias}.id = :visRecordId`, { visRecordId: input.id });
+        qb.andWhere(`${alias}.userId <> :visNotOwner`, { visNotOwner: input.userId });
+        return qb.getOne();
+    }
+
+    private async visibleQuery<T extends ObjectLiteral>(
+        repository: Repository<T>,
+        alias: string,
+        aggregate: VisibilityAggregate,
+        userId: string,
+        scope: OwnershipScope | null | undefined,
+        view: RecordListView | 'shared-or-org',
+    ): Promise<SelectQueryBuilder<T>> {
+        const context = await this.contextFor({ kind: 'user', userId }, scope);
+        const qb = repository.createQueryBuilder(alias);
+        const predicate = visibleToPredicate({
+            alias,
+            aggregate,
+            context,
+            view: view === 'shared-or-org' ? 'organization' : view,
+            escape: (identifier) => qb.connection.driver.escape(identifier),
+        });
+        qb.where(predicate.clause, predicate.parameters);
+        const scopePredicate = ownershipSqlPredicate(alias, scope ?? undefined, 'visScope');
+        if (scopePredicate) qb.andWhere(scopePredicate.clause, scopePredicate.parameters);
+        return qb;
+    }
+
     /** Whether the user takes part in the task as one of `kinds`. */
     async isTaskParticipant(
         taskId: string,
@@ -179,17 +293,23 @@ export class RecordAccessPolicy {
         const checks: Array<Promise<number>> = [];
         if (kinds.includes('assignee')) {
             checks.push(
-                this.assignees.count({ where: { taskId, assigneeType: 'user', assigneeId: userId } }),
+                this.assignees.count({
+                    where: { taskId, assigneeType: 'user', assigneeId: userId },
+                }),
             );
         }
         if (kinds.includes('approver')) {
             checks.push(
-                this.approvers.count({ where: { taskId, approverType: 'user', approverId: userId } }),
+                this.approvers.count({
+                    where: { taskId, approverType: 'user', approverId: userId },
+                }),
             );
         }
         if (kinds.includes('reviewer')) {
             checks.push(
-                this.reviewers.count({ where: { taskId, reviewerType: 'user', reviewerId: userId } }),
+                this.reviewers.count({
+                    where: { taskId, reviewerType: 'user', reviewerId: userId },
+                }),
             );
         }
         if (kinds.includes('watcher')) {

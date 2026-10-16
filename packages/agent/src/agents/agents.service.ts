@@ -9,6 +9,7 @@ import {
     Optional,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
 import { SEAT_GUARD, type SeatGuard } from './seat-guard';
 import {
     AGENT_PERMISSIONS_DEFAULT,
@@ -278,6 +279,9 @@ export class AgentsService {
         @Optional()
         @Inject(SEAT_GUARD)
         private readonly seatGuard?: SeatGuard,
+        // Record visibility (EW-P1-3) — the shared / org tabs and the readable get.
+        // Appended LAST + @Optional(): absent means reads stay owner-only.
+        @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
 
     async list(
@@ -288,6 +292,20 @@ export class AgentsService {
         rows: AgentDto[];
         total: number;
     }> {
+        const view = filter.view ?? 'mine';
+        if (view !== 'mine' && this.accessPolicy) {
+            const context = await this.accessPolicy.contextFor(
+                { kind: 'user', userId },
+                ownershipScope,
+            );
+            const visible = await this.agents.findVisibleScoped(
+                context,
+                view,
+                filter,
+                ownershipScope,
+            );
+            return { rows: visible.rows.map(toAgentDto), total: visible.total };
+        }
         const { rows, total } = await this.agents.findByUserIdScoped(
             userId,
             filter,
@@ -299,6 +317,42 @@ export class AgentsService {
     async getOne(userId: string, id: string, ownershipScope?: OwnershipScope): Promise<AgentDto> {
         const agent = await this.requireOwned(userId, id, ownershipScope);
         return toAgentDto(agent);
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — the READ of one Agent: the owner exactly as
+     * {@link getOne}, or anyone `visibleTo(principal)` admits in the active
+     * Organization. Only `GET /api/agents/:id` uses it: every other route keeps
+     * {@link getOne} as its owner gate, so no write is widened.
+     */
+    async getReadable(
+        userId: string,
+        id: string,
+        ownershipScope?: OwnershipScope,
+    ): Promise<AgentDto> {
+        try {
+            return await this.getOne(userId, id, ownershipScope);
+        } catch (error) {
+            if (
+                !(error instanceof NotFoundException) ||
+                !this.accessPolicy ||
+                !ownershipScope?.organizationId
+            ) {
+                throw error;
+            }
+            const context = await this.accessPolicy.contextFor(
+                { kind: 'user', userId },
+                ownershipScope,
+            );
+            const shared = await this.agents.findVisibleNotOwned(
+                id,
+                userId,
+                context,
+                ownershipScope,
+            );
+            if (!shared) throw error;
+            return toAgentDto(shared);
+        }
     }
 
     async create(

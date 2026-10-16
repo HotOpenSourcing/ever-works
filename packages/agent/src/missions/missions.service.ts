@@ -5,6 +5,8 @@ import {
     NotFoundException,
     Optional,
 } from '@nestjs/common';
+import type { RecordListView } from '@ever-works/contracts';
+import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ILike, In, Repository, type FindOptionsWhere } from 'typeorm';
 import {
@@ -110,6 +112,8 @@ export interface UpdateMissionInput {
 }
 
 export interface ListMissionsFilter {
+    /** Record visibility (EW-P1-3) list tab: `mine` (default), `shared`, `organization`. */
+    view?: RecordListView;
     status?: MissionStatus;
     search?: string;
     limit?: number;
@@ -206,6 +210,9 @@ export class MissionsService {
         // call sites so an activity failure never fails the operation.
         @Optional()
         private readonly activityLog?: ActivityLogService,
+        // Record visibility (EW-P1-3) — the shared / org tabs and the readable get.
+        // Appended LAST + @Optional(): absent means reads stay owner-only.
+        @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
 
     /**
@@ -223,6 +230,32 @@ export class MissionsService {
         filter: ListMissionsFilter = {},
         scope?: OwnershipScope,
     ): Promise<MissionDto[]> {
+        const view = filter.view ?? 'mine';
+        if (view !== 'mine' && this.accessPolicy) {
+            const search = filter.search?.trim().toLowerCase();
+            const { rows } = await this.accessPolicy.listVisible<Mission>({
+                aggregate: 'mission',
+                userId,
+                scope,
+                view,
+                take: filter.limit,
+                skip: filter.offset,
+                refine: (qb, alias) => {
+                    if (filter.status) {
+                        qb.andWhere(`${alias}.status = :missionStatus`, {
+                            missionStatus: filter.status,
+                        });
+                    }
+                    if (search) {
+                        qb.andWhere(
+                            `(LOWER(${alias}.title) LIKE :missionSearch OR LOWER(${alias}.description) LIKE :missionSearch)`,
+                            { missionSearch: `%${search}%` },
+                        );
+                    }
+                },
+            });
+            return rows.map(toMissionDto);
+        }
         const baseWhere = (scope ? ownershipWhere<Mission>(userId, scope) : [{ userId }]).map(
             (branch) => ({
                 ...branch,
@@ -261,6 +294,32 @@ export class MissionsService {
     ): Promise<MissionDto> {
         const row = await this.findOrThrow(userId, missionId, scope);
         return toMissionDto(row);
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — the READ of one Mission: the owner exactly as
+     * {@link getForUser}, or anyone `visibleTo(principal)` admits in the active
+     * Organization. Only `GET /api/me/missions/:id` uses it; every other route keeps
+     * {@link getForUser} / `findOrThrow` as its owner gate, so no write is widened.
+     */
+    async getReadable(
+        userId: string,
+        missionId: string,
+        scope?: OwnershipScope,
+    ): Promise<MissionDto> {
+        try {
+            return await this.getForUser(userId, missionId, scope);
+        } catch (error) {
+            if (!(error instanceof NotFoundException) || !this.accessPolicy) throw error;
+            const shared = await this.accessPolicy.findVisibleNotOwned<Mission>({
+                aggregate: 'mission',
+                userId,
+                id: missionId,
+                scope,
+            });
+            if (!shared) throw error;
+            return toMissionDto(shared);
+        }
     }
 
     /**
