@@ -327,7 +327,7 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 		expect(scratch.removed.some((path) => path.startsWith(SCRATCH))).toBe(true);
 	});
 
-	it('codex is unchanged: no config written, no MCP flag, no connector switch (documented gap)', async () => {
+	it('codex runs with --ignore-user-config (control 16): no owner config.toml, no MCP config file, no connector switch', async () => {
 		stub.dropIsolation = false;
 		const scratch = scratchFs();
 		const { commands, envs, spawnFn } = recordingSpawn();
@@ -337,10 +337,72 @@ describe('runAgentTaskJob — MCP isolation from the machine owner’s servers',
 			io({ spawnFn, scratchFs: scratch.fs })
 		);
 
-		expect(commands[0]).toContain(' exec --json ');
+		expect(commands[0]).toContain(' exec --ignore-user-config --json ');
 		expect(commands[0]).not.toContain('mcp');
 		expect(scratch.writes.some((write) => write.path.endsWith('mcp.json'))).toBe(false);
 		expect(spellings(envs[0], 'ENABLE_CLAUDEAI_MCP_SERVERS')).toEqual([]);
+	});
+
+	it("keeps only the owner's Codex sandbox mode and model defaults, read from CODEX_HOME/config.toml (control 16)", async () => {
+		stub.dropIsolation = false;
+		const scratch = scratchFs();
+		const { commands, spawnFn } = recordingSpawn();
+		const reads: string[] = [];
+		const ownerConfig = [
+			'model = "gpt-6-astra"',
+			'model_reasoning_effort = "high"',
+			'notify = ["notify-send", "codex"]',
+			'[mcp_servers.node_repl]',
+			'command = "node_repl.exe"',
+			'[windows]',
+			'sandbox = "elevated"'
+		].join('\n');
+
+		await runAgentTaskJob(
+			job({ ...basePayload, execution: { ...basePayload.execution, provider: 'codex' } }),
+			io({
+				spawnFn,
+				scratchFs: scratch.fs,
+				parentEnv: { CODEX_HOME: '/owner/codex-home' },
+				sessionConfigFs: {
+					readFile: async (path: string) => {
+						reads.push(path.replace(/\\/g, '/'));
+						return path.replace(/\\/g, '/').endsWith('/owner/codex-home/config.toml') ? ownerConfig : null;
+					}
+				}
+			})
+		);
+
+		expect(reads).toContain('/owner/codex-home/config.toml');
+		expect(commands[0]).toContain(' exec --ignore-user-config --json ');
+		expect(commands[0]).toContain('-c windows.sandbox=elevated');
+		expect(commands[0]).toContain('-c model_reasoning_effort=high');
+		expect(commands[0]).toContain('-m gpt-6-astra');
+		expect(commands[0]).not.toContain('node_repl');
+		expect(commands[0]).not.toContain('notify');
+	});
+
+	it('a Codex config that cannot be read keeps nothing, and the run is STILL isolated', async () => {
+		stub.dropIsolation = false;
+		const scratch = scratchFs();
+		const { commands, spawnFn } = recordingSpawn();
+
+		await runAgentTaskJob(
+			job({ ...basePayload, execution: { ...basePayload.execution, provider: 'codex' } }),
+			io({
+				spawnFn,
+				scratchFs: scratch.fs,
+				parentEnv: { CODEX_HOME: '/owner/codex-home' },
+				sessionConfigFs: {
+					readFile: async () => {
+						throw new Error('EACCES');
+					}
+				}
+			})
+		);
+
+		expect(commands[0]).toContain(' exec --ignore-user-config --json ');
+		expect(commands[0]).not.toContain('windows.sandbox');
 	});
 });
 

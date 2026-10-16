@@ -64,6 +64,7 @@ Options:
   -C, --cd <DIR>               Tell the agent to use the specified directory as its working root
       --add-dir <DIR>          Additional directories that should be writable
       --json                   Print events to stdout as JSONL
+      --ignore-user-config     Do not load CODEX_HOME/config.toml; auth still uses CODEX_HOME
   -h, --help                   Print help
 `;
 

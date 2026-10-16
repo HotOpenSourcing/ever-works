@@ -62,7 +62,7 @@ export const MODEL_CLI_REQUIRED_FLAGS: Readonly<Record<ModelCliProvider, readonl
 	// bridge's. A CLI without them cannot run fleet work at all, so `doctor`
 	// must say INCOMPATIBLE, not "runs that need them will fail".
 	'claude-code': ['-p', '--output-format', '--permission-mode', '--mcp-config', '--strict-mcp-config'],
-	codex: ['--json', '--sandbox', '-C']
+	codex: ['--json', '--sandbox', '-C', '--ignore-user-config']
 };
 
 /**

@@ -79,6 +79,8 @@ import {
 	ModelCliCommandError,
 	modelCliMcpIsolationEnv,
 	parseModelCliResult,
+	readCodexUserSettings,
+	type CodexUserSettings,
 	redactCommandResult,
 	type ModelCliPaths,
 	MODEL_CLI_EMPTY_MCP_CONFIG,
@@ -1361,6 +1363,11 @@ async function runModelStep(
 		// BEFORE building its command line. A probe that cannot answer drops
 		// nothing — the command is then exactly what it always was.
 		const droppedFlags = await optionalFlagsToDrop(jobId, execution, executable, io);
+		// Control 16: every Codex run starts with `--ignore-user-config`, and
+		// only the owner's sandbox mode and model defaults are kept (see
+		// CodexUserSettings). Read once per job; a config that cannot be read
+		// keeps nothing, which never weakens the isolation itself.
+		const codexUserSettings = execution.provider === 'codex' ? await readOwnerCodexSettings(jobId, io) : undefined;
 		// ONE model invocation: write the prompt, build and gate the command,
 		// spawn, parse. Run once for a fresh session — or, slice AU, once with
 		// `--resume` and, only when the CLI could not open that session at
@@ -1382,6 +1389,7 @@ async function runModelStep(
 					...(mounts && mounts.length > 0 ? { mounts } : {}),
 					...(bridge.cli ? { mcp: bridge.cli } : {}),
 					...(emptyMcpConfigPath ? { emptyMcpConfigPath } : {}),
+					...(codexUserSettings ? { codexUserSettings } : {}),
 					...(resumeSessionId ? { resumeSessionId } : {}),
 					...(io.platform ? { platform: io.platform } : {}),
 					...(streamClaude ? { stream: true } : {}),
@@ -1837,6 +1845,35 @@ export function resolveRealHomeDir(io: Pick<AgentTaskIo, 'parentEnv' | 'platform
 		}
 	}
 	return homedir();
+}
+
+/**
+ * Control 16: the owner Codex settings a fleet run keeps under
+ * `--ignore-user-config`, read from `$CODEX_HOME/config.toml` (default
+ * `<real home>/.codex`). Reads only, and only the three keys
+ * {@link readCodexUserSettings} knows; their VALUES are bare identifiers by
+ * construction. Unwired reader, absent file or read error: `{}` (Codex's own
+ * defaults, the run an owner with no config gets).
+ */
+async function readOwnerCodexSettings(jobId: string, io: AgentTaskIo): Promise<CodexUserSettings> {
+	const read = io.sessionConfigFs?.readFile?.bind(io.sessionConfigFs);
+	if (!read) return {};
+	const env = io.parentEnv ?? process.env;
+	const codexHomeKey = Object.keys(env).find((name) => name.toUpperCase() === 'CODEX_HOME');
+	const configuredHome = codexHomeKey === undefined ? undefined : env[codexHomeKey];
+	const codexHome =
+		typeof configuredHome === 'string' && configuredHome.trim()
+			? configuredHome.trim()
+			: join(resolveRealHomeDir(io), '.codex');
+	try {
+		return readCodexUserSettings(await read(join(codexHome, 'config.toml')));
+	} catch (error) {
+		io.logger?.warn(
+			`[fleet-node] job ${jobId}: could not read the Codex config to keep its sandbox and model defaults; the ` +
+				`run uses Codex's own defaults (still under --ignore-user-config): ${describeContainmentError(error)}`
+		);
+		return {};
+	}
 }
 
 function describeContainmentError(error: unknown): string {
