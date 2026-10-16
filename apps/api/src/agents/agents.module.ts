@@ -646,13 +646,25 @@ async function assertRealWriteTarget(
                         ? subject.trim().slice(0, 200)
                         : `Inbound email from ${from}`;
                     const body = bodyText?.trim() ? bodyText.trim().slice(0, 8000) : '';
-                    // EW-P4-3 — the Task lives in the receiving address's
-                    // tenant / organization (a public webhook has no request
-                    // scope). An address with no organization keeps the
-                    // personal scope, exactly as before.
+                    // EW-P4-3 — a public webhook has no request scope, so the
+                    // Task is placed explicitly: where its assignee, the
+                    // receiving Agent, lives. Not the address's scope: an
+                    // address may be bound to an Agent of another scope (a
+                    // personal Agent on an org address), and `addAssignee`
+                    // then could not reach the Agent from the Task (review on
+                    // #2612). The address's tenant / organization (`tenantId`
+                    // / `organizationId`) is still stamped on the email row.
+                    // An Agent that cannot be resolved keeps the old,
+                    // unscoped create.
+                    void tenantId;
+                    void organizationId;
+                    const agent = await agents.findByIdAndUser(agentId, userId).catch(() => null);
                     const scope =
-                        tenantId || organizationId
-                            ? { tenantId: tenantId ?? null, organizationId: organizationId ?? null }
+                        agent && (agent.tenantId || agent.organizationId)
+                            ? {
+                                  tenantId: agent.tenantId ?? null,
+                                  organizationId: agent.organizationId ?? null,
+                              }
                             : undefined;
                     const data = {
                         title,

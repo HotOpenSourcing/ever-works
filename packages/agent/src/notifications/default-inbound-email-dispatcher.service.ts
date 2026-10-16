@@ -36,8 +36,62 @@ export const MAX_INBOUND_ATTACHMENTS = 20;
 /** EW-P4-3 — most decoded attachment bytes stored per inbound message. */
 export const MAX_INBOUND_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 
-/** EW-P4-3 — most bytes of provider metadata kept on an inbound row. */
-export const MAX_INBOUND_METADATA_CHARS = 32_000;
+/**
+ * EW-P4-3 — most UTF-8 bytes of provider metadata kept on an inbound row.
+ * Bytes, not characters: `simple-json` is a MySQL `TEXT` (65,535 bytes).
+ */
+export const MAX_INBOUND_METADATA_BYTES = 32_000;
+
+/**
+ * EW-P4-3 — most UTF-8 bytes of the serialized attachment list on a row. The
+ * list is sender-driven (one record per attachment, refused ones included),
+ * and `simple-json` is a MySQL `TEXT` (65,535 bytes).
+ */
+export const MAX_INBOUND_ATTACHMENT_LIST_BYTES = 48_000;
+
+/** EW-P4-3 — most attachments listed one by one; the rest are summed in one record. */
+export const MAX_LISTED_INBOUND_ATTACHMENTS = 50;
+
+/** EW-P4-3 — most `Cc` recipients kept on an inbound row. */
+export const MAX_INBOUND_CC = 100;
+
+/** UTF-8 size of `value` serialized as JSON; `Infinity` when it cannot be. */
+function jsonBytes(value: unknown): number {
+    try {
+        return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+    } catch {
+        return Number.POSITIVE_INFINITY;
+    }
+}
+
+/**
+ * EW-P4-3 — the attachment list as stored: at most
+ * {@link MAX_LISTED_INBOUND_ATTACHMENTS} records and
+ * {@link MAX_INBOUND_ATTACHMENT_LIST_BYTES} serialized bytes; whatever does
+ * not fit is summed in one trailing record, so the count is never lost.
+ */
+export function boundAttachmentRecords(
+    records: EmailMessageAttachmentRecord[],
+): EmailMessageAttachmentRecord[] {
+    const summary = (rest: EmailMessageAttachmentRecord[]): EmailMessageAttachmentRecord => ({
+        filename: `${rest.length} more attachment${rest.length === 1 ? '' : 's'}`,
+        mimeType: 'application/octet-stream',
+        size: rest.reduce((total, record) => total + (record.size || 0), 0),
+        cid: null,
+        stored: false,
+        uploadId: null,
+        reason: `not listed: ${rest.filter((r) => r.stored).length} of them stored`,
+    });
+    let kept = records.slice(0, MAX_LISTED_INBOUND_ATTACHMENTS);
+    const fits = (list: EmailMessageAttachmentRecord[]): boolean =>
+        jsonBytes(list) <= MAX_INBOUND_ATTACHMENT_LIST_BYTES;
+    const withSummary = (list: EmailMessageAttachmentRecord[]): EmailMessageAttachmentRecord[] =>
+        list.length < records.length ? [...list, summary(records.slice(list.length))] : list;
+    while (kept.length > 0 && !fits(withSummary(kept))) {
+        kept = kept.slice(0, kept.length - 1);
+    }
+    return withSummary(kept);
+}
 
 /**
  * EW-P4-3 — the provider metadata kept on an inbound row: as given when it
@@ -49,13 +103,7 @@ export function boundInboundMetadata(
     metadata: Readonly<Record<string, unknown>> | undefined,
 ): Record<string, unknown> | null {
     if (!metadata || typeof metadata !== 'object') return null;
-    const fits = (value: unknown): boolean => {
-        try {
-            return JSON.stringify(value).length <= MAX_INBOUND_METADATA_CHARS;
-        } catch {
-            return false;
-        }
-    };
+    const fits = (value: unknown): boolean => jsonBytes(value) <= MAX_INBOUND_METADATA_BYTES;
     if (fits(metadata)) return { ...metadata };
     const { headers: _headers, ...rest } = metadata as Record<string, unknown>;
     if (fits(rest)) return { ...rest, headersOmitted: true };
@@ -71,6 +119,11 @@ function safeFilename(name: unknown): string {
         .trim()
         .slice(0, 255);
     return cleaned || 'attachment';
+}
+
+/** A provider-given URL, bounded (it is listed, never fetched). */
+function boundedUrl(url: unknown): string | null {
+    return typeof url === 'string' && url ? url.slice(0, 1024) : null;
 }
 
 /** A sender-written MIME type, lower-cased and bounded (the store validates it). */
@@ -483,13 +536,14 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
                     ...base,
                     stored: true,
                     uploadId: stored.uploadId,
-                    url: stored.url ?? null,
+                    url: boundedUrl(stored.url),
                 });
             } catch (error) {
                 refuse(describeRefusal(error));
             }
         }
-        return records;
+        // Bounded for the column (a sender can attach hundreds of tiny files).
+        return boundAttachmentRecords(records);
     }
 
     private async persistMessage(
@@ -513,7 +567,7 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
             // EW-P4-3 — Cc, provider metadata and attachments are kept, and the
             // row is stamped with the receiving address's tenant / organization
             // (a public webhook has no request scope to stamp it from).
-            ccAddresses: payload.cc?.length ? [...payload.cc] : null,
+            ccAddresses: payload.cc?.length ? payload.cc.slice(0, MAX_INBOUND_CC) : null,
             metadata: boundInboundMetadata(payload.metadata),
             attachments,
             tenantId: address.tenantId ?? null,
