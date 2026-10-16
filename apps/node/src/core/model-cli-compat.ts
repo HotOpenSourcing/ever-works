@@ -26,7 +26,9 @@ import { parseCliVersion } from './telemetry-probe';
  * drives), from which the advertised `--flags` are read. Both answers are
  * cached per binary PATH + modification time + size, so a beat or a run
  * costs a `stat`, not two process spawns, and an in-place CLI upgrade is
- * re-probed on the very next ask.
+ * re-probed on the very next ask. An upgrade BEHIND a stable wrapper (an
+ * npm shim such as `claude.cmd`) does not change the stamp, so a complete
+ * answer is also re-asked after {@link MODEL_CLI_COMPAT_STAMPED_MAX_AGE_MS}.
  *
  * ## The rule that keeps it honest
  *
@@ -128,10 +130,29 @@ export interface ModelCliCompatibilityProbeOptions {
 	 * failure). Default 1 minute, whatever the file stamp says.
 	 */
 	incompleteRetryMs?: number;
+	/**
+	 * How long a COMPLETE answer from a stamped binary is reused while its
+	 * file does not change. Default 1 hour (#2598 b).
+	 */
+	stampedMaxAgeMs?: number;
 }
 
 /** Default lifetime of an answer for a binary whose file could not be stamped. */
 export const MODEL_CLI_COMPAT_UNSTAMPED_TTL_MS = 10 * 60_000;
+
+/**
+ * Default maximum age of a complete answer from a STAMPED binary (#2598 b).
+ *
+ * The stamp (mtime + size) sees an in-place upgrade of the file it names,
+ * but not one BEHIND a stable wrapper. That is the common install: the
+ * pinned `claude.cmd` / `codex.cmd` (or `/usr/local/bin/claude`) is an npm
+ * shim that never changes when `npm i -g @anthropic-ai/claude-code`
+ * replaces the package it launches. Without a ceiling, the node would report
+ * the old version and keep the old flag list until the daemon restarted:
+ * still passing a removed flag, or dropping a newly supported one. Re-asking
+ * once an hour costs two short CLI invocations.
+ */
+export const MODEL_CLI_COMPAT_STAMPED_MAX_AGE_MS = 60 * 60_000;
 
 /**
  * Default lifetime of an answer the binary did not fully give (review): a
@@ -141,10 +162,9 @@ export const MODEL_CLI_COMPAT_UNSTAMPED_TTL_MS = 10 * 60_000;
 export const MODEL_CLI_COMPAT_INCOMPLETE_RETRY_MS = 60_000;
 
 interface CacheEntry {
+	/** Provider + path + file stamp: a changed file is a cache miss at once. */
 	key: string;
-	/** True when the answer may be kept until the binary's file changes. */
-	permanent: boolean;
-	/** How long a non-permanent answer is reused. */
+	/** How long this answer is reused while the key holds. */
 	ttlMs: number;
 	probedAt: number;
 	result: ModelCliCompatibility;
@@ -163,11 +183,13 @@ export class ModelCliCompatibilityProbe {
 	private readonly now: () => number;
 	private readonly unstampedTtlMs: number;
 	private readonly incompleteRetryMs: number;
+	private readonly stampedMaxAgeMs: number;
 
 	constructor(private readonly options: ModelCliCompatibilityProbeOptions) {
 		this.now = options.now ?? (() => Date.now());
 		this.unstampedTtlMs = options.unstampedTtlMs ?? MODEL_CLI_COMPAT_UNSTAMPED_TTL_MS;
 		this.incompleteRetryMs = options.incompleteRetryMs ?? MODEL_CLI_COMPAT_INCOMPLETE_RETRY_MS;
+		this.stampedMaxAgeMs = options.stampedMaxAgeMs ?? MODEL_CLI_COMPAT_STAMPED_MAX_AGE_MS;
 	}
 
 	/** One pinned binary. */
@@ -175,7 +197,7 @@ export class ModelCliCompatibilityProbe {
 		const stamp = await this.stamp(executable);
 		const key = `${provider}|${executable}|${stamp ? `${stamp.mtimeMs}:${stamp.size}` : 'unstamped'}`;
 		const cached = this.cache.get(`${provider}|${executable}`);
-		if (cached && cached.key === key && (cached.permanent || this.now() - cached.probedAt < cached.ttlMs)) {
+		if (cached && cached.key === key && this.now() - cached.probedAt < cached.ttlMs) {
 			return cached.result;
 		}
 		const pending = this.inFlight.get(key);
@@ -184,11 +206,16 @@ export class ModelCliCompatibilityProbe {
 			.then(({ result, answered }) => {
 				this.cache.set(`${provider}|${executable}`, {
 					key,
-					// Only a COMPLETE answer from a stamped file is kept until the
-					// file changes. An incomplete one is retried soon, and an
-					// unstamped one on the slower clock.
-					permanent: answered && stamp !== null,
-					ttlMs: answered ? this.unstampedTtlMs : this.incompleteRetryMs,
+					// A COMPLETE answer from a stamped file is kept until the file
+					// changes or, at the latest, for `stampedMaxAgeMs` (an upgrade
+					// behind a stable wrapper does not change the stamp). An
+					// incomplete one is retried soon, and an unstamped one on the
+					// ten-minute clock.
+					ttlMs: !answered
+						? this.incompleteRetryMs
+						: stamp !== null
+							? this.stampedMaxAgeMs
+							: this.unstampedTtlMs,
 					probedAt: this.now(),
 					result
 				});
