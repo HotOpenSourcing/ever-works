@@ -381,6 +381,49 @@
 			"minProperties": 1,
 			"additionalProperties": false
 		},
+		"InboundEmail": {
+			"description": "POST /email/inbound (P4, EW-P4-1; email:write, opt-in). Pushes an email a Gauzy mailbox received to an Ever Works agent of the pinned organization: stored as an inbound email_messages row on the agent's own inbound address and dispatched through the agent's inbound assignment exactly like provider mail (task-spawn or conversation; RFC threading joins an existing thread). Idempotency-Key required; a repeated Message-ID (same key and organization) answers 200 with the message already delivered. An agent without an active inbound assignment, or whose inbound address is not an address of the pinned organization, answers 422 domain_rule. Attachments are recorded with their url and never fetched (CR-11).",
+			"type": "object",
+			"required": ["agentId", "message"],
+			"properties": {
+				"agentId": { "$ref": "common.schema.json#/$defs/Uuid" },
+				"message": {
+					"type": "object",
+					"required": ["from", "to", "subject"],
+					"properties": {
+						"from": { "type": "string", "minLength": 3, "maxLength": 254 },
+						"to": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 254 } },
+						"cc": { "type": "array", "maxItems": 100, "items": { "type": "string", "maxLength": 254 } },
+						"subject": { "type": "string", "maxLength": 998 },
+						"text": { "type": ["string", "null"], "maxLength": 2000000 },
+						"html": { "type": ["string", "null"], "maxLength": 2000000 },
+						"messageId": { "type": ["string", "null"], "maxLength": 255 },
+						"inReplyTo": { "type": ["string", "null"], "maxLength": 255 },
+						"references": {
+							"type": "array",
+							"maxItems": 100,
+							"items": { "type": "string", "maxLength": 255 }
+						},
+						"attachments": {
+							"type": "array",
+							"maxItems": 20,
+							"items": {
+								"type": "object",
+								"required": ["filename", "contentType"],
+								"properties": {
+									"filename": { "type": "string", "minLength": 1, "maxLength": 255 },
+									"contentType": { "type": "string", "minLength": 1, "maxLength": 255 },
+									"url": { "type": ["string", "null"], "maxLength": 2048 }
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					"additionalProperties": false
+				}
+			},
+			"additionalProperties": false
+		},
 		"PutLink": {
 			"description": "PUT /links/:entityType/:entityId. `source` comes from the key's integrationKind (ever-gauzy → gauzy).",
 			"type": "object",
