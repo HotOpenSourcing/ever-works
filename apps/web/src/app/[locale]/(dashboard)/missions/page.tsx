@@ -86,6 +86,8 @@ export default async function MissionsPage({
 
     return (
         <MissionsList
+            key={tab}
+            tab={tab}
             missions={pageMissions}
             loadError={loadError}
             filters={{ status, search }}

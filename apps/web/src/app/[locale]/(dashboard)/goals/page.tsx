@@ -77,6 +77,8 @@ export default async function GoalsPage({ searchParams }: { searchParams: GoalsS
 
     return (
         <GoalsList
+            key={tab}
+            tab={tab}
             goals={pageGoals}
             loadError={loadError}
             filters={{ status, archived }}

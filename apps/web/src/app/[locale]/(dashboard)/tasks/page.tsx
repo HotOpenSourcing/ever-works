@@ -1,7 +1,12 @@
 import type { Metadata } from 'next';
 import { Suspense } from 'react';
 import { RecordViewTabs } from '@/components/record-visibility';
-import { RECORD_TAB_PARAM, parseRecordTab, type RecordListView } from '@/lib/record-visibility';
+import {
+    RECORD_TAB_PARAM,
+    parseRecordTab,
+    withRecordTab,
+    type RecordListView,
+} from '@/lib/record-visibility';
 import { cookies } from 'next/headers';
 import { getTranslations } from 'next-intl/server';
 import { ListChecks, Plus, Search } from 'lucide-react';
@@ -267,7 +272,11 @@ export default async function TasksPage({ searchParams }: { searchParams: TasksS
                     <Button type="submit" size="sm">
                         {t('list.filter.apply')}
                     </Button>
-                    <Button href={ROUTES.DASHBOARD_TASKS} size="sm" variant="ghost">
+                    <Button
+                        href={withRecordTab(ROUTES.DASHBOARD_TASKS, tab)}
+                        size="sm"
+                        variant="ghost"
+                    >
                         {t('list.filter.reset')}
                     </Button>
                 </div>

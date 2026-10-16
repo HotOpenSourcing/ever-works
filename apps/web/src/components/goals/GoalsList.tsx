@@ -1,5 +1,6 @@
 'use client';
 
+import { RECORD_TAB_PARAM, withRecordTab, type RecordListView } from '@/lib/record-visibility';
 import { useEffect, useState, type ReactNode } from 'react';
 import { Gauge, Plus } from 'lucide-react';
 import { useTranslations } from 'next-intl';
@@ -13,6 +14,8 @@ import type { Goal, GoalStatus } from '@/lib/api/goals';
 const GOAL_STATUSES: GoalStatus[] = ['draft', 'active', 'paused', 'completed'];
 
 interface GoalsListProps {
+    /** Record visibility (EW-P1-3): the active tab, kept by the filter form and Reset. */
+    tab?: RecordListView;
     /** Record visibility (EW-P1-3): the Mine | Shared with me | Organization tabs. */
     tabs?: ReactNode;
     goals: Goal[];
@@ -49,6 +52,7 @@ export function GoalsList({
     archiveHrefs,
     pagination,
     tabs,
+    tab = 'mine',
 }: GoalsListProps) {
     const t = useTranslations('dashboard.goalsPage');
     const [statusFilter, setStatusFilter] = useState(filters?.status ?? '');
@@ -105,6 +109,9 @@ export function GoalsList({
 
             <form className="mb-5 mt-8 flex flex-col gap-2 @lg/main:flex-row @lg/main:items-end">
                 {archived ? <input type="hidden" name="archived" value="true" /> : null}
+                {tab !== 'mine' ? (
+                    <input type="hidden" name={RECORD_TAB_PARAM} value={tab} />
+                ) : null}
                 <div className="min-w-40">
                     <span className="block text-xs text-text-secondary dark:text-text-secondary-dark mb-1">
                         {t('filterBar.status')}
@@ -128,7 +135,7 @@ export function GoalsList({
                     <Button type="submit" size="sm">
                         {t('filterBar.apply')}
                     </Button>
-                    <Button href="/goals" size="sm" variant="ghost">
+                    <Button href={withRecordTab('/goals', tab)} size="sm" variant="ghost">
                         {t('filterBar.reset')}
                     </Button>
                 </div>

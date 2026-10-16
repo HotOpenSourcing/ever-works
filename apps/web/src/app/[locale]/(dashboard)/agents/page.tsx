@@ -70,7 +70,12 @@ export default async function AgentsPage({
             <Suspense fallback={null}>
                 <RecordViewTabs />
             </Suspense>
-            <AgentsList agents={result.data} templates={templates} userTemplates={userTemplates} />
+            <AgentsList
+                key={tab}
+                agents={result.data}
+                templates={templates}
+                userTemplates={userTemplates}
+            />
         </div>
     );
 }

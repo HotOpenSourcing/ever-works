@@ -1,5 +1,6 @@
 'use client';
 
+import { RECORD_TAB_PARAM, withRecordTab, type RecordListView } from '@/lib/record-visibility';
 import { useState, useTransition, useEffect, type ReactNode } from 'react';
 import { HelpLink } from '@/components/help/HelpLink';
 import { Lightbulb, Settings as SettingsIcon, Search, PenLine } from 'lucide-react';
@@ -71,6 +72,8 @@ const IDEA_PLACEHOLDERS: ReadonlyArray<string> = [
 ];
 
 interface IdeasPageClientProps {
+    /** Record visibility (EW-P1-3): the active tab, kept by the filter form and Reset. */
+    tab?: RecordListView;
     /** Record visibility (EW-P1-3): the Mine | Shared with me | Organization tabs. */
     tabs?: ReactNode;
     initialIdeas: WorkProposal[];
@@ -101,6 +104,7 @@ export function IdeasPageClient({
     loadError = null,
     matchedWorkIds = {},
     tabs,
+    tab = 'mine',
     filters,
     pagination,
 }: IdeasPageClientProps) {
@@ -266,6 +270,9 @@ export function IdeasPageClient({
             </div>
 
             <form className="mb-5 flex flex-col gap-2 @lg/main:flex-row @lg/main:items-end">
+                {tab !== 'mine' ? (
+                    <input type="hidden" name={RECORD_TAB_PARAM} value={tab} />
+                ) : null}
                 <label className="flex-1 min-w-0">
                     <span className="block text-xs text-text-secondary dark:text-text-secondary-dark mb-1">
                         {t('filterBar.search')}
@@ -299,7 +306,7 @@ export function IdeasPageClient({
                         {t('filterBar.apply')}
                     </Button>
                     <Link
-                        href={ROUTES.DASHBOARD_IDEAS}
+                        href={withRecordTab(ROUTES.DASHBOARD_IDEAS, tab)}
                         className="inline-flex h-9 items-center justify-center rounded-md px-3 text-sm font-medium text-text dark:text-text-dark hover:bg-surface-secondary dark:hover:bg-surface-secondary-dark"
                     >
                         {t('filterBar.reset')}

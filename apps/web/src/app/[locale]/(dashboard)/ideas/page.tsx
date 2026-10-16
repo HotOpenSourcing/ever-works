@@ -124,6 +124,8 @@ export default async function IdeasPage({ searchParams }: { searchParams: IdeasS
 
     return (
         <IdeasPageClient
+            key={tab}
+            tab={tab}
             initialIdeas={pageIdeas}
             loadError={loadError}
             matchedWorkIds={matchIdeasToWorks(pageIdeas, works)}
