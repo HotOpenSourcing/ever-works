@@ -14,7 +14,7 @@ import {
 import { TaskRepository } from '../database/repositories/task.repository';
 import { AgentRunRepository } from '../database/repositories/agent-run.repository';
 import { ownershipScopeOf, type OwnershipScope } from '../database/ownership-scope';
-import type { TaskChatMessage } from '../entities/task-chat-message.entity';
+import { TaskChatMessage } from '../entities/task-chat-message.entity';
 import type { Task, TaskAuthorType, TaskExternalAuthor } from '../entities/task.entity';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
@@ -23,6 +23,8 @@ import { AGENT_CHAT_REPLY_DISPATCHER, type AgentChatReplyDispatcher } from './ta
 import { RUN_STEERING_PORT, type RunSteeringPort } from './run-steering-port';
 import { isAgentReviewRunScope } from './task-agent-review';
 import { RunDispatchGateService } from '../agents/run-dispatch-gate.service';
+import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
+import { toTaskCommentDto } from '../domain-events/domain-event-snapshots';
 
 /**
  * Tasks feature — Phase 13.2.
@@ -96,6 +98,10 @@ export class TaskChatService {
         // Appended LAST + @Optional() per the positional-spec arity rule;
         // without it the path behaves exactly as it did before.
         @Optional() private readonly dispatchGate?: RunDispatchGateService,
+        // Domain events (EW-P1-1 B2) — `task.comment.created` / `.updated`,
+        // recorded in the same transaction as the message write. Appended
+        // LAST + @Optional (positional-spec arity rule).
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     async list(
@@ -119,7 +125,7 @@ export class TaskChatService {
 
         const mentions = this.parseMentions(input.body, lookups);
 
-        const row = await this.messages.create({
+        const data: Partial<TaskChatMessage> = {
             taskId: task.id,
             authorType: input.authorType,
             authorId: input.authorId,
@@ -131,7 +137,31 @@ export class TaskChatService {
                 input.authorType === 'integration' && input.externalAuthor
                     ? input.externalAuthor
                     : null,
-        });
+        };
+        const publisher = this.domainEvents;
+        const row = publisher
+            ? await publisher.transaction(async (manager) => {
+                  const created = await this.messages.create(data, manager);
+                  await publisher.child(
+                      manager,
+                      'task',
+                      task.id,
+                      'task.comment.created',
+                      toTaskCommentDto(created, task.organizationId) as unknown as Record<
+                          string,
+                          unknown
+                      >,
+                      {
+                          changedFields: ['comments'],
+                          actor:
+                              input.authorType === 'agent'
+                                  ? { type: 'agent', id: input.authorId, label: null }
+                                  : undefined,
+                      },
+                  );
+                  return created;
+              })
+            : await this.messages.create(data);
 
         // Materialize KB mentions for the Related panel — dedupe on
         // (taskId, kbDocumentId).
@@ -321,7 +351,7 @@ export class TaskChatService {
         const msg = await this.messages.findById(messageId);
         if (!msg) throw new NotFoundException(`Chat message ${messageId} not found.`);
 
-        await this.requireOwnedTask(userId, msg.taskId, ownershipScope);
+        const ownedTask = await this.requireOwnedTask(userId, msg.taskId, ownershipScope);
 
         // Authorship — only the original author can edit (when author
         // is a user; agent-authored messages are not user-editable).
@@ -344,11 +374,36 @@ export class TaskChatService {
         // intent.
         const reparsed = this.parseMentions(newBody, lookups);
 
-        await this.messages.updateBodyAndMentions(
-            messageId,
-            newBody,
-            reparsed.records.length > 0 ? reparsed.records : null,
-        );
+        const nextMentions = reparsed.records.length > 0 ? reparsed.records : null;
+        const publisher = this.domainEvents;
+        if (publisher) {
+            await publisher.transaction(async (manager) => {
+                await this.messages.updateBodyAndMentions(
+                    messageId,
+                    newBody,
+                    nextMentions,
+                    manager,
+                );
+                const updated = await manager
+                    .getRepository(TaskChatMessage)
+                    .findOne({ where: { id: messageId } });
+                if (updated) {
+                    await publisher.child(
+                        manager,
+                        'task',
+                        msg.taskId,
+                        'task.comment.updated',
+                        toTaskCommentDto(updated, ownedTask.organizationId) as unknown as Record<
+                            string,
+                            unknown
+                        >,
+                        { changedFields: ['comments'], previous: { body: msg.body } },
+                    );
+                }
+            });
+        } else {
+            await this.messages.updateBodyAndMentions(messageId, newBody, nextMentions);
+        }
 
         // Re-materialize KB mentions. We do NOT delete prior rows —
         // `task_kb_mentions` is task-scoped (not message-scoped), so

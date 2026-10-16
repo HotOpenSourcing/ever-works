@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { Agent } from '../entities/agent.entity';
 import { AgentAttachment } from '../entities/agent-attachment.entity';
 import { Work } from '../entities/work.entity';
@@ -69,6 +70,8 @@ import { FacadesModule } from '../facades/facades.module';
  */
 @Module({
     imports: [
+        // Domain events (EW-P1-1 B2) — the publisher AgentsService records `agent.*` through.
+        DomainEventsModule,
         TypeOrmModule.forFeature([
             Agent,
             AgentAttachment,
