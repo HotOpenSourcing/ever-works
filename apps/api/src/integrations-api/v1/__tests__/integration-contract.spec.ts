@@ -33,6 +33,14 @@ import {
     IntegrationInboundMessageDto,
 } from '../email.controller';
 import { IntegrationInboxReplyDto, IntegrationInboxStateDto } from '../inbox.controller';
+import {
+    IntegrationCreateKbDocumentDto,
+    IntegrationCreateKbFolderDto,
+    IntegrationKbScopeDto,
+    IntegrationMoveKbDocumentDto,
+    IntegrationUpdateKbDocumentDto,
+    IntegrationUpdateKbFolderDto,
+} from '../kb.controller';
 import { IntegrationExceptionFilter } from '../integration-exception.filter';
 import { IntegrationPutLinkDto } from '../links.controller';
 import {
@@ -250,6 +258,14 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
             },
         },
     },
+    CreateKbDocument: {
+        dto: IntegrationCreateKbDocumentDto,
+        nested: { scope: { dto: IntegrationKbScopeDto }, externalRef: EXTERNAL_REF },
+    },
+    UpdateKbDocument: { dto: IntegrationUpdateKbDocumentDto },
+    MoveKbDocument: { dto: IntegrationMoveKbDocumentDto },
+    CreateKbFolder: { dto: IntegrationCreateKbFolderDto, nested: { externalRef: EXTERNAL_REF } },
+    UpdateKbFolder: { dto: IntegrationUpdateKbFolderDto },
     PutLink: { dto: IntegrationPutLinkDto },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
