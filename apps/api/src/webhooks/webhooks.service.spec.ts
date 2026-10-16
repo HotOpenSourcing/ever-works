@@ -428,6 +428,63 @@ describe('WebhooksService', () => {
             expect(repo.updateV2).not.toHaveBeenCalled();
         });
 
+        it('refuses to pause a disabled subscription (pause then resume must not revive it)', async () => {
+            repo.findById.mockResolvedValue(v2Row({ status: 'disabled' }));
+            await expect(service.update(ACCOUNT, 'wh-2', { status: 'paused' })).rejects.toThrow(
+                BadRequestException,
+            );
+            expect(repo.pause).not.toHaveBeenCalled();
+        });
+
+        it('resuming counts against the active-subscription limit', async () => {
+            repo.findById.mockResolvedValue(v2Row({ status: 'paused' }));
+            repo.listActiveForAccount.mockResolvedValueOnce(
+                Array.from({ length: 25 }, (_, i) => v2Row({ id: `other-${i}` })),
+            );
+            await expect(service.update(ACCOUNT, 'wh-2', { status: 'active' })).rejects.toThrow(
+                /limit of 25/,
+            );
+            expect(repo.resume).not.toHaveBeenCalled();
+        });
+
+        it('keeps the ownership stamp in step when organizationIds change', async () => {
+            const ORG_2 = '22222222-3333-4444-5555-666666666666';
+            organizations.findById.mockImplementation(async (id: string) =>
+                id === ORG || id === ORG_2 ? { id, tenantId: TENANT_ID } : null,
+            );
+            repo.findById.mockResolvedValue(v2Row());
+            await service.update(ACCOUNT, 'wh-2', { organizationIds: [ORG_2] });
+            expect(repo.updateV2).toHaveBeenLastCalledWith('wh-2', {
+                organizationIds: [ORG_2],
+                organizationId: ORG_2,
+                tenantId: TENANT_ID,
+            });
+            await service.update(ACCOUNT, 'wh-2', { organizationIds: [ORG, ORG_2] });
+            expect(repo.updateV2).toHaveBeenLastCalledWith('wh-2', {
+                organizationIds: [ORG, ORG_2],
+                organizationId: null,
+                tenantId: TENANT_ID,
+            });
+        });
+
+        it('starts a new subscription after the current feed head', async () => {
+            const feed = { head: jest.fn().mockResolvedValue('4242') };
+            service = new WebhooksService(
+                repo as any,
+                secrets,
+                workOwnership as any,
+                users as any,
+                organizations as any,
+                feed as any,
+            );
+            await service.createV2(ACCOUNT, {
+                url: 'https://hooks.example.com/ever',
+                events: ['*'],
+                organizationIds: [ORG],
+            });
+            expect(repo.createV2).toHaveBeenCalledWith(expect.objectContaining({ startAfterSeq: '4242' }));
+        });
+
         it('PATCH changes the filters of a v2 subscription', async () => {
             repo.findById.mockResolvedValue(v2Row());
             await service.update(ACCOUNT, 'wh-2', {

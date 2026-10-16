@@ -77,6 +77,14 @@ export class WebhookSubscription {
     @Column({ type: 'simple-json', nullable: true })
     excludeOriginTags?: string[] | null;
 
+    /**
+     * v2: the change-feed head when the subscription was created — it receives
+     * events with a later `seq` only (exact, unlike a creation timestamp: no
+     * clock or column-precision skew). NULL = no lower bound.
+     */
+    @Column({ type: 'bigint', nullable: true })
+    startAfterSeq?: string | null;
+
     /** v2: free-text note. */
     @Column({ type: 'varchar', length: 500, nullable: true })
     description?: string | null;

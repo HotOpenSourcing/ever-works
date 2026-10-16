@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import {
     WebhookSubscription,
     type WebhookSubscriptionOwnerType,
@@ -71,6 +71,8 @@ export class WebhookSubscriptionRepository {
         description: string | null;
         tenantId?: string | null;
         organizationId?: string | null;
+        /** The change-feed head at creation (only later events are delivered). */
+        startAfterSeq?: string | null;
     }): Promise<WebhookSubscription> {
         const row = this.repository.create({
             accountId: data.accountId,
@@ -86,6 +88,7 @@ export class WebhookSubscriptionRepository {
             organizationIds: data.organizationIds,
             excludeOriginTags: data.excludeOriginTags,
             description: data.description,
+            startAfterSeq: data.startAfterSeq ?? null,
             tenantId: data.tenantId ?? null,
             organizationId: data.organizationId ?? null,
         });
@@ -113,9 +116,16 @@ export class WebhookSubscriptionRepository {
         return this.repository.find({ where: { version: 2, status: 'active' } });
     }
 
-    /** Resume a paused / failed subscription: active again, failure streak reset. */
-    async resume(id: string): Promise<void> {
-        await this.repository.update(id, { status: 'active', consecutiveFailures: 0 });
+    /**
+     * Resume a paused / failed subscription: active again, failure streak
+     * reset. Never touches a `disabled` one (its owner lost access).
+     */
+    async resume(id: string): Promise<boolean> {
+        const result = await this.repository.update(
+            { id, status: In(['paused', 'failed', 'active']) },
+            { status: 'active', consecutiveFailures: 0 },
+        );
+        return (result.affected ?? 0) > 0;
     }
 
     /** The owner lost access (key revoked, membership gone): stop delivering until re-enabled. */
@@ -141,7 +151,13 @@ export class WebhookSubscriptionRepository {
         patch: Partial<
             Pick<
                 WebhookSubscription,
-                'url' | 'events' | 'organizationIds' | 'excludeOriginTags' | 'description'
+                | 'url'
+                | 'events'
+                | 'organizationIds'
+                | 'excludeOriginTags'
+                | 'description'
+                | 'organizationId'
+                | 'tenantId'
             >
         >,
     ): Promise<void> {
@@ -167,7 +183,9 @@ export class WebhookSubscriptionRepository {
     }
 
     async pause(id: string): Promise<void> {
-        await this.repository.update(id, { status: 'paused' });
+        // A `disabled` subscription stays disabled: pausing it must not turn it
+        // into something PATCH status=active can resume.
+        await this.repository.update({ id, status: Not('disabled') }, { status: 'paused' });
     }
 
     async updateSecret(

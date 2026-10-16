@@ -21,6 +21,7 @@ import { PluginEventCursor } from '../../entities/plugin-event-cursor.entity';
 import { User } from '../../entities/user.entity';
 import { WebhookDelivery } from '../../entities/webhook-delivery.entity';
 import { WebhookSubscription } from '../../entities/webhook-subscription.entity';
+import { WebhookOwnerAccessService } from '../webhook-owner-access.service';
 import {
     WEBHOOKS_V2_CURSOR_ID,
     WebhookDomainEventFanoutService,
@@ -60,8 +61,10 @@ describe('WebhookDomainEventFanoutService', () => {
     };
     const deliveries = () =>
         dataSource.getRepository(WebhookDelivery).find({ order: { createdAt: 'ASC' } });
-    const subscribe = (overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {}) =>
+    const subscribe = async (overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {}) =>
         subscriptions.createV2({
+            // As WebhooksService.createV2 does: start after the current feed head.
+            startAfterSeq: await new DomainEventFeedService(dataSource).head(),
             accountId: OWNER,
             ownerType: 'user',
             ownerId: OWNER,
@@ -82,6 +85,7 @@ describe('WebhookDomainEventFanoutService', () => {
             subscriptions,
             new WebhookDeliveryRepository(dataSource.getRepository(WebhookDelivery)),
             new DomainEventFeedService(dataSource),
+            new WebhookOwnerAccessService(dataSource),
             enqueuer,
         );
     });
@@ -117,6 +121,37 @@ describe('WebhookDomainEventFanoutService', () => {
             .getRepository(PluginEventCursor)
             .findOneByOrFail({ pluginId: WEBHOOKS_V2_CURSOR_ID });
         expect(String(cursor.lastSeq)).toBe('1');
+    });
+
+    it('a first pass that runs after its batch was dispatched still delivers that batch', async () => {
+        // The relay assigns positions, THEN hands the batch to the fan-out: a
+        // cursor created at the head right then would skip it for good.
+        await subscribe();
+        await record();
+        await dispatch();
+        expect(await fanout.catchUp()).toBe(1);
+        expect(await deliveries()).toHaveLength(1);
+    });
+
+    it('re-enqueues a fan-out delivery that was created but never enqueued', async () => {
+        await fanout.catchUp();
+        const sub = await subscribe();
+        const repo = new WebhookDeliveryRepository(dataSource.getRepository(WebhookDelivery));
+        const orphan = await repo.createPendingForEvent({
+            subscriptionId: sub.id,
+            accountId: OWNER,
+            event: 'task.updated',
+            eventId: 'evt_01JABZ3K9QW8E5R2T7Y4V6X0ZP',
+            payload: { id: 'evt_01JABZ3K9QW8E5R2T7Y4V6X0ZP', type: 'task.updated' },
+        });
+        // Fresh: still inside the grace window, left alone.
+        await fanout.catchUp();
+        expect(enqueued).toEqual([]);
+        await dataSource
+            .getRepository(WebhookDelivery)
+            .update({ id: orphan!.id }, { createdAt: new Date(Date.now() - 10 * 60 * 1000) });
+        await fanout.catchUp();
+        expect(enqueued.map((item) => item.subscriptionId)).toEqual([sub.id]);
     });
 
     it('delivers what matches the organization, type pattern and origin filter — once', async () => {

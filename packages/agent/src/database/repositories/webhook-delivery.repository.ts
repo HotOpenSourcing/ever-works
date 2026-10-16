@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { LessThan, Repository } from 'typeorm';
+import { IsNull, LessThan, Not, Repository } from 'typeorm';
 import { isUniqueConstraintError } from '../../utils/db-error.utils';
 import {
     WebhookDelivery,
@@ -78,6 +78,25 @@ export class WebhookDeliveryRepository {
             if (isUniqueConstraintError(error)) return null;
             throw error;
         }
+    }
+
+    /**
+     * Webhooks v2: fan-out deliveries created but never handed to the
+     * pipeline — `pending`, never attempted, no Trigger run, created before
+     * `createdBefore` (the fan-out re-enqueues them).
+     */
+    async listUnsentFanout(createdBefore: Date, limit: number): Promise<WebhookDelivery[]> {
+        return this.repository.find({
+            where: {
+                eventId: Not(IsNull()),
+                status: 'pending',
+                attempts: 0,
+                triggerRunId: IsNull(),
+                createdAt: LessThan(createdBefore),
+            },
+            order: { createdAt: 'ASC' },
+            take: limit,
+        });
     }
 
     async recordAttempt(id: string, attempt: RecordAttemptInput): Promise<void> {

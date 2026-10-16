@@ -17,6 +17,7 @@ import type {
     WebhookSubscriptionStatus,
 } from '@ever-works/agent/entities';
 import { DOMAIN_EVENT_TYPES, isDomainEventType } from '@ever-works/contracts';
+import { DomainEventFeedService } from '@ever-works/agent/domain-events';
 // Security: reuse the canonical lexical SSRF guard shared with the delivery
 // path (packages/agent/src/utils/ssrf-guard.ts) instead of a weaker inline
 // hostname check. It strips IPv6 brackets, and covers IPv4-mapped IPv6,
@@ -110,6 +111,9 @@ export class WebhooksService {
         // hand-built test graphs keep constructing; v2 creation refuses without them.
         @Optional() private readonly users?: UserRepository,
         @Optional() private readonly organizations?: OrganizationRepository,
+        // The change-feed head a new v2 subscription starts after (exact
+        // "only new events"). Optional + last.
+        @Optional() private readonly feed?: DomainEventFeedService,
     ) {}
 
     /**
@@ -161,6 +165,7 @@ export class WebhooksService {
             description: input.description?.trim() || null,
             tenantId: firstOrg?.tenantId ?? null,
             organizationId: organizationIds.length === 1 ? organizationIds[0] : null,
+            startAfterSeq: this.feed ? await this.feed.head() : null,
         });
         return { subscription: this.toView(row), signingSecret: raw };
     }
@@ -189,10 +194,21 @@ export class WebhooksService {
                 'Only status can change on a v1 subscription; create a v2 subscription (events + organizationIds) instead',
             );
         }
-        if (input.status === 'active' && row.status === 'disabled') {
+        if (input.status !== undefined && row.status === 'disabled') {
+            // Neither pause nor resume: pausing would turn `disabled` into
+            // something a second PATCH could resume.
             throw new BadRequestException(
                 'This subscription was disabled because its owner lost access; create a new one',
             );
+        }
+        if (input.status === 'active' && row.status !== 'active') {
+            // Resuming counts against the same limit as creating.
+            const active = await this.repo.listActiveForAccount(accountId);
+            if (active.filter((sub) => sub.id !== row.id).length >= MAX_PER_ACCOUNT) {
+                throw new BadRequestException(
+                    `Account is already at the per-account limit of ${MAX_PER_ACCOUNT} active subscriptions`,
+                );
+            }
         }
         if (touchesV2) {
             const patch: Parameters<WebhookSubscriptionRepository['updateV2']>[1] = {};
@@ -206,6 +222,12 @@ export class WebhooksService {
                     accountId,
                     input.organizationIds,
                 );
+                // Keep the ownership stamp (what backups and scope filters read)
+                // in step with the subscribed organizations.
+                const firstOrg = await this.organizations?.findById(patch.organizationIds[0]);
+                patch.organizationId =
+                    patch.organizationIds.length === 1 ? patch.organizationIds[0] : null;
+                patch.tenantId = firstOrg?.tenantId ?? row.tenantId ?? null;
             }
             if (input.excludeOriginTags !== undefined) {
                 patch.excludeOriginTags = this.cleanOriginTags(input.excludeOriginTags);

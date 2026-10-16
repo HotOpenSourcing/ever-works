@@ -63,6 +63,7 @@ describe('AddWebhookSubscriptionsV21795080100000', () => {
                 'events',
                 'organizationIds',
                 'excludeOriginTags',
+                'startAfterSeq',
                 'description',
                 'previousSecretEncrypted',
                 'previousSecretExpiresAt',

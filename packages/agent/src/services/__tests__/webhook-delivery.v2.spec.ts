@@ -96,8 +96,12 @@ describe('webhooks v2 delivery', () => {
     });
 
     describe('orchestrator', () => {
-        const setup = (sub: Record<string, unknown>) => {
+        const setup = (
+            sub: Record<string, unknown>,
+            access: { allowed: boolean; disable: boolean } | null = { allowed: true, disable: false },
+        ) => {
             const deliver = jest.fn().mockResolvedValue({ ok: true, outcome: 'success', deliveryId: 'd' });
+            const markDisabled = jest.fn().mockResolvedValue(undefined);
             const service = new WebhookSubscriptionDeliveryService(
                 { deliver } as unknown as WebhookDeliveryService,
                 {
@@ -111,13 +115,17 @@ describe('webhooks v2 delivery', () => {
                         ...sub,
                     }),
                     markSuccess: jest.fn().mockResolvedValue(undefined),
+                    markDisabled,
                 } as never,
                 { recordAttempt: jest.fn().mockResolvedValue(undefined) } as never,
+                access === null
+                    ? undefined
+                    : ({ canReceive: jest.fn().mockResolvedValue(access) } as never),
             );
             service.setSecretDecryptor((encrypted) =>
                 encrypted === 'enc-current' ? 'current' : encrypted === 'enc-previous' ? 'previous' : '',
             );
-            return { service, deliver };
+            return { service, deliver, markDisabled };
         };
 
         it('signs a v2 subscription v2, with the previous secret while its grace lasts', async () => {
@@ -146,6 +154,24 @@ describe('webhooks v2 delivery', () => {
             const legacy = setup({ version: 1 });
             await legacy.service.dispatch({ subscriptionId: 'sub-1', event: 'work.created', payload: {}, deliveryId: 'd' });
             expect(legacy.deliver).toHaveBeenCalledWith(expect.objectContaining({ signatureVersion: 1 }));
+        });
+
+        it('re-checks the owner before a v2 send: no access, no send; revoked, disabled', async () => {
+            const left = setup({ version: 2 }, { allowed: false, disable: false });
+            const result = await left.service.dispatch({ subscriptionId: 'sub-1', event: 'task.updated', payload: { ...ENVELOPE, organizationId: 'org-1' }, deliveryId: 'd' });
+            expect(left.deliver).not.toHaveBeenCalled();
+            expect(result).toMatchObject({ shouldRetry: false, result: { error: 'owner_access_denied' } });
+            expect(left.markDisabled).not.toHaveBeenCalled();
+
+            const revoked = setup({ version: 2 }, { allowed: false, disable: true });
+            await revoked.service.dispatch({ subscriptionId: 'sub-1', event: 'task.updated', payload: ENVELOPE, deliveryId: 'd' });
+            expect(revoked.deliver).not.toHaveBeenCalled();
+            expect(revoked.markDisabled).toHaveBeenCalledWith('sub-1');
+
+            // Without the access service a v2 delivery is refused, never sent unchecked.
+            const unchecked = setup({ version: 2 }, null);
+            await unchecked.service.dispatch({ subscriptionId: 'sub-1', event: 'task.updated', payload: ENVELOPE, deliveryId: 'd' });
+            expect(unchecked.deliver).not.toHaveBeenCalled();
         });
 
         it('does not deliver to a disabled subscription', async () => {
