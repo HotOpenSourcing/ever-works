@@ -13,6 +13,8 @@ import { Work } from '../../entities/work.entity';
 import { WorkProposal } from '../../entities/work-proposal.entity';
 import { TeamResourcesService } from '../../teams/team-resources.service';
 import { TeamsService } from '../../teams/teams.service';
+import { RecordVisibilityService } from '../../record-visibility/record-visibility.service';
+import { Goal } from '../../entities/goal.entity';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
 import {
@@ -43,14 +45,18 @@ describe('team recording points', () => {
         dataSource.getRepository(DomainEvent).find({ order: { outboxSeq: 'ASC' } });
     const versionOf = async (entity: typeof Team | typeof Task, id: string) =>
         Number(
-            ((await dataSource.getRepository(entity).findOneByOrFail({ id })) as { version: number })
-                .version,
+            (
+                (await dataSource.getRepository(entity).findOneByOrFail({ id })) as {
+                    version: number;
+                }
+            ).version,
         );
 
     beforeAll(async () => {
         dataSource = await createDomainEventsDataSource();
         const repo = <T extends object>(entity: new () => T) => dataSource.getRepository(entity);
         const publisher = new DomainEventPublisher(new DomainEventRecorder(), dataSource);
+        const visibility = new RecordVisibilityService(dataSource, new DomainEventRecorder());
         teams = new TeamsService(
             repo(Team),
             repo(TeamMember),
@@ -58,6 +64,9 @@ describe('team recording points', () => {
             repo(Organization),
             repo(User),
             publisher,
+            // Record visibility (EW-P1-3), wired as in production: the automatic
+            // team / organization change lands before the side snapshots.
+            visibility,
         );
         plainTeams = new TeamsService(
             repo(Team),
@@ -76,12 +85,20 @@ describe('team recording points', () => {
             repo(WorkProposal),
             repo(Task),
             publisher,
+            repo(Goal),
+            visibility,
         );
     });
 
     beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
-        for (const table of ['organizations', 'agents', 'team_members', 'team_resources', 'tasks']) {
+        for (const table of [
+            'organizations',
+            'agents',
+            'team_members',
+            'team_resources',
+            'tasks',
+        ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
         await dataSource.getRepository(Organization).insert({
@@ -217,7 +234,10 @@ describe('team recording points', () => {
 
     it('delete also records what it changes: re-parented children and everything losing the team', async () => {
         const parent = await newTeam('Engineering');
-        const team = await teams.create(OWNER, ORG_A, { name: 'Platform', parentTeamId: parent.id });
+        const team = await teams.create(OWNER, ORG_A, {
+            name: 'Platform',
+            parentTeamId: parent.id,
+        });
         const child = await teams.create(OWNER, ORG_A, { name: 'Runtime', parentTeamId: team.id });
         await teams.addMember(OWNER, ORG_A, team.id, { memberType: 'agent', memberId: AGENT });
         await resources.attach(OWNER, ORG_A, team.id, { resourceType: 'task', resourceId: TASK });

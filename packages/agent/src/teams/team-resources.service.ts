@@ -5,6 +5,7 @@ import {
     NotFoundException,
     Optional,
 } from '@nestjs/common';
+import type { VisibilityAggregate } from '@ever-works/contracts';
 import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, In, Repository } from 'typeorm';
@@ -148,6 +149,7 @@ export class TeamResourcesService {
                           { teamId: team.id, resourceType, resourceId: input.resourceId },
                           { changedFields: ['resources'] },
                       );
+                      await this.recomputeVisibilityIn(manager, resourceType, input.resourceId);
                       await this.recordResourceSide(
                           publisher,
                           manager,
@@ -191,6 +193,7 @@ export class TeamResourcesService {
                           { teamId, resourceType: type, resourceId, deleted: true },
                           { changedFields: ['resources'] },
                       );
+                      await this.recomputeVisibilityIn(manager, type, resourceId);
                       await this.recordResourceSide(publisher, manager, type, resourceId);
                   }
                   return deleted;
@@ -207,14 +210,40 @@ export class TeamResourcesService {
         resourceType: TeamResourceType,
         resourceId: string,
     ): Promise<void> {
-        if (!this.visibility) return;
-        const aggregate =
-            resourceType === 'idea'
-                ? 'idea'
-                : resourceType === 'work'
-                  ? null
-                  : (resourceType as 'task' | 'agent' | 'mission' | 'goal');
-        if (aggregate) await this.visibility.recomputeAutomatic(aggregate, resourceId);
+        const aggregate = this.visibilityAggregateOf(resourceType);
+        if (this.visibility && aggregate) {
+            await this.visibility.recomputeAutomatic(aggregate, resourceId);
+        }
+    }
+
+    /**
+     * The same, inside the team-event transaction and BEFORE `recordResourceSide`, so the
+     * task's `task.updated` snapshot already carries the new visibility (and no separate
+     * notice is needed for it). Other aggregates get their own `visibility_changed`.
+     */
+    private async recomputeVisibilityIn(
+        manager: EntityManager,
+        resourceType: TeamResourceType,
+        resourceId: string,
+    ): Promise<void> {
+        const aggregate = this.visibilityAggregateOf(resourceType);
+        if (!this.visibility || !aggregate) return;
+        await this.visibility.recomputeAutomaticIn(manager, aggregate, resourceId, {
+            recordEvent: aggregate !== 'task',
+        });
+    }
+
+    private visibilityAggregateOf(resourceType: TeamResourceType): VisibilityAggregate | null {
+        switch (resourceType) {
+            case 'task':
+            case 'goal':
+            case 'mission':
+            case 'idea':
+            case 'agent':
+                return resourceType;
+            default:
+                return null;
+        }
     }
 
     /** List a Team's attached resources, resolved + grouped by type. */

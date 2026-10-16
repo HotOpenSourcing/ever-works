@@ -7,6 +7,7 @@ import { getDomainEventCatalogEntry } from '@ever-works/contracts';
 import { DataSource } from 'typeorm';
 import { ENTITIES } from '../../database/_entities-inventory';
 import { DomainEvent } from '../../entities/domain-event.entity';
+import { RecordVisibilitySubscriber } from '../../entities/_record-visibility';
 import {
     DOMAIN_EVENT_RELAY_STATE_ID,
     DomainEventRelayState,
@@ -24,6 +25,9 @@ export async function createDomainEventsDataSource(): Promise<DataSource> {
         type: 'better-sqlite3',
         database: ':memory:',
         entities: ENTITIES,
+        // Record visibility (EW-P1-3): the insert-time default, registered exactly as
+        // `databaseConfig()` registers it, so org rows start `team` / `organization`.
+        subscribers: [RecordVisibilitySubscriber],
         synchronize: true,
         logging: false,
     });
@@ -138,7 +142,9 @@ interface ContractCatalogRow {
  */
 export function catalogDataValidator(): (event: { type: string; data: unknown }) => void {
     const validate = contractValidator();
-    const catalog = JSON.parse(readFileSync(join(CONTRACT_DIR, 'event-catalog.v1.json'), 'utf8')) as {
+    const catalog = JSON.parse(
+        readFileSync(join(CONTRACT_DIR, 'event-catalog.v1.json'), 'utf8'),
+    ) as {
         events: ContractCatalogRow[];
     };
     const rows = new Map(catalog.events.map((row) => [row.type, row]));

@@ -5,6 +5,7 @@ import {
     Optional,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import { Task } from '../entities/task.entity';
 import type { VisibilityAggregate } from '@ever-works/contracts';
 import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -204,6 +205,11 @@ export class TeamsService {
                     { parentTeamId: team.parentTeamId ?? null },
                 );
             await em.getRepository(Team).delete({ id: teamId });
+            // `tasks.teamId` is ON DELETE SET NULL; clear it here too so the automatic
+            // visibility below sees the same state on every dialect (EW-P1-3).
+            await em
+                .getRepository(Task)
+                .update({ teamId, organizationId: orgId }, { teamId: null });
         };
         const publisher = this.domainEvents;
         if (!publisher) {
@@ -237,6 +243,20 @@ export class TeamsService {
             await em.getRepository(TeamMember).delete({ teamId });
             await em.getRepository(TeamResource).delete({ teamId });
             await publisher.deleted(em, tombstone, 'team.deleted');
+            // Record visibility (EW-P1-3): widen what lost its last Team BEFORE the side
+            // events below snapshot it. Records those events re-snapshot need no extra
+            // notice; the others (e.g. tasks whose teamId the delete clears) get one.
+            const resnapshotted = new Set<string>([
+                ...agentMembers.map((row) => `agent:${row.memberId}`),
+                ...links
+                    .filter((link) => link.resourceType === 'task')
+                    .map((link) => `task:${link.resourceId}`),
+            ]);
+            for (const record of affected) {
+                await this.visibility?.recomputeAutomaticIn(em, record.aggregate, record.id, {
+                    recordEvent: !resnapshotted.has(`${record.aggregate}:${record.id}`),
+                });
+            }
             for (const child of children) {
                 await publisher.changed(em, 'team', child.id, 'team.updated', {
                     changedFields: ['parentTeamId'],
@@ -388,6 +408,14 @@ export class TeamsService {
                     );
                     // An agent's team scope is its team memberships (`teamIds`).
                     if (member.memberType === 'agent') {
+                        // Record visibility (EW-P1-3): the snapshot below carries the
+                        // automatic team / organization change.
+                        await this.visibility?.recomputeAutomaticIn(
+                            manager,
+                            'agent',
+                            member.memberId,
+                            { recordEvent: false },
+                        );
                         await publisher.changed(
                             manager,
                             'agent',
@@ -447,6 +475,9 @@ export class TeamsService {
                     { changedFields: ['members'] },
                 );
                 if (memberType === 'agent') {
+                    await this.visibility?.recomputeAutomaticIn(manager, 'agent', memberId, {
+                        recordEvent: false,
+                    });
                     await publisher.changed(manager, 'agent', memberId, 'agent.updated', {
                         changedFields: ['teamIds'],
                     });

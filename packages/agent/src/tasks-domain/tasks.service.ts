@@ -1819,6 +1819,13 @@ export class TasksService {
         await this.withTaskEvent(
             (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
             async (publisher, manager) => {
+                // Record visibility (EW-P1-3): a teamId change moves an automatic
+                // visibility first, so the task.updated snapshot carries it.
+                if ('teamId' in patch) {
+                    await this.visibility?.recomputeAutomaticIn(manager, 'task', id, {
+                        recordEvent: false,
+                    });
+                }
                 await publisher.changed(
                     manager,
                     'task',

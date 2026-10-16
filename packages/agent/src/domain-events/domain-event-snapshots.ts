@@ -36,9 +36,12 @@ import { WorkMember } from '../entities/work-member.entity';
  * serves the same builders, so an event's `data` and a GET of the same version
  * are identical.
  *
- * Until record visibility (EW-P1-3) lands, an org record's visibility is
- * derived the way that migration will set it: `team` when it sits on a team,
- * else `organization`, with `visibilityExplicit = false`.
+ * Tasks and agents carry their STORED record visibility (EW-P1-3,
+ * `visibility` / `visibilityExplicit`): a `private` record's snapshot says
+ * `private`, the recorder stores that on the event row, and the feed and
+ * webhooks v2 never serve such an event (only the id-only
+ * `*.visibility_changed` notice). Works carry no visibility column: theirs is
+ * derived — `team` when the work sits on a team, else `organization`.
  */
 
 /** A DTO plus the scope of the row it came from (the DTO has no tenant; personal rows have no org). */
@@ -66,6 +69,25 @@ const webUrl = (path: string): string | null => {
 
 function derivedVisibility(teamIds: readonly string[]): IntegrationVisibility {
     return teamIds.length > 0 ? 'team' : 'organization';
+}
+
+/**
+ * A record's stored visibility (EW-P1-3), or the derived value for a row read
+ * before the column existed. `private` passes through (typed as the DTO's
+ * visibility on purpose): it is what keeps the event out of the feed.
+ */
+function recordVisibility(
+    row: { visibility?: string | null; visibilityExplicit?: boolean | null },
+    teamIds: readonly string[],
+): { visibility: IntegrationVisibility; visibilityExplicit: boolean } {
+    const stored = row.visibility;
+    if (stored === 'private' || stored === 'team' || stored === 'organization') {
+        return {
+            visibility: stored as IntegrationVisibility,
+            visibilityExplicit: row.visibilityExplicit === true,
+        };
+    }
+    return { visibility: derivedVisibility(teamIds), visibilityExplicit: false };
 }
 
 function unique<T>(values: readonly T[]): T[] {
@@ -110,8 +132,7 @@ export async function buildTaskSnapshot(
         version: Number(task.version) || 1,
         createdAt: isoRequired(task.createdAt),
         updatedAt: isoRequired(task.updatedAt),
-        visibility: derivedVisibility(teamIds),
-        visibilityExplicit: false,
+        ...recordVisibility(task, teamIds),
         owner: { type: 'user', id: task.userId },
         createdBy: {
             type:
@@ -260,8 +281,7 @@ export async function buildAgentSnapshot(
         version: Number(agent.version) || 1,
         createdAt: isoRequired(agent.createdAt),
         updatedAt: isoRequired(agent.updatedAt),
-        visibility: derivedVisibility(teamIds),
-        visibilityExplicit: false,
+        ...recordVisibility(agent, teamIds),
         owner: { type: 'user', id: agent.userId },
         createdBy: { type: 'user', id: agent.userId },
         externalLinks: [],
