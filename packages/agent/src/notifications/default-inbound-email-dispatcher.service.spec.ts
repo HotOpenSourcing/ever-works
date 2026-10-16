@@ -55,8 +55,11 @@ describe('DefaultInboundEmailDispatcher', () => {
         messages = {
             save: jest.fn().mockResolvedValue({ id: 'msg-1' }),
             updateDeliveryStatus: jest.fn().mockResolvedValue(undefined),
+            findByMessageIdHeaders: jest.fn().mockResolvedValue([]),
+            linkTask: jest.fn().mockResolvedValue(true),
         };
         conversations = {
+            findById: jest.fn().mockResolvedValue(null),
             findByThreadKey: jest.fn(),
             save: jest.fn().mockResolvedValue({ id: 'conv-1' }),
             touchLastMessageAt: jest.fn().mockResolvedValue(undefined),
@@ -160,6 +163,245 @@ describe('DefaultInboundEmailDispatcher', () => {
         const res = await svc.dispatch(basePayload);
         expect(res.conversationId).toBe('conv-existing');
         expect(conversations.save).not.toHaveBeenCalled();
+    });
+
+    // EW-P4-3 — the spawned Task is written back onto the message.
+    it('task-spawn mode links the message to the Task it spawned', async () => {
+        const svc = await build(true);
+        addresses.findById.mockResolvedValue(inboundAddress);
+        assignments.findByEmailAddress.mockResolvedValue([
+            { agentId: 'agent-1', dispatchMode: 'task-spawn' },
+        ]);
+        await svc.dispatch(basePayload);
+        expect(messages.linkTask).toHaveBeenCalledWith('msg-1', 'task-1');
+    });
+
+    it('a failing back-link never fails the dispatch', async () => {
+        const svc = await build(true);
+        addresses.findById.mockResolvedValue(inboundAddress);
+        assignments.findByEmailAddress.mockResolvedValue([
+            { agentId: 'agent-1', dispatchMode: 'task-spawn' },
+        ]);
+        messages.linkTask.mockRejectedValue(new Error('db down'));
+        await expect(svc.dispatch(basePayload)).resolves.toMatchObject({
+            handled: true,
+            taskId: 'task-1',
+        });
+    });
+
+    describe('RFC threading (EW-P4-3)', () => {
+        const reply = {
+            ...basePayload,
+            providerMessageId: 'pm-in-2',
+            subject: 'A completely different subject',
+            messageIdHeader: 'reply-2@client.test',
+            inReplyTo: 'out-1@acme.test',
+            references: ['root@client.test', 'out-1@acme.test'],
+        };
+
+        async function taskSpawnAgent(withAppend: boolean) {
+            const svc = await build(true);
+            if (withAppend) {
+                taskSpawner.appendInboundEmailToTask = jest
+                    .fn()
+                    .mockImplementation(async ({ taskId }: { taskId: string }) => ({ taskId }));
+            }
+            addresses.findById.mockResolvedValue(inboundAddress);
+            assignments.findByEmailAddress.mockResolvedValue([
+                { agentId: 'agent-1', dispatchMode: 'task-spawn' },
+            ]);
+            return svc;
+        }
+
+        it('persists the threading ids on the inbound row', async () => {
+            const svc = await taskSpawnAgent(false);
+            await svc.dispatch(reply);
+            expect(messages.save).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    messageIdHeader: 'reply-2@client.test',
+                    inReplyTo: 'out-1@acme.test',
+                    references: ['root@client.test', 'out-1@acme.test'],
+                }),
+            );
+        });
+
+        it('looks up In-Reply-To first, then References newest-first, owner-scoped, never its own id', async () => {
+            const svc = await taskSpawnAgent(true);
+            await svc.dispatch({
+                ...reply,
+                references: ['root@client.test', 'reply-2@client.test', 'out-1@acme.test'],
+            });
+            expect(messages.findByMessageIdHeaders).toHaveBeenCalledWith('u1', [
+                'out-1@acme.test',
+                'root@client.test',
+            ]);
+        });
+
+        it('task-spawn: a reply to a message linked to a Task joins that Task', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'msg-out-1',
+                    agentId: 'agent-1',
+                    taskId: 'task-original',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+
+            const res = await svc.dispatch(reply);
+
+            expect(res).toMatchObject({
+                handled: true,
+                mode: 'task-spawn',
+                taskId: 'task-original',
+                threaded: true,
+            });
+            expect(taskSpawner.appendInboundEmailToTask).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    taskId: 'task-original',
+                    agentId: 'agent-1',
+                    userId: 'u1',
+                    emailMessageId: 'msg-1',
+                }),
+            );
+            expect(taskSpawner.spawnTaskForInboundEmail).not.toHaveBeenCalled();
+            expect(messages.linkTask).toHaveBeenCalledWith('msg-1', 'task-original');
+        });
+
+        it('task-spawn: prefers the In-Reply-To match over an older References match', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-root',
+                    agentId: 'agent-1',
+                    taskId: 'task-root',
+                    messageIdHeader: 'root@client.test',
+                },
+                {
+                    id: 'm-out',
+                    agentId: 'agent-1',
+                    taskId: 'task-out',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            await expect(svc.dispatch(reply)).resolves.toMatchObject({ taskId: 'task-out' });
+        });
+
+        it("task-spawn: never joins another Agent's thread", async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-x',
+                    agentId: 'agent-2',
+                    taskId: 'task-of-agent-2',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            const res = await svc.dispatch(reply);
+            expect(res).toMatchObject({ taskId: 'task-1' });
+            expect(res.threaded).toBeUndefined();
+            expect(taskSpawner.appendInboundEmailToTask).not.toHaveBeenCalled();
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+        });
+
+        it('task-spawn: falls back to a new Task when appending fails (the reply is never lost)', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-out',
+                    agentId: 'agent-1',
+                    taskId: 'task-original',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            taskSpawner.appendInboundEmailToTask.mockRejectedValue(new Error('secret detected'));
+
+            const res = await svc.dispatch(reply);
+
+            expect(res).toMatchObject({ handled: true, taskId: 'task-1' });
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+            expect(messages.linkTask).toHaveBeenCalledWith('msg-1', 'task-1');
+            expect(messages.linkTask).not.toHaveBeenCalledWith('msg-1', 'task-original');
+        });
+
+        it('task-spawn: a spawner without appendInboundEmailToTask keeps one Task per message', async () => {
+            const svc = await taskSpawnAgent(false);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-out',
+                    agentId: 'agent-1',
+                    taskId: 'task-original',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            await expect(svc.dispatch(reply)).resolves.toMatchObject({ taskId: 'task-1' });
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+        });
+
+        it('a failing thread lookup falls back instead of failing the dispatch', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockRejectedValue(new Error('db down'));
+            await expect(svc.dispatch(reply)).resolves.toMatchObject({
+                handled: true,
+                taskId: 'task-1',
+            });
+        });
+
+        it("conversation: a reply joins the parent's conversation whatever its subject", async () => {
+            const svc = await build(false);
+            addresses.findById.mockResolvedValue(inboundAddress);
+            assignments.findByEmailAddress.mockResolvedValue([
+                { agentId: 'agent-1', dispatchMode: 'conversation' },
+            ]);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-out',
+                    agentId: 'agent-1',
+                    conversationId: 'conv-thread',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            conversations.findById.mockResolvedValue({ id: 'conv-thread', agentId: 'agent-1' });
+
+            const res = await svc.dispatch(reply);
+
+            expect(res).toMatchObject({ conversationId: 'conv-thread', threaded: true });
+            expect(conversations.findByThreadKey).not.toHaveBeenCalled();
+            expect(conversations.save).not.toHaveBeenCalled();
+            expect(messages.save).toHaveBeenCalledWith(
+                expect.objectContaining({ conversationId: 'conv-thread' }),
+            );
+        });
+
+        it('conversation: ignores a conversation that belongs to another Agent and falls back to the subject', async () => {
+            const svc = await build(false);
+            addresses.findById.mockResolvedValue(inboundAddress);
+            assignments.findByEmailAddress.mockResolvedValue([
+                { agentId: 'agent-1', dispatchMode: 'conversation' },
+            ]);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'm-out',
+                    agentId: 'agent-1',
+                    conversationId: 'conv-foreign',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            conversations.findById.mockResolvedValue({ id: 'conv-foreign', agentId: 'agent-2' });
+            conversations.findByThreadKey.mockResolvedValue({ id: 'conv-by-subject' });
+
+            const res = await svc.dispatch(reply);
+
+            expect(res.conversationId).toBe('conv-by-subject');
+            expect(res.threaded).toBeUndefined();
+        });
+
+        it('a message with no threading headers does no lookup', async () => {
+            const svc = await taskSpawnAgent(true);
+            await svc.dispatch(basePayload);
+            expect(messages.findByMessageIdHeaders).not.toHaveBeenCalled();
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+        });
     });
 
     describe('routes only to the authenticated address (PLG-1 follow-up)', () => {

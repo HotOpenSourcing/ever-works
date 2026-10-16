@@ -185,6 +185,63 @@ describe('MailgunPlugin', () => {
 		expect(() => plugin.verifyWebhookSignature(bad, {}, opts)).toThrow(/signature mismatch/);
 	});
 
+	// EW-P4-3 — RFC threading.
+	it('forwards EmailSendInput.headers as h:<Name> parameters', async () => {
+		createMock.mockResolvedValueOnce({ id: '<x@mg>', message: 'Queued.' });
+		await plugin.sendEmail(
+			{
+				from: 'a@example.com',
+				to: ['b@example.com'],
+				subject: 'Re: hi',
+				bodyText: 'hi',
+				messageRef: 'ref-thread',
+				headers: {
+					'Message-ID': '<out-1@acme.test>',
+					'In-Reply-To': '<in-1@client.test>',
+					References: '<root@client.test> <in-1@client.test>'
+				}
+			},
+			{ userId: 'u' }
+		);
+		const [, data] = createMock.mock.calls[0];
+		expect(data['h:Message-ID']).toBe('<out-1@acme.test>');
+		expect(data['h:In-Reply-To']).toBe('<in-1@client.test>');
+		expect(data['h:References']).toBe('<root@client.test> <in-1@client.test>');
+	});
+
+	it('parses the threading headers from the forwarded fields', async () => {
+		const form = new URLSearchParams({
+			sender: 'x@y.test',
+			recipient: 'agent@mg.example.com',
+			subject: 'Re: hi',
+			'Message-Id': '<reply-2@client.test>',
+			'In-Reply-To': '<out-1@acme.test>',
+			References: '<root@client.test> <out-1@acme.test>',
+			timestamp: '1700000000'
+		});
+		const msg = await plugin.parseInboundWebhook(Buffer.from(form.toString()), {}, {});
+		expect(msg.messageIdHeader).toBe('reply-2@client.test');
+		expect(msg.inReplyTo).toBe('out-1@acme.test');
+		expect(msg.references).toEqual(['root@client.test', 'out-1@acme.test']);
+	});
+
+	it('falls back to message-headers for the threading headers', async () => {
+		const form = new URLSearchParams({
+			sender: 'x@y.test',
+			recipient: 'agent@mg.example.com',
+			subject: 'Re: hi',
+			'message-headers': JSON.stringify([
+				['Message-Id', '<reply-3@client.test>'],
+				['In-Reply-To', '<out-1@acme.test>'],
+				['References', '<out-1@acme.test>']
+			])
+		});
+		const msg = await plugin.parseInboundWebhook(Buffer.from(form.toString()), {}, {});
+		expect(msg.messageIdHeader).toBe('reply-3@client.test');
+		expect(msg.inReplyTo).toBe('out-1@acme.test');
+		expect(msg.references).toEqual(['out-1@acme.test']);
+	});
+
 	it('parses a form-urlencoded inbound payload into the canonical shape', async () => {
 		const form = new URLSearchParams({
 			sender: 'human@example.com',

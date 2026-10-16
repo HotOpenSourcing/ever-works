@@ -68,6 +68,7 @@ import {
     sep as pathSep,
 } from 'node:path';
 import type { RepositoryRole } from '@ever-works/contracts/api';
+import { formatInboundEmailChatPost, inboundEmailReplyHint } from './inbound-email-task-chat';
 
 // Phase 16.6 / 16.7 — commitToRepo / openPullRequest tools.
 // The `AGENT_GIT_FACADE` token (exported from `@ever-works/agent/agents`)
@@ -602,17 +603,38 @@ async function assertRealWriteTarget(
         // the task-tracking flow dispatches `agent-task-execute`. When this
         // token is unbound the dispatcher persists the message but spawns
         // no Task (graceful no-op).
+        //
+        // EW-P4-3 — a reply that threads (In-Reply-To / References) onto an
+        // email already linked to a Task is posted on THAT Task's chat
+        // instead (`appendInboundEmailToTask`), mentioning the receiving
+        // agent so it picks the reply up. The email text is defused first
+        // (see `inbound-email-task-chat.ts`). Any failure (a secret in the
+        // body, a deleted task) makes the dispatcher spawn a new Task, as
+        // before, so a reply is never lost.
         {
             provide: INBOUND_EMAIL_TASK_SPAWNER,
-            inject: [TasksService],
-            useFactory: (tasks: TasksService): InboundEmailTaskSpawner => ({
-                async spawnTaskForInboundEmail({ agentId, userId, subject, bodyText, from }) {
+            inject: [TasksService, TaskChatService, AgentRepository],
+            useFactory: (
+                tasks: TasksService,
+                chat: TaskChatService,
+                agents: AgentRepository,
+            ): InboundEmailTaskSpawner => ({
+                async spawnTaskForInboundEmail({
+                    agentId,
+                    userId,
+                    emailMessageId,
+                    subject,
+                    bodyText,
+                    from,
+                }) {
                     const title = subject?.trim()
                         ? subject.trim().slice(0, 200)
                         : `Inbound email from ${from}`;
+                    const body = bodyText?.trim() ? bodyText.trim().slice(0, 8000) : '';
                     const task = await tasks.create(userId, {
                         title,
-                        description: bodyText?.trim() ? bodyText.trim().slice(0, 8000) : null,
+                        // EW-P4-3 — the message id lets the agent reply in thread.
+                        description: `${body}${inboundEmailReplyHint(emailMessageId)}`.trim(),
                         labels: ['inbound-email'],
                         createdByType: 'agent',
                         createdById: agentId,
@@ -621,6 +643,37 @@ async function assertRealWriteTarget(
                     // fans out agent-task-execute for it.
                     await tasks.addAssignee(userId, task.id, 'agent', agentId);
                     return { taskId: task.id };
+                },
+                async appendInboundEmailToTask({
+                    taskId,
+                    agentId,
+                    userId,
+                    emailMessageId,
+                    subject,
+                    bodyText,
+                    from,
+                }) {
+                    const agent = await agents.findByIdAndUser(agentId, userId);
+                    if (!agent?.slug) return null;
+                    // Posted as the address owner (whose mailbox received it);
+                    // only the receiving agent's mention is live.
+                    await chat.post(
+                        userId,
+                        {
+                            taskId,
+                            authorType: 'user',
+                            authorId: userId,
+                            body: formatInboundEmailChatPost({
+                                agentSlug: agent.slug,
+                                emailMessageId,
+                                from,
+                                subject,
+                                bodyText,
+                            }),
+                        },
+                        { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) },
+                    );
+                    return { taskId };
                 },
             }),
         },
@@ -1619,6 +1672,7 @@ async function assertRealWriteTarget(
                     bodyHtml,
                     template,
                     fromAddressId,
+                    inReplyToMessageId,
                 }) {
                     // AW-05 — `origin: 'agent'`: this is the Agent writing, so
                     // its inbox's approve-before-send mode applies (a person
@@ -1634,6 +1688,8 @@ async function assertRealWriteTarget(
                             bodyHtml,
                             template,
                             fromAddressId,
+                            // EW-P4-3 — reply in thread (owner-scoped in EmailService).
+                            ...(inReplyToMessageId ? { inReplyToMessageId } : {}),
                         },
                         { origin: 'agent' },
                     );
