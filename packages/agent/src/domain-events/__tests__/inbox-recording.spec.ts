@@ -5,8 +5,12 @@ import { DomainEvent } from '../../entities/domain-event.entity';
 import { InboxItem } from '../../entities/inbox-item.entity';
 import { Organization } from '../../entities/organization.entity';
 import { InboxService } from '../../inbox/inbox.service';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { DomainEventFeedService } from '../domain-event-feed.service';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
+import { DomainEventRelayService } from '../domain-event-relay.service';
+import { DomainEventRetentionService } from '../domain-event-retention.service';
 import {
     catalogDataValidator,
     createDomainEventsDataSource,
@@ -109,13 +113,32 @@ describe('inbox recording points', () => {
         expectValid(event);
     });
 
-    it('records inbox events private: a message for one person never reaches the org feed or its webhooks', async () => {
+    it('records inbox events recipient-scoped: the feed serves them only with inbox:read', async () => {
         await fileNotice();
         const item = await onlyItem();
         await inbox.setUnread(item.id, RECIPIENT, false);
         const recorded = await events();
         expect(recorded.length).toBeGreaterThan(0);
-        expect(recorded.map((event) => event.visibility)).toEqual(recorded.map(() => 'private'));
+        expect(recorded.map((event) => event.visibility)).toEqual(recorded.map(() => 'recipient'));
+
+        const relay = new DomainEventRelayService(
+            dataSource,
+            new DomainEventRetentionService(dataSource),
+            new EventEmitter2(),
+        );
+        await relay.tick();
+        await relay.stop();
+        const feed = new DomainEventFeedService(dataSource);
+        const read = (grantedScopes?: string[]) =>
+            feed.readPage({ organizationIds: [ORG_A], after: '0', grantedScopes });
+        // `events:read` alone (or no scopes at all): one person's messages stay out.
+        expect((await read()).events).toEqual([]);
+        expect((await read(['events:read', 'tasks:read'])).events).toEqual([]);
+        // With `inbox:read` the integration reads every recipient's messages.
+        expect((await read(['events:read', 'inbox:read'])).events.map((e) => e.type)).toEqual([
+            'inbox.item.created',
+            'inbox.item.state_changed',
+        ]);
     });
 
     it('every producer records created: escalation and approval mirrors too', async () => {
@@ -192,6 +215,49 @@ describe('inbox recording points', () => {
             status: 'answered',
             unread: false,
             answerText: 'Thanks',
+        });
+        expectValid(recorded[0]);
+    });
+
+    it('a reply whose routing fails records no answer, but the read flip the claim made (state_changed)', async () => {
+        const failingApprovals = {
+            decide: async () => {
+                throw new Error('approvals down');
+            },
+        };
+        const withFailingRouting = new InboxService(
+            new InboxItemRepository(dataSource.getRepository(InboxItem)),
+            { findById: async () => null, setAwaitingInput: async () => undefined } as never,
+            undefined,
+            failingApprovals as never,
+            undefined,
+            undefined,
+            undefined,
+            new DomainEventPublisher(new DomainEventRecorder(), dataSource),
+        );
+        await withFailingRouting.proposalPending({
+            userId: RECIPIENT,
+            proposalId: randomUUID(),
+            title: 'Send the newsletter',
+            actionType: 'email.send',
+            organizationId: ORG_A,
+        } as never);
+        const { id } = await onlyItem();
+        await expect(
+            withFailingRouting.reply(RECIPIENT, id, { optionId: 'approve' }),
+        ).rejects.toThrow(/approvals down/);
+        const recorded = (await events()).slice(1);
+        expect(recorded.map((event) => [event.type, event.aggregateVersion])).toEqual([
+            ['inbox.item.state_changed', 2],
+        ]);
+        expect(recorded[0]).toMatchObject({
+            changedFields: ['unread'],
+            previous: { unread: true },
+        });
+        expect(recorded[0].data).toMatchObject({
+            status: 'open',
+            unread: false,
+            answerOptionId: null,
         });
         expectValid(recorded[0]);
     });

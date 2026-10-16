@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
+import { InboxModule as AgentInboxModule } from '@ever-works/agent/inbox';
 import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-api';
 import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
@@ -8,6 +9,7 @@ import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
+import { IntegrationInboxController } from './inbox.controller';
 import { IntegrationLinksController } from './links.controller';
 import { IntegrationResourcesController } from './resources.controller';
 import { IntegrationTasksWriteController } from './tasks-write.controller';
@@ -42,6 +44,9 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         RecordVisibilityModule,
         // Key-owned webhook subscriptions (EW-P1-5).
         WebhooksModule,
+        // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
+        // `InboxService` (steer, resume, decide exactly like the Inbox UI).
+        AgentInboxModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -55,6 +60,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTeamsWriteController,
         IntegrationBatchController,
         IntegrationWebhooksController,
+        // EW-P3-1 — the Inbox (`inbox:*`).
+        IntegrationInboxController,
     ],
     providers: [
         IntegrationOnlyGuard,
