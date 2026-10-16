@@ -398,6 +398,11 @@ export const ROUTES = {
     ORG_INVITE: '/org-invite/:token',
     /** Concrete href for a given token. */
     orgInvite: (token: string) => `/org-invite/${token}`,
+    // EW-P4-3 — where a tenant email address's confirmation link lands,
+    // straight from that mailbox, often in another browser with no session.
+    // Public (the token is the proof); the page confirms only on a click, so
+    // a mail scanner that prefetches the link confirms nothing.
+    EMAIL_ADDRESS_VERIFY: '/email-address/verify/:token',
 
     // API routes
     API_AUTH_VERIFY_EMAIL: '/api/auth/verify-email',
@@ -466,6 +471,8 @@ export const PUBLIC_ROUTES = [
     // segment. The page itself grants nothing: it renders a preview and
     // sends the visitor to register or sign in.
     ROUTES.ORG_INVITE,
+    // EW-P4-3 — tenant email address confirmation link (see ROUTES).
+    ROUTES.EMAIL_ADDRESS_VERIFY,
     // EW-617 zero-friction onboarding landing page — public so anonymous
     // visitors from the marketing site can mint a guest session client-side.
     ROUTES.ONBOARDING,

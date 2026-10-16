@@ -11,5 +11,14 @@ export default async function EmailAddressesPage() {
     } catch {
         initialAddresses = [];
     }
-    return <EmailAddressesSettings initialAddresses={initialAddresses} />;
+    // EW-P4-3 — the inbound webhook URL the wizard shows must be the API's
+    // PUBLIC origin (API_URL may be an in-cluster address).
+    const apiOrigin = (
+        process.env.NEXT_PUBLIC_API_URL ||
+        process.env.API_URL ||
+        'http://localhost:3100'
+    )
+        .replace(/\/+$/, '')
+        .replace(/\/api$/, '');
+    return <EmailAddressesSettings initialAddresses={initialAddresses} apiOrigin={apiOrigin} />;
 }

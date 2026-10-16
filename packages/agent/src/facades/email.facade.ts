@@ -1,4 +1,5 @@
 import {
+    ForbiddenException,
     Inject,
     Injectable,
     Logger,
@@ -66,6 +67,30 @@ export const EMAIL_SEND_RESERVATION_PENDING_PLUGIN_ID = 'pending';
  * answered to the unauthenticated caller.
  */
 const WEBHOOK_SIGNATURE_REJECTED = 'Invalid webhook signature';
+
+/**
+ * EW-P4-3 — operator switch for the sender check. A tenant address must be
+ * VERIFIED (its owner clicked the confirmation link mailed to it) before
+ * anything is sent from it. On unless this env var is the exact string
+ * `'false'` — for a self-hosted install with no platform mail to deliver the
+ * confirmation; never on a deployed environment.
+ */
+export const EMAIL_SENDER_VERIFICATION_REQUIRED_ENV = 'EMAIL_SENDER_VERIFICATION_REQUIRED';
+
+export function emailSenderVerificationRequired(): boolean {
+    return process.env[EMAIL_SENDER_VERIFICATION_REQUIRED_ENV] !== 'false';
+}
+
+/** EW-P4-3 — the refusal for a send from an address nobody has verified. */
+export class EmailSenderNotVerifiedException extends ForbiddenException {
+    constructor(address: string) {
+        super(
+            `The sending address ${address} is not verified. Send the confirmation email from ` +
+                'Settings → Integrations → Email addresses and click its link, then try again.',
+        );
+        this.name = 'EmailSenderNotVerifiedException';
+    }
+}
 
 export class EmailFacadeError extends FacadeError {
     constructor(message: string, operation: string, provider?: string, cause?: Error) {
@@ -192,6 +217,17 @@ export class EmailFacadeService extends BaseFacadeService {
         input: EmailFacadeSendInput,
         options: EmailFacadeSendOptions,
     ): Promise<EmailSendResult> {
+        // EW-P4-3 — never send from a tenant address its owner has not
+        // verified. Checked first, so a refused send reserves no capacity and
+        // touches no provider. (EmailService refuses earlier with the same
+        // error; this is the backstop every outbound path converges on.)
+        if (options.addressId && this.emailAddresses && emailSenderVerificationRequired()) {
+            const sender = await this.emailAddresses.findById(options.addressId);
+            if (sender && !sender.verified) {
+                throw new EmailSenderNotVerifiedException(sender.address);
+            }
+        }
+
         // EW-P4-3 — RFC threading: every send carries a Message-ID (and the
         // caller's In-Reply-To / References), recorded on its row so a reply
         // can be matched back to it.

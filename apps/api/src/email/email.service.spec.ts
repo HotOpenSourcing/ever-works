@@ -9,6 +9,15 @@ jest.mock('@ever-works/agent/database', () => ({
 }));
 jest.mock('@ever-works/agent/facades', () => ({
     EmailFacadeService: class EmailFacadeService {},
+    // EW-P4-3 — the verified-sender rule (same semantics as the real ones).
+    emailSenderVerificationRequired: () =>
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED !== 'false',
+    EmailSenderNotVerifiedException: class EmailSenderNotVerifiedException extends Error {
+        readonly status = 403;
+        constructor(address: string) {
+            super(`The sending address ${address} is not verified.`);
+        }
+    },
     // EW-P4-3 — the REAL threading helpers, from their leaf module.
     ...jest.requireActual<Record<string, unknown>>(
         '../../../../packages/agent/src/facades/email-threading',
@@ -17,6 +26,7 @@ jest.mock('@ever-works/agent/facades', () => ({
 jest.mock('@ever-works/agent/email', () => ({
     EmailDraftService: class EmailDraftService {},
 }));
+jest.mock('../mail/mail.service', () => ({ MailService: class MailService {} }));
 jest.mock('./templates/render', () => ({
     renderTemplate: jest.fn(),
     listTemplates: jest.fn(() => []),
@@ -78,6 +88,7 @@ describe('EmailService.sendMessage authorization', () => {
             id: 'addr-foreign',
             address: 'me@x.com',
             userId: 'user-1',
+            verified: true,
         });
 
         await service.sendMessage('user-1', {
@@ -116,6 +127,7 @@ describe('EmailService.sendMessage authorization', () => {
             id: 'addr-1',
             address: 'me@x.com',
             userId: 'user-1',
+            verified: true,
         });
 
         await service.sendMessage('user-1', {
@@ -256,7 +268,13 @@ describe('EmailService verification-token expiry', () => {
  * person. The origin is a server-side argument, never a body field.
  */
 describe('EmailService.sendMessage origin (AW-05)', () => {
-    const address = { id: 'addr-1', address: 'nova@x.com', userId: 'user-1', pluginId: 'postmark' };
+    const address = {
+        id: 'addr-1',
+        address: 'nova@x.com',
+        userId: 'user-1',
+        pluginId: 'postmark',
+        verified: true,
+    };
     let emailFacade: { send: jest.Mock };
     let drafts: { submit: jest.Mock };
     let service: EmailService;
@@ -373,6 +391,7 @@ describe('EmailService.sendMessage pinned sending address (AW-05)', () => {
         pluginId: 'postmark',
         direction: 'outbound',
         disabledAt: null,
+        verified: true,
     };
     const PINNED = { ...PRIMARY, id: 'addr-pinned', address: 'pinned@x.com', pluginId: 'resend' };
     const EXPLICIT = { ...PRIMARY, id: 'addr-explicit', address: 'explicit@x.com' };
@@ -500,7 +519,13 @@ describe('EmailService.sendMessage pinned sending address (AW-05)', () => {
  * belongs to the same Task. Another account's message answers 404.
  */
 describe('EmailService.sendMessage inReplyToMessageId (EW-P4-3)', () => {
-    const address = { id: 'addr-1', address: 'nova@x.com', userId: 'user-1', pluginId: 'postmark' };
+    const address = {
+        id: 'addr-1',
+        address: 'nova@x.com',
+        userId: 'user-1',
+        pluginId: 'postmark',
+        verified: true,
+    };
     const parent = {
         id: '6f1c2e8a-5d0b-4b7e-9a51-3c8f2d9e1a01',
         userId: 'user-1',
@@ -622,5 +647,144 @@ describe('EmailService.sendMessage inReplyToMessageId (EW-P4-3)', () => {
         expect(messages.findByIdAndUserId).not.toHaveBeenCalled();
         expect(emailFacade.send.mock.calls[0][0].headers).toBeUndefined();
         expect(emailFacade.send.mock.calls[0][1].taskId).toBeUndefined();
+    });
+});
+
+/**
+ * EW-P4-3 — address verification is real: a confirmation email with a fresh
+ * one-time link is sent, and nothing can be sent FROM an unverified address.
+ */
+describe('EmailService verification (EW-P4-3)', () => {
+    const row = {
+        id: 'addr-1',
+        userId: 'user-1',
+        address: 'nova@x.com',
+        pluginId: 'postmark',
+        verified: false,
+        disabledAt: null,
+        verificationTokenExpiresAt: null as Date | null,
+    };
+    let addresses: { findByIdForUser: jest.Mock; update: jest.Mock };
+    let mail: { sendNotificationEmail: jest.Mock };
+    let facade: { verifyAddress: jest.Mock; send: jest.Mock };
+
+    function build(withMail = true) {
+        return new EmailService(
+            addresses as never,
+            {
+                findPrimaryOutboundForAgent: jest
+                    .fn()
+                    .mockResolvedValue({ emailAddressId: 'addr-1' }),
+            } as never,
+            {} as never,
+            facade as never,
+            { findByIdAndUser: jest.fn().mockResolvedValue({ id: 'agent-1' }) } as never,
+            undefined,
+            undefined,
+            (withMail ? mail : undefined) as never,
+        );
+    }
+
+    beforeEach(() => {
+        addresses = {
+            findByIdForUser: jest.fn().mockResolvedValue({ ...row }),
+            update: jest.fn().mockResolvedValue(undefined),
+        };
+        mail = { sendNotificationEmail: jest.fn().mockResolvedValue(true) };
+        facade = {
+            verifyAddress: jest.fn().mockRejectedValue(new Error('No email-outbound provider')),
+            send: jest
+                .fn()
+                .mockResolvedValue({ providerMessageId: 'pm-1', accepted: [], rejected: [] }),
+        };
+        delete process.env.EMAIL_SENDER_VERIFICATION_REQUIRED;
+    });
+
+    afterEach(() => {
+        delete process.env.EMAIL_SENDER_VERIFICATION_REQUIRED;
+    });
+
+    it('mails a fresh one-time link to the address and stores its token', async () => {
+        const before = Date.now();
+        const result = await build().triggerVerification('user-1', 'addr-1');
+
+        expect(result).toMatchObject({ sent: true });
+        const [id, patch] = addresses.update.mock.calls[0];
+        expect(id).toBe('addr-1');
+        expect(patch.verificationToken).toMatch(/^[A-Za-z0-9_-]{32}$/);
+        expect(patch.verificationTokenExpiresAt.getTime()).toBeGreaterThanOrEqual(
+            before + 24 * 60 * 60 * 1000,
+        );
+        const [to, , context] = mail.sendNotificationEmail.mock.calls[0];
+        expect(to).toBe('nova@x.com');
+        expect(context.actionUrl).toBe(`/email-address/verify/${patch.verificationToken}`);
+        expect(context.settingsPath).toBe('/settings/integrations/emails');
+    });
+
+    it('a failing provider-side verifyAddress does not stop the confirmation email', async () => {
+        await expect(build().triggerVerification('user-1', 'addr-1')).resolves.toMatchObject({
+            sent: true,
+        });
+        expect(facade.verifyAddress).toHaveBeenCalled();
+    });
+
+    it('sends nothing for an address that is already verified', async () => {
+        addresses.findByIdForUser.mockResolvedValue({ ...row, verified: true });
+        await expect(build().triggerVerification('user-1', 'addr-1')).resolves.toMatchObject({
+            sent: false,
+            alreadyVerified: true,
+        });
+        expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('refuses a resend within the cooldown (429) and a disabled address (400)', async () => {
+        addresses.findByIdForUser.mockResolvedValue({
+            ...row,
+            verificationTokenExpiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000 - 5_000),
+        });
+        await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
+            status: 429,
+        });
+        addresses.findByIdForUser.mockResolvedValue({ ...row, disabledAt: new Date() });
+        await expect(build().triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
+            status: 400,
+        });
+        expect(mail.sendNotificationEmail).not.toHaveBeenCalled();
+    });
+
+    it('answers 503 rather than pretending to send when platform mail is not wired', async () => {
+        await expect(build(false).triggerVerification('user-1', 'addr-1')).rejects.toMatchObject({
+            status: 503,
+        });
+        expect(addresses.update).not.toHaveBeenCalled();
+    });
+
+    it("answers 404 for another account's address", async () => {
+        addresses.findByIdForUser.mockResolvedValue(null);
+        await expect(build().triggerVerification('user-2', 'addr-1')).rejects.toBeInstanceOf(
+            NotFoundException,
+        );
+    });
+
+    const input = { agentId: 'agent-1', to: ['ada@x.com'], subject: 'Hi', bodyText: 'Hello' };
+
+    it('refuses to send from an unverified address (403) before any provider is asked', async () => {
+        await expect(build().sendMessage('user-1', input)).rejects.toMatchObject({
+            status: 403,
+            message: expect.stringContaining('nova@x.com'),
+        });
+        expect(facade.send).not.toHaveBeenCalled();
+    });
+
+    it('sends from a verified address', async () => {
+        addresses.findByIdForUser.mockResolvedValue({ ...row, verified: true });
+        await build().sendMessage('user-1', input);
+        expect(facade.send).toHaveBeenCalled();
+    });
+
+    it('lets an operator switch the rule off with EMAIL_SENDER_VERIFICATION_REQUIRED=false', async () => {
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'false';
+        await build().sendMessage('user-1', input);
+        expect(facade.send).toHaveBeenCalled();
     });
 });
