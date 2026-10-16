@@ -108,7 +108,10 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       `proposalDecided`); `inbox.item.state_changed` for a real read / unread or archive / restore flip;
       `inbox.item.deleted` with a tombstone claimed before the delete. `data` is the inbox-item DTO
       (`resources/inbox-item.schema.json`; `data.recipientUserId` is always set, fleet `sourceMeta` is never exposed).
-      Pinned by `inbox-recording.spec.ts`.
+      They are **recipient-scoped** (`visibility: recipient`, one person's messages): the integration feed and webhooks
+      v2 serve them only to an integration key that holds `inbox:read`, never to a user-owned subscription; the gate is
+      by event type (`recipientScopeForEventType` in `@ever-works/contracts`, also `email.*` → `email:read`).
+      Pinned by `inbox-recording.spec.ts` and `webhook-domain-event-fanout.service.spec.ts`.
     - The same mode records the **Knowledge Base** (P3, EW-P3-2): `kb.document.*` in `KnowledgeBaseService` (create,
       edit, lock, decision, accept, archive / restore, delete with a tombstone, for Work and organization documents) and
       `KnowledgeLibraryService` (`moved` when documents are filed, or unfiled by a folder delete); `kb.folder.*` in

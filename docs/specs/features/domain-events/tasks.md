@@ -40,11 +40,14 @@
 
 ## P3 — Inbox (EW-P3-1)
 
-- [x] **T20** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`).
-- [ ] **T21** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
-      (act-as = the recipient only) + coverage gate entries.
-      Until T21 lands, `inbox.item.*` events are recorded `visibility: private` (an inbox item is one person's
-      message), so the organization feed and webhooks v2 never serve them; in-process listeners still get them.
+- [x] **T23** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`; a reply whose routing fails records the read flip its claim made).
+- [x] **T24** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
+      (act-as = the recipient only; `integrations-api-v1` spec §9) + coverage gate entries (the Inbox, escalation and
+      approvals controllers, whose decisions close the Inbox mirror).
+      `inbox.item.*` events are recorded `visibility: recipient` (an inbox item is one person's message): the feed and
+      webhooks v2 serve them only to an integration key holding `inbox:read` (never to a user-owned subscription or a
+      key without the scope); in-process listeners get them all. Until these routes landed they were recorded
+      `private` (#2644).
 
 ## P3 — Knowledge Base (EW-P3-2)
 

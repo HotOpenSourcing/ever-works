@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ExternalRecordLinksService } from './external-record-links.service';
 import { IntegrationIdempotencyService } from './integration-idempotency.service';
+import { IntegrationInboxService } from './integration-inbox.service';
 import { IntegrationKbService } from './integration-kb.service';
 import { IntegrationResourcesService } from './integration-resources.service';
 
@@ -15,6 +16,8 @@ import { IntegrationResourcesService } from './integration-resources.service';
         ExternalRecordLinksService,
         IntegrationIdempotencyService,
         IntegrationResourcesService,
+        // EW-P3-1 — `GET /inbox/items[/:id]`.
+        IntegrationInboxService,
         // EW-P3-2 — `GET /kb/documents`, `GET /kb/folders`.
         IntegrationKbService,
     ],
@@ -22,6 +25,7 @@ import { IntegrationResourcesService } from './integration-resources.service';
         ExternalRecordLinksService,
         IntegrationIdempotencyService,
         IntegrationResourcesService,
+        IntegrationInboxService,
         IntegrationKbService,
     ],
 })
