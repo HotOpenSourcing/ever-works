@@ -232,7 +232,6 @@ export class MissionsService {
     ): Promise<MissionDto[]> {
         const view = filter.view ?? 'mine';
         if (view !== 'mine' && this.accessPolicy) {
-            const search = filter.search?.trim().toLowerCase();
             const { rows } = await this.accessPolicy.listVisible<Mission>({
                 aggregate: 'mission',
                 userId,
@@ -246,13 +245,8 @@ export class MissionsService {
                             missionStatus: filter.status,
                         });
                     }
-                    if (search) {
-                        qb.andWhere(
-                            `(LOWER(${alias}.title) LIKE :missionSearch OR LOWER(${alias}.description) LIKE :missionSearch)`,
-                            { missionSearch: `%${search}%` },
-                        );
-                    }
                 },
+                search: { term: filter.search, columns: ['title', 'description'] },
             });
             return rows.map(toMissionDto);
         }
