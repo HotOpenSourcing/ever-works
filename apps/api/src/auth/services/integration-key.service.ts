@@ -187,20 +187,37 @@ export class IntegrationKeyService {
      * API to the key that created it (at most {@link INTEGRATION_KEY_MAX_ORGANIZATIONS}).
      */
     async addPin(keyId: string, organizationId: string): Promise<string[]> {
+        await this.assertPinCapacity(keyId, organizationId);
+        // One locked read-modify-write: concurrent creates through one key keep every pin.
+        const result = await this.apiKeys.appendOrganizationId(
+            keyId,
+            organizationId,
+            INTEGRATION_KEY_MAX_ORGANIZATIONS,
+        );
+        if (result.status === 'missing') throw new NotFoundException('Integration key not found');
+        if (result.status === 'full') throw this.pinsFull();
+        return result.organizationIds;
+    }
+
+    /**
+     * EW-P2-6 — refuse BEFORE `POST /organizations` writes anything when the key has no
+     * pin left, so a full key never leaves an orphan Organization behind. `404` when
+     * `keyId` is not an integration key.
+     */
+    async assertPinCapacity(keyId: string, organizationId?: string): Promise<void> {
         const row = await this.apiKeys.findById(keyId);
         if (!row || row.kind !== INTEGRATION_API_KEY_KIND) {
             throw new NotFoundException('Integration key not found');
         }
-        const pins = Array.isArray(row.organizationIds) ? [...row.organizationIds] : [];
-        if (pins.includes(organizationId)) return pins;
-        if (pins.length >= INTEGRATION_KEY_MAX_ORGANIZATIONS) {
-            throw new BadRequestException(
-                `A key may be pinned to at most ${INTEGRATION_KEY_MAX_ORGANIZATIONS} organizations`,
-            );
-        }
-        const next = [...pins, organizationId];
-        await this.apiKeys.updateOrganizationIds(keyId, next);
-        return next;
+        const pins = Array.isArray(row.organizationIds) ? row.organizationIds : [];
+        if (organizationId && pins.includes(organizationId)) return;
+        if (pins.length >= INTEGRATION_KEY_MAX_ORGANIZATIONS) throw this.pinsFull();
+    }
+
+    private pinsFull(): BadRequestException {
+        return new BadRequestException(
+            `A key may be pinned to at most ${INTEGRATION_KEY_MAX_ORGANIZATIONS} organizations`,
+        );
     }
 
     /**

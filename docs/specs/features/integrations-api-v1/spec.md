@@ -328,16 +328,21 @@ active` answers `422 domain_rule`; the status already reached is a no-op; any ot
 - **`POST /organizations`** ([`CreateOrganization`](./contract/schemas/requests.schema.json) `{displayName, slug?,
 legalName?, countryCode?}`, scope `org:write` — opt-in, not in the Ever Gauzy preset; `Idempotency-Key` required; no
   `X-Scope-Slug`): creates an Organization in the key's Tenant, owned by the Tenant owner like every Organization of
-  the Tenant, and **pins it to the calling key** (at most 50 pins, `400` beyond). A key created by an Organization
-  admin also makes its creator an `admin` of the new Organization. Answers `201` with the organization DTO and records
+  the Tenant, and **pins it to the calling key** (at most 50 pins: a full key answers `400` before anything is
+  written; concurrent creates through one key keep every pin). A key created by an Organization admin also makes its
+  creator an `admin` of the new Organization, and creates only while that creator still administers an Organization
+  of the Tenant (`422 domain_rule`, `details.reason: 'creator_not_admin'`). Answers `201` with the organization DTO and records
   `organization.created` (new in the catalog; also recorded when a person creates an Organization in the app).
 - **Member roles:** `owner` (the Tenant owner, a member of every Organization by construction), `admin`, `member`
   (every existing roster row). Only the Tenant owner promotes or demotes (`PATCH
 /api/organizations/:orgId/members/:userId {role: admin|member}` in the app, `organization.member.updated`); invitations
   always create `member`s. Today `admin` grants exactly one thing: **creating integration keys** pinned to the
   Organizations the admin administers. Such a key acts as its creator, and its usable pins are re-read on every
-  request, so a demoted or removed admin's key loses those pins at once (`403 org_not_pinned`). The Tenant owner sees
-  and may revoke every key of the Tenant; an admin sees their own.
+  request and before every webhook send, so a demoted or removed admin's key loses those pins at once (`403
+  org_not_pinned`; with no pin left the key no longer authenticates, `401`, and its webhooks pause). Its
+  `X-Act-As-User` may name only its creator or a plain `member` of the pinned Organization — never the Tenant owner or
+  another admin (`403 act_as_forbidden`). The Tenant owner sees and may revoke every key of the Tenant; an admin sees
+  their own.
 - **`displayName`:** members now carry the optional `users.displayName` (null when the person set none; fall back to
   `username`). Profile fields are copied once by the consumer (plan 01 §3): changing them records no event.
 

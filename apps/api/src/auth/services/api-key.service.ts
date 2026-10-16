@@ -182,6 +182,9 @@ export class ApiKeyService {
         // EW-P2-6 — the principal is built from these pins: narrow them to what the
         // creator may use NOW (a copy when narrowed; the stored row is untouched).
         const usable = await this.effectivePins(apiKey);
+        // A demoted (or removed) admin's key keeps no pin: like a key with no pin, it
+        // cannot act anywhere, so it does not authenticate at all.
+        if (usable.length === 0) return null;
         if (usable.length === apiKey.organizationIds.length) return apiKey;
         return { ...apiKey, organizationIds: usable } as ApiKey;
     }

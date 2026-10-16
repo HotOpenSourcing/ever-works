@@ -6,6 +6,7 @@ import { ApiKey } from '../entities/api-key.entity';
 import { Organization } from '../entities/organization.entity';
 import { User } from '../entities/user.entity';
 import type { WebhookSubscription } from '../entities/webhook-subscription.entity';
+import { effectiveIntegrationKeyPins } from './integration-key-pins';
 
 /** Whether a v2 subscription's owner may receive events right now, and of which organizations. */
 export interface WebhookOwnerAccess {
@@ -42,8 +43,8 @@ const DENIED_FOR_GOOD: WebhookOwnerAccess = {
  *  - a user owner belongs to the organizations of its tenant
  *    (`OrganizationMembershipService.ensureMember`); a deleted user denies for good;
  *  - an integration-key owner must be active and unexpired, and is limited to
- *    the organizations it is pinned to; a revoked, expired or deleted key
- *    denies for good.
+ *    the organizations it is pinned to (for an admin's key, the ones its creator
+ *    still administers — EW-P2-6); a revoked, expired or deleted key denies for good.
  */
 @Injectable()
 export class WebhookOwnerAccessService {
@@ -63,11 +64,14 @@ export class WebhookOwnerAccessService {
             ) {
                 return DENIED_FOR_GOOD;
             }
-            const pinned = key.organizationIds;
+            // EW-P2-6 — an admin's key keeps only the pins its creator still administers
+            // (a demoted or removed admin receives nothing; re-promotion restores it).
+            const pinned = await effectiveIntegrationKeyPins(this.dataSource.manager, key);
+            if (key.tenantId && pinned.length === 0) return DENIED_FOR_NOW;
             return {
                 ok: true,
                 disable: false,
-                organizationIds: new Set(Array.isArray(pinned) ? pinned : []),
+                organizationIds: new Set(pinned),
                 scopes: new Set(Array.isArray(key.scopes) ? key.scopes : []),
             };
         }

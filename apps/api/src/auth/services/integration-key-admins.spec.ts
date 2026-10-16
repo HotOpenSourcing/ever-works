@@ -2,6 +2,7 @@ jest.mock('@ever-works/agent/database', () => ({}));
 jest.mock('@ever-works/agent/activity-log', () => ({ ActivityLogService: class {} }));
 
 import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { IntegrationPrincipalGuard } from '../integration/integration-principal.guard';
 import { ApiKeyService } from './api-key.service';
 import { IntegrationKeyService } from './integration-key.service';
 
@@ -31,6 +32,37 @@ describe('integration keys and organization admins (EW-P2-6)', () => {
 
     describe('ApiKeyService.effectivePins', () => {
         const service = new ApiKeyService({} as never, tenants as never, members as never);
+
+        it('a key whose creator administers none of its pins any more does not authenticate', async () => {
+            const row = (userId: string) => ({
+                id: 'k-1',
+                kind: 'integration',
+                userId,
+                tenantId: TENANT,
+                organizationIds: [ORG_A],
+                expiresAt: null,
+            });
+            const keysOf = (userId: string) => ({
+                findByHashedKey: jest.fn().mockResolvedValue(row(userId)),
+                findByPreviousHashedKey: jest.fn().mockResolvedValue(null),
+                updateLastUsed: jest.fn().mockResolvedValue(undefined),
+            });
+            const demoted = new ApiKeyService(
+                keysOf(MEMBER) as never,
+                tenants as never,
+                members as never,
+            );
+            await expect(demoted.validateIntegrationKey('ew_int_secret')).resolves.toBeNull();
+            const admin = new ApiKeyService(
+                keysOf(ADMIN) as never,
+                tenants as never,
+                members as never,
+            );
+            await expect(admin.validateIntegrationKey('ew_int_secret')).resolves.toMatchObject({
+                id: 'k-1',
+                organizationIds: [ORG_A],
+            });
+        });
 
         it('keeps every pin of a key the Tenant owner created', async () => {
             await expect(
@@ -97,6 +129,13 @@ describe('integration keys and organization admins (EW-P2-6)', () => {
                     id === 'key-1' ? { id, kind: 'integration', organizationIds: [ORG_A] } : null,
                 ),
                 updateOrganizationIds: jest.fn().mockResolvedValue(true),
+                appendOrganizationId: jest.fn(async (id: string, org: string) =>
+                    id !== 'key-1'
+                        ? { status: 'missing', organizationIds: [] }
+                        : org === ORG_A
+                          ? { status: 'present', organizationIds: [ORG_A] }
+                          : { status: 'added', organizationIds: [ORG_A, org] },
+                ),
             };
             const organizations = {
                 findByTenantId: jest.fn().mockResolvedValue([
@@ -158,12 +197,63 @@ describe('integration keys and organization admins (EW-P2-6)', () => {
             expect(await service.list(MEMBER)).toEqual([]);
         });
 
+        it('addPin refuses a full key before writing (400)', async () => {
+            const { service, apiKeys } = setup();
+            apiKeys.findById.mockResolvedValue({
+                id: 'key-1',
+                kind: 'integration',
+                organizationIds: Array.from({ length: 50 }, (_, index) => `org-${index}`),
+            } as never);
+            await expect(service.addPin('key-1', ORG_B)).rejects.toThrow('at most 50');
+            expect(apiKeys.appendOrganizationId).not.toHaveBeenCalled();
+        });
+
         it('addPin appends a pin once and refuses a key that is not an integration key', async () => {
             const { service, apiKeys } = setup();
             await expect(service.addPin('key-1', ORG_B)).resolves.toEqual([ORG_A, ORG_B]);
-            expect(apiKeys.updateOrganizationIds).toHaveBeenCalledWith('key-1', [ORG_A, ORG_B]);
+            expect(apiKeys.appendOrganizationId).toHaveBeenCalledWith('key-1', ORG_B, 50);
             await expect(service.addPin('key-1', ORG_A)).resolves.toEqual([ORG_A]);
             await expect(service.addPin('nope', ORG_A)).rejects.toThrow('not found');
+        });
+    });
+
+    describe('X-Act-As-User on an admin-created key', () => {
+        const roster: Record<string, string> = {
+            [ADMIN]: 'admin',
+            'admin-2': 'admin',
+            [MEMBER]: 'member',
+        };
+        const guard = new IntegrationPrincipalGuard(
+            {} as never,
+            {} as never,
+            {} as never,
+            {} as never,
+            tenants as never,
+            {
+                findByOrgAndUser: jest.fn(async (_org: string, userId: string) =>
+                    roster[userId] ? { userId, role: roster[userId] } : null,
+                ),
+            } as never,
+        );
+        const mayActAs = (creator: string, target: string, org: string | null) =>
+            (
+                guard as unknown as {
+                    mayActAs: (
+                        principal: { tenantId: string; ownerUserId: string },
+                        target: string,
+                        org: string | null,
+                    ) => Promise<boolean>;
+                }
+            ).mayActAs({ tenantId: TENANT, ownerUserId: creator }, target, org);
+
+        it('acts only as itself or a plain member of the pinned organization, never as the owner or another admin', async () => {
+            await expect(mayActAs(ADMIN, MEMBER, ORG_A)).resolves.toBe(true);
+            await expect(mayActAs(ADMIN, ADMIN, ORG_A)).resolves.toBe(true);
+            await expect(mayActAs(ADMIN, OWNER, ORG_A)).resolves.toBe(false);
+            await expect(mayActAs(ADMIN, 'admin-2', ORG_A)).resolves.toBe(false);
+            await expect(mayActAs(ADMIN, MEMBER, null)).resolves.toBe(false);
+            // The Tenant owner's key keeps today's rule.
+            await expect(mayActAs(OWNER, ADMIN, ORG_A)).resolves.toBe(true);
         });
     });
 });
