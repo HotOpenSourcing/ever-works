@@ -342,9 +342,11 @@ describe('WebhooksService', () => {
         beforeEach(() => {
             users = { findById: jest.fn().mockResolvedValue({ id: ACCOUNT, tenantId: TENANT_ID }) };
             organizations = {
-                findById: jest.fn().mockImplementation(async (id: string) =>
-                    id === ORG ? { id: ORG, tenantId: TENANT_ID } : null,
-                ),
+                findById: jest
+                    .fn()
+                    .mockImplementation(async (id: string) =>
+                        id === ORG ? { id: ORG, tenantId: TENANT_ID } : null,
+                    ),
             };
             service = new WebhooksService(
                 repo as any,
@@ -376,7 +378,10 @@ describe('WebhooksService', () => {
                     organizationId: ORG,
                 }),
             );
-            expect(result.subscription).toMatchObject({ version: 2, events: ['task.*', 'team.created', 'task.runtime_updated'] });
+            expect(result.subscription).toMatchObject({
+                version: 2,
+                events: ['task.*', 'team.created', 'task.runtime_updated'],
+            });
             expect(result.signingSecret.length).toBeGreaterThanOrEqual(32);
         });
 
@@ -482,7 +487,9 @@ describe('WebhooksService', () => {
                 events: ['*'],
                 organizationIds: [ORG],
             });
-            expect(repo.createV2).toHaveBeenCalledWith(expect.objectContaining({ startAfterSeq: '4242' }));
+            expect(repo.createV2).toHaveBeenCalledWith(
+                expect.objectContaining({ startAfterSeq: '4242' }),
+            );
         });
 
         it('PATCH changes the filters of a v2 subscription', async () => {
@@ -505,7 +512,9 @@ describe('WebhooksService', () => {
             await service.rotateSecret(ACCOUNT, 'wh-2');
             const [, , previous] = repo.updateSecret.mock.calls[0];
             expect(previous.secretEncrypted).toBe('enc-old');
-            expect(previous.expiresAt.getTime()).toBeGreaterThanOrEqual(before + 23 * 60 * 60 * 1000);
+            expect(previous.expiresAt.getTime()).toBeGreaterThanOrEqual(
+                before + 23 * 60 * 60 * 1000,
+            );
 
             repo.updateSecret.mockClear();
             repo.findById.mockResolvedValue(v2Row({ version: 1 }));

@@ -35,7 +35,12 @@ export class AddWebhookSubscriptionsV21795080100000 implements MigrationInterfac
     public async up(queryRunner: QueryRunner): Promise<void> {
         const subscriptionColumns: TableColumn[] = [
             new TableColumn({ name: 'version', type: 'int', default: 1 }),
-            new TableColumn({ name: 'ownerType', type: 'varchar', length: '32', default: "'user'" }),
+            new TableColumn({
+                name: 'ownerType',
+                type: 'varchar',
+                length: '32',
+                default: "'user'",
+            }),
             new TableColumn({ name: 'ownerId', type: 'uuid', isNullable: true }),
             new TableColumn({ name: 'events', type: 'text', isNullable: true }),
             new TableColumn({ name: 'organizationIds', type: 'text', isNullable: true }),

@@ -15,8 +15,16 @@ export interface WebhookOwnerAccess {
     readonly organizationIds: ReadonlySet<string>;
 }
 
-const DENIED_FOR_NOW: WebhookOwnerAccess = { ok: false, disable: false, organizationIds: new Set() };
-const DENIED_FOR_GOOD: WebhookOwnerAccess = { ok: false, disable: true, organizationIds: new Set() };
+const DENIED_FOR_NOW: WebhookOwnerAccess = {
+    ok: false,
+    disable: false,
+    organizationIds: new Set(),
+};
+const DENIED_FOR_GOOD: WebhookOwnerAccess = {
+    ok: false,
+    disable: true,
+    organizationIds: new Set(),
+};
 
 /**
  * Webhooks v2 (EW-P1-5): who may still receive a subscription's events.
@@ -37,12 +45,19 @@ export class WebhookOwnerAccessService {
     async resolve(sub: WebhookSubscription): Promise<WebhookOwnerAccess> {
         const ownerId = sub.ownerId ?? sub.accountId;
         if (sub.ownerType === 'integration_key') {
-            const key = await this.dataSource.getRepository(ApiKey).findOne({ where: { id: ownerId } });
+            const key = await this.dataSource
+                .getRepository(ApiKey)
+                .findOne({ where: { id: ownerId } });
             if (!key || !key.isActive || (key.expiresAt && key.expiresAt.getTime() <= Date.now())) {
                 return DENIED_FOR_GOOD;
             }
-            const pinned = (key as unknown as { organizationIds?: string[] | null }).organizationIds;
-            return { ok: true, disable: false, organizationIds: new Set(Array.isArray(pinned) ? pinned : []) };
+            const pinned = (key as unknown as { organizationIds?: string[] | null })
+                .organizationIds;
+            return {
+                ok: true,
+                disable: false,
+                organizationIds: new Set(Array.isArray(pinned) ? pinned : []),
+            };
         }
         const user = await this.dataSource
             .getRepository(User)

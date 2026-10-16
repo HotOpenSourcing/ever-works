@@ -36,7 +36,7 @@
 
 - [x] **T18** Subscription columns + migration (3 dialects) — `1795080100000-AddWebhookSubscriptionsV2`.
 - [x] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags` — `WebhookDomainEventFanoutService` (cursor
-  `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
+      `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
 - [x] **T20** `t=,v1=` signer + rotation grace + vector contract test — `webhook-signature-v2.ts` (all 22 vectors).
 - [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily; the
   `/api/integrations/v1/webhooks` routes for key-owned subscriptions follow #2606).

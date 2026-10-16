@@ -4,7 +4,10 @@ import type { DataSource } from 'typeorm';
 import { WebhookDeliveryRepository } from '../../database/repositories/webhook-delivery.repository';
 import { WebhookSubscriptionRepository } from '../../database/repositories/webhook-subscription.repository';
 import { DomainEventFeedService } from '../../domain-events/domain-event-feed.service';
-import { DomainEventRecorder, type RecordDomainEventInput } from '../../domain-events/domain-event-recorder.service';
+import {
+    DomainEventRecorder,
+    type RecordDomainEventInput,
+} from '../../domain-events/domain-event-recorder.service';
 import { DomainEventRelayService } from '../../domain-events/domain-event-relay.service';
 import { DomainEventRetentionService } from '../../domain-events/domain-event-retention.service';
 import {
@@ -36,7 +39,11 @@ describe('WebhookDomainEventFanoutService', () => {
     let dataSource: DataSource;
     let fanout: WebhookDomainEventFanoutService;
     let subscriptions: WebhookSubscriptionRepository;
-    const enqueued: Array<{ subscriptionId: string; eventName: string; payload: Record<string, unknown> }> = [];
+    const enqueued: Array<{
+        subscriptionId: string;
+        eventName: string;
+        payload: Record<string, unknown>;
+    }> = [];
     const enqueuer: WebhookV2Enqueuer = {
         enqueueDelivery: async (payload) => {
             enqueued.push(payload);
@@ -48,7 +55,9 @@ describe('WebhookDomainEventFanoutService', () => {
 
     const record = async (overrides: Partial<RecordDomainEventInput> = {}) => {
         const recorder = new DomainEventRecorder();
-        await dataSource.transaction((manager) => recorder.record(manager, taskEventInput(overrides)));
+        await dataSource.transaction((manager) =>
+            recorder.record(manager, taskEventInput(overrides)),
+        );
     };
     const dispatch = async () => {
         const relay = new DomainEventRelayService(
@@ -61,7 +70,9 @@ describe('WebhookDomainEventFanoutService', () => {
     };
     const deliveries = () =>
         dataSource.getRepository(WebhookDelivery).find({ order: { createdAt: 'ASC' } });
-    const subscribe = async (overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {}) =>
+    const subscribe = async (
+        overrides: Partial<Parameters<WebhookSubscriptionRepository['createV2']>[0]> = {},
+    ) =>
         subscriptions.createV2({
             // As WebhooksService.createV2 does: start after the current feed head.
             startAfterSeq: await new DomainEventFeedService(dataSource).head(),
@@ -79,7 +90,9 @@ describe('WebhookDomainEventFanoutService', () => {
 
     beforeAll(async () => {
         dataSource = await createDomainEventsDataSource();
-        subscriptions = new WebhookSubscriptionRepository(dataSource.getRepository(WebhookSubscription));
+        subscriptions = new WebhookSubscriptionRepository(
+            dataSource.getRepository(WebhookSubscription),
+        );
         fanout = new WebhookDomainEventFanoutService(
             dataSource,
             subscriptions,
@@ -92,13 +105,29 @@ describe('WebhookDomainEventFanoutService', () => {
 
     beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
-        for (const table of ['webhook_deliveries', 'webhook_subscriptions', 'users', 'organizations', 'api_keys']) {
+        for (const table of [
+            'webhook_deliveries',
+            'webhook_subscriptions',
+            'users',
+            'organizations',
+            'api_keys',
+        ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
         enqueued.length = 0;
         await dataSource.getRepository(Organization).insert([
-            { id: ORG_A, tenantId: TENANT, slug: `a-${randomUUID().slice(0, 6)}`, displayName: 'A' },
-            { id: ORG_B, tenantId: OTHER_TENANT, slug: `b-${randomUUID().slice(0, 6)}`, displayName: 'B' },
+            {
+                id: ORG_A,
+                tenantId: TENANT,
+                slug: `a-${randomUUID().slice(0, 6)}`,
+                displayName: 'A',
+            },
+            {
+                id: ORG_B,
+                tenantId: OTHER_TENANT,
+                slug: `b-${randomUUID().slice(0, 6)}`,
+                displayName: 'B',
+            },
         ] as unknown as Organization[]);
         await dataSource.getRepository(User).insert({
             id: OWNER,
@@ -158,7 +187,11 @@ describe('WebhookDomainEventFanoutService', () => {
         await fanout.catchUp(); // cursor at the (empty) head
         const sub = await subscribe({ excludeOriginTags: ['gauzy:conn-1'] });
         await record({ type: 'task.updated' });
-        await record({ type: 'team.created', aggregate: { type: 'team', id: randomUUID(), version: 1 }, data: { id: 'x', visibility: 'organization' } });
+        await record({
+            type: 'team.created',
+            aggregate: { type: 'team', id: randomUUID(), version: 1 },
+            data: { id: 'x', visibility: 'organization' },
+        });
         await record({ type: 'task.updated', organizationId: ORG_B, tenantId: OTHER_TENANT });
         await record({ type: 'task.updated', originTag: 'gauzy:conn-1' });
         await record({ type: 'task.runtime_updated' });
@@ -167,7 +200,11 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(await fanout.catchUp()).toBe(1);
         const rows = await deliveries();
         expect(rows).toHaveLength(1);
-        expect(rows[0]).toMatchObject({ subscriptionId: sub.id, event: 'task.updated', status: 'pending' });
+        expect(rows[0]).toMatchObject({
+            subscriptionId: sub.id,
+            event: 'task.updated',
+            status: 'pending',
+        });
         expect(rows[0].eventId).toMatch(/^evt_/);
         expect(enqueued).toHaveLength(1);
         expect(enqueued[0].payload).toMatchObject({
@@ -244,7 +281,11 @@ describe('WebhookDomainEventFanoutService', () => {
 
     it('ignores v1 subscriptions and paused v2 ones', async () => {
         await fanout.catchUp();
-        await subscriptions.createForAccount({ accountId: OWNER, url: 'https://v1.example.com', secretEncrypted: 's' });
+        await subscriptions.createForAccount({
+            accountId: OWNER,
+            url: 'https://v1.example.com',
+            secretEncrypted: 's',
+        });
         const paused = await subscribe();
         await subscriptions.pause(paused.id);
         await record();

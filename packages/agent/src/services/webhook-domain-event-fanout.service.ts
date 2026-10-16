@@ -162,7 +162,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
             return 0;
         }
 
-        const organizationIds = [...new Set(subscriptions.flatMap((sub) => sub.organizationIds ?? []))];
+        const organizationIds = [
+            ...new Set(subscriptions.flatMap((sub) => sub.organizationIds ?? [])),
+        ];
         const patterns = [...new Set(subscriptions.flatMap((sub) => sub.events ?? []))];
         const owners = new Map<string, WebhookOwnerAccess>();
         let after = cursor.lastSeq;
@@ -195,7 +197,8 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
                 for (const sub of subscriptions) {
                     if (!this.matches(sub, event)) continue;
                     const owner = await this.ownerVerdict(sub, owners);
-                    if (!owner.ok || !owner.organizationIds.has(event.organizationId ?? '')) continue;
+                    if (!owner.ok || !owner.organizationIds.has(event.organizationId ?? ''))
+                        continue;
                     if (await this.deliver(sub, event)) created += 1;
                 }
             }
@@ -207,7 +210,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
             if (!result.hasMore) break;
         }
         await this.recoverUnsent().catch((error) =>
-            this.logger.warn(`webhooks v2 recovery of unsent deliveries failed: ${describe(error)}`),
+            this.logger.warn(
+                `webhooks v2 recovery of unsent deliveries failed: ${describe(error)}`,
+            ),
         );
         return created;
     }
@@ -287,7 +292,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         });
         if (!delivery) return false;
         if (!this.enqueuer) {
-            this.logger.warn(`webhooks v2 delivery ${delivery.id} created but no enqueuer is bound`);
+            this.logger.warn(
+                `webhooks v2 delivery ${delivery.id} created but no enqueuer is bound`,
+            );
             return true;
         }
         await this.enqueuer.enqueueDelivery({
@@ -317,7 +324,11 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         if (existing) return { id: existing.id, lastSeq: String(existing.lastSeq ?? '0') };
         const start = await this.initialPosition(subscriptions);
         try {
-            await repo.insert({ ...where, lastSeq: start, consecutiveFailures: 0 } as Partial<PluginEventCursor>);
+            await repo.insert({
+                ...where,
+                lastSeq: start,
+                consecutiveFailures: 0,
+            } as Partial<PluginEventCursor>);
         } catch {
             // Another replica created it first.
         }
@@ -329,7 +340,9 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         const head = await this.feed.head();
         if (
             subscriptions.length > 0 &&
-            subscriptions.every((sub) => sub.startAfterSeq !== null && sub.startAfterSeq !== undefined)
+            subscriptions.every(
+                (sub) => sub.startAfterSeq !== null && sub.startAfterSeq !== undefined,
+            )
         ) {
             const lowest = subscriptions
                 .map((sub) => seqToBigInt(sub.startAfterSeq))
