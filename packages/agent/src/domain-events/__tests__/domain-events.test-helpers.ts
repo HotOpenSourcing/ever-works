@@ -138,7 +138,9 @@ interface ContractCatalogRow {
  */
 export function catalogDataValidator(): (event: { type: string; data: unknown }) => void {
     const validate = contractValidator();
-    const catalog = JSON.parse(readFileSync(join(CONTRACT_DIR, 'event-catalog.v1.json'), 'utf8')) as {
+    const catalog = JSON.parse(
+        readFileSync(join(CONTRACT_DIR, 'event-catalog.v1.json'), 'utf8'),
+    ) as {
         events: ContractCatalogRow[];
     };
     const rows = new Map(catalog.events.map((row) => [row.type, row]));

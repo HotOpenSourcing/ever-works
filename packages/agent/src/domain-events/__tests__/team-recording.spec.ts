@@ -43,8 +43,11 @@ describe('team recording points', () => {
         dataSource.getRepository(DomainEvent).find({ order: { outboxSeq: 'ASC' } });
     const versionOf = async (entity: typeof Team | typeof Task, id: string) =>
         Number(
-            ((await dataSource.getRepository(entity).findOneByOrFail({ id })) as { version: number })
-                .version,
+            (
+                (await dataSource.getRepository(entity).findOneByOrFail({ id })) as {
+                    version: number;
+                }
+            ).version,
         );
 
     beforeAll(async () => {
@@ -81,7 +84,13 @@ describe('team recording points', () => {
 
     beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
-        for (const table of ['organizations', 'agents', 'team_members', 'team_resources', 'tasks']) {
+        for (const table of [
+            'organizations',
+            'agents',
+            'team_members',
+            'team_resources',
+            'tasks',
+        ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
         await dataSource.getRepository(Organization).insert({
@@ -217,7 +226,10 @@ describe('team recording points', () => {
 
     it('delete also records what it changes: re-parented children and everything losing the team', async () => {
         const parent = await newTeam('Engineering');
-        const team = await teams.create(OWNER, ORG_A, { name: 'Platform', parentTeamId: parent.id });
+        const team = await teams.create(OWNER, ORG_A, {
+            name: 'Platform',
+            parentTeamId: parent.id,
+        });
         const child = await teams.create(OWNER, ORG_A, { name: 'Runtime', parentTeamId: team.id });
         await teams.addMember(OWNER, ORG_A, team.id, { memberType: 'agent', memberId: AGENT });
         await resources.attach(OWNER, ORG_A, team.id, { resourceType: 'task', resourceId: TASK });

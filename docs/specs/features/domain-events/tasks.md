@@ -21,7 +21,7 @@
 ## B2 — Recording points
 
 - [x] **T12** DTO snapshot builders (`domain-event-snapshots.ts`) + `DomainEventPublisher` (`created`, `changed`, `child`,
-  `beforeDelete`/`deleted`, `runtime`, `recordAfterWrite`).
+      `beforeDelete`/`deleted`, `runtime`, `recordAfterWrite`).
 - [x] **T13** Task recording points (incl. edges, chat, templates) + `version`/`updatedAt` bumps (`task-recording.spec.ts`).
 - [x] **T14** `task.runtime_updated` for PR/CI/run writers (run denorm, PR status, discard branch).
 - [x] **T15** Team recording points (incl. members, resources) (`team-recording.spec.ts`).
