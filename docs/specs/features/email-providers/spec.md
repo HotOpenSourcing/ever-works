@@ -536,3 +536,29 @@ Now:
       as before — a reply is never lost.
     - After a Task is spawned or joined, the message is linked to it (`email_messages.taskId`, only when still empty).
     - A spawned Task's description ends with the inbound message id and how to reply in thread.
+
+### 14.3 Inbound data: attachments, Cc, metadata, tenant / organization
+
+Before: the inbound webhook handed the dispatcher only from / to / subject / bodies, so **attachments, Cc and the
+provider metadata (spam score, headers) were dropped**, and the row written from the public webhook (no request scope)
+got NULL tenant / organization.
+
+Now:
+
+- **Contract**: `EmailInboundMessage.cc` (bare mailboxes; Postmark `CcFull` / `Cc`, Mailgun `Cc`). Recorded, never
+  routed on — like `to`.
+- **Attachments** (`email_messages.attachments`, simple-json; migration `1795061530000-AddEmailMessageAttachments`,
+  portable DDL): each inbound attachment is stored through the optional `INBOUND_EMAIL_ATTACHMENT_STORE`, which the
+  platform binds to the **same upload pipeline as a user's own uploads** (`UploadsService.saveFile`: MIME allow-list
+  checked against magic bytes, size cap, content-hash storage key — the sender's filename never reaches storage),
+  owned by the receiving address's owner and recorded in the address's tenant / organization (`user_uploads`). Every
+  attachment is listed on the row (`filename`, `mimeType`, `size`, `cid`, `stored`, `uploadId`, `url`, `reason`): one
+  the pipeline refused, one over the per-message limits (20 attachments, 25 MB decoded), an empty one, or any when no
+  store is bound, is listed with `stored: false` and why. A refused attachment never blocks the message.
+- **Cc and metadata**: `ccAddresses` and `metadata` are kept. Metadata is bounded to 32,000 serialized characters
+  (first the raw header list is dropped, marked `headersOmitted`; then only the keys are kept, marked `truncated`).
+- **Tenant / organization**: the inbound row — and a conversation it creates — is stamped with the **receiving
+  address's** `tenantId` / `organizationId` (explicit values, so the scope-stamping subscriber's empty request scope
+  never applies). A Task spawned from it is created in that same scope (an address with no organization keeps the
+  personal scope, as before), and its description lists the attachments (names and types defused like the rest of the
+  email text) with their upload ids.

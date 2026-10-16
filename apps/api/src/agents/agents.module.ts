@@ -654,20 +654,19 @@ async function assertRealWriteTarget(
                         tenantId || organizationId
                             ? { tenantId: tenantId ?? null, organizationId: organizationId ?? null }
                             : undefined;
-                    const task = await tasks.create(
-                        userId,
-                        {
-                            title,
-                            // EW-P4-3 — the attachments it came with, and the
-                            // message id the agent replies in thread with.
-                            description:
-                                `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}`.trim(),
-                            labels: ['inbound-email'],
-                            createdByType: 'agent',
-                            createdById: agentId,
-                        },
-                        scope,
-                    );
+                    const data = {
+                        title,
+                        // EW-P4-3 — the attachments it came with, and the
+                        // message id the agent replies in thread with.
+                        description:
+                            `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}`.trim(),
+                        labels: ['inbound-email'],
+                        createdByType: 'agent' as const,
+                        createdById: agentId,
+                    };
+                    const task = scope
+                        ? await tasks.create(userId, data, scope)
+                        : await tasks.create(userId, data);
                     // Assign the receiving agent so the task-tracking flow
                     // fans out agent-task-execute for it.
                     await tasks.addAssignee(userId, task.id, 'agent', agentId);

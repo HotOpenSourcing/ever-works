@@ -66,7 +66,10 @@ export function boundInboundMetadata(
 function safeFilename(name: unknown): string {
     const text = typeof name === 'string' ? name : '';
     // eslint-disable-next-line no-control-regex
-    const cleaned = text.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 255);
+    const cleaned = text
+        .replace(/[\u0000-\u001f\u007f]/g, '')
+        .trim()
+        .slice(0, 255);
     return cleaned || 'attachment';
 }
 

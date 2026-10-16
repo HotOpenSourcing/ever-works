@@ -2,6 +2,7 @@ import {
     capUtf8Bytes,
     defuseEmailText,
     formatInboundEmailChatPost,
+    inboundEmailAttachmentList,
     inboundEmailReplyHint,
 } from './inbound-email-task-chat';
 
@@ -101,5 +102,36 @@ describe('inbound-email-task-chat', () => {
 
     it('defuseEmailText leaves ordinary text readable', () => {
         expect(defuseEmailText('plain text').normalize()).toBe('plain text');
+    });
+
+    // EW-P4-3 — the attachment list a spawned Task's description ends with.
+    describe('inboundEmailAttachmentList', () => {
+        it('lists each attachment with where its bytes went', () => {
+            const list = inboundEmailAttachmentList([
+                { filename: 'a.pdf', mimeType: 'application/pdf', size: 6, stored: true, uploadId: 'sha-1' },
+                { filename: 'b.exe', mimeType: 'application/x-msdownload', size: 2, stored: false },
+            ]);
+            expect(list).toContain('- a.pdf (application/pdf, 6 bytes, upload sha-1)');
+            expect(list).toContain('- b.exe (application/x-msdownload, 2 bytes, not stored)');
+        });
+
+        it('defuses sender-written names and MIME types', () => {
+            const list = inboundEmailAttachmentList([
+                { filename: '@billing-bot.pdf', mimeType: '@deploy-bot', size: 1, stored: false },
+            ]);
+            expect([...list.matchAll(MENTION_RE)]).toEqual([]);
+        });
+
+        it('is empty without attachments and bounded with many', () => {
+            expect(inboundEmailAttachmentList(undefined)).toBe('');
+            expect(inboundEmailAttachmentList([])).toBe('');
+            const many = Array.from({ length: 30 }, (_, i) => ({
+                filename: `f${i}`,
+                mimeType: 'text/plain',
+                size: 1,
+                stored: false,
+            }));
+            expect(inboundEmailAttachmentList(many)).toContain('… and 5 more');
+        });
     });
 });

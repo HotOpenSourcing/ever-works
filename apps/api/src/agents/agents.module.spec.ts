@@ -71,6 +71,7 @@ jest.mock('@ever-works/agent/facades', () => ({
 }));
 jest.mock('@ever-works/agent/notifications', () => ({
     INBOUND_EMAIL_TASK_SPAWNER: 'INBOUND_EMAIL_TASK_SPAWNER',
+    INBOUND_EMAIL_ATTACHMENT_STORE: 'INBOUND_EMAIL_ATTACHMENT_STORE',
 }));
 jest.mock('@ever-works/agent/tasks-domain', () => ({
     TasksDomainModule: class TasksDomainModule {},
@@ -681,6 +682,42 @@ describe('api-side AgentsModule — AGENT_EMAIL_FACADE approve-before-send', () 
 });
 
 /**
+ * EW-P4-3 — inbound attachments go through the SAME upload pipeline as a
+ * user's own uploads (type + size validated there), owned by the receiving
+ * address's owner, in its scope.
+ */
+describe('api-side AgentsModule — INBOUND_EMAIL_ATTACHMENT_STORE', () => {
+    it('saves through UploadsService.saveFile with the address scope', async () => {
+        const uploads = {
+            saveFile: jest.fn().mockResolvedValue({ id: 'sha-1', url: '/api/uploads/sha-1' }),
+        };
+        const store = findProvider('INBOUND_EMAIL_ATTACHMENT_STORE')?.useFactory?.(uploads) as {
+            store: (input: Record<string, unknown>) => Promise<{ uploadId: string; url?: string }>;
+        };
+        const content = Buffer.from('%PDF-1');
+        await expect(
+            store.store({
+                userId: 'user-1',
+                tenantId: 'tenant-1',
+                organizationId: 'org-1',
+                filename: 'a.pdf',
+                mimeType: 'application/pdf',
+                content,
+            }),
+        ).resolves.toEqual({ uploadId: 'sha-1', url: '/api/uploads/sha-1' });
+        expect(uploads.saveFile).toHaveBeenCalledWith(
+            'user-1',
+            { buffer: content, mimetype: 'application/pdf', size: 6, originalname: 'a.pdf' },
+            { ownershipScope: { tenantId: 'tenant-1', organizationId: 'org-1' } },
+        );
+    });
+
+    it('is exported, so the agent-side dispatcher can reach it', () => {
+        expect(meta('exports')).toContain('INBOUND_EMAIL_ATTACHMENT_STORE');
+    });
+});
+
+/**
  * EW-P4-3 — the inbound-email Task spawner: a spawned Task names the email
  * message id (so the agent can reply in thread), and a reply that threads onto
  * an existing Task is posted on that Task's chat with only the receiving
@@ -757,6 +794,35 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
             'support-bot',
         ]);
         expect([...lookups.ownedAgentSlugs.entries()]).toEqual([['support-bot', 'agent-1']]);
+    });
+
+    // EW-P4-3 — the Task lives in the receiving address's scope and names
+    // the attachments the email came with.
+    it("creates the Task in the receiving address's tenant / organization", async () => {
+        const { spawner, tasks } = build();
+        await spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+            attachments: [
+                {
+                    filename: 'a.pdf',
+                    mimeType: 'application/pdf',
+                    size: 6,
+                    stored: true,
+                    uploadId: 'sha-1',
+                },
+            ],
+        });
+        const [, created, scope] = tasks.create.mock.calls[0];
+        expect(scope).toEqual({ tenantId: 'tenant-1', organizationId: 'org-1' });
+        expect(created.description).toContain('- a.pdf (application/pdf, 6 bytes, upload sha-1)');
+    });
+
+    it('keeps the personal scope for an address without tenant or organization', async () => {
+        const { spawner, tasks } = build();
+        await spawner.spawnTaskForInboundEmail(input);
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
     });
 
     it("does not append when the receiving agent is not the owner's", async () => {
