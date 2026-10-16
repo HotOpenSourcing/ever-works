@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { UnprocessableEntityException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { DomainEvent } from '../../entities/domain-event.entity';
+import { Mission } from '../../entities/mission.entity';
 import { Team } from '../../entities/team.entity';
 import { TeamResource } from '../../entities/team-resource.entity';
 import {
@@ -13,6 +14,10 @@ import {
 import { RecordVisibilityService } from '../../record-visibility/record-visibility.service';
 import { WorkProposalRepository } from '../../user-research/work-proposal.repository';
 import { WorkProposalService } from '../../user-research/work-proposal.service';
+import {
+    AggregateVersionConflictError,
+    runExpectingAggregateVersion,
+} from '../domain-event-context';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
 import {
@@ -69,7 +74,7 @@ describe('idea recording points', () => {
 
     beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
-        for (const table of ['work_proposals', 'team_resources']) {
+        for (const table of ['work_proposals', 'team_resources', 'missions']) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
     });
@@ -279,6 +284,66 @@ describe('idea recording points', () => {
             ['idea.created', generated.id],
             ['idea.created', manual.id],
         ]);
+    });
+
+    const newMission = async (organizationId: string, visibility = 'organization') =>
+        dataSource.getRepository(Mission).save(
+            dataSource.getRepository(Mission).create({
+                userId: OWNER,
+                title: 'Grow',
+                description: 'Grow the customer base.',
+                type: 'one-shot',
+                status: 'paused',
+                tenantId: TENANT,
+                organizationId,
+                visibility,
+            } as unknown as Partial<Mission>),
+        );
+
+    it('createExternal links a Mission of the pinned Organization; a foreign or private one is 404 and writes nothing', async () => {
+        const mission = await newMission(ORG_A);
+        const idea = await external({ missionId: mission.id });
+        expect(idea.missionId).toBe(mission.id);
+        const [created] = await events();
+        expect(created.data).toMatchObject({ missionId: mission.id });
+
+        const foreign = await newMission(randomUUID());
+        const secret = await newMission(ORG_A, 'private');
+        for (const missionId of [foreign.id, secret.id, randomUUID()]) {
+            await expect(external({ missionId })).rejects.toThrow('Mission not found');
+        }
+        expect(await dataSource.getRepository(WorkProposal).count()).toBe(1);
+        expect(await events()).toHaveLength(1);
+    });
+
+    it('createExternal attributes an act-as create to the person', async () => {
+        const PERSON = randomUUID();
+        const idea = await external({ userId: PERSON, createdBy: { type: 'user', id: PERSON } });
+        expect(idea).toMatchObject({ userId: PERSON, createdByType: 'user', createdById: PERSON });
+        const [created] = await events();
+        expect(created.data).toMatchObject({
+            owner: { type: 'user', id: PERSON },
+            createdBy: { type: 'user', id: PERSON },
+        });
+    });
+
+    it('updateContent under a stale If-Match version rolls the edit back with its event', async () => {
+        const idea = await external();
+        await expect(
+            runExpectingAggregateVersion({ aggregateType: 'idea', id: idea.id, version: 7 }, () =>
+                service.updateContent(OWNER, idea.id, { title: 'Stale edit' }),
+            ),
+        ).rejects.toBeInstanceOf(AggregateVersionConflictError);
+        const row = await dataSource.getRepository(WorkProposal).findOneBy({ id: idea.id });
+        expect(row).toMatchObject({ title: 'Customer portal', version: 1 });
+        expect((await events()).map((event) => event.type)).toEqual(['idea.created']);
+
+        await runExpectingAggregateVersion({ aggregateType: 'idea', id: idea.id, version: 1 }, () =>
+            service.updateContent(OWNER, idea.id, { title: 'Fresh edit' }),
+        );
+        expect(
+            await dataSource.getRepository(WorkProposal).findOneBy({ id: idea.id }),
+        ).toMatchObject({ title: 'Fresh edit', version: 2 });
     });
 
     it('without the publisher the repository behaves as before and records nothing', async () => {

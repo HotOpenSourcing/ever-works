@@ -18,6 +18,7 @@ import { Task } from '../../entities/task.entity';
 import { TaskChatMessage } from '../../entities/task-chat-message.entity';
 import { Team } from '../../entities/team.entity';
 import { User } from '../../entities/user.entity';
+import { WorkProposal } from '../../entities/work-proposal.entity';
 import { ExternalRecordLinksService } from '../external-record-links.service';
 import { ResourceNotFoundError } from '../integration-api.errors';
 import { IntegrationResourcesService } from '../integration-resources.service';
@@ -72,6 +73,7 @@ describe('IntegrationResourcesService', () => {
             'organization_members',
             'users',
             'external_record_links',
+            'work_proposals',
         ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
@@ -263,6 +265,58 @@ describe('IntegrationResourcesService', () => {
         await expect(
             resources.comment(ORG_A, mine.id, randomUUID(), 'gauzy'),
         ).rejects.toBeInstanceOf(ResourceNotFoundError);
+    });
+
+    const idea = (organizationId: string, title: string, visibility = 'organization') =>
+        dataSource.getRepository(WorkProposal).save({
+            userId: OWNER,
+            title,
+            description: 'A self-service portal.',
+            slugSuggestion: 'portal',
+            suggestedCategories: [],
+            suggestedFields: [],
+            recommendedPlugins: [],
+            reasoning: 'test',
+            source: 'external',
+            status: 'pending',
+            tenantId: TENANT,
+            organizationId,
+            visibility,
+        } as unknown as WorkProposal);
+
+    it('serves the organization Ideas (EW-P2-1) as contract DTOs, never a private one, and links to them', async () => {
+        const shared = await idea(ORG_A, 'Customer portal');
+        const secret = await idea(ORG_A, 'Secret', 'private');
+        await idea(ORG_B, 'Not yours');
+        await links.create(
+            { organizationId: ORG_A, source: 'gauzy', installationId: 'conn-1' },
+            { entityType: 'idea', entityId: shared.id, externalId: 'g-idea-1' },
+        );
+        const page = await resources.list('idea', ORG_A, {}, 'gauzy');
+        expect(page.data.map((dto) => dto.id)).toEqual([shared.id]);
+        expect(page.data[0]).toMatchObject({
+            status: 'pending',
+            source: 'external',
+            externalLinks: [expect.objectContaining({ externalId: 'g-idea-1' })],
+        });
+        expectValid('resources/idea.schema.json', page.data[0]);
+        const got = await resources.get('idea', ORG_A, shared.id, 'gauzy');
+        expect(got.etag).toBe('"1"');
+        await expect(resources.get('idea', ORG_A, secret.id, 'gauzy')).rejects.toBeInstanceOf(
+            ResourceNotFoundError,
+        );
+        expect(await resources.assertLinkTarget('idea', ORG_A, shared.id, 'gauzy')).toBe(true);
+        await expect(
+            resources.assertLinkTarget('idea', ORG_A, secret.id, 'gauzy'),
+        ).rejects.toBeInstanceOf(ResourceNotFoundError);
+        expect(
+            (
+                await resources.withoutPrivateTargets([
+                    { entityType: 'idea', entityId: shared.id },
+                    { entityType: 'idea', entityId: secret.id },
+                ])
+            ).map((row) => row.entityId),
+        ).toEqual([shared.id]);
     });
 
     it('serves the organization and its members', async () => {

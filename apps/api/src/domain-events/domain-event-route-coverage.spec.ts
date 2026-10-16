@@ -36,6 +36,8 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/tasks-sets.controller.ts',
     'integrations-api/v1/task-comments.controller.ts',
     'integrations-api/v1/teams-write.controller.ts',
+    // P2 resources (EW-P2-1 ideas).
+    'integrations-api/v1/ideas.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([

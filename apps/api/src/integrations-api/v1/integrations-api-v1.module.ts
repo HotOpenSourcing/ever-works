@@ -5,6 +5,7 @@ import { IntegrationsApiFoundationModule } from '@ever-works/agent/integrations-
 import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
+import { UserResearchModule } from '@ever-works/agent/user-research';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
@@ -16,6 +17,7 @@ import { IntegrationTaskCommentsController } from './task-comments.controller';
 import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
+import { IntegrationIdeasController } from './ideas.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
@@ -27,7 +29,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
  *
  * EW-P1-2 ships the first route, `GET /whoami`, because it is about the key
  * itself. The resources (members, agents, teams, works, tasks, events,
- * links, batch) are EW-P1-4 and land in this module.
+ * links, batch) are EW-P1-4 and land in this module; the P2 resources
+ * (ideas, then goals and missions) follow.
  */
 @Module({
     imports: [
@@ -42,6 +45,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         RecordVisibilityModule,
         // Key-owned webhook subscriptions (EW-P1-5).
         WebhooksModule,
+        // Ideas (EW-P2-1): `WorkProposalService` (createExternal, dismiss, restore).
+        UserResearchModule,
     ],
     controllers: [
         IntegrationWhoamiController,
@@ -55,6 +60,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTeamsWriteController,
         IntegrationBatchController,
         IntegrationWebhooksController,
+        // P2 resources.
+        IntegrationIdeasController,
     ],
     providers: [
         IntegrationOnlyGuard,

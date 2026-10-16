@@ -1,7 +1,7 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$id": "https://ever.works/schemas/integrations/v1/requests.schema.json",
-	"title": "P1 request bodies (contract v1, B.5/B.6)",
+	"title": "Request bodies (contract v1, B.5/B.6: P1, then P2 as served)",
 	"description": "Bodies of the P1 write routes. Unknown properties answer 400 validation_failed. PUT set routes replace the whole set and answer the parent DTO. Every POST that creates something needs an Idempotency-Key header; every write should send X-Sync-Origin.",
 	"$defs": {
 		"WritableVisibility": {
@@ -359,6 +359,32 @@
 					"minLength": 1,
 					"maxLength": 16384
 				}
+			},
+			"additionalProperties": false
+		},
+		"CreateIdea": {
+			"description": "POST /ideas (EW-P2-1). An integration-created Idea is always source='external' and status='pending' (a `source` or `status` in the body answers 400). It is never queued or built: building stays a user action in Ever Works (spend safety D9). `missionId` must name a Mission of the pinned organization the key sees (404 otherwise). `teamIds` decide the scope (D11) unless `visibility` is set by hand.",
+			"type": "object",
+			"required": ["title", "description"],
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 120 },
+				"description": { "type": "string", "minLength": 1, "maxLength": 100000 },
+				"missionId": { "$ref": "common.schema.json#/$defs/NullableUuid" },
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" },
+				"externalRef": { "$ref": "common.schema.json#/$defs/ExternalRef" }
+			},
+			"additionalProperties": false
+		},
+		"UpdateIdea": {
+			"description": "PATCH /ideas/:id (EW-P2-1, If-Match optional). No `status`: POST /ideas/:id/dismiss (pending -> dismissed) and /restore (dismissed -> pending) move it; accept and build stay Ever Works actions (D9).",
+			"type": "object",
+			"minProperties": 1,
+			"properties": {
+				"title": { "type": "string", "minLength": 1, "maxLength": 120 },
+				"description": { "type": "string", "minLength": 1, "maxLength": 100000 },
+				"teamIds": { "$ref": "common.schema.json#/$defs/TeamIds" },
+				"visibility": { "$ref": "#/$defs/WritableVisibility" }
 			},
 			"additionalProperties": false
 		},

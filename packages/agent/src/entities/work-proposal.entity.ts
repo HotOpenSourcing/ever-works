@@ -102,6 +102,8 @@ export interface WorkProposalRecommendedPlugin {
 
 @Entity({ name: 'work_proposals' })
 @Index('idx_work_proposals_org_visibility', ['organizationId', 'visibility'])
+// Integration API v1 keyset lists (EW-P2, migration 1795120000000-AddP2IntegrationKeysetIndexes).
+@Index('idx_work_proposals_org_updated', ['organizationId', 'updatedAt', 'id'])
 @Index('idx_work_proposals_user_status_mission_generated', [
     'userId',
     'status',
