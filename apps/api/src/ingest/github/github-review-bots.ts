@@ -315,7 +315,8 @@ export type ReviewBotCommentIgnoreReason =
     | 'command-ack'
     | 'summary'
     | 'status'
-    | 'empty';
+    | 'empty'
+    | 'thread-reply';
 
 export type ReviewBotCommentVerdict =
     | { readonly kind: 'findings' }
@@ -458,6 +459,12 @@ const GREPTILE_FINDING_BADGE = /<img\b[^>]{0,1000}\balt="P[0-3]"/i;
 export function classifyReviewBotComment(input: {
     action?: string | null;
     body?: string | null;
+    /**
+     * The review-thread comment this one replies to (`in_reply_to_id` of a
+     * `pull_request_review_comment`), or absent for a thread's first comment
+     * and for every `issue_comment`.
+     */
+    inReplyTo?: number | null;
 }): ReviewBotCommentVerdict {
     const ignore = (reason: ReviewBotCommentIgnoreReason): ReviewBotCommentVerdict => ({
         kind: 'ignore',
@@ -513,5 +520,22 @@ export function classifyReviewBotComment(input: {
     // The RAW body here: a finding that is nothing but a code sample is
     // still a finding.
     if (stripReviewBotMarkup(raw).length === 0) return ignore('empty');
+    // A REPLY inside a review thread is the bot answering whoever replied to
+    // its finding ("Thanks for the fix…", "Verified the fix by code
+    // inspection…"), and each one used to be recorded as a new rejection,
+    // which could buy a paid fix run for a thank-you (self-build handover item
+    // 11). A reply is a finding only when the bot TAGGED it as one: CodeRabbit
+    // (`_🟠 Major_`), Greptile and Codex (P-badges) open a new finding with a
+    // severity marker, and an acknowledgement never carries one. Copilot's
+    // untagged findings are first comments, never replies, so they are not
+    // affected. The finding that started the thread was recorded when it was
+    // created.
+    if (
+        typeof input.inReplyTo === 'number' &&
+        input.inReplyTo > 0 &&
+        parseReviewBotSeverity(raw) === null
+    ) {
+        return ignore('thread-reply');
+    }
     return { kind: 'findings' };
 }

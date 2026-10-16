@@ -326,6 +326,41 @@ describe('github-review-bots', () => {
         const created = (body: string | null | undefined) =>
             label(classifyReviewBotComment({ action: 'created', body }));
 
+        describe('replies inside a review thread (self-build handover item 11)', () => {
+            const reply = (body: string, inReplyTo: number | null = 900) =>
+                label(classifyReviewBotComment({ action: 'created', body, inReplyTo }));
+
+            it('an untagged reply is conversation, not a finding', () => {
+                expect(reply('Thanks for the fix! The guard now covers the retry path.')).toBe(
+                    'ignore:thread-reply',
+                );
+                expect(
+                    reply(
+                        '`@evereq` Verified the fix by code inspection. I did not rerun the tests.',
+                    ),
+                ).toBe('ignore:thread-reply');
+            });
+
+            it('a reply the bot TAGGED with a severity marker is still a finding', () => {
+                expect(reply('_🟠 Major_ | The retry path still skips the guard.')).toBe(
+                    'findings',
+                );
+                expect(
+                    reply(
+                        '<img alt="P2" src="https://greptile-static-assets.s3.amazonaws.com/badges/p2.svg"> Still racy.',
+                    ),
+                ).toBe('findings');
+                expect(
+                    reply('**![P1 Badge](https://img.shields.io/badge/P1-orange)** Still unsafe.'),
+                ).toBe('findings');
+            });
+
+            it('the same untagged text as a thread-OPENING comment is unchanged (still a finding)', () => {
+                expect(reply('The retry loop never backs off.', null)).toBe('findings');
+                expect(created('The retry loop never backs off.')).toBe('findings');
+            });
+        });
+
         describe('the captured corpus', () => {
             it.each(reviewBotCommentFixtures().map((fixture) => [fixture.name, fixture] as const))(
                 '%s',
