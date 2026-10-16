@@ -1,8 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
-import Ajv2020 from 'ajv/dist/2020';
-import addFormats from 'ajv-formats';
 import type { DataSource } from 'typeorm';
 import { TaskRepository } from '../../database/repositories/task.repository';
 import {
@@ -35,6 +31,7 @@ import { TasksService } from '../../tasks-domain/tasks.service';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
 import {
+    contractValidator,
     createDomainEventsDataSource,
     ORG_A,
     resetDomainEventsTables,
@@ -47,41 +44,6 @@ import {
  * event, bumps the version as the spec says, and the event `data` is a valid
  * integration DTO.
  */
-const CONTRACT_DIR = join(
-    __dirname,
-    '..',
-    '..',
-    '..',
-    '..',
-    '..',
-    'docs',
-    'specs',
-    'features',
-    'integrations-api-v1',
-    'contract',
-);
-const BASE = 'https://ever.works/schemas/integrations/v1/';
-
-function contractValidator() {
-    const ajv = new Ajv2020({ strict: false, allErrors: true });
-    addFormats(ajv);
-    const walk = (dir: string): string[] =>
-        readdirSync(dir).flatMap((name) => {
-            const path = join(dir, name);
-            if (statSync(path).isDirectory()) return walk(path);
-            return name.endsWith('.schema.json') ? [path] : [];
-        });
-    for (const file of walk(join(CONTRACT_DIR, 'schemas')))
-        ajv.addSchema(JSON.parse(readFileSync(file, 'utf8')));
-    return (ref: string, value: unknown) => {
-        const validate = ajv.getSchema(BASE + ref);
-        if (!validate) throw new Error(`no schema ${ref}`);
-        if (!validate(JSON.parse(JSON.stringify(value)))) {
-            throw new Error(`${ref}: ${JSON.stringify(validate.errors, null, 1)}`);
-        }
-    };
-}
-
 describe('task recording points', () => {
     let dataSource: DataSource;
     let tasks: TasksService;
