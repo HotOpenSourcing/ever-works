@@ -412,6 +412,25 @@ describe('TaskTransitionService.transitionSync', () => {
         expect(row.status).toBe(TaskStatus.BLOCKED);
     });
 
+    it('answers 409 conflict, not success, when the Task moves right after the final hop', async () => {
+        const realCas = tasks.casUpdateStatus.getMockImplementation();
+        tasks.casUpdateStatus.mockImplementationOnce(async (...args: unknown[]) => {
+            const won = await realCas(...args);
+            row = { ...row, status: TaskStatus.CANCELLED } as Task;
+            return won;
+        });
+        const err = (await svc
+            .transitionSync(row, TaskStatus.TODO)
+            .catch((e) => e)) as TaskTransitionConflictException;
+        expect(err).toBeInstanceOf(TaskTransitionConflictException);
+        expect(err.details).toEqual({
+            from: TaskStatus.BACKLOG,
+            to: TaskStatus.TODO,
+            path: [TaskStatus.TODO],
+            currentStatus: TaskStatus.CANCELLED,
+        });
+    });
+
     it('a refused hop whose Task did not move stays the ordinary 400', async () => {
         tasks.casUpdateStatus.mockResolvedValueOnce(false);
         await expect(svc.transitionSync(row, TaskStatus.TODO)).rejects.toBeInstanceOf(

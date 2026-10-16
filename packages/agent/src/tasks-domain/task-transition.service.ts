@@ -603,7 +603,9 @@ export class TaskTransitionService {
             // between (todo → blocked), the next hop would start from THEIR
             // status and quietly undo it. Stop instead: the hop we wrote
             // landed, theirs came after, and the caller re-reads and decides.
-            if (walked.length < path.length && current.status !== hop) {
+            // The final hop too (CodeRabbit): a walk never answers success with
+            // a Task that sits anywhere but `to`.
+            if (current.status !== hop) {
                 throw new TaskTransitionConflictException(
                     `Task moved to ${current.status} while the sync walk was at ${hop}; re-read it and retry.`,
                     { from, to, path: [...walked], currentStatus: current.status },
