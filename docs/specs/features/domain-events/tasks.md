@@ -40,9 +40,10 @@
 
 ## P3 — Inbox (EW-P3-1)
 
-- [x] **T20** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`).
-- [ ] **T21** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
-      (act-as = the recipient only) + coverage gate entries.
+- [x] **T23** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`; a reply whose routing fails records the read flip its claim made).
+- [x] **T24** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
+      (act-as = the recipient only; `integrations-api-v1` spec §9) + coverage gate entries (the Inbox, escalation and
+      approvals controllers, whose decisions close the Inbox mirror).
 
 ## Status legend
 

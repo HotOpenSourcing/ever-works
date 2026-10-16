@@ -55,6 +55,9 @@ import { PortableDateColumn } from './_types';
 // Producer dedup: is there already an item mirroring this escalation/proposal?
 @Index('idx_inbox_items_escalation', ['escalationId'])
 @Index('idx_inbox_items_proposal', ['proposalId'])
+// Integration API v1 keyset list (EW-P3-1, `GET /api/integrations/v1/inbox/items`):
+// one organization's messages ordered by `(updatedAt, id)` — migration 1795130100000.
+@Index('idx_inbox_items_org_updated', ['organizationId', 'updatedAt', 'id'])
 export class InboxItem {
     @PrimaryGeneratedColumn('uuid')
     id: string;

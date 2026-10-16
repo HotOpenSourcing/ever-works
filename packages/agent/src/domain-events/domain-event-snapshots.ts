@@ -530,7 +530,8 @@ export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemD
         workId: row.workId ?? null,
         escalationId: row.escalationId ?? null,
         proposalId: row.proposalId ?? null,
-        webUrl: webUrl('/inbox'),
+        // The Inbox deep link the bell and channel messages use (`/inbox?id=`).
+        webUrl: webUrl(`/inbox?id=${encodeURIComponent(row.id)}`),
     };
 }
 

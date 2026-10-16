@@ -149,9 +149,15 @@ describe('inbox recording points', () => {
             ['inbox.item.state_changed', 3],
             ['inbox.item.state_changed', 4],
         ]);
-        expect(recorded[0]).toMatchObject({ changedFields: ['unread'], previous: { unread: true } });
+        expect(recorded[0]).toMatchObject({
+            changedFields: ['unread'],
+            previous: { unread: true },
+        });
         expect(recorded[0].data).toMatchObject({ unread: false });
-        expect(recorded[1]).toMatchObject({ changedFields: ['status'], previous: { status: 'open' } });
+        expect(recorded[1]).toMatchObject({
+            changedFields: ['status'],
+            previous: { status: 'open' },
+        });
         expect(recorded[1].data).toMatchObject({ status: 'archived' });
         expect(recorded[2]).toMatchObject({ previous: { status: 'archived' } });
         expect(recorded[2].data).toMatchObject({ status: 'open' });
@@ -177,6 +183,49 @@ describe('inbox recording points', () => {
             status: 'answered',
             unread: false,
             answerText: 'Thanks',
+        });
+        expectValid(recorded[0]);
+    });
+
+    it('a reply whose routing fails records no answer, but the read flip the claim made (state_changed)', async () => {
+        const failingApprovals = {
+            decide: async () => {
+                throw new Error('approvals down');
+            },
+        };
+        const withFailingRouting = new InboxService(
+            new InboxItemRepository(dataSource.getRepository(InboxItem)),
+            { findById: async () => null, setAwaitingInput: async () => undefined } as never,
+            undefined,
+            failingApprovals as never,
+            undefined,
+            undefined,
+            undefined,
+            new DomainEventPublisher(new DomainEventRecorder(), dataSource),
+        );
+        await withFailingRouting.proposalPending({
+            userId: RECIPIENT,
+            proposalId: randomUUID(),
+            title: 'Send the newsletter',
+            actionType: 'email.send',
+            organizationId: ORG_A,
+        } as never);
+        const { id } = await onlyItem();
+        await expect(
+            withFailingRouting.reply(RECIPIENT, id, { optionId: 'approve' }),
+        ).rejects.toThrow(/approvals down/);
+        const recorded = (await events()).slice(1);
+        expect(recorded.map((event) => [event.type, event.aggregateVersion])).toEqual([
+            ['inbox.item.state_changed', 2],
+        ]);
+        expect(recorded[0]).toMatchObject({
+            changedFields: ['unread'],
+            previous: { unread: true },
+        });
+        expect(recorded[0].data).toMatchObject({
+            status: 'open',
+            unread: false,
+            answerOptionId: null,
         });
         expectValid(recorded[0]);
     });
