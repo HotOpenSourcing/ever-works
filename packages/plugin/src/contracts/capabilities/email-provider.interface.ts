@@ -119,6 +119,11 @@ export interface EmailInboundMessage {
 	readonly providerMessageId: string;
 	readonly from: string;
 	readonly to: readonly string[];
+	/**
+	 * EW-P4-3 — `Cc` recipients, bare mailboxes. Recorded only: like `to`,
+	 * never used for routing.
+	 */
+	readonly cc?: readonly string[];
 	readonly subject: string;
 	readonly bodyText: string;
 	readonly bodyHtml?: string;

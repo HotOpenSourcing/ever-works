@@ -85,8 +85,9 @@ One small PR per item, security first.
       better-sqlite3 migration); set on outbound through `EmailSendInput.headers`; parsed on inbound; the dispatcher
       threads on them before falling back to the normalized subject; reply-in-thread (`inReplyToMessageId`); and the
       `email_messages.taskId` back-link after task-spawn, which threading needs (§14.2).
-- [ ] **T44** Inbound data: persist inbound attachments; keep `cc` and the plugin's `metadata`; stamp `tenantId` and
-      `organizationId` on inbound rows from the receiving address.
+- [x] **T44** Inbound data: persist inbound attachments (upload pipeline, listed on `email_messages.attachments`); keep
+      `cc` and the plugin's `metadata` (bounded); stamp `tenantId` and `organizationId` on inbound rows, new
+      conversations and spawned Tasks from the receiving address (§14.3).
 - [ ] **T45** Settings → Email addresses: replace the `alert()` placeholder with a real add-address wizard; make
       verification real (send the confirmation mail, enforce `verified` for sending), grandfathering addresses already
       in use.
