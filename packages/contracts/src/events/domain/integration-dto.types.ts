@@ -260,7 +260,6 @@ export interface IntegrationVisibilityPrivateData {
 	readonly visibility: 'private';
 }
 
-<<<<<<< HEAD
 /**
  * EW-P3-1 — one Inbox message addressed to ONE human (its recipient): a
  * question an agent run asked, an approval request, an escalation mirror or a
@@ -309,7 +308,8 @@ export interface IntegrationInboxItemDto {
 	readonly webUrl?: string | null;
 	/** Only on `inbox.item.deleted`. */
 	readonly deleted?: true;
-=======
+}
+
 /** Lifecycle of an Idea (Ever Works `work_proposals.status`). */
 export type IntegrationIdeaStatus = 'pending' | 'dismissed' | 'accepted' | 'queued' | 'building' | 'failed';
 
@@ -339,5 +339,4 @@ export interface IntegrationIdeaDto extends IntegrationResourceBase {
 	readonly acceptedWorkId: string | null;
 	readonly failureMessage: string | null;
 	readonly webUrl?: string | null;
->>>>>>> 5e264b7b2e9f49e2dca8724e9353779a2884db58
 }

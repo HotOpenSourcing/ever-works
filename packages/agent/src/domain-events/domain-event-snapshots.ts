@@ -1,11 +1,8 @@
 import {
     getWorkCapabilities,
     type IntegrationAgentDto,
-<<<<<<< HEAD
     type IntegrationInboxItemDto,
-=======
     type IntegrationIdeaDto,
->>>>>>> 5e264b7b2e9f49e2dca8724e9353779a2884db58
     type IntegrationMemberDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
