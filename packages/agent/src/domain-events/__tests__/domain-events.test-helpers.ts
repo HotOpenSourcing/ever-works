@@ -7,7 +7,7 @@ import { getDomainEventCatalogEntry } from '@ever-works/contracts';
 import { DataSource } from 'typeorm';
 import { ENTITIES } from '../../database/_entities-inventory';
 import { DomainEvent } from '../../entities/domain-event.entity';
-import { RecordVisibilitySubscriber } from '../../entities/_record-visibility';
+import { RecordVisibilitySubscriber } from '../../database/record-visibility.subscriber';
 import {
     DOMAIN_EVENT_RELAY_STATE_ID,
     DomainEventRelayState,

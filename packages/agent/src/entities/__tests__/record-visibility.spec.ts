@@ -5,11 +5,8 @@ import { Mission } from '../mission.entity';
 import { Task } from '../task.entity';
 import { TEAM_RESOURCE_TYPES } from '../team-resource.entity';
 import { WorkProposal } from '../work-proposal.entity';
-import {
-    applyInsertVisibilityDefault,
-    hasVisibilityColumns,
-    RecordVisibilitySubscriber,
-} from '../_record-visibility';
+import { applyInsertVisibilityDefault, hasVisibilityColumns } from '../_record-visibility';
+import { RecordVisibilitySubscriber } from '../../database/record-visibility.subscriber';
 import { databaseConfig } from '../../database/database.config';
 
 /**

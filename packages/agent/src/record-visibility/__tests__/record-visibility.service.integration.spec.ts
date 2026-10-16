@@ -16,7 +16,7 @@ import { Team } from '../../entities/team.entity';
 import { TeamResource } from '../../entities/team-resource.entity';
 import { Tenant } from '../../entities/tenant.entity';
 import { User } from '../../entities/user.entity';
-import { RecordVisibilitySubscriber } from '../../entities/_record-visibility';
+import { RecordVisibilitySubscriber } from '../../database/record-visibility.subscriber';
 import {
     PrivateVisibilityForbiddenError,
     RecordVisibilityService,
