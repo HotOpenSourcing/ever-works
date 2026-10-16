@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { INTEGRATION_API_KEY_KIND } from '@ever-works/contracts';
 import { ApiKey } from '../entities/api-key.entity';
 import { Organization } from '../entities/organization.entity';
 import { User } from '../entities/user.entity';
@@ -48,11 +49,15 @@ export class WebhookOwnerAccessService {
             const key = await this.dataSource
                 .getRepository(ApiKey)
                 .findOne({ where: { id: ownerId } });
-            if (!key || !key.isActive || (key.expiresAt && key.expiresAt.getTime() <= Date.now())) {
+            if (
+                !key ||
+                key.kind !== INTEGRATION_API_KEY_KIND ||
+                !key.isActive ||
+                (key.expiresAt && key.expiresAt.getTime() <= Date.now())
+            ) {
                 return DENIED_FOR_GOOD;
             }
-            const pinned = (key as unknown as { organizationIds?: string[] | null })
-                .organizationIds;
+            const pinned = key.organizationIds;
             return {
                 ok: true,
                 disable: false,

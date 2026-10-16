@@ -279,6 +279,37 @@ describe('WebhookDomainEventFanoutService', () => {
         expect((await subscriptions.findById(sub.id))?.status).toBe('disabled');
     });
 
+    it('delivers to an active integration key in its pinned organizations; a personal key never owns one', async () => {
+        await fanout.catchUp();
+        const insertKey = async (kind: string, organizationIds: string[] | null) => {
+            const id = randomUUID();
+            await dataSource.getRepository(ApiKey).insert({
+                id,
+                userId: OWNER,
+                name: kind,
+                hashedKey: `h-${id}`,
+                prefix: 'ew_int_x',
+                isActive: true,
+                kind,
+                organizationIds,
+            } as unknown as ApiKey);
+            return id;
+        };
+        const pinned = await subscribe({
+            ownerType: 'integration_key',
+            ownerId: await insertKey('integration', [ORG_A]),
+        });
+        const personal = await subscribe({
+            ownerType: 'integration_key',
+            ownerId: await insertKey('personal', null),
+        });
+        await record();
+        await dispatch();
+        expect(await fanout.catchUp()).toBe(1);
+        expect((await deliveries()).map((row) => row.subscriptionId)).toEqual([pinned.id]);
+        expect((await subscriptions.findById(personal.id))?.status).toBe('disabled');
+    });
+
     it('ignores v1 subscriptions and paused v2 ones', async () => {
         await fanout.catchUp();
         await subscriptions.createForAccount({
