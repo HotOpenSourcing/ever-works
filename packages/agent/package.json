@@ -209,6 +209,10 @@
             "types": "./dist/integrations-api/index.d.ts",
             "default": "./dist/integrations-api/index.js"
         },
+        "./webhooks-v2": {
+            "types": "./dist/webhooks-v2/index.d.ts",
+            "default": "./dist/webhooks-v2/index.js"
+        },
         "./schedules": {
             "types": "./dist/schedules/index.d.ts",
             "default": "./dist/schedules/index.js"

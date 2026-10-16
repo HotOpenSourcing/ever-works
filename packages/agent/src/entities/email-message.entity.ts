@@ -16,6 +16,24 @@ import { PortableDateColumn } from './_types';
 export type EmailMessageDirection = 'outbound' | 'inbound';
 
 /**
+ * EW-P4-3 — one inbound attachment as recorded on its message. `uploadId` is
+ * the `user_uploads` content id when the bytes were stored (`stored: true`);
+ * an attachment the upload pipeline refused (type not allowed, too large,
+ * over the per-message limits) is still listed, with `stored: false` and the
+ * reason, so nobody is left wondering where it went.
+ */
+export interface EmailMessageAttachmentRecord {
+    filename: string;
+    mimeType: string;
+    size: number;
+    cid?: string | null;
+    stored: boolean;
+    uploadId?: string | null;
+    url?: string | null;
+    reason?: string | null;
+}
+
+/**
  * Notifications v2 — Email Providers (EW-650, EW-667).
  *
  * Per-message audit row. Outbound messages are inserted by the
@@ -146,6 +164,13 @@ export class EmailMessage {
 
     @Column({ type: 'simple-json', nullable: true })
     metadata?: Record<string, unknown> | null;
+
+    /**
+     * EW-P4-3 — attachments of an inbound message (metadata + where the bytes
+     * went). NULL for a message without attachments, and for outbound rows.
+     */
+    @Column({ type: 'simple-json', nullable: true })
+    attachments?: EmailMessageAttachmentRecord[] | null;
 
     /** Caller-supplied idempotency key (`EmailSendInput.messageRef`). */
     @Column({ type: 'varchar', length: 120, nullable: true })

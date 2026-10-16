@@ -9,6 +9,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, In, Repository } from 'typeorm';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
 import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
 import { Mission } from '../entities/mission.entity';
 import { Organization } from '../entities/organization.entity';
 import { Task } from '../entities/task.entity';
@@ -37,7 +38,7 @@ interface ScopedResourceRow {
 /**
  * Teams & Prebuilt Companies — Team ↔ resource association service
  * (operator ask "some Works belong to some Teams", generalized to
- * Works / Tasks / Agents / Missions / Ideas).
+ * Works / Tasks / Agents / Missions / Ideas / Goals).
  *
  * Authorization happens BEFORE these methods run: every route is behind
  * `OrganizationOwnershipGuard` (fail-closed tenant-ownership, 404 posture).
@@ -70,6 +71,12 @@ export class TeamResourcesService {
         // `work.updated` for an attached task or work (their `teamIds` change).
         // Appended LAST + @Optional.
         @Optional() private readonly domainEvents?: DomainEventPublisher,
+        // EW-P1-3: goals sit on Teams too (`team_resources` type `goal`). After the
+        // domain-event publisher so positional test fixtures keep their indices;
+        // @Optional() because a required parameter cannot follow an optional one.
+        @Optional()
+        @InjectRepository(Goal)
+        private readonly goals?: Repository<Goal>,
     ) {}
 
     /** The resource-side event of a team resource change (its DTO's `teamIds` moved). */
@@ -202,6 +209,7 @@ export class TeamResourcesService {
             agent: [],
             mission: [],
             idea: [],
+            goal: [],
         };
         if (rows.length === 0) {
             return grouped;
@@ -312,6 +320,11 @@ export class TeamResourcesService {
                 return this.ideas as unknown as Repository<ScopedResourceRow>;
             case 'task':
                 return this.tasks as unknown as Repository<ScopedResourceRow>;
+            case 'goal':
+                if (!this.goals) {
+                    throw new NotFoundException('Goals cannot be attached in this context');
+                }
+                return this.goals as unknown as Repository<ScopedResourceRow>;
         }
     }
 
@@ -359,6 +372,7 @@ export class TeamResourcesService {
             case 'task':
                 return { name: str(e.title), slug: str(e.slug) };
             case 'mission':
+            case 'goal':
                 return { name: str(e.title), slug: null };
             case 'idea':
                 return { name: str(e.title), slug: str(e.slugSuggestion) };

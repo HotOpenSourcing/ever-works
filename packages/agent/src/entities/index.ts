@@ -268,3 +268,4 @@ export * from './domain-event-relay-state.entity';
 export * from './plugin-event-cursor.entity';
 export * from './external-record-link.entity';
 export * from './integration-idempotency-key.entity';
+export * from './_record-visibility';

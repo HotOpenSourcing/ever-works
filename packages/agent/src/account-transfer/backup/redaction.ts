@@ -487,6 +487,8 @@ export const BACKUP_BENIGN_COLUMNS: Readonly<Record<string, string>> = Object.fr
     verificationTokenExpiresAt: 'A timestamp.',
     tokenRotatedAt: 'A timestamp — when a share link was last regenerated.',
     credentialExpiresAt: 'A timestamp — when a model account’s credential stops working.',
+    previousSecretExpiresAt:
+        'A timestamp — when a rotated-out webhook signing secret stops signing (webhooks v2 grace window). The secret itself is `previousSecretEncrypted`, redacted by name.',
     normalizedContentHash:
         'A digest of a knowledge document’s whitespace-normalized body, used to tell a substantive edit from a reformat. Derived from content the archive already carries in full.',
     includeSecrets:
