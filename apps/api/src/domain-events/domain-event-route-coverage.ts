@@ -226,6 +226,8 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['task.updated', 'team.resource.added', 'team.resource.removed'],
     },
     'DELETE /api/integrations/v1/tasks/:id': { events: ['task.deleted'] },
+    // One `task.transitioned` per hop of the sync walk (EW-P1-6).
+    'POST /api/integrations/v1/tasks/:id/transition': { events: ['task.transitioned'] },
     'PUT /api/integrations/v1/tasks/:id/assignees': {
         events: ['task.assignee.added', 'task.assignee.removed'],
     },

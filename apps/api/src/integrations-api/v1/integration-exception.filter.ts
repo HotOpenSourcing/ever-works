@@ -134,6 +134,29 @@ export class IntegrationExceptionFilter implements ExceptionFilter {
         if (exception instanceof HttpException) {
             const status = exception.getStatus();
             const body = exception.getResponse();
+            // A domain exception already shaped as the envelope (EW-P1-6's
+            // `409 transition_blocked` / `conflict` from a sync walk) keeps its
+            // code and details.
+            const shaped =
+                typeof body === 'object' && body !== null && 'error' in body
+                    ? (
+                          body as {
+                              error?: { code?: unknown; message?: unknown; details?: unknown };
+                          }
+                      ).error
+                    : undefined;
+            if (shaped && typeof shaped.code === 'string') {
+                return {
+                    status,
+                    code: shaped.code as IntegrationErrorCode,
+                    message:
+                        typeof shaped.message === 'string' ? shaped.message : exception.message,
+                    details:
+                        typeof shaped.details === 'object' && shaped.details !== null
+                            ? (shaped.details as Record<string, unknown>)
+                            : undefined,
+                };
+            }
             const message =
                 typeof body === 'object' && body !== null && 'message' in body
                     ? (body as { message: unknown }).message

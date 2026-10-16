@@ -1,7 +1,7 @@
 # Task Breakdown: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Last updated**: 2026-10-15
+**Last updated**: 2026-10-16
 
 ## Contract (published)
 
@@ -10,32 +10,42 @@
 
 ## Phase 1 — Namespace and common pieces (EW-P1-4)
 
-- [ ] **T1** `integrations-api/v1` module skeleton + namespace exception filter (error envelope).
-- [~] **T2** Keyset list helper (`updatedSince`, `(updatedAt, id)` cursor, `limit ≤ 500`) — `readKeysetPage` in
-  `packages/agent/src/integrations-api/keyset-cursor.ts`; the `(organizationId, updatedAt)` indexes ship with the
-  resource routes that read them.
-- [~] **T3** `ETag` / `If-Match` — helpers (`etagFor`, `parseIfMatch`, `assertIfMatch` → `VersionMismatchError`); the
-  interceptor ships with the write routes.
+- [x] **T1** `integrations-api/v1` module (`apps/api/src/integrations-api/v1/`) + `IntegrationExceptionFilter`
+      (error envelope; an exception already shaped as the envelope, e.g. `409 transition_blocked`, keeps its code
+      and details).
+- [x] **T2** Keyset list helper (`updatedSince`, `(updatedAt, id)` cursor, `limit ≤ 500`) — `readKeysetPage` in
+      `packages/agent/src/integrations-api/keyset-cursor.ts`; `(organizationId, updatedAt, id)` indexes (and
+      `(taskId, updatedAt, id)` for comments) in migration `1795080300000`.
+- [x] **T3** `ETag` / `If-Match` — helpers (`etagFor`, `parseIfMatch`, `assertIfMatch` → `412 version_mismatch`),
+      applied per write route (PATCH / DELETE of tasks and teams).
 - [~] **T4** `integration_idempotency_keys` table + migration (3 dialects, `1795080200000`) +
   `IntegrationIdempotencyService` (claim-first, replay, mismatch/in-progress `409`, release on error/5xx, purge);
-  the interceptor and purge schedule ship with the write routes.
+  `runIdempotent` on every create (`Idempotent-Replayed: true` on a replay). Open: a schedule for `purgeExpired`.
 - [x] **T5** `external_record_links` table + migration (3 dialects, `1795080200000`) + `ExternalRecordLinksService`
       (create in the caller's transaction, `PUT`/`DELETE`/list, `linksFor`, `installationFromOrigin`).
 - [x] **T6** `X-Sync-Origin` → event `originTag` (`DomainEventContextInterceptor`, EW-P1-1 #2611).
-- [ ] **T7** `POST /batch`.
+- [x] **T7** `POST /batch` — ≤ 100 operations in order, not atomic; each one a loopback request with the outer
+      credential and pin, so every guard, scope and rate limit applies; paths confined to `/api/integrations/v1`.
 - [x] **T8** DTO mappers shared with domain-event `data` builders (`domain-event-snapshots.ts`, EW-P1-1 #2617).
 
 ## Phase 2 — P1 resources
 
-- [ ] **T9** `whoami`, `organization`, `members`.
-- [ ] **T10** `GET /events` (feed).
-- [ ] **T11** Agents (read).
-- [ ] **T12** Teams + members + resources.
-- [ ] **T13** Works (read).
-- [ ] **T14** Tasks + PUT sets.
-- [ ] **T15** Task comments.
-- [ ] **T16** Links.
-- [ ] **T17** OpenAPI in production for the namespace.
+- [x] **T9** `whoami` (EW-P1-2), `organization`, `members`.
+- [x] **T10** `GET /events` (feed).
+- [x] **T11** Agents (read).
+- [x] **T12** Teams: `GET`/`POST /teams`, `GET`/`PATCH`/`DELETE /teams/:id`, `PUT /teams/:id/members` (a role change is
+      a remove + an add), `PUT /teams/:id/resources`.
+- [x] **T13** Works (read).
+- [x] **T14** Tasks: reads, `POST` (Idempotency-Key, `externalRef`, status `backlog`\|`todo`, `private` → `422`),
+      `PATCH`/`DELETE` with `If-Match`, `POST /tasks/:id/transition {to, mode:'sync'}` (delegates to
+      `TasksService.syncTransition`, never `force`), `PUT` assignees / watchers / blocks / relations.
+- [x] **T15** Task comments: `GET`/`POST /tasks/:id/comments`, `PATCH`/`DELETE /tasks/:id/comments/:cid` (author only;
+      integration-authored: no edit window; refusals `422 domain_rule`; `task.comment.deleted`).
+- [x] **T16** Links: `GET /links`, `PUT`/`DELETE /links/:entityType/:entityId` (the record must be visible; types not
+      served in v1 yet → `400`).
+- [x] **T17** OpenAPI in production: `GET /api/integrations/v1/openapi.json` (`serveIntegrationOpenApi`).
+- [ ] **T17a** Create + link in ONE transaction (today: create, then link, undo on a lost race; a crash between the
+      two leaves an unlinked record and a retry after the 5-minute stale claim creates a second one).
 
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 
@@ -43,8 +53,9 @@
 - [x] **T19** Relay-driven, org-scoped fan-out with `excludeOriginTags` — `WebhookDomainEventFanoutService` (cursor
       `core:webhooks-v2`, at least once, idempotent per `(subscription, event)`).
 - [x] **T20** `t=,v1=` signer + rotation grace + vector contract test — `webhook-signature-v2.ts` (all 22 vectors).
-- [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily; the
-  `/api/integrations/v1/webhooks` routes for key-owned subscriptions follow #2606).
+- [~] **T21** PATCH resume (done); revoke key → disable subscriptions (the fan-out disables them lazily, and a
+  key-owned subscription needs `kind = integration`; the `/api/integrations/v1/webhooks` routes for key-owned
+  subscriptions are next).
 - [ ] **T22** Settings → Webhooks UI.
 
 ## Phase 4 — Transitions (EW-P1-6)

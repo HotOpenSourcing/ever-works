@@ -153,6 +153,15 @@ export class IntegrationCreateTaskDto {
     externalRef?: IntegrationExternalRefDto;
 }
 
+/** Contract v1 `requests.schema.json#/$defs/TransitionTask`. */
+export class IntegrationTransitionTaskDto {
+    @IsIn(Object.values(TaskStatus))
+    to!: TaskStatus;
+
+    @IsIn(['sync'])
+    mode!: 'sync';
+}
+
 /** Contract v1 `requests.schema.json#/$defs/UpdateTask` (no `status`: use /transition). */
 export class IntegrationUpdateTaskDto {
     @IsOptional()
@@ -399,6 +408,38 @@ export class IntegrationTasksWriteController {
         const updated = await this.resources.get('task', organizationId, id, source);
         if (updated.etag) res.setHeader('ETag', updated.etag);
         return updated.dto;
+    }
+
+    @Post('tasks/:id/transition')
+    @RequireScopes('tasks:write')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({
+        summary:
+            "Move a task to a status along the shortest legal path (mode 'sync'; gates → 409 transition_blocked)",
+    })
+    async transition(
+        @CurrentUser() user: AuthenticatedUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() dto: IntegrationTransitionTaskDto,
+        @Res({ passthrough: true }) res: Response,
+    ): Promise<Record<string, unknown>> {
+        const principal = principalOf(user);
+        const organizationId = pinnedOrganizationOf(this.scope.getScope().organizationId);
+        const source = linkSourceOf(principal);
+        // The task must be one the caller sees (404 otherwise).
+        await this.resources.get('task', organizationId, id, source);
+        // EW-P1-6: one gated hop at a time, no agent work started (D9), never
+        // `force` — the approver gate stands for integrations.
+        await this.tasks.syncTransition(
+            user.userId,
+            id,
+            dto.to,
+            { force: false },
+            this.scope.getScope() as never,
+        );
+        const moved = await this.resources.get('task', organizationId, id, source);
+        if (moved.etag) res.setHeader('ETag', moved.etag);
+        return moved.dto;
     }
 
     @Delete('tasks/:id')

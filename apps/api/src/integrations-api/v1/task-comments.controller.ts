@@ -71,7 +71,7 @@ export class IntegrationExternalAuthorDto {
 /** `CreateComment` (contract v1 requests.schema.json). */
 export class IntegrationCreateCommentDto {
     @IsString()
-    @Length(1, 50_000)
+    @Length(1, 16_384)
     body!: string;
 
     @IsOptional()
@@ -88,7 +88,7 @@ export class IntegrationCreateCommentDto {
 /** `UpdateComment` (contract v1 requests.schema.json). */
 export class IntegrationUpdateCommentDto {
     @IsString()
-    @Length(1, 50_000)
+    @Length(1, 16_384)
     body!: string;
 }
 

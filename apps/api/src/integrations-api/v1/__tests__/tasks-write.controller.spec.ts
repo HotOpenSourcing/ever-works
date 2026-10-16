@@ -3,6 +3,8 @@ import {
     VersionMismatchError,
 } from '@ever-works/agent/integrations-api';
 import { IntegrationHttpException } from '../../../auth/integration/integration-http.exception';
+import { TaskTransitionBlockedException } from '@ever-works/agent/tasks-domain';
+import { IntegrationExceptionFilter } from '../integration-exception.filter';
 import { IntegrationTasksWriteController } from '../tasks-write.controller';
 
 /**
@@ -37,6 +39,7 @@ describe('IntegrationTasksWriteController', () => {
             update: jest.fn().mockResolvedValue({}),
             remove: jest.fn().mockResolvedValue({ deleted: true }),
             addAssignee: jest.fn().mockResolvedValue({}),
+            syncTransition: jest.fn().mockResolvedValue({ task: {}, from: 'backlog', path: [] }),
         };
         const teamResources = { attach: jest.fn(), detach: jest.fn() };
         const links = {
@@ -207,5 +210,39 @@ describe('IntegrationTasksWriteController', () => {
         await controller.remove(user, 'task-1', undefined);
         expect(tasks.remove).toHaveBeenCalledWith('owner-1', 'task-1', expect.anything());
         expect(links.removeAllFor).toHaveBeenCalledWith(ORG, 'task', 'task-1');
+    });
+
+    it('transition walks the sync path without force and answers the moved task', async () => {
+        const { controller, tasks } = setup();
+        const response = res();
+        const dto = await controller.transition(
+            user,
+            'task-1',
+            { to: 'done' as never, mode: 'sync' },
+            response,
+        );
+        expect(tasks.syncTransition).toHaveBeenCalledWith(
+            'owner-1',
+            'task-1',
+            'done',
+            { force: false },
+            expect.anything(),
+        );
+        expect(dto).toMatchObject({ id: 'task-1' });
+        expect(response.setHeader).toHaveBeenCalledWith('ETag', '"3"');
+    });
+
+    it('a blocked sync walk keeps its transition_blocked code and details in the envelope', () => {
+        const details = {
+            from: 'todo',
+            to: 'done',
+            blockers: [{ taskId: 't-9', slug: 'T-9', title: 'Blocker', status: 'todo' }],
+            pendingApprovers: [],
+            path: ['in_progress', 'in_review', 'done'],
+        };
+        const envelope = new IntegrationExceptionFilter().toEnvelope(
+            new TaskTransitionBlockedException('Blocked.', details as never),
+        );
+        expect(envelope).toMatchObject({ status: 409, code: 'transition_blocked', details });
     });
 });
