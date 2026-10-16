@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
@@ -12,11 +13,13 @@ import type { Task } from '@/lib/api/tasks';
  */
 export function TaskDueChip({ task }: { task: Pick<Task, 'dueAt' | 'status'> }) {
     const t = useTranslations('dashboard.tasksPage.planning');
+    // Read the clock once per mount, not in the render body (`react-hooks/purity`).
+    const [now] = useState(() => Date.now());
     if (!task.dueAt) return null;
     const due = new Date(task.dueAt);
     if (Number.isNaN(due.getTime())) return null;
     const closed = task.status === 'done' || task.status === 'cancelled';
-    const overdue = !closed && due.getTime() < Date.now();
+    const overdue = !closed && due.getTime() < now;
     const date = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     return (
         <span
