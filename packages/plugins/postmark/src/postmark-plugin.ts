@@ -77,6 +77,38 @@ function angleAddress(value: string): string | null {
 	return null;
 }
 
+/**
+ * EW-P4-3 — split a raw address-list header (`To` / `Cc`) on the commas that
+ * SEPARATE mailboxes, not the ones inside a quoted display name or an angle
+ * address: `"Doe, John" <john@x>, jane@x` is two mailboxes. Linear time (the
+ * header is sender-written and read before verification).
+ */
+function splitAddressList(raw: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let inQuote = false;
+	let inAngle = false;
+	for (let i = 0; i < raw.length; i += 1) {
+		const ch = raw[i];
+		if (ch === '\\' && inQuote && i + 1 < raw.length) {
+			current += ch + raw[i + 1];
+			i += 1;
+			continue;
+		}
+		if (ch === '"' && !inAngle) inQuote = !inQuote;
+		else if (ch === '<' && !inQuote) inAngle = true;
+		else if (ch === '>' && !inQuote) inAngle = false;
+		if (ch === ',' && !inQuote && !inAngle) {
+			parts.push(current);
+			current = '';
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current);
+	return parts;
+}
+
 interface PostmarkInboundPayload {
 	readonly MessageID: string;
 	readonly From: string;
@@ -278,8 +310,10 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 		// the raw `Cc` header fallback may carry display names.
 		const cc = (
 			payload.CcFull?.map((c) => c.Email) ??
-			(payload.Cc ? payload.Cc.split(',').map((part) => parseEmailAddress(part)) : [])
-		).filter((address): address is string => typeof address === 'string' && address.length > 0);
+			(payload.Cc ? splitAddressList(payload.Cc).map((part) => parseEmailAddress(part)) : [])
+		).filter(
+			(address): address is string => typeof address === 'string' && address.length > 0 && address.includes('@')
+		);
 		const attachments: EmailAttachment[] =
 			payload.Attachments?.map((a) => ({
 				filename: a.Name,

@@ -825,6 +825,26 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
         expect(tasks.create.mock.calls[0][2]).toBeUndefined();
     });
 
+    it('posts the attachments of a threaded reply on the Task chat', async () => {
+        const { spawner, chat } = build();
+        await spawner.appendInboundEmailToTask({
+            ...input,
+            taskId: 'task-original',
+            attachments: [
+                {
+                    filename: 'scan.pdf',
+                    mimeType: 'application/pdf',
+                    size: 9,
+                    stored: true,
+                    uploadId: 'sha-9',
+                },
+            ],
+        });
+        expect(chat.post.mock.calls[0][1].body).toContain(
+            '- scan.pdf (application/pdf, 9 bytes, upload sha-9)',
+        );
+    });
+
     it("does not append when the receiving agent is not the owner's", async () => {
         const { spawner, chat } = build(null);
         await expect(
