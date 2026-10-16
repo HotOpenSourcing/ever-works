@@ -12,6 +12,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 type IntegrationRequest = {
     method?: string;
+    params?: Record<string, string | undefined>;
     headers?: Record<string, string | string[] | undefined>;
     user?: AuthenticatedUser;
 };
@@ -124,6 +125,20 @@ export class IntegrationPrincipalGuard implements CanActivate {
     ): Promise<string | null> {
         const headerOrgId = firstHeader(request.headers?.[INTEGRATION_HEADERS.organizationId]);
         const scope = this.scopeContext.getScope();
+
+        // A slug the caller SUPPLIED must have resolved to a pinned organization.
+        // A person's slug (or the `@personal` sentinel) resolves to no
+        // organization at all; it is a wrong selector, not an omitted one, so
+        // it is refused on every route — org-optional ones and next to
+        // `X-Organization-Id` included.
+        const suppliedSlug =
+            (typeof request.params?.slug === 'string' && request.params.slug.trim()) ||
+            firstHeader(request.headers?.[INTEGRATION_HEADERS.scopeSlug]);
+        if (suppliedSlug && scope.organizationId === null) {
+            throw this.notPinned(
+                'X-Scope-Slug does not name an organization this key is pinned to.',
+            );
+        }
 
         if (headerOrgId) {
             if (
