@@ -95,6 +95,27 @@ One `RecordAccessPolicy` service plus a repository helper `visibleTo(principal)`
 it, replacing the scattered `userId = caller` filters; each replaced filter becomes a test case. The integration
 principal reads every row in its pinned orgs with `visibility` `team` or `organization`.
 
+**As implemented** (`packages/agent/src/record-visibility/`):
+
+- `visibleToPredicate()` (`visible-to.ts`) is the one SQL predicate for all five aggregates. A user reads a row when they
+  own it; take part in it (tasks: user assignee, approver, reviewer, watcher — any visibility); reach it through a Team
+  (`tasks.teamId`, `team_resources` of the type, an agent's `team_members`) or a Work they own or belong to
+  (`tasks.workId`, `agents.workId`, `mission_works`) when it is `team` / `organization`; or are an organization member
+  (roster row, or the tenant owner) when it is `organization`. Personal scope stays owner-only. The integration
+  principal reads `team` / `organization` rows of its pinned organizations.
+- `RecordAccessPolicy` resolves the caller's roster, Teams and Works **once per request** (`contextFor`) and exposes
+  `isOrganizationMember(orgId, userId)` (the authoritative roster for act-as, EW-P1-2) and `isTaskParticipant`.
+- **Views:** `?view=mine|shared|organization` on `GET /api/tasks` (and the board), `/api/me/goals`, `/api/me/missions`,
+  `/api/me/work-proposals` and `/api/agents`. `mine` (default, also for unknown values) is the unchanged owner query;
+  `shared` = rows the caller does not own but takes part in or reaches through a Team / Work; `organization` = every
+  readable row of the active organization, own rows included.
+- **Get by id:** a new `getReadable` (tasks, goals, missions, ideas, agents) answers the owner exactly as before, then
+  falls back to `visibleTo`. Only the `GET /:id` routes use it: **every write route keeps its owner-only gate**
+  (`getOne` / `getForUser` / `requireOwned`), several of which other routes use as an ownership check.
+- **Writes (§4):** a task's user assignees, approvers and reviewers may transition it (watchers and other readers get
+  403); anyone who can read a task may list and post comments, and edit their own; a non-owner's `@agent` mention is
+  kept on the message but never dispatches a run (no spend, no agent work on somebody else's task).
+
 ## 9. Events
 
 A change of visibility records `<aggregate>.visibility_changed` ([`domain-events`](../domain-events/spec.md)). A change
