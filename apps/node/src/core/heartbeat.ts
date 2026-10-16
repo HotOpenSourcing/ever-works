@@ -110,12 +110,6 @@ export interface HeartbeatLoopOptions {
 }
 
 /**
- * Exponential backoff: the nominal interval while healthy, then
- * `interval * 2^failures` capped at `maxMs`. The first retry therefore already
- * waits longer than the normal cadence — a node that just failed is far more
- * likely to fail again immediately than a healthy one is.
- */
-/**
  * Resolves `true` once the loop has had an ACCEPTED beat (state
  * `connected`), at once when it already has. It resolves `false` once
  * waiting is pointless: the loop reported `stopped`, or `shouldWait()` turned
@@ -151,6 +145,12 @@ export function untilHeartbeatAccepted(
 	});
 }
 
+/**
+ * Exponential backoff: the nominal interval while healthy, then
+ * `interval * 2^failures` capped at `maxMs`. The first retry therefore already
+ * waits longer than the normal cadence — a node that just failed is far more
+ * likely to fail again immediately than a healthy one is.
+ */
 export function computeBackoffDelay(intervalMs: number, failures: number, maxMs: number): number {
 	if (failures <= 0) {
 		return intervalMs;
