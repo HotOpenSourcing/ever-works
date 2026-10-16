@@ -1,5 +1,6 @@
 'use client';
 
+import type { RecordListView } from '@/lib/record-visibility';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
@@ -752,6 +753,8 @@ export interface TasksKanbanViewProps {
         status: TaskStatus,
         offset: number,
     ) => Promise<{ total: number; cards: Task[] } | null>;
+    /** Record visibility (EW-P1-3) tab the board shows; run polling reads the same one. */
+    view?: RecordListView;
 }
 
 /**
@@ -775,6 +778,7 @@ export function TasksKanbanView({
     sort = 'priority',
     pageSize,
     loadColumn,
+    view = 'mine',
 }: TasksKanbanViewProps) {
     const t = useTranslations('dashboard.tasksPage');
     const [tasks, setTasks] = useState(initialTasks);
@@ -843,7 +847,7 @@ export function TasksKanbanView({
             }),
         );
     }, []);
-    useTaskRunPolling(tasks, mergeRunData);
+    useTaskRunPolling(tasks, mergeRunData, view);
 
     const grouped = useMemo(() => {
         const map = new Map<TaskStatus, Task[]>(COLUMNS.map((c) => [c.key, []]));
@@ -955,8 +959,9 @@ export function TasksKanbanView({
         const src = tasks.find((t) => t.id === draggingTaskId);
         if (!src || src.status === status) return;
         if (!(NEXT_STATUS[src.status] ?? []).includes(status)) {
-            // A cancelled Task has no legal move at all. The drop is refused
-            // either way; say why once, instead of letting it silently fail.
+            // A cancelled Task only re-opens into backlog or todo (EW-P1-6).
+            // Any other drop is refused; say why once, instead of letting it
+            // silently fail.
             if (src.status === 'cancelled' && !refusalExplainedRef.current) {
                 refusalExplainedRef.current = true;
                 toast.error(t('board.dropRefusedCancelled'));
