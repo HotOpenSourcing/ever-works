@@ -71,6 +71,7 @@ import { CatalogModule } from './catalog/catalog.module';
 import { TerminalModule } from './terminal/terminal.module';
 import { ComputerApiModule } from './computer/computer.module';
 import { TeamsModule } from './teams/teams.module';
+import { DomainEventsApiModule } from './domain-events/domain-events-api.module';
 import { SchedulesModule } from './schedules/schedules.module';
 import { HomeModule } from './home/home.module';
 import { WorkspaceSearchModule } from './workspace-search/workspace-search.module';
@@ -294,6 +295,8 @@ import { DatabaseModule } from '@ever-works/agent/database';
         // Teams & Prebuilt Companies — org-nested Teams CRUD + Org Chart
         // (docs/specs/features/teams-and-companies/spec.md §3).
         TeamsModule,
+        // Domain events (EW-P1-1): outbox recorder, single-leader relay, request attribution.
+        DomainEventsApiModule,
         // Schedules ("Cadence") — read-only aggregation of every
         // user-owned scheduled source into GET /api/schedules. Additive;
         // reuses existing entity tables (no new schema).

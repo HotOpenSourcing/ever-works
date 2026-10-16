@@ -13,7 +13,7 @@ import type {
 	PluginCategory,
 	JsonSchema
 } from '@ever-works/plugin';
-import { PLUGIN_CAPABILITIES } from '@ever-works/plugin';
+import { PLUGIN_CAPABILITIES, normalizeMessageId, parseMessageIdList } from '@ever-works/plugin';
 
 /**
  * Resolve the configured API token. Plugin settings come from
@@ -150,6 +150,10 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 				ReplyTo: input.replyTo,
 				Tag: input.metadata?.tag,
 				Metadata: input.metadata,
+				// EW-P4-3 — RFC threading (Message-ID / In-Reply-To / References).
+				Headers: input.headers
+					? Object.entries(input.headers).map(([Name, Value]) => ({ Name, Value }))
+					: undefined,
 				Attachments: input.attachments?.map((a) => ({
 					Name: a.filename,
 					Content: a.content,
@@ -258,6 +262,13 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 		_options: EmailOptions
 	): Promise<EmailInboundMessage> {
 		const payload = JSON.parse(rawBody.toString('utf8')) as PostmarkInboundPayload;
+		// EW-P4-3 — RFC threading headers, from the original message's
+		// headers (Postmark's own `MessageID` is its id, not the header).
+		const header = (name: string): string | undefined =>
+			payload.Headers?.find((h) => typeof h?.Name === 'string' && h.Name.toLowerCase() === name)?.Value;
+		const messageIdHeader = normalizeMessageId(header('message-id'));
+		const inReplyTo = parseMessageIdList(header('in-reply-to'))[0];
+		const references = parseMessageIdList(header('references'));
 		// The same bare mailboxes `extractInboundRecipients` names (the raw
 		// `To` fallback may carry a display name).
 		const to = payload.ToFull?.map((t) => t.Email) ?? (payload.To ? [parseEmailAddress(payload.To)] : []);
@@ -282,7 +293,10 @@ export class PostmarkPlugin implements IEmailOutboundPlugin, IEmailInboundPlugin
 				spamScore: payload.SpamScore ?? null,
 				headers: payload.Headers ?? [],
 				fromName: payload.FromName ?? null
-			}
+			},
+			...(messageIdHeader ? { messageIdHeader } : {}),
+			...(inReplyTo ? { inReplyTo } : {}),
+			...(references.length > 0 ? { references } : {})
 		};
 	}
 

@@ -167,9 +167,11 @@ flowchart LR
 
 Two failure modes are silent by design and useful to know when debugging: if no registered address matches any recipient, the webhook is acked and nothing is stored; and if the Task-spawner adapter is not bound in a given deployment, a `task-spawn` message is still persisted, just without a Task.
 
-:::note Subject slugs do not thread a Task
+:::note How replies thread
 
-Threading applies to `conversation` mode only, and it keys on the normalized subject — not on a Task slug like `[ACME-123]`. In `task-spawn` mode **every** inbound message creates a new Task; there is no join-the-existing-Task path.
+Every message the platform sends carries a `Message-ID`, and replies are matched on the standard `In-Reply-To` / `References` headers — only ever against the same Agent's own mail. In `conversation` mode a reply joins the conversation of the message it answers, whatever its subject; with no match, the normalized subject decides. In `task-spawn` mode a reply to a message that belongs to a Task is posted on that Task's chat (the receiving Agent is mentioned, so it picks the reply up) instead of creating a new Task; with no match, or if posting fails, a new Task is created as before. A Task slug in the subject (`[ACME-123]`) is not used for threading.
+
+To answer in the same thread, pass `inReplyToMessageId` (an email message id — a spawned Task's description names it) to `POST /api/email/messages` or to the Agent's `sendEmail` tool.
 
 :::
 

@@ -88,6 +88,9 @@ export const AGENT_ENTITY_NAMES: ReadonlyArray<string> = [
     // Pay-as-you-go meter events (billing spec §3.5) — the platform-side
     // mirror of every credit reported to the provider's usage meter
     'CreditMeterEvent',
+    // Domain events (EW-P1-1) — the outbox and the relay's state row.
+    'DomainEvent',
+    'DomainEventRelayState',
     'EmailConversation',
     'EmailMessage',
     // Environments (Settings → Environments) — named, reusable runtime
@@ -169,6 +172,8 @@ export const AGENT_ENTITY_NAMES: ReadonlyArray<string> = [
     'OrganizationOnboardingProfile',
     // Plan entitlements (pricing Wave 9 M1)
     'PlanEntitlement',
+    // Domain events (EW-P1-1) — per-plugin, per-tenant delivery cursors.
+    'PluginEventCursor',
     'PluginUsageEvent',
     // AW-14 What's new — per-person read state for product changelog entries.
     'ProductChangelogRead',

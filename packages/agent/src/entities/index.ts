@@ -261,3 +261,8 @@ export * from './work-app-runtime-state.entity';
 export * from './ever-instance.entity';
 export * from './ever-stats-report.entity';
 export * from './ever-stats-lease.entity';
+// Domain events (EW-P1-1) — the transactional outbox, the relay's lease and
+// feed-position state, and the per-plugin delivery cursors.
+export * from './domain-event.entity';
+export * from './domain-event-relay-state.entity';
+export * from './plugin-event-cursor.entity';

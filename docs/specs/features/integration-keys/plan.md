@@ -32,7 +32,7 @@
 | `UserAwareThrottlerGuard`                                             | `config/user-aware-throttler.guard.ts`              | per-key read/write buckets + burst; `429 rate_limited` + `Retry-After`                                             |
 | `IntegrationAuditInterceptor` (global)                                | `auth/integration/integration-audit.interceptor.ts` | `integration_write` rows                                                                                           |
 | `writeAttribution()`                                                  | `auth/integration/integration-attribution.ts`       | `user` vs `integration` creator/author                                                                             |
-| `IntegrationsApiV1Module`                                             | `integrations-api/v1/`                              | `GET /whoami`; `IntegrationOnlyGuard`; `INTEGRATION_FEED_HEAD` hook                                                |
+| `IntegrationsApiV1Module`                                             | `integrations-api/v1/`                              | `GET /whoami`; `IntegrationOnlyGuard`; `INTEGRATION_FEED_HEAD` → feed head                                         |
 
 Guard order (providers order in `ApiModule`): `AuthSessionGuard` → `SessionScopeGuard` → `IntegrationPrincipalGuard` →
 `ScopeOwnershipGuard` → `UserAwareThrottlerGuard`.

@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '@ever-works/agent/database';
+import { DomainEventFeedService, DomainEventsModule } from '@ever-works/agent/domain-events';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationOnlyGuard } from './integration-only.guard';
+import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
 
 /**
  * Integration API v1 — `/api/integrations/v1/*`, the stable contract Ever
@@ -13,8 +15,20 @@ import { IntegrationOnlyGuard } from './integration-only.guard';
  * links, batch) are EW-P1-4 and land in this module.
  */
 @Module({
-    imports: [DatabaseModule],
+    imports: [DatabaseModule, DomainEventsModule],
     controllers: [IntegrationWhoamiController],
-    providers: [IntegrationOnlyGuard],
+    providers: [
+        IntegrationOnlyGuard,
+        // `whoami.feedHead` — the GLOBAL change-feed head (EW-P1-1): feed
+        // positions are assigned by the relay across every organization, so
+        // there is no per-organization head and the pins are not needed here.
+        {
+            provide: INTEGRATION_FEED_HEAD,
+            useFactory: (feed: DomainEventFeedService): IntegrationFeedHead => ({
+                head: () => feed.head(),
+            }),
+            inject: [DomainEventFeedService],
+        },
+    ],
 })
 export class IntegrationsApiV1Module {}
