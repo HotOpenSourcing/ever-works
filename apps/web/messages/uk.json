@@ -2655,6 +2655,7 @@
                 "appLauncher": "Запуск застосунків",
                 "channels": "Channels",
                 "emails": "Email Addresses",
+                "webhooks": "Вебхуки",
                 "environments": "Environments",
                 "connections": "Connections",
                 "repositories": "Repositories",
