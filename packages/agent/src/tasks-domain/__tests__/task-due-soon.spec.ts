@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { TaskRecurrenceDispatcherService } from '../task-recurrence-dispatcher.service';
 import { TasksService } from '../tasks.service';
 import { TaskStatus } from '../../entities/task.entity';
@@ -21,8 +21,12 @@ describe('TaskRecurrenceDispatcherService.notifyDueSoon', () => {
         const tasks = {
             findDueSoonTasks: jest.fn().mockResolvedValue([task]),
             casClaimDueSoon: jest.fn().mockResolvedValue(claimed),
+            releaseDueSoonClaim: jest.fn().mockResolvedValue(true),
         };
-        const notifications = { emit: jest.fn().mockResolvedValue(1) };
+        const notifications = {
+            canDeliver: jest.fn().mockReturnValue(true),
+            emitCounted: jest.fn().mockResolvedValue({ sent: 2, recipients: 2 }),
+        };
         const assignees = {
             findByTaskId: jest.fn().mockResolvedValue([
                 { assigneeType: 'user', assigneeId: 'u-2' },
@@ -48,7 +52,7 @@ describe('TaskRecurrenceDispatcherService.notifyDueSoon', () => {
             new Date('2026-10-17T10:00:00Z'),
         );
         expect(tasks.casClaimDueSoon).toHaveBeenCalledWith('t1', dueAt, now);
-        expect(notifications.emit).toHaveBeenCalledWith(
+        expect(notifications.emitCounted).toHaveBeenCalledWith(
             'task_due_soon',
             expect.objectContaining({
                 taskId: 't1',
@@ -69,17 +73,36 @@ describe('TaskRecurrenceDispatcherService.notifyDueSoon', () => {
     it('a lost claim notifies nobody', async () => {
         const { svc, notifications } = build(false);
         const summary = await svc.notifyDueSoon(100, now);
-        expect(notifications.emit).not.toHaveBeenCalled();
+        expect(notifications.emitCounted).not.toHaveBeenCalled();
         expect(summary).toMatchObject({ notified: 0, skipped: 1 });
     });
 
-    it('a failure is counted, never thrown', async () => {
-        const { svc, notifications } = build();
-        notifications.emit.mockRejectedValueOnce(new Error('down'));
+    it('a failure is counted, never thrown, and gives the claim back for a retry', async () => {
+        const { svc, tasks, notifications } = build();
+        notifications.emitCounted.mockRejectedValueOnce(new Error('down'));
         await expect(svc.notifyDueSoon(100, now)).resolves.toMatchObject({
             failed: 1,
             notified: 0,
         });
+        expect(tasks.releaseDueSoonClaim).toHaveBeenCalledWith('t1', now);
+    });
+
+    it('a partial delivery releases the claim too (dedup per deadline keeps the retry idempotent)', async () => {
+        const { svc, tasks, notifications } = build();
+        notifications.emitCounted.mockResolvedValueOnce({ sent: 1, recipients: 2 });
+        await expect(svc.notifyDueSoon(100, now)).resolves.toMatchObject({
+            failed: 1,
+            notified: 0,
+        });
+        expect(tasks.releaseDueSoonClaim).toHaveBeenCalledWith('t1', now);
+    });
+
+    it('does not scan at all when no notice can be delivered', async () => {
+        const { svc, tasks, notifications } = build();
+        notifications.canDeliver.mockReturnValue(false);
+        await expect(svc.notifyDueSoon(100, now)).resolves.toMatchObject({ dueCount: 0 });
+        expect(tasks.findDueSoonTasks).not.toHaveBeenCalled();
+        expect(tasks.casClaimDueSoon).not.toHaveBeenCalled();
     });
 });
 
@@ -101,6 +124,7 @@ describe('TasksService planning fields', () => {
         const tasks = {
             findByIdAndUser: jest.fn().mockResolvedValue({ ...base }),
             updateById: jest.fn().mockResolvedValue(undefined),
+            updateByIdIfUnchanged: jest.fn().mockResolvedValue(true),
         };
         const service = new TasksService(
             tasks as never,
@@ -134,12 +158,39 @@ describe('TasksService planning fields', () => {
     it('a moved due date re-arms the due-soon notice; the same date does not', async () => {
         const { service, tasks } = build();
         await service.update('u1', 't1', { dueAt: new Date('2026-10-22T23:59:59Z') });
-        expect(tasks.updateById.mock.calls[0][1]).toMatchObject({
+        expect(tasks.updateByIdIfUnchanged.mock.calls[0][1]).toMatchObject({
             dueAt: new Date('2026-10-22T23:59:59Z'),
             dueSoonNotifiedAt: null,
         });
         await service.update('u1', 't1', { dueAt: new Date('2026-10-20T23:59:59Z') });
-        expect(tasks.updateById.mock.calls[1][1]).not.toHaveProperty('dueSoonNotifiedAt');
+        expect(tasks.updateByIdIfUnchanged.mock.calls[1][1]).not.toHaveProperty(
+            'dueSoonNotifiedAt',
+        );
+    });
+
+    it('moving one end guards the write on the other end (no racing PATCH can invert the pair)', async () => {
+        const { service, tasks } = build();
+        await service.update('u1', 't1', { startAt: new Date('2026-10-19T00:00:00Z') });
+        expect(tasks.updateByIdIfUnchanged.mock.calls[0][2]).toEqual({
+            field: 'dueAt',
+            expected: base.dueAt,
+        });
+        await service.update('u1', 't1', { dueAt: new Date('2026-10-21T00:00:00Z') });
+        expect(tasks.updateByIdIfUnchanged.mock.calls[1][2]).toEqual({
+            field: 'startAt',
+            expected: base.startAt,
+        });
+        // Both ends together (or a clear) need no guard.
+        await service.update('u1', 't1', { estimateMinutes: 30 });
+        expect(tasks.updateById).toHaveBeenCalledTimes(1);
+    });
+
+    it('a lost guard answers 409 so the caller re-reads', async () => {
+        const { service, tasks } = build();
+        tasks.updateByIdIfUnchanged.mockResolvedValueOnce(false);
+        await expect(
+            service.update('u1', 't1', { startAt: new Date('2026-10-19T00:00:00Z') }),
+        ).rejects.toBeInstanceOf(ConflictException);
     });
 
     it('clears dates and the estimate with null', async () => {

@@ -652,7 +652,7 @@ export function NewTaskForm({ createTask }: { createTask: CreateTaskFn }) {
                                 type="number"
                                 min={0}
                                 max={525600}
-                                step={15}
+                                step={1}
                                 inputMode="numeric"
                                 value={estimateRaw}
                                 onChange={(e) => setEstimateRaw(e.target.value)}

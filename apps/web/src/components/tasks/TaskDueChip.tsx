@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
@@ -13,13 +13,23 @@ import type { Task } from '@/lib/api/tasks';
  */
 export function TaskDueChip({ task }: { task: Pick<Task, 'dueAt' | 'status'> }) {
     const t = useTranslations('dashboard.tasksPage.planning');
-    // Read the clock once per mount, not in the render body (`react-hooks/purity`).
-    const [now] = useState(() => Date.now());
-    if (!task.dueAt) return null;
-    const due = new Date(task.dueAt);
-    if (Number.isNaN(due.getTime())) return null;
+    // The clock is read on mount and again the moment the deadline passes, never
+    // in the render body (`react-hooks/purity`), so a card that becomes overdue
+    // while the board is open turns red without a reload.
+    const [now, setNow] = useState(() => Date.now());
+    const dueMs = task.dueAt ? new Date(task.dueAt).getTime() : NaN;
     const closed = task.status === 'done' || task.status === 'cancelled';
-    const overdue = !closed && due.getTime() < now;
+    useEffect(() => {
+        if (closed || Number.isNaN(dueMs)) return;
+        const wait = dueMs - Date.now();
+        // setTimeout caps at ~24.8 days; a later deadline is re-armed on remount.
+        if (wait <= 0 || wait > 2_147_000_000) return;
+        const timer = setTimeout(() => setNow(Date.now()), wait + 1_000);
+        return () => clearTimeout(timer);
+    }, [dueMs, closed]);
+    if (!task.dueAt || Number.isNaN(dueMs)) return null;
+    const due = new Date(dueMs);
+    const overdue = !closed && dueMs < now;
     const date = due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
     return (
         <span

@@ -70,16 +70,16 @@ export function TaskPlanningSection({ task }: { task: Task }) {
             patch.estimateMinutes = estimateMinutes;
         setError(null);
         if (Object.keys(patch).length === 0) return;
-        startTransition(() => {
-            void (async () => {
-                try {
-                    await updateTaskAction(task.id, patch);
-                    toast.success(t('saved'));
-                    router.refresh();
-                } catch (err) {
-                    setError(err instanceof Error ? err.message : t('saveError'));
-                }
-            })();
+        // An async transition: `pending` covers the request itself, so the
+        // inputs and Save stay disabled until it settles (no overlapping saves).
+        startTransition(async () => {
+            try {
+                await updateTaskAction(task.id, patch);
+                toast.success(t('saved'));
+                router.refresh();
+            } catch (err) {
+                setError(err instanceof Error ? err.message : t('saveError'));
+            }
         });
     };
 
@@ -143,7 +143,7 @@ export function TaskPlanningSection({ task }: { task: Task }) {
                         type="number"
                         min={0}
                         max={525600}
-                        step={15}
+                        step={1}
                         inputMode="numeric"
                         value={estimate}
                         onChange={(e) => setEstimate(e.target.value)}

@@ -997,6 +997,18 @@ export class TasksService {
 
         // EW-P2-3 — planning dates + estimate. Validated against the values
         // the row will hold AFTER the patch (a PATCH may move only one end).
+        // When it moves only one end to a date, the write is guarded on the
+        // other end still holding the value validated here, so two PATCHes
+        // moving opposite ends cannot together save `startAt` > `dueAt`.
+        let planningGuard: { field: 'startAt' | 'dueAt'; expected: Date | null } | undefined;
+        if (input.startAt && input.dueAt === undefined) {
+            planningGuard = { field: 'dueAt', expected: task.dueAt ? new Date(task.dueAt) : null };
+        } else if (input.dueAt && input.startAt === undefined) {
+            planningGuard = {
+                field: 'startAt',
+                expected: task.startAt ? new Date(task.startAt) : null,
+            };
+        }
         if (
             input.dueAt !== undefined ||
             input.startAt !== undefined ||
@@ -1131,7 +1143,7 @@ export class TasksService {
             }
         }
 
-        await this.updateTaskRow(id, patch, task);
+        await this.updateTaskRow(id, patch, task, planningGuard);
         // Record visibility (EW-P1-3): a first Team narrows an automatic
         // `organization` Task to `team`; clearing its last widens it back.
         if ('teamId' in ownerPatch) {
@@ -1916,9 +1928,31 @@ export class TasksService {
     }
 
     /** `updateById` + `task.updated` (changed fields described against `before`). */
-    private async updateTaskRow(id: string, patch: Partial<Task>, before?: Task): Promise<void> {
+    private async updateTaskRow(
+        id: string,
+        patch: Partial<Task>,
+        before?: Task,
+        planningGuard?: { field: 'startAt' | 'dueAt'; expected: Date | null },
+    ): Promise<void> {
         await this.withTaskEvent(
-            (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
+            async (manager) => {
+                if (!planningGuard) {
+                    await this.tasks.updateById(id, patch, ...managerArg(manager));
+                    return;
+                }
+                const written = await this.tasks.updateByIdIfUnchanged(
+                    id,
+                    patch,
+                    planningGuard,
+                    ...managerArg(manager),
+                );
+                if (!written) {
+                    // The other planning date moved since this request read it.
+                    throw new ConflictException(
+                        `Task ${id}'s ${planningGuard.field} changed meanwhile; re-read the Task and retry.`,
+                    );
+                }
+            },
             async (publisher, manager) => {
                 // Record visibility (EW-P1-3): a teamId change moves an automatic
                 // visibility first, so the task.updated snapshot carries it.

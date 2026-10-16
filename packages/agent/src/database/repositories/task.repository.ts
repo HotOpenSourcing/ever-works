@@ -884,6 +884,49 @@ export class TaskRepository {
      * stamps `dueSoonNotifiedAt` while it is still NULL (and `dueAt` is still
      * the date it read) sends it, so two ticks or replicas never notify twice.
      */
+    /**
+     * EW-P2-3 — give a due-soon claim back (the notice did not reach everyone),
+     * so the next scan retries. Only the claim stamped at `claimedAt` is
+     * released, never a later one.
+     */
+    async releaseDueSoonClaim(taskId: string, claimedAt: Date): Promise<boolean> {
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(Task)
+            .set({ dueSoonNotifiedAt: null })
+            .where('id = :id', { id: taskId })
+            .andWhere('dueSoonNotifiedAt = :claimedAt', { claimedAt })
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * EW-P2-3 — update a Task only while one planning date still holds the
+     * value the caller validated against (`startAt` ≤ `dueAt` is a rule over
+     * BOTH columns; a PATCH that moves one end must not race a PATCH moving the
+     * other). Answers whether the row was written.
+     */
+    async updateByIdIfUnchanged(
+        id: string,
+        data: Partial<Task>,
+        guard: { field: 'startAt' | 'dueAt'; expected: Date | null },
+        manager?: EntityManager,
+    ): Promise<boolean> {
+        const repository = manager ? manager.getRepository(Task) : this.repository;
+        const query = repository
+            .createQueryBuilder()
+            .update(Task)
+            .set(data)
+            .where('id = :id', { id });
+        if (guard.expected === null) {
+            query.andWhere(`${guard.field} IS NULL`);
+        } else {
+            query.andWhere(`${guard.field} = :expected`, { expected: guard.expected });
+        }
+        const result = await query.execute();
+        return (result.affected ?? 0) > 0;
+    }
+
     async casClaimDueSoon(taskId: string, expectedDueAt: Date, now: Date): Promise<boolean> {
         const result = await this.repository
             .createQueryBuilder()

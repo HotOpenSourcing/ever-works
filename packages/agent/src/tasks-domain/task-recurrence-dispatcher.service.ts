@@ -320,9 +320,18 @@ export class TaskRecurrenceDispatcherService {
      * `task_due_soon` to the owner and the Task's user assignees (watchers are
      * added by `TaskNotificationService`). Changing `dueAt` clears the claim,
      * so a moved deadline is noticed again. Never dispatches any work.
+     *
+     * A notice that did not reach every recipient releases its claim, so the
+     * next tick tries again; notices are deduplicated per deadline, so a
+     * recipient who already has one is not notified twice. With no
+     * notification store bound the scan does not run at all (it would only
+     * claim and release the same rows every minute).
      */
     async notifyDueSoon(limit = 100, now: Date = new Date()): Promise<DueSoonSummary> {
         const windowHours = taskDueSoonWindowHours();
+        if (!this.notifications?.canDeliver()) {
+            return { limit, windowHours, dueCount: 0, notified: 0, skipped: 0, failed: 0 };
+        }
         const until = new Date(now.getTime() + windowHours * 3_600_000);
         const due = await this.tasks.findDueSoonTasks(limit, now, until);
         const summary: DueSoonSummary = {
@@ -334,8 +343,9 @@ export class TaskRecurrenceDispatcherService {
             failed: 0,
         };
         for (const task of due) {
+            let claimed = false;
             try {
-                const claimed = await this.tasks.casClaimDueSoon(task.id, task.dueAt!, now);
+                claimed = await this.tasks.casClaimDueSoon(task.id, task.dueAt!, now);
                 if (!claimed) {
                     summary.skipped += 1;
                     continue;
@@ -345,7 +355,7 @@ export class TaskRecurrenceDispatcherService {
                 for (const assignee of assignees ?? []) {
                     if (assignee.assigneeType === 'user') recipients.add(assignee.assigneeId);
                 }
-                await this.notifications?.emit(
+                const delivery = await this.notifications.emitCounted(
                     'task_due_soon',
                     {
                         taskId: task.id,
@@ -355,9 +365,18 @@ export class TaskRecurrenceDispatcherService {
                     },
                     [...recipients],
                 );
+                if (delivery.sent < delivery.recipients) {
+                    throw new Error(
+                        `delivered ${delivery.sent} of ${delivery.recipients} due-soon notices`,
+                    );
+                }
                 summary.notified += 1;
             } catch (err) {
                 summary.failed += 1;
+                if (claimed) {
+                    // Give the notice back so the next tick retries it.
+                    await this.tasks.releaseDueSoonClaim(task.id, now).catch(() => false);
+                }
                 this.logger.warn(
                     `Due-soon notice failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
                 );
