@@ -8,7 +8,8 @@ import { Work } from '@src/entities/work.entity';
 import { WorkMemberRole, GenerateStatusType, WorkScheduleStatus } from '@src/entities/types';
 import { WorkOwnershipService } from './work-ownership.service';
 import { normalizeGeneratorError, rethrowAsNormalized } from './utils/error.utils';
-import { isRepositoryWork } from '@src/works/repository-work-guard';
+import { assertNotRepositoryWork, isRepositoryWork } from '@src/works/repository-work-guard';
+import { workKindHasRepository } from '@ever-works/contracts';
 import { trimEdgeChars } from '@src/utils/text.utils';
 import {
     WorkGenerationHistoryDto,
@@ -587,7 +588,8 @@ export class WorkQueryService {
         // would clone the wrapped code repository into the shared checkout
         // to discover that. Answer the read without the clone — a read is
         // not refused, it is simply empty.
-        if (isRepositoryWork(work)) {
+        // EW-P2-4: a Project Work has no repository at all — same answer.
+        if (isRepositoryWork(work) || !workKindHasRepository(work.kind)) {
             return { status: 'success', items: [] };
         }
 
@@ -623,6 +625,13 @@ export class WorkQueryService {
         // Any access level can view config
         const { work } = await this.ownershipService.ensureCanView(workId, user.id);
 
+        // EW-P2-4: a Work with no repository (a Project Work) has no data
+        // config to read — answer empty instead of cloning the derived
+        // `<slug>-data` name, which could even be an unrelated repository.
+        if (!workKindHasRepository(work.kind)) {
+            return { status: 'success', config: null };
+        }
+
         try {
             const config = await this.dataGenerator.getConfig(work, user);
             return {
@@ -655,6 +664,17 @@ export class WorkQueryService {
         // Any access level can view settings
         const { work } = await this.ownershipService.ensureCanView(workId, user.id);
         const defaultCompanyName = work.name || work.slug;
+
+        // EW-P2-4: no repository → the defaults, without a clone.
+        if (!workKindHasRepository(work.kind)) {
+            return {
+                status: 'success',
+                company_name: defaultCompanyName,
+                company_website: '',
+                settings: {},
+                custom_menu: { header: [], footer: [] },
+            };
+        }
 
         try {
             const config = await this.dataGenerator.getConfig(work, user);
@@ -743,6 +763,12 @@ export class WorkQueryService {
     ) {
         // Require edit access to update settings
         const { work } = await this.ownershipService.ensureCanEdit(workId, user.id);
+        // EW-P2-4: a Project Work has no data repository to write the settings
+        // into — refuse (400, the Project refusal) instead of pushing to the
+        // derived `<slug>-data` name.
+        if (!workKindHasRepository(work.kind)) {
+            assertNotRepositoryWork(work, 'website settings update');
+        }
 
         try {
             const { custom_menu, company_name, company_website, ...settings } = dto;
@@ -766,6 +792,11 @@ export class WorkQueryService {
     async workCount(workId: string, user: User) {
         // Any access level can view count
         const { work } = await this.ownershipService.ensureCanView(workId, user.id);
+
+        // EW-P2-4: no repository → nothing to count, without a clone.
+        if (!workKindHasRepository(work.kind)) {
+            return { status: 'success', items: 0, categories: 0, tags: 0 };
+        }
 
         try {
             const count = await this.dataGenerator.count(work, user);
@@ -800,6 +831,11 @@ export class WorkQueryService {
     async workCategoriesTags(workId: string, user: User) {
         // Any access level can view categories and tags
         const { work } = await this.ownershipService.ensureCanView(workId, user.id);
+
+        // EW-P2-4: no repository → no taxonomy, without a clone.
+        if (!workKindHasRepository(work.kind)) {
+            return { status: 'success', categories: [], tags: [], collections: [] };
+        }
 
         try {
             const { categories, tags, collections } = await this.dataGenerator.getCategoriesTags(

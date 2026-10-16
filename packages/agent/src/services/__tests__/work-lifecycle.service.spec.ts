@@ -763,6 +763,21 @@ describe('WorkLifecycleService', () => {
             expect(dataGenerator.getItems).not.toHaveBeenCalled();
             expect(result).toBe(persisted);
         });
+
+        it('records work.created (this path emits no work.created app event for the bridge)', async () => {
+            process.env.EVER_WORKS_PROJECT_WORKS_ENABLED = 'true';
+            workRepository.create.mockResolvedValue({ id: 'w-p', kind: 'project' } as any);
+            const manager = { tx: true } as never;
+            const publisher = {
+                transaction: jest.fn(async (fn: (m: never) => Promise<unknown>) => fn(manager)),
+                created: jest.fn().mockResolvedValue(undefined),
+            };
+            (service as unknown as { domainEvents: unknown }).domainEvents = publisher;
+
+            await service.createProjectWork(user, { name: 'Relaunch', slug: 'relaunch' });
+
+            expect(publisher.created).toHaveBeenCalledWith(manager, 'work', 'w-p', 'work.created');
+        });
     });
 
     describe('createCompanyWork (EW-665 Phase 13)', () => {
