@@ -71,6 +71,7 @@ jest.mock('@ever-works/agent/facades', () => ({
 }));
 jest.mock('@ever-works/agent/notifications', () => ({
     INBOUND_EMAIL_TASK_SPAWNER: 'INBOUND_EMAIL_TASK_SPAWNER',
+    INBOUND_EMAIL_ATTACHMENT_STORE: 'INBOUND_EMAIL_ATTACHMENT_STORE',
 }));
 jest.mock('@ever-works/agent/tasks-domain', () => ({
     TasksDomainModule: class TasksDomainModule {},
@@ -681,6 +682,42 @@ describe('api-side AgentsModule — AGENT_EMAIL_FACADE approve-before-send', () 
 });
 
 /**
+ * EW-P4-3 — inbound attachments go through the SAME upload pipeline as a
+ * user's own uploads (type + size validated there), owned by the receiving
+ * address's owner, in its scope.
+ */
+describe('api-side AgentsModule — INBOUND_EMAIL_ATTACHMENT_STORE', () => {
+    it('saves through UploadsService.saveFile with the address scope', async () => {
+        const uploads = {
+            saveFile: jest.fn().mockResolvedValue({ id: 'sha-1', url: '/api/uploads/sha-1' }),
+        };
+        const store = findProvider('INBOUND_EMAIL_ATTACHMENT_STORE')?.useFactory?.(uploads) as {
+            store: (input: Record<string, unknown>) => Promise<{ uploadId: string; url?: string }>;
+        };
+        const content = Buffer.from('%PDF-1');
+        await expect(
+            store.store({
+                userId: 'user-1',
+                tenantId: 'tenant-1',
+                organizationId: 'org-1',
+                filename: 'a.pdf',
+                mimeType: 'application/pdf',
+                content,
+            }),
+        ).resolves.toEqual({ uploadId: 'sha-1', url: '/api/uploads/sha-1' });
+        expect(uploads.saveFile).toHaveBeenCalledWith(
+            'user-1',
+            { buffer: content, mimetype: 'application/pdf', size: 6, originalname: 'a.pdf' },
+            { ownershipScope: { tenantId: 'tenant-1', organizationId: 'org-1' } },
+        );
+    });
+
+    it('is exported, so the agent-side dispatcher can reach it', () => {
+        expect(meta('exports')).toContain('INBOUND_EMAIL_ATTACHMENT_STORE');
+    });
+});
+
+/**
  * EW-P4-3 — the inbound-email Task spawner: a spawned Task names the email
  * message id (so the agent can reply in thread), and a reply that threads onto
  * an existing Task is posted on that Task's chat with only the receiving
@@ -706,7 +743,12 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
     };
 
     function build(
-        agent: { id: string; slug: string } | null = { id: 'agent-1', slug: 'support-bot' },
+        agent: {
+            id: string;
+            slug: string;
+            tenantId?: string | null;
+            organizationId?: string | null;
+        } | null = { id: 'agent-1', slug: 'support-bot' },
     ) {
         const tasks = {
             create: jest.fn().mockResolvedValue({ id: 'task-new' }),
@@ -757,6 +799,95 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
             'support-bot',
         ]);
         expect([...lookups.ownedAgentSlugs.entries()]).toEqual([['support-bot', 'agent-1']]);
+    });
+
+    // EW-P4-3 — the Task lives where its assignee (the receiving Agent) lives,
+    // and names the attachments the email came with.
+    it("creates the Task in the receiving Agent's tenant / organization", async () => {
+        const { spawner, tasks } = build({
+            id: 'agent-1',
+            slug: 'support-bot',
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
+        await spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+            attachments: [
+                {
+                    filename: 'a.pdf',
+                    mimeType: 'application/pdf',
+                    size: 6,
+                    stored: true,
+                    uploadId: 'sha-1',
+                },
+            ],
+        });
+        const [, created, scope] = tasks.create.mock.calls[0];
+        expect(scope).toEqual({ tenantId: 'tenant-1', organizationId: 'org-1' });
+        expect(created.description).toContain('- a.pdf (application/pdf, 6 bytes, upload sha-1)');
+        expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
+    });
+
+    // Review on #2612: an org address may be bound to the owner's PERSONAL
+    // Agent (or one of another org). The Task must follow the Agent, or
+    // `addAssignee` cannot reach the Agent from it and delivery stops.
+    it('follows the Agent, not the address, when their scopes differ', async () => {
+        const { spawner, tasks } = build({ id: 'agent-1', slug: 'support-bot' });
+        await spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
+        const other = build({
+            id: 'agent-1',
+            slug: 'support-bot',
+            tenantId: 'tenant-1',
+            organizationId: 'org-2',
+        });
+        await other.spawner.spawnTaskForInboundEmail({
+            ...input,
+            tenantId: 'tenant-1',
+            organizationId: 'org-1',
+        });
+        expect(other.tasks.create.mock.calls[0][2]).toEqual({
+            tenantId: 'tenant-1',
+            organizationId: 'org-2',
+        });
+    });
+
+    it('keeps the old unscoped create when the Agent cannot be resolved', async () => {
+        const { spawner, tasks } = build(null);
+        await spawner.spawnTaskForInboundEmail({ ...input, organizationId: 'org-1' });
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
+    });
+
+    it('keeps the personal scope for a personal Agent', async () => {
+        const { spawner, tasks } = build();
+        await spawner.spawnTaskForInboundEmail(input);
+        expect(tasks.create.mock.calls[0][2]).toBeUndefined();
+    });
+
+    it('posts the attachments of a threaded reply on the Task chat', async () => {
+        const { spawner, chat } = build();
+        await spawner.appendInboundEmailToTask({
+            ...input,
+            taskId: 'task-original',
+            attachments: [
+                {
+                    filename: 'scan.pdf',
+                    mimeType: 'application/pdf',
+                    size: 9,
+                    stored: true,
+                    uploadId: 'sha-9',
+                },
+            ],
+        });
+        expect(chat.post.mock.calls[0][1].body).toContain(
+            '- scan.pdf (application/pdf, 9 bytes, upload sha-9)',
+        );
     });
 
     it("does not append when the receiving agent is not the owner's", async () => {

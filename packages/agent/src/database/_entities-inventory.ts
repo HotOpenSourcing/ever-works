@@ -208,6 +208,8 @@ import { EverStatsLease } from '../entities/ever-stats-lease.entity';
 import { DomainEvent } from '../entities/domain-event.entity';
 import { DomainEventRelayState } from '../entities/domain-event-relay-state.entity';
 import { PluginEventCursor } from '../entities/plugin-event-cursor.entity';
+import { ExternalRecordLink } from '../entities/external-record-link.entity';
+import { IntegrationIdempotencyKey } from '../entities/integration-idempotency-key.entity';
 
 import {
     PluginEntity,
@@ -543,4 +545,8 @@ export const ENTITIES = [
     DomainEvent,
     DomainEventRelayState,
     PluginEventCursor,
+    // Integration API v1 (EW-P1-4) — external record links and the
+    // `Idempotency-Key` response store.
+    ExternalRecordLink,
+    IntegrationIdempotencyKey,
 ];

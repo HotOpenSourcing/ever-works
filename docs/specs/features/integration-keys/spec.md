@@ -189,6 +189,21 @@ ownerUserId, method, route, statusCode, originTag (X-Sync-Origin), resourceId }`
 Everything else stays closed to integration keys until the integration API v1 (EW-P1-4) opens it. Reads across owners
 need record visibility (EW-P1-3).
 
+### 3.10 Settings UI (EW-P1-7)
+
+- **Settings → API keys** shows **Integration keys** below the personal keys: name and kind (Ever Gauzy /
+  Integration), prefix, pinned organizations, scope count (full list on hover), last use, the grace deadline of a
+  recent rotation, and **Rotate** / **Revoke**. Only the workspace owner sees keys; everyone else sees the empty
+  state and the owner-only note.
+- **New integration key** dialog: name, description, organizations (multi-select; preselected when there is only one),
+  preset (**Ever Gauzy** or Custom), a checklist of every v1 scope, and expiry. The Ever Gauzy preset ticks every
+  scope except `org:write` and `email:write`, which stay opt-in. The secret is shown once.
+- **Deep link** `/settings/api-keys?new=integration&preset=ever-gauzy` opens the dialog with the Ever Gauzy preset.
+- **Rotate** dialog: grace period (none, 1 h, 24 h, 3 days, 7 days; default 24 h); the new secret is shown once.
+- **Settings → Integrations → Ever Gauzy** (`/settings/integrations/ever-gauzy`, new nav entry): how to connect
+  manually, the API URL to paste, a button to the preset dialog, and the active Ever Gauzy keys with Revoke
+  (disconnects Ever Gauzy at once). Webhook subscriptions join this card with webhooks v2 (EW-P1-5).
+
 ## 4. Non-functional requirements
 
 - Additive only: personal keys, fleet-run tokens, sessions and delegated Ever ID tokens behave exactly as before, except
@@ -201,4 +216,3 @@ need record visibility (EW-P1-3).
 - Org-wide reads within pins (EW-P1-3) and the integration resources (EW-P1-4).
 - Authoritative roster for act-as (EW-P1-3).
 - Ever ID delegated tokens mapping to the same principal (P5).
-- Settings UI (EW-P1-7).
