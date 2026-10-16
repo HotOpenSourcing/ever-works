@@ -9,8 +9,9 @@ describe('AddEmailMessageAttachments1795061530000', () => {
     let dataSource: DataSource;
     const migration = new AddEmailMessageAttachments1795061530000();
 
-    const columns = async (): Promise<Array<{ name: string; notnull: number; dflt_value: unknown }>> =>
-        dataSource.query(`PRAGMA table_info("email_messages")`);
+    const columns = async (): Promise<
+        Array<{ name: string; notnull: number; dflt_value: unknown }>
+    > => dataSource.query(`PRAGMA table_info("email_messages")`);
 
     beforeEach(async () => {
         dataSource = new DataSource({
