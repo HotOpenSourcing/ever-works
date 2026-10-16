@@ -91,6 +91,11 @@ One small PR per item, security first.
 - [x] **T45** Settings → Email addresses: replace the `alert()` placeholder with a real add-address wizard and row
       actions; make verification real (confirmation mail through platform mail, click-to-confirm public page, enforce
       `verified` for sending), grandfathering addresses already in use (§14.4).
+- [ ] **T46** (follow-up, review on #2612) Durable inbound ingestion: an idempotent admission record per inbound
+      message, written before attachments are stored, plus a reconciliation pass, so attachment bytes stored for a
+      message whose row (or upload ownership record) then failed to save are found and cleaned up — without deleting
+      content-hash uploads another message or upload still uses. Today such bytes stay in the receiving owner's own
+      upload namespace, like any interrupted upload.
 
 ## Status legend
 
