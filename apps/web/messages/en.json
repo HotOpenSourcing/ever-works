@@ -2652,7 +2652,7 @@
                 "errorOpenTable": "Open the Table view instead",
                 "columnErrorTitle": "Couldn't load this column.",
                 "transitionFailed": "Couldn't move this Task.",
-                "dropRefusedCancelled": "A cancelled Task can't be reopened."
+                "dropRefusedCancelled": "A cancelled Task can only be reopened into Backlog or Todo."
             },
             "gateChip": {
                 "green": "Gate passed",

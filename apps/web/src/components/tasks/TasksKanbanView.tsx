@@ -955,8 +955,9 @@ export function TasksKanbanView({
         const src = tasks.find((t) => t.id === draggingTaskId);
         if (!src || src.status === status) return;
         if (!(NEXT_STATUS[src.status] ?? []).includes(status)) {
-            // A cancelled Task has no legal move at all. The drop is refused
-            // either way; say why once, instead of letting it silently fail.
+            // A cancelled Task only re-opens into backlog or todo (EW-P1-6).
+            // Any other drop is refused; say why once, instead of letting it
+            // silently fail.
             if (src.status === 'cancelled' && !refusalExplainedRef.current) {
                 refusalExplainedRef.current = true;
                 toast.error(t('board.dropRefusedCancelled'));
