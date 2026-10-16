@@ -159,8 +159,8 @@ function bootstrap(): void {
 		});
 		workerStatus = toWorkerStatusView(created.worker?.getState());
 		runtime = created;
-		// First heartbeat, THEN the worker, as the CLI does (#2598 a): the
-		// first answer brings the saved limit ceiling and the version verdict,
+		// The worker leases only after a heartbeat has been ACCEPTED (#2598 a):
+		// that answer brings the saved limit ceiling and the version verdict,
 		// and both must be in force before the first lease.
 		void startRuntimeInOrder(created, () => runtime === created).catch((error: unknown) => {
 			logger.error(
