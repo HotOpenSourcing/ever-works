@@ -109,6 +109,17 @@ describe('inbox recording points', () => {
         expectValid(event);
     });
 
+    it('records inbox events private: one person's message never reaches the org feed or its webhooks', async () => {
+        await fileNotice();
+        const item = await onlyItem();
+        await inbox.setUnread(item.id, RECIPIENT, false);
+        const recorded = await events();
+        expect(recorded.length).toBeGreaterThan(0);
+        expect(recorded.map((event) => event.visibility)).toEqual(
+            recorded.map(() => 'private'),
+        );
+    });
+
     it('every producer records created: escalation and approval mirrors too', async () => {
         await inbox.escalationRaised({
             userId: RECIPIENT,

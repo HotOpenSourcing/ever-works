@@ -43,6 +43,8 @@
 - [x] **T20** `inbox_items.version` + `inbox_item` snapshot (`resources/inbox-item.schema.json`, catalog `dataSchema`) + `InboxService` recording points (`inbox-recording.spec.ts`).
 - [ ] **T21** Integration routes `GET /inbox/items[/:id]`, `POST /inbox/items/:id/reply`, `PATCH /inbox/items/:id/state`
       (act-as = the recipient only) + coverage gate entries.
+      Until T21 lands, `inbox.item.*` events are recorded `visibility: private` (an inbox item is one person's
+      message), so the organization feed and webhooks v2 never serve them; in-process listeners still get them.
 
 ## Status legend
 
