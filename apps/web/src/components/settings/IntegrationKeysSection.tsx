@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import { AlertTriangle, Copy, KeyRound, RefreshCw, Trash2 } from 'lucide-react';
@@ -71,7 +71,8 @@ export function IntegrationKeysSection({
     const [keys, setKeys] = useState<IntegrationKeySummary[]>(initialKeys);
 
     const startPreset: PresetChoice = initialPreset === 'ever-gauzy' ? 'ever-gauzy' : 'custom';
-    const [showCreate, setShowCreate] = useState(false);
+    // `?new=integration` opens the dialog on arrival.
+    const [showCreate, setShowCreate] = useState(openOnArrival);
     const [name, setName] = useState('');
     const [description, setDescription] = useState('');
     const [preset, setPreset] = useState<PresetChoice>(startPreset);
@@ -89,9 +90,8 @@ export function IntegrationKeysSection({
 
     const [revokeTarget, setRevokeTarget] = useState<IntegrationKeySummary | null>(null);
 
-    useEffect(() => {
-        if (openOnArrival) setShowCreate(true);
-    }, [openOnArrival]);
+    // Captured once per mount: whether a rotation's grace period is still running.
+    const [renderedAt] = useState(() => Date.now());
 
     const orgById = useMemo(
         () => new Map(organizations.map((org) => [org.id, org])),
@@ -297,7 +297,7 @@ export function IntegrationKeysSection({
                                         </div>
                                         {key.previousKeyGraceUntil &&
                                         new Date(key.previousKeyGraceUntil).getTime() >
-                                            Date.now() ? (
+                                            renderedAt ? (
                                             <div className="text-warning mt-1">
                                                 {t('graceUntil', {
                                                     date: new Date(
