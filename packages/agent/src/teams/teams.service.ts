@@ -5,6 +5,9 @@ import {
     Optional,
     UnprocessableEntityException,
 } from '@nestjs/common';
+import { Task } from '../entities/task.entity';
+import type { VisibilityAggregate } from '@ever-works/contracts';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
 import { type EntityManager, In, Repository } from 'typeorm';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
@@ -53,6 +56,10 @@ export class TeamsService {
         // transaction as each write. Appended LAST + @Optional; absent, every
         // write runs exactly as before and records nothing.
         @Optional() private readonly domainEvents?: DomainEventPublisher,
+        // Record visibility (EW-P1-3) — automatic Team ↔ Organization scope when an
+        // agent joins or leaves a Team, or a Team is deleted. @Optional(): absent
+        // means no automatic change (today's behaviour).
+        @Optional() private readonly visibility?: RecordVisibilityService,
     ) {}
 
     /** Run `write` (and `record`) in one transaction when events are wired; as today otherwise. */
@@ -186,6 +193,10 @@ export class TeamsService {
      */
     async remove(orgId: string, teamId: string): Promise<void> {
         const team = await this.getOrThrow(orgId, teamId);
+        // Record visibility (EW-P1-3): the Team's records lose it with the delete
+        // (team_resources / team_members cascade, tasks.teamId is SET NULL), so
+        // collect them first and widen the ones left with no Team afterwards.
+        const affected = this.visibility ? await this.visibility.recordsOfTeam(teamId) : [];
         const removeIn = async (em: EntityManager) => {
             await em
                 .getRepository(Team)
@@ -194,10 +205,16 @@ export class TeamsService {
                     { parentTeamId: team.parentTeamId ?? null },
                 );
             await em.getRepository(Team).delete({ id: teamId });
+            // `tasks.teamId` is ON DELETE SET NULL; clear it here too so the automatic
+            // visibility below sees the same state on every dialect (EW-P1-3).
+            await em
+                .getRepository(Task)
+                .update({ teamId, organizationId: orgId }, { teamId: null });
         };
         const publisher = this.domainEvents;
         if (!publisher) {
             await this.teams.manager.transaction(removeIn);
+            await this.recomputeVisibilityOf(affected);
             return;
         }
         await publisher.transaction(async (em) => {
@@ -226,6 +243,20 @@ export class TeamsService {
             await em.getRepository(TeamMember).delete({ teamId });
             await em.getRepository(TeamResource).delete({ teamId });
             await publisher.deleted(em, tombstone, 'team.deleted');
+            // Record visibility (EW-P1-3): widen what lost its last Team BEFORE the side
+            // events below snapshot it. Records those events re-snapshot need no extra
+            // notice; the others (e.g. tasks whose teamId the delete clears) get one.
+            const resnapshotted = new Set<string>([
+                ...agentMembers.map((row) => `agent:${row.memberId}`),
+                ...links
+                    .filter((link) => link.resourceType === 'task')
+                    .map((link) => `task:${link.resourceId}`),
+            ]);
+            for (const record of affected) {
+                await this.visibility?.recomputeAutomaticIn(em, record.aggregate, record.id, {
+                    recordEvent: !resnapshotted.has(`${record.aggregate}:${record.id}`),
+                });
+            }
             for (const child of children) {
                 await publisher.changed(em, 'team', child.id, 'team.updated', {
                     changedFields: ['parentTeamId'],
@@ -249,6 +280,16 @@ export class TeamsService {
                 }
             }
         });
+        await this.recomputeVisibilityOf(affected);
+    }
+
+    /** Record visibility (EW-P1-3): re-apply D11 to the records a Team change touched. */
+    private async recomputeVisibilityOf(
+        records: ReadonlyArray<{ aggregate: VisibilityAggregate; id: string }>,
+    ): Promise<void> {
+        for (const record of records) {
+            await this.visibility?.recomputeAutomatic(record.aggregate, record.id);
+        }
     }
 
     // ── Roster ──
@@ -367,6 +408,14 @@ export class TeamsService {
                     );
                     // An agent's team scope is its team memberships (`teamIds`).
                     if (member.memberType === 'agent') {
+                        // Record visibility (EW-P1-3): the snapshot below carries the
+                        // automatic team / organization change.
+                        await this.visibility?.recomputeAutomaticIn(
+                            manager,
+                            'agent',
+                            member.memberId,
+                            { recordEvent: false },
+                        );
                         await publisher.changed(
                             manager,
                             'agent',
@@ -379,6 +428,9 @@ export class TeamsService {
                     }
                 },
             );
+            if (input.memberType === 'agent') {
+                await this.visibility?.recomputeAutomatic('agent', input.memberId);
+            }
             const [view] = await this.resolveMemberViews([saved]);
             return view;
         } catch (error) {
@@ -423,6 +475,9 @@ export class TeamsService {
                     { changedFields: ['members'] },
                 );
                 if (memberType === 'agent') {
+                    await this.visibility?.recomputeAutomaticIn(manager, 'agent', memberId, {
+                        recordEvent: false,
+                    });
                     await publisher.changed(manager, 'agent', memberId, 'agent.updated', {
                         changedFields: ['teamIds'],
                     });
@@ -431,6 +486,9 @@ export class TeamsService {
         );
         if (!result.affected) {
             throw new NotFoundException('Team member not found');
+        }
+        if (memberType === 'agent') {
+            await this.visibility?.recomputeAutomatic('agent', memberId);
         }
     }
 

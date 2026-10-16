@@ -57,6 +57,7 @@ import {
 } from '../schedules/schedule-control.codes';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
 import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
+import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { AgentRepository } from '../database/repositories/agent.repository';
 import { AgentStatus, type Agent } from '../entities/agent.entity';
 import { AgentRunRepository } from '../database/repositories/agent-run.repository';
@@ -379,6 +380,9 @@ export class TasksService {
         // @Optional per the positional-spec arity rule; absent means every read stays
         // owner-only, exactly as before.
         @Optional() private readonly accessPolicy?: RecordAccessPolicy,
+        // Record visibility (EW-P1-3) — automatic Team <-> Organization scope when a
+        // Task's teamId is set or cleared. Appended LAST + @Optional.
+        @Optional() private readonly visibility?: RecordVisibilityService,
         // Integration API v1 (EW-P1-4) — task watchers (`PUT /tasks/:id/watchers`).
         // Appended LAST + @Optional per the positional-spec arity rule; absent,
         // the watcher methods refuse.
@@ -1087,6 +1091,11 @@ export class TasksService {
         }
 
         await this.updateTaskRow(id, patch, task);
+        // Record visibility (EW-P1-3): a first Team narrows an automatic
+        // `organization` Task to `team`; clearing its last widens it back.
+        if ('teamId' in ownerPatch) {
+            await this.visibility?.recomputeAutomatic('task', id);
+        }
         const refreshed = await this.getOne(userId, id, ownershipScope);
         await this.logActivity({
             userId,
@@ -1870,6 +1879,13 @@ export class TasksService {
         await this.withTaskEvent(
             (manager) => this.tasks.updateById(id, patch, ...managerArg(manager)),
             async (publisher, manager) => {
+                // Record visibility (EW-P1-3): a teamId change moves an automatic
+                // visibility first, so the task.updated snapshot carries it.
+                if ('teamId' in patch) {
+                    await this.visibility?.recomputeAutomaticIn(manager, 'task', id, {
+                        recordEvent: false,
+                    });
+                }
                 await publisher.changed(
                     manager,
                     'task',

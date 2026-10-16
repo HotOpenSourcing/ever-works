@@ -137,6 +137,71 @@ describe('EmailFacadeService.send — RFC threading (EW-P4-3)', () => {
     });
 });
 
+// EW-P4-3 — the sender name saved on the address reaches the provider on
+// every path (direct send, auto-sent draft, released draft all go through send).
+describe('EmailFacadeService.send — saved sender name', () => {
+    function facadeWithAddress(address: unknown) {
+        const { facade, plugin } = makeFacade();
+        (facade as unknown as { emailAddresses: unknown }).emailAddresses = {
+            findById: jest.fn().mockResolvedValue(address),
+        };
+        return { facade, plugin };
+    }
+
+    it("uses the address's providerSettings.fromName when the caller gives none", async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: { fromName: '  Nova Agent ' },
+        });
+        await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Nova Agent');
+    });
+
+    it("keeps the caller's own fromName", async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: { fromName: 'Saved' },
+        });
+        await facade.send(
+            { ...INPUT, fromName: 'Explicit' },
+            { userId: 'user-1', addressId: 'addr-1' },
+        );
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Explicit');
+    });
+
+    it('sends without a name when none is saved', async () => {
+        const { facade, plugin } = facadeWithAddress({
+            id: 'addr-1',
+            verified: true,
+            providerSettings: {},
+        });
+        await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(plugin.sendEmail.mock.calls[0][0].fromName).toBeUndefined();
+    });
+
+    it('looks the name up itself, best-effort, when sender verification is switched off', async () => {
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'false';
+        try {
+            const { facade, plugin } = facadeWithAddress({
+                id: 'addr-1',
+                verified: false,
+                providerSettings: { fromName: 'Saved' },
+            });
+            await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+            expect(plugin.sendEmail.mock.calls[0][0].fromName).toBe('Saved');
+            (
+                facade as unknown as { emailAddresses: { findById: jest.Mock } }
+            ).emailAddresses.findById.mockRejectedValue(new Error('db down'));
+            await facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+            expect(plugin.sendEmail.mock.calls[1][0].fromName).toBeUndefined();
+        } finally {
+            delete process.env.EMAIL_SENDER_VERIFICATION_REQUIRED;
+        }
+    });
+});
+
 describe('buildOutboundHeaders', () => {
     it('drops header injection attempts: CR/LF in a value, an illegal name', () => {
         const headers = buildOutboundHeaders('a@acme.test', {
@@ -186,5 +251,72 @@ describe('threadingFieldsOf / replyHeadersFor', () => {
 
     it('answers no headers for a parent without a Message-ID', () => {
         expect(replyHeadersFor({ messageIdHeader: null })).toEqual({});
+    });
+});
+
+/** EW-P4-3 — the facade refuses to send from an unverified tenant address. */
+describe('EmailFacadeService.send — verified sender (EW-P4-3)', () => {
+    function facadeWith(address: { address: string; verified: boolean } | null) {
+        const plugin = {
+            id: 'postmark',
+            capabilities: ['email-outbound'],
+            sendEmail: jest.fn().mockResolvedValue({
+                provider: 'postmark',
+                providerMessageId: 'pm-1',
+                accepted: [],
+                rejected: [],
+            }),
+        };
+        const emailAddresses = { findById: jest.fn().mockResolvedValue(address) };
+        const gate = { assertSendAllowed: jest.fn().mockResolvedValue(undefined) };
+        const facade = new EmailFacadeService(
+            { getByCapability: jest.fn().mockReturnValue([]) } as never,
+            { getSettings: jest.fn().mockResolvedValue({}) } as never,
+            undefined,
+            emailAddresses as never,
+            undefined,
+            undefined,
+            undefined,
+            gate as never,
+        );
+        jest.spyOn(
+            facade as unknown as { resolveOutboundPlugin: () => unknown },
+            'resolveOutboundPlugin',
+        ).mockResolvedValue(plugin as never);
+        return { facade, plugin, gate };
+    }
+
+    afterEach(() => {
+        delete process.env.EMAIL_SENDER_VERIFICATION_REQUIRED;
+    });
+
+    it('refuses (403) before the send gate and the provider', async () => {
+        const { facade, plugin, gate } = facadeWith({ address: 'nova@x.com', verified: false });
+        await expect(
+            facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' }),
+        ).rejects.toMatchObject({ status: 403, name: 'EmailSenderNotVerifiedException' });
+        expect(gate.assertSendAllowed).not.toHaveBeenCalled();
+        expect(plugin.sendEmail).not.toHaveBeenCalled();
+    });
+
+    it('sends from a verified address, and without an address no check applies', async () => {
+        const verified = facadeWith({ address: 'nova@x.com', verified: true });
+        await verified.facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(verified.plugin.sendEmail).toHaveBeenCalled();
+        const system = facadeWith({ address: 'nova@x.com', verified: false });
+        await system.facade.send(INPUT, { userId: 'user-1' });
+        expect(system.plugin.sendEmail).toHaveBeenCalled();
+    });
+
+    it('is switched off only by EMAIL_SENDER_VERIFICATION_REQUIRED=false (exact)', async () => {
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'FALSE';
+        const strict = facadeWith({ address: 'nova@x.com', verified: false });
+        await expect(
+            strict.facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' }),
+        ).rejects.toMatchObject({ status: 403 });
+        process.env.EMAIL_SENDER_VERIFICATION_REQUIRED = 'false';
+        const lax = facadeWith({ address: 'nova@x.com', verified: false });
+        await lax.facade.send(INPUT, { userId: 'user-1', addressId: 'addr-1' });
+        expect(lax.plugin.sendEmail).toHaveBeenCalled();
     });
 });

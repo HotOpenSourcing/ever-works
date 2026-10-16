@@ -570,3 +570,44 @@ Now:
   address may be bound to an Agent of another scope, e.g. the owner's personal Agent on an organization address, and the
   Agent must stay reachable from the Task; an Agent that cannot be resolved keeps the old unscoped create), and its description lists the attachments (names and types defused like the rest of the
   email text) with their upload ids.
+
+### 14.4 Add-address wizard and real verification
+
+Before: Settings → Integrations → Email addresses was a list with an `alert('Add-address wizard: implementation in
+follow-up tick')` button and an inert "Edit"; addresses could only be registered through the API. Verification was
+cosmetic: `POST /api/email/addresses/:id/verify` asked the provider plugin for a token and **threw it away** — no email
+went out — and `verified` was **never checked** for sending.
+
+Now:
+
+- **Wizard** (`AddEmailAddressWizard`, §2.1 steps): (1) direction — send / receive / both; (2) provider, filtered by
+  capability (only Postmark and Mailgun receive); (3) address, sender name, "default for replies", and for inbound the
+  webhook URL to register at the provider (on the API's public origin) with how that provider's secret is configured
+  (§14.1); (4) for sending addresses, "Send confirmation email". Each row gets **Send confirmation** (unverified
+  sending addresses), **Disable / Enable** and **Remove** (with a confirmation that names what is lost; disabling keeps
+  the history).
+- **Verification is real**: `POST /api/email/addresses/:id/verify` rotates a fresh one-time token (24 h) and sends the
+  address a confirmation email through **platform mail** (`MailService.sendNotificationEmail`), linking to the public
+  web page `/email-address/verify/<token>`. That page confirms only on a **click** (a server action calling the public
+  `GET /api/email/verify/:token`), so a mail scanner that prefetches the link confirms nothing; it is in
+  `PUBLIC_ROUTES`, since the link is usually opened from the mailbox without a session.
+    - Already verified → nothing sent (`alreadyVerified: true`). Disabled → 400. A second email within 60 s → 429
+      (the address is the caller's to type; the route is also throttled to 5/min per caller). The send is recorded in
+      `tenant_email_addresses.verificationSentAt` (migration `1795061550000-AddTenantEmailAddressVerificationSentAt`)
+      and claimed with a compare-and-set, so concurrent clicks send one email; the token `createAddress` mints is never
+      mailed and never starts the cooldown. No platform mail, or a mailer that would only log (`MAILER_PROVIDER`
+      unset/`none`, Resend without a key) → 503, never a silent "sent". The email is sent `strict`: a provider refusal
+      (Resend answers errors without throwing) → 503 and the cooldown is given back. The provider plugin's own
+      `verifyAddress` still runs, best-effort.
+    - Response (additive): `{ messageRef, sent, alreadyVerified?, expiresAt? }`.
+- **`verified` is enforced for sending**: `EmailService.sendMessage` refuses an unverified sending address up front
+  (before a draft is held) and `EmailFacadeService.send` refuses it as the backstop every outbound path converges on —
+  `403`, `EmailSenderNotVerifiedException`, naming the address and how to confirm it — before the send gate or any
+  provider. Sends with no tenant address (system mail through the first enabled provider) are unaffected; receiving
+  never requires verification. Operator switch: `EMAIL_SENDER_VERIFICATION_REQUIRED=false` (exact string) turns the
+  check off for a self-hosted install with no platform mail to deliver the confirmation; on by default.
+- **Grandfathering** (no-breakage): migration `1795061540000-GrandfatherInUseEmailAddressesVerified` marks every
+  address **already in use** as verified — assigned to an Agent, already sent mail, or pinned by an Agent inbox — so
+  working setups keep sending. Unused, unverified addresses (2 on dev, 0 on stage at rollout) verify through the
+  confirmation email before their first send. `down()` is a no-op by design (a grandfathered row is indistinguishable
+  from a later real verification).
