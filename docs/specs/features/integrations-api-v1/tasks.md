@@ -99,6 +99,18 @@
       `/move`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (`IntegrationKbController`) + coverage
       gate entries for every KB controller. Contract CR-7 (`kb-document`, `kb-folder`, five request bodies).
 
+## Phase 8 — Agent email (EW-P4-2, EW-P4-1)
+
+- [x] **T32** `email_messages.updatedAt` (backfilled from `createdAt`) + `version` + keyset index (migration
+      `1795130300000`, 3 dialects); `email_message` snapshots (recipient-scoped, 256 KiB event body limit);
+      `EmailMessageRepository` reports every write and `EmailMessageDomainEventsBridge` records `email.message.received`
+      / `sent` / `status_changed`.
+- [x] **T33** `GET /email/messages` (`agentId`, `direction`, `status`, keyset) and `GET /email/messages/:id`
+      (`email:read`) — `IntegrationEmailService`.
+- [x] **T34** `POST /email/inbound` (`email:write`, opt-in): stored on the agent's own inbound address and dispatched
+      through `AGENT_INBOUND_EMAIL_DISPATCHER` like provider mail; Message-ID / Idempotency-Key de-duplication;
+      attachments recorded, never fetched. Contract CR-11 (`email-message`, `email-inbound-result`, `InboundEmail`).
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked

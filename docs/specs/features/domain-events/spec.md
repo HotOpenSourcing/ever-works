@@ -119,6 +119,12 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       rewritten subtree; a delete records `deleted` per folder, tombstones claimed before it). A document of a
       personal Work records none. Background writers that go straight to the repository (Git-mirror reconcile,
       consolidation markers) record nothing; the integration's reconcile covers them. Pinned by `kb-recording.spec.ts`.
+    - **Agent email** (P4, EW-P4-2) records at the repository: `EmailMessageRepository` is the single writer of
+      `email_messages` and reports every write after it lands (a new row, a status move, a delivery status, the Task
+      link; inside the send-admission lock the reports wait for the commit), and `EmailMessageDomainEventsBridge`
+      records `email.message.received` (new inbound), `email.message.sent` (new outbound already sent, or a move to
+      `sent`) and `email.message.status_changed` (everything else). Recipient-scoped like the Inbox (`email:read`).
+      Pinned by `email-recording.spec.ts`.
 - **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
   added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
   direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of

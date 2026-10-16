@@ -55,6 +55,12 @@
       `kb_document` / `kb_folder` snapshots, recording in `KnowledgeBaseService`, `KnowledgeLibraryService` and
       `MemoryFoldersService` (`kb-recording.spec.ts`), coverage gate over the KB controllers.
 
+## P4 — Agent email (EW-P4-2)
+
+- [x] **T26** `email_messages.updatedAt` + `version` (`AddEmailMessageSyncColumns1795130300000`), `email_message`
+      snapshots (recipient-scoped), `EmailMessageRepository` change reports + `EmailMessageDomainEventsBridge`
+      (`email-recording.spec.ts`).
+
 ## Status legend
 
 `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked

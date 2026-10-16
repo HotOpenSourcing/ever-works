@@ -324,6 +324,10 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['inbox.item.answered', 'inbox.item.state_changed'],
     },
     'PATCH /api/integrations/v1/inbox/items/:id/state': { events: ['inbox.item.state_changed'] },
+    // Integration API v1 agent email (EW-P4-1): the provider path's dispatcher; + the Task link.
+    'POST /api/integrations/v1/email/inbound': {
+        events: ['email.message.received', 'email.message.status_changed'],
+    },
 
     // ── Integration API v1 (`api/integrations/v1`, EW-P1-4) ───────────────────
     'POST /api/integrations/v1/tasks': {

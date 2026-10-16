@@ -48,6 +48,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/teams-write.controller.ts',
     'integrations-api/v1/inbox.controller.ts',
     'integrations-api/v1/kb.controller.ts',
+    'integrations-api/v1/email.controller.ts',
 ];
 
 const MUTATING = new Map<string, string>([

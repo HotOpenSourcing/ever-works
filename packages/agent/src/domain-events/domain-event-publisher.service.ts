@@ -6,6 +6,7 @@ import { serializeOnSingleConnection } from '../database/repositories/single-con
 import { assertExpectedAggregateVersion } from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
 import { buildKbDocumentSnapshot, buildKbFolderSnapshot } from './domain-event-kb-snapshots';
+import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
@@ -38,6 +39,8 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     // EW-P3-2 — Knowledge Base documents and organization library folders.
     kb_document: buildKbDocumentSnapshot,
     kb_folder: buildKbFolderSnapshot,
+    // EW-P4-2 — agent email (recipient-scoped).
+    email_message: buildEmailMessageSnapshot,
 };
 
 /** A full snapshot taken BEFORE a hard delete, to record the tombstone after it. */
