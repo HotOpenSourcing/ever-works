@@ -5,10 +5,9 @@ import { TenantJobRuntimeConfig } from '@ever-works/agent/entities';
 // Security (EW-711 #14): WorkModule provides/exports WorkOwnershipService so
 // WebhooksService can authorize a supplied workId before binding a
 // subscription to that Work's event stream.
+import { WEBHOOK_V2_ENQUEUER, WebhookDomainEventFanoutService } from '@ever-works/agent/webhooks-v2';
 import {
-    WEBHOOK_V2_ENQUEUER,
     WebhookDeliveryService,
-    WebhookDomainEventFanoutService,
     WebhookOwnerAccessService,
     WebhookSubscriptionDeliveryService,
     WorkModule,
