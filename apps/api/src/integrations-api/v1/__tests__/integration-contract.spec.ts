@@ -178,7 +178,11 @@ function objectSchemaOf(
 }
 
 /** The DTO's whitelisted properties (any class-validator decorator) and the optional ones. */
-function dtoShape(dto: new () => object): { properties: Set<string>; optional: Set<string> } {
+function dtoShape(dto: new () => object): {
+    properties: Set<string>;
+    optional: Set<string>;
+    allowed: Map<string, unknown[]>;
+} {
     const metadata = getMetadataStorage().getTargetValidationMetadatas(dto, '', true, false);
     const properties = new Set(metadata.map((entry) => entry.propertyName));
     // `@IsOptional()` only: a bare `@ValidateIf(v => v !== null)` makes a
@@ -190,8 +194,33 @@ function dtoShape(dto: new () => object): { properties: Set<string>; optional: S
             )
             .map((entry) => entry.propertyName),
     );
-    return { properties, optional };
+    // `@IsIn(values)` (also `{ each: true }` on arrays): the values it accepts.
+    const allowed = new Map<string, unknown[]>();
+    for (const entry of metadata) {
+        if (entry.name === 'isIn' && Array.isArray(entry.constraints?.[0])) {
+            allowed.set(entry.propertyName, entry.constraints[0] as unknown[]);
+        }
+    }
+    return { properties, optional, allowed };
 }
+
+/**
+ * The values a property schema allows (`const` / `enum`, through `$ref`s and
+ * array `items`), without `null` (nullability is `@IsOptional`'s business).
+ * `null` when the schema does not enumerate them.
+ */
+function schemaValues(schema: JsonSchema, file: string): unknown[] | null {
+    if (schema.$ref) {
+        const target = resolveRef(schema.$ref, file);
+        return schemaValues(target.schema, target.file);
+    }
+    if ('const' in schema) return [schema.const];
+    if (Array.isArray(schema.enum)) return schema.enum.filter((value) => value !== null);
+    if (schema.items) return schemaValues(schema.items, file);
+    return null;
+}
+
+const sortedValues = (values: readonly unknown[]): string[] => values.map(String).sort();
 
 /** Where `@nestjs/swagger` lists each `@ApiProperty` (as `:name`) on the prototype. */
 const SWAGGER_PROPERTIES = 'swagger/apiModelPropertiesArray';
@@ -281,7 +310,7 @@ const NOT_A_BODY = new Set(['WritableVisibility', 'BatchResult']);
 /** Each difference between a body schema and its DTO, as readable lines. */
 function bodyDrift(path: string, schema: JsonSchema, file: string, pair: BodyPair): string[] {
     const drift: string[] = [];
-    const { properties, optional } = dtoShape(pair.dto);
+    const { properties, optional, allowed } = dtoShape(pair.dto);
     const schemaProperties = Object.keys(schema.properties ?? {});
     const required = new Set(schema.required ?? []);
     for (const name of schemaProperties) {
@@ -293,6 +322,24 @@ function bodyDrift(path: string, schema: JsonSchema, file: string, pair: BodyPai
                     optional.has(name) ? 'optional' : 'required'
                 } in ${pair.dto.name}`,
             );
+        }
+        // Enumerated values: what `@IsIn` accepts is what the schema allows
+        // (a property the route checks in code instead, e.g. `visibility`,
+        // has no `@IsIn` and is not compared).
+        const values = schema.properties?.[name]
+            ? schemaValues(schema.properties[name], file)
+            : null;
+        const accepted = allowed.get(name);
+        if (values && accepted) {
+            const expected = sortedValues(values);
+            const actual = sortedValues(accepted);
+            if (JSON.stringify(expected) !== JSON.stringify(actual)) {
+                drift.push(
+                    `${path}.${name}: the schema allows [${expected.join(', ')}], ${
+                        pair.dto.name
+                    } @IsIn [${actual.join(', ')}]`,
+                );
+            }
         }
     }
     const documented = documentedProperties(pair.dto);

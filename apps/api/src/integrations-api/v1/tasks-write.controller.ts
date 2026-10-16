@@ -250,7 +250,7 @@ export class IntegrationTransitionTaskDto {
     @IsIn(Object.values(TaskStatus))
     to!: TaskStatus;
 
-    @ApiProperty()
+    @ApiProperty({ enum: ['sync'] })
     @IsIn(['sync'])
     mode!: 'sync';
 }
