@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RecordVisibilityModule } from '../record-visibility/record-visibility.module';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { DomainEventsModule } from '../domain-events/domain-events.module';
 import { Agent } from '../entities/agent.entity';
@@ -72,6 +73,8 @@ import { FacadesModule } from '../facades/facades.module';
     imports: [
         // Domain events (EW-P1-1 B2) — the publisher AgentsService records `agent.*` through.
         DomainEventsModule,
+        // Record visibility (EW-P1-3) — RecordAccessPolicy for the shared reads.
+        RecordVisibilityModule,
         TypeOrmModule.forFeature([
             Agent,
             AgentAttachment,

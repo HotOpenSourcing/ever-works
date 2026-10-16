@@ -1,6 +1,7 @@
 import {
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     Injectable,
     Logger,
     NotFoundException,
@@ -54,6 +55,7 @@ import {
     SCHEDULE_OWNER_ARCHIVED,
 } from '../schedules/schedule-control.codes';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
+import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
 import { AgentRepository } from '../database/repositories/agent.repository';
 import { AgentStatus, type Agent } from '../entities/agent.entity';
 import { AgentRunRepository } from '../database/repositories/agent-run.repository';
@@ -371,6 +373,11 @@ export class TasksService {
         // @Optional per the positional-spec arity rule; absent, every write
         // runs exactly as before and records nothing.
         @Optional() private readonly domainEvents?: DomainEventPublisher,
+        // Record visibility (EW-P1-3) — `visibleTo(principal)` for the shared list
+        // views, the readable get and the participant transition. Appended LAST +
+        // @Optional per the positional-spec arity rule; absent means every read stays
+        // owner-only, exactly as before.
+        @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
 
     /** Per-process run-now claims, used only when `runNowLock` is unbound. */
@@ -457,11 +464,7 @@ export class TasksService {
         opts: { includeRun?: boolean } = {},
         ownershipScope?: OwnershipScope,
     ): Promise<{ rows: TaskWithRun[]; total: number }> {
-        const { rows: scopedRows, total } = await this.tasks.findByUserIdFiltered(
-            userId,
-            filter,
-            ownershipScope,
-        );
+        const { rows: scopedRows, total } = await this.findListRows(userId, filter, ownershipScope);
         const rows = await this.filterTasksByReachableWork(userId, scopedRows, ownershipScope);
         const reachableTotal = Math.max(0, total - (scopedRows.length - rows.length));
         if (!opts.includeRun || rows.length === 0 || !this.agentRuns) {
@@ -490,7 +493,24 @@ export class TasksService {
         }
         let runsById = new Map<string, TaskRunEmbed>();
         try {
-            const runs = await this.agentRuns.findByIds(runIds, userId, ownershipScope);
+            // Record visibility (EW-P1-3): a shared row's run belongs to the Task's
+            // owner, so each run is loaded under the owner of the row that points at
+            // it — never under client input, and only for rows the caller may read.
+            const runIdsByOwner = new Map<string, string[]>();
+            for (const row of rows) {
+                if (!row.latestRunId) continue;
+                const ids = runIdsByOwner.get(row.userId) ?? [];
+                if (!ids.includes(row.latestRunId)) ids.push(row.latestRunId);
+                runIdsByOwner.set(row.userId, ids);
+            }
+            const agentRuns = this.agentRuns;
+            const runs = (
+                await Promise.all(
+                    [...runIdsByOwner].map(([ownerId, ids]) =>
+                        agentRuns.findByIds(ids, ownerId, ownershipScope),
+                    ),
+                )
+            ).flat();
             runsById = new Map(
                 runs.map((run) => [
                     run.id,
@@ -531,8 +551,16 @@ export class TasksService {
     ): Promise<Task[]> {
         if (!scope) return rows;
 
+        // Only the caller's OWN rows carry today's Work-reachability rule. A row
+        // someone else owns reached this list through `visibleTo(principal)`, which
+        // already decided the caller may read it (record visibility, EW-P1-3).
         const workIds = [
-            ...new Set(rows.map((task) => task.workId).filter((id): id is string => Boolean(id))),
+            ...new Set(
+                rows
+                    .filter((task) => task.userId === userId)
+                    .map((task) => task.workId)
+                    .filter((id): id is string => Boolean(id)),
+            ),
         ];
         if (workIds.length === 0) return rows;
         if (!this.works) return rows.filter((task) => !task.workId);
@@ -543,7 +571,92 @@ export class TasksService {
                 .filter((work) => work.userId === userId && ownershipScopeMatches(work, scope))
                 .map((work) => work.id),
         );
-        return rows.filter((task) => !task.workId || reachableWorkIds.has(task.workId));
+        return rows.filter(
+            (task) => task.userId !== userId || !task.workId || reachableWorkIds.has(task.workId),
+        );
+    }
+
+    /**
+     * The list's rows: `view = 'mine'` (the default) is today's owner list, unchanged;
+     * `shared` / `organization` read through `visibleTo(principal)` (EW-P1-3). Without
+     * the access policy bound, every view is the owner list.
+     */
+    private async findListRows(
+        userId: string,
+        filter: ListTasksFilter,
+        ownershipScope?: OwnershipScope,
+    ): Promise<{ rows: Task[]; total: number }> {
+        const view = filter.view ?? 'mine';
+        if (view === 'mine' || !this.accessPolicy) {
+            return this.tasks.findByUserIdFiltered(userId, filter, ownershipScope);
+        }
+        const context = await this.accessPolicy.contextFor(
+            { kind: 'user', userId },
+            ownershipScope,
+        );
+        return this.tasks.findVisibleFiltered(context, view, filter, ownershipScope);
+    }
+
+    /**
+     * Record visibility (EW-P1-3) — the READ of one Task: the owner exactly as
+     * {@link getOne} (Work check included), or anyone `visibleTo(principal)` admits in
+     * the active Organization (participants, Team / Work members, Organization members
+     * for `organization` rows). Every WRITE path keeps calling {@link getOne}, so this
+     * never widens who may change a Task.
+     */
+    async getReadable(userId: string, id: string, scope?: OwnershipScope): Promise<Task> {
+        try {
+            return await this.getOne(userId, id, scope);
+        } catch (error) {
+            if (!(error instanceof NotFoundException)) throw error;
+            const shared = await this.findVisibleNotOwned(userId, id, scope);
+            if (!shared) throw error;
+            return shared;
+        }
+    }
+
+    /** A Task the caller does NOT own but may read in the active Organization. */
+    private async findVisibleNotOwned(
+        userId: string,
+        id: string,
+        scope?: OwnershipScope,
+    ): Promise<Task | null> {
+        if (!this.accessPolicy || !scope?.organizationId) return null;
+        const context = await this.accessPolicy.contextFor({ kind: 'user', userId }, scope);
+        const task = await this.tasks.findVisibleById(id, context, scope);
+        if (!task || task.userId === userId || !ownershipScopeMatches(task, scope)) return null;
+        return task;
+    }
+
+    /**
+     * Who may move a Task (spec §4): the owner, exactly as before, and the Task's user
+     * assignees, approvers and reviewers — the participants the work is waiting on.
+     * Watchers and other readers may read and comment, not transition. The transition
+     * itself runs with the owner's context (`task.userId`), so no gate changes.
+     */
+    private async getForTransition(
+        userId: string,
+        id: string,
+        scope?: OwnershipScope,
+    ): Promise<Task> {
+        try {
+            return await this.getOne(userId, id, scope);
+        } catch (error) {
+            if (!(error instanceof NotFoundException) || !this.accessPolicy) throw error;
+            const shared = await this.findVisibleNotOwned(userId, id, scope);
+            if (!shared) throw error;
+            const participant = await this.accessPolicy.isTaskParticipant(id, userId, [
+                'assignee',
+                'approver',
+                'reviewer',
+            ]);
+            if (!participant) {
+                throw new ForbiddenException(
+                    'Only the owner and the assignees, approvers and reviewers of a Task can move it.',
+                );
+            }
+            return shared;
+        }
     }
 
     async getOne(userId: string, id: string, scope?: OwnershipScope): Promise<Task> {
@@ -1677,7 +1790,7 @@ export class TasksService {
         opts: TransitionOptions = {},
         ownershipScope?: OwnershipScope,
     ): Promise<Task> {
-        const task = await this.getOne(userId, id, ownershipScope);
+        const task = await this.getForTransition(userId, id, ownershipScope);
         const from = task.status;
         const result = await this.transitions.transition(task, to, opts);
         await this.logActivity({
