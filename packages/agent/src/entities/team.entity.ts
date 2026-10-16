@@ -39,6 +39,8 @@ export interface TeamMetadata {
 @Index('uq_teams_org_slug', ['organizationId', 'slug'], { unique: true })
 @Index('idx_teams_user', ['userId'])
 @Index('idx_teams_parent', ['parentTeamId'])
+// Integration API v1 keyset lists (migration 1795080300000).
+@Index('idx_teams_org_updated', ['organizationId', 'updatedAt', 'id'])
 export class Team {
     @PrimaryGeneratedColumn('uuid')
     id: string;

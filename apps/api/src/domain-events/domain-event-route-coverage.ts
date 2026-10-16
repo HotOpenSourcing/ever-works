@@ -243,6 +243,60 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/works/:id/comparisons/generate': { exempt: WORK_CONTENT },
     'POST /api/works/:id/comparisons/generate-manual': { exempt: WORK_CONTENT },
     'DELETE /api/works/:id/comparisons/:slug': { exempt: WORK_CONTENT },
+
+    // ── Integration API v1 (`api/integrations/v1`, EW-P1-4) ───────────────────
+    'POST /api/integrations/v1/tasks': {
+        // + extra teamIds as team resources, assignees as edges, a hand-picked visibility.
+        events: [
+            'task.created',
+            'team.resource.added',
+            'task.updated',
+            'task.assignee.added',
+            'task.visibility_changed',
+        ],
+    },
+    'PATCH /api/integrations/v1/tasks/:id': {
+        events: [
+            'task.updated',
+            'team.resource.added',
+            'team.resource.removed',
+            'task.visibility_changed',
+        ],
+    },
+    'DELETE /api/integrations/v1/tasks/:id': { events: ['task.deleted'] },
+    // One `task.transitioned` per hop of the sync walk (EW-P1-6).
+    'POST /api/integrations/v1/tasks/:id/transition': { events: ['task.transitioned'] },
+    'PUT /api/integrations/v1/tasks/:id/assignees': {
+        events: ['task.assignee.added', 'task.assignee.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/watchers': {
+        events: ['task.watcher.added', 'task.watcher.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/blocks': {
+        events: ['task.block.added', 'task.block.removed'],
+    },
+    'PUT /api/integrations/v1/tasks/:id/relations': {
+        events: ['task.relation.added', 'task.relation.removed'],
+    },
+    // + `task.comment.deleted` when a concurrent create won the externalRef.
+    'POST /api/integrations/v1/tasks/:id/comments': {
+        events: ['task.comment.created', 'task.comment.deleted'],
+    },
+    'PATCH /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.updated'] },
+    'DELETE /api/integrations/v1/tasks/:id/comments/:cid': { events: ['task.comment.deleted'] },
+    // + `team.deleted` when a concurrent create won the externalRef.
+    'POST /api/integrations/v1/teams': { events: ['team.created', 'team.deleted'] },
+    'PATCH /api/integrations/v1/teams/:id': { events: ['team.updated'] },
+    // As the app's DELETE: the cascade re-records children, members and resources.
+    'DELETE /api/integrations/v1/teams/:id': {
+        events: ['team.deleted', 'team.updated', 'agent.updated', 'task.updated', 'work.updated'],
+    },
+    'PUT /api/integrations/v1/teams/:id/members': {
+        events: ['team.member.added', 'team.member.removed', 'agent.updated'],
+    },
+    'PUT /api/integrations/v1/teams/:id/resources': {
+        events: ['team.resource.added', 'team.resource.removed', 'task.updated', 'work.updated'],
+    },
 };
 
 /** The routes a list of events covers (for messages). */

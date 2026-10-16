@@ -396,8 +396,9 @@ export class TaskRelationRepository {
     async remove(id: string, taskId?: string): Promise<void> {
         await this.repo.delete(taskId ? { id, taskId } : id);
     }
-    async removeForTask(taskId: string, id: string): Promise<boolean> {
-        const result = await this.repo.delete({ id, taskId });
+    async removeForTask(taskId: string, id: string, manager?: EntityManager): Promise<boolean> {
+        const repo = manager ? manager.getRepository(TaskRelation) : this.repo;
+        const result = await repo.delete({ id, taskId });
         return (result.affected ?? 0) > 0;
     }
 }
@@ -447,6 +448,11 @@ export class TaskChatMessageRepository {
             mentions: mentions && mentions.length > 0 ? mentions : null,
             editedAt: new Date(),
         });
+    }
+    /** Integration API v1 (EW-P1-4): delete one message (`DELETE /tasks/:id/comments/:cid`). */
+    async delete(id: string, manager?: EntityManager): Promise<void> {
+        const repo = manager ? manager.getRepository(TaskChatMessage) : this.repo;
+        await repo.delete(id);
     }
 }
 
@@ -504,14 +510,16 @@ export class TaskWatcherRepository {
     async findByUserId(userId: string): Promise<TaskWatcher[]> {
         return this.repo.find({ where: { userId } });
     }
-    async add(taskId: string, userId: string): Promise<TaskWatcher> {
-        const entity = this.repo.create({ taskId, userId });
-        return this.repo.save(entity);
+    async add(taskId: string, userId: string, manager?: EntityManager): Promise<TaskWatcher> {
+        const repo = manager ? manager.getRepository(TaskWatcher) : this.repo;
+        const entity = repo.create({ taskId, userId });
+        return repo.save(entity);
     }
     // Security (IDOR): optional `taskId` scopes the delete (see
     // TaskAssigneeRepository.remove). Behavior unchanged when omitted.
-    async remove(id: string, taskId?: string): Promise<void> {
-        await this.repo.delete(taskId ? { id, taskId } : id);
+    async remove(id: string, taskId?: string, manager?: EntityManager): Promise<void> {
+        const repo = manager ? manager.getRepository(TaskWatcher) : this.repo;
+        await repo.delete(taskId ? { id, taskId } : id);
     }
 }
 
