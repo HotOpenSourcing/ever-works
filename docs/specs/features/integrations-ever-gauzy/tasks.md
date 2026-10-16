@@ -12,10 +12,10 @@
 
 ## Settings UI (EW-P1-7)
 
-- [ ] **T5** "New integration key" dialog with the "Ever Gauzy" preset.
-- [ ] **T6** Deep link `?new=integration&preset=ever-gauzy`.
-- [ ] **T7** Integration keys list with Rotate / Revoke.
-- [ ] **T8** "Ever Gauzy" integrations card.
+- [x] **T5** "New integration key" dialog with the "Ever Gauzy" preset (`IntegrationKeysSection`, EW-P1-7 PR).
+- [x] **T6** Deep link `?new=integration&preset=ever-gauzy`.
+- [x] **T7** Integration keys list with Rotate / Revoke.
+- [x] **T8** "Ever Gauzy" integrations card (`/settings/integrations/ever-gauzy`; webhook subscriptions join with T9 / EW-P1-5).
 - [ ] **T9** Settings → Webhooks page.
 - [ ] **T10** Emails page placeholder → wizard (EW-P4-3).
 
