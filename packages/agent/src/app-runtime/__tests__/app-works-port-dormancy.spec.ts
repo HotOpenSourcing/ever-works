@@ -258,6 +258,12 @@ const BOUND: readonly string[] = [
     // and listed nowhere: the register only checked BOUND ⊆ provided until the
     // "names in BOUND every declared …" case (2026-09-26) checked the other half.
     'APP_FORK_READINESS_DISPATCHER',
+    // APW-04 (lane aw-ai, 2026-10-17) — `AppProvisioningService` and
+    // `AppProvisionEventsService`, provided by `AppWorksModule`. Unbound, the ready
+    // handler's step 8 logged "no AppProvisioningService is bound" for every App Work
+    // without a spec, so nothing ever worked out how to run a repository.
+    'APP_PROVISIONING_SERVICE',
+    'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_ENV_SOURCE',
     // APW-03 T26 (explicit + probe halves) — `AppSourceCatalogAdapter`, bound
     // 2026-09-25 by `AppWorksModule`, beside the inspector and the create service
@@ -269,6 +275,11 @@ const BOUND: readonly string[] = [
     // MATCH stays behind the apply gate until `APP_BLUEPRINT_APPLY_SERVICE`
     // (T28) is bound — without it a match would fail the Work's readiness.
     'APP_SOURCE_CATALOG_PORT',
+    // APW-08 T25 (lane aw-ai, 2026-10-17) — `AppWorkAgentResolverService`, provided by
+    // `AppWorksModule` where APW-02's `AppUpstreamStateService` is declared (APW08-G18).
+    // Unbound, every upstream conflict Task was filed unassigned, and the evolve loop had
+    // no rule to pick its Agent.
+    'APP_WORK_AGENT_RESOLVER',
     // APW-05 T16's two credential/fact ports, provided by `AppBuildsModule`
     // (2026-09-22). Declared by `build-facade.service.ts`, so they belong in this
     // register like any other port — a new token in NEITHER list fails the
@@ -320,11 +331,13 @@ const WORKER_BOUND: readonly string[] = [
     'APP_DEPLOY_SPEC_SOURCE',
     'APP_DEPLOY_TARGET_RESOLVER',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
+    'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_ENV_SOURCE',
     'APP_RUNTIME_HEALTH_FACADE',
     'APP_RUNTIME_TARGET',
     'APP_RUNTIME_VERIFICATION_FACADE',
+    'APP_TARGET_UPDATED_PORT',
     'APP_VERIFICATION_SINK',
     'APP_VERIFICATION_SPEC_SOURCE',
 ];
@@ -377,8 +390,6 @@ const UNBOUND: readonly string[] = [
     // been applied. Binding it means inventing an actor and an ordering that
     // APW-07 T24/T25 own, and both are open.
     'APP_PROMPTED_VALUES_PORT',
-    'APP_PROVISIONING_SERVICE',
-    'APP_PROVISION_EVENTS_PORT',
     'APP_PUBLISHED_HOSTS',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_EVENT_SINK',
@@ -402,7 +413,6 @@ const UNBOUND: readonly string[] = [
     // export reaches `AppWorksTelemetryService` without an import. Unbound in THIS
     // package on purpose: the agent never depends on `@ever-works/monitoring`.
     'APP_WORKS_TELEMETRY_SINK',
-    'APP_WORK_AGENT_RESOLVER',
     'APP_WORK_DELETION_COMPLETION',
     'APP_WORK_DELETION_PORT',
 ];
@@ -508,8 +518,11 @@ describe('App Works port dormancy register (§5.10)', () => {
         // `MANAGED_HOST_ROOT_RESOLVER`) and three that no module in this package
         // provides (`APP_FORK_READY_HANDLER`, `APP_UPSTREAM_SYNC_DISPATCHER`,
         // `APP_WORKS_TELEMETRY_SINK`).
-        expect(UNBOUND).toHaveLength(49);
-        expect(BOUND).toHaveLength(24);
+        //
+        // 49/24 → 46/27 on 2026-10-17 (lane aw-ai): APW-08 T25's resolver and APW-04's
+        // provisioning service and events port are bound by `AppWorksModule`.
+        expect(UNBOUND).toHaveLength(46);
+        expect(BOUND).toHaveLength(27);
     });
 
     it('names where the worker binds what this package does not', () => {
@@ -529,9 +542,13 @@ describe('App Works port dormancy register (§5.10)', () => {
         //   second instance: the worker binds each to a `createRemoteProxy` of
         //   the API's own provider (`AppDeployBuildSourceAdapter`,
         //   `AppSpecService`), so both processes read through one implementation.
+        //
+        //   `APP_PROVISION_EVENTS_PORT` (APW-04, 2026-10-17) is the same shape: the
+        //   worker binds a `createRemoteProxy` of the API's `AppProvisionEventsService`.
         const BOUND_IN_BOTH: readonly string[] = [
             'APP_DEPLOY_BUILD_SOURCE',
             'APP_DEPLOY_SPEC_SOURCE',
+            'APP_PROVISION_EVENTS_PORT',
             'APP_RUNTIME_ENV_SOURCE',
         ];
 

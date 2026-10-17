@@ -10,6 +10,7 @@ import {
     APP_RUNTIME_HEALTH_FACADE,
     APP_RUNTIME_TARGET,
     APP_RUNTIME_VERIFICATION_FACADE,
+    APP_TARGET_UPDATED_PORT,
     APP_VERIFICATION_SINK,
     APP_VERIFICATION_SPEC_SOURCE,
     APPS_TIER_POLICY,
@@ -34,6 +35,7 @@ import {
     markAppClusterWorkerContext,
 } from '@ever-works/agent/app-runtime';
 import { APP_DEPLOY_HOST_SOURCE } from '@ever-works/agent/app-runtime';
+import { APP_PROVISION_EVENTS_PORT } from '@ever-works/agent/app-works';
 import { AppRuntimeFacadeService, DeployFacadeService } from '@ever-works/agent/facades';
 import {
     WorkCustomDomainRepository,
@@ -319,6 +321,23 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
             provide: APP_DEPLOY_BUILD_SOURCE,
             useFactory: (apiClient: TriggerInternalApiClient) =>
                 createRemoteProxy(apiClient, 'AppDeployBuildSourceAdapter'),
+            inject: [TriggerInternalApiClient],
+        },
+        // APW-04 (lane aw-ai, 2026-10-17) — the provisioner's events port, dialled by name to
+        // the API's ONE `AppProvisionEventsService` (`AgentAppWorksModule`): the orchestrator's
+        // `smokeFailedAfterUpstreamSync` (§5.6:844-847, which files a re-provision Task) and
+        // `cluster-check`'s `targetUpdated` (§9.10:1593). Both land where the Task tables are;
+        // the worker owns no `DataSource`.
+        {
+            provide: APP_PROVISION_EVENTS_PORT,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppProvisionEventsService'),
+            inject: [TriggerInternalApiClient],
+        },
+        {
+            provide: APP_TARGET_UPDATED_PORT,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppProvisionEventsService'),
             inject: [TriggerInternalApiClient],
         },
 

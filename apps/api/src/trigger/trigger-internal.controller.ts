@@ -101,6 +101,7 @@ import {
 } from '@ever-works/agent/subscriptions';
 import {
     AppForkReadinessRunner,
+    AppProvisionEventsService,
     AppSourceInitializerService,
     AppUpstreamStateService,
     AppUpstreamSyncDispatcherService,
@@ -630,6 +631,13 @@ export class TriggerInternalController implements OnModuleInit {
         // `PluginAllowlistReader`. Appended LAST + `@Optional()` per the arity rule above.
         @Optional()
         private readonly gitHubAppInstallationRepository?: GitHubAppInstallationRepository,
+        // APW-04 (lane aw-ai) — the provisioner's events port, behind the isolated App
+        // runtime worker's `APP_PROVISION_EVENTS_PORT` and `APP_TARGET_UPDATED_PORT` proxies
+        // (`trigger-app-runtime.module.ts`). Appended LAST + `@Optional()` per the arity rule
+        // above: with the name absent the worker's proxy answers the loud `Unknown remote
+        // target: AppProvisionEventsService` rather than pretending it was told.
+        @Optional()
+        private readonly appProvisionEventsService?: AppProvisionEventsService,
     ) {}
 
     onModuleInit() {
@@ -845,6 +853,7 @@ export class TriggerInternalController implements OnModuleInit {
             // row (FR-17…FR-24a) — the service's own `deps.sleep` cannot cross this hop,
             // which is what `AppForkReadinessRunner` exists to bridge.
             AppForkReadinessRunner: this.appForkReadinessRunner,
+            AppProvisionEventsService: this.appProvisionEventsService,
             // APW-01 T15 — the worker half of the ready hand-off. Registered
             // unconditionally for the same reason every App entry above is: a name that
             // maps to `undefined` answers a loud "Unknown remote target" instead of
