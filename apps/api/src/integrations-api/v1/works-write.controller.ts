@@ -1,5 +1,5 @@
 import { Body, Controller, Headers, Post, Req, Res, UseFilters, UseGuards } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -49,35 +49,57 @@ import { IntegrationExternalRefDto } from './tasks-write.controller';
 /** Contract v1 `requests.schema.json#/$defs/CreateWork` (Gauzy CR-6, EW-P2-4). */
 export class IntegrationCreateWorkDto {
     /** The only kind an integration creates: the repo-less Project Work. */
+    @ApiProperty({
+        enum: ['project'],
+        description: 'Only a repo-less Project Work (no repositories, deploy or generator; D9).',
+    })
     @IsIn(['project'])
     kind!: 'project';
 
+    @ApiProperty({ minLength: 1, maxLength: 255 })
     @IsString()
     @Length(1, 255)
     name!: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 2000 })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsString()
     @MaxLength(2000)
     description?: string | null;
 
+    @ApiProperty({ required: false, nullable: true, format: 'uri', maxLength: 2048 })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsUrl({ protocols: ['http', 'https'], require_protocol: true, require_tld: false })
     @MaxLength(2048)
     website?: string | null;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'team_resources rows (type work); a Work derives its visibility from them (CR-1).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Only validated (a Work derives its visibility from its Teams); `private` answers 422 domain_rule.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
