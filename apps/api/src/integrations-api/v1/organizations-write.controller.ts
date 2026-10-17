@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
     Body,
     Controller,
@@ -129,18 +130,35 @@ export class IntegrationOrganizationsWriteController {
                     );
                 }
             }
-            // Before anything is written: a key with no pin left answers 400 here rather
-            // than after an orphan Organization was created.
-            await this.keys.assertPinCapacity(principal.keyId);
-            const organization = await this.organizations.createOrganization(
-                tenant.ownerUserId,
-                dto.displayName,
-                dto.slug,
-                {
-                    legalName: dto.legalName ?? null,
-                    countryCode: dto.countryCode ? dto.countryCode.toUpperCase() : null,
-                },
-            );
+            // Reserve the key's pin FIRST (one locked read-modify-write; a key with no pin
+            // left answers 400 before anything is written), then create the Organization
+            // with that id; a failed create releases the pin. So no Organization is ever
+            // left without its pin, and concurrent creates through one key keep theirs.
+            const organizationId = randomUUID();
+            await this.keys.addPin(principal.keyId, organizationId);
+            let organization: Awaited<ReturnType<OrganizationService['createOrganization']>>;
+            try {
+                organization = await this.organizations.createOrganization(
+                    tenant.ownerUserId,
+                    dto.displayName,
+                    dto.slug,
+                    {
+                        legalName: dto.legalName ?? null,
+                        countryCode: dto.countryCode ? dto.countryCode.toUpperCase() : null,
+                        id: organizationId,
+                    },
+                );
+            } catch (error) {
+                await this.keys
+                    .releasePin(principal.keyId, organizationId)
+                    .catch((releaseError: unknown) =>
+                        this.logger.warn(
+                            `Key ${principal.keyId}: releasing the pin ${organizationId} of a failed ` +
+                                `organization create failed too (${String(releaseError)})`,
+                        ),
+                    );
+                throw error;
+            }
             if (principal.ownerUserId !== tenant.ownerUserId) {
                 // An admin's key: make its creator an admin of what it just created.
                 const existing = await this.members.findByOrgAndUser(
@@ -176,7 +194,6 @@ export class IntegrationOrganizationsWriteController {
                     );
                 }
             }
-            await this.keys.addPin(principal.keyId, organization.id);
             const created = await this.resources.organization(organization.id);
             if (created.etag) res.setHeader('ETag', created.etag);
             return { status: 201, body: created.dto };

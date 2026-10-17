@@ -221,6 +221,33 @@ export class ApiKeyRepository {
         );
     }
 
+    /**
+     * EW-P2-6 — drop one Organization pin from an integration key, in the same locked
+     * read-modify-write as {@link appendOrganizationId} (the undo of a pin reserved for
+     * an Organization whose create then failed). `false` when the pin was not there.
+     */
+    async removeOrganizationId(id: string, organizationId: string): Promise<boolean> {
+        return serializeOnSingleConnection(this.repository.manager, () =>
+            this.repository.manager.transaction(async (manager) => {
+                const type = String(manager.connection.options.type);
+                const locks = type === 'postgres' || type === 'mysql' || type === 'mariadb';
+                const row = await manager.getRepository(ApiKey).findOne({
+                    where: { id },
+                    ...(locks ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+                });
+                const pins = Array.isArray(row?.organizationIds) ? row.organizationIds : [];
+                if (!row || !pins.includes(organizationId)) return false;
+                await manager
+                    .getRepository(ApiKey)
+                    .update(
+                        { id },
+                        { organizationIds: pins.filter((pin) => pin !== organizationId) },
+                    );
+                return true;
+            }),
+        );
+    }
+
     async deactivateById(id: string): Promise<boolean> {
         const result = await this.repository.update({ id, isActive: true }, { isActive: false });
         return (result.affected ?? 0) > 0;

@@ -81,7 +81,7 @@
       `PUT /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
       `$defs`), `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; contract `v1-draft.12` (CR-8).
       Recording points: [`domain-events`](../domain-events/tasks.md) T22.
-- [x] **T34** Organization create + member roles (EW-P2-6): `POST /organizations` (`org:write`, auto-pin, an admin
+- [x] **T38** Organization create + member roles (EW-P2-6): `POST /organizations` (`org:write`, auto-pin, an admin
       creator becomes admin of the new Organization), `organization.created` (catalog + app creates); roles `owner` /
       `admin` / `member` (Tenant owner promotes via `PATCH /api/organizations/:orgId/members/:userId`); admins may create
       integration keys for the Organizations they administer, the key's usable pins re-read per request

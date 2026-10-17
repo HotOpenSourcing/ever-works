@@ -200,6 +200,14 @@ export class IntegrationKeyService {
     }
 
     /**
+     * EW-P2-6 — undo a pin {@link addPin} reserved for an Organization whose create then
+     * failed. Never throws for a pin that is not there.
+     */
+    async releasePin(keyId: string, organizationId: string): Promise<void> {
+        await this.apiKeys.removeOrganizationId(keyId, organizationId);
+    }
+
+    /**
      * EW-P2-6 — refuse BEFORE `POST /organizations` writes anything when the key has no
      * pin left, so a full key never leaves an orphan Organization behind. `404` when
      * `keyId` is not an integration key.
