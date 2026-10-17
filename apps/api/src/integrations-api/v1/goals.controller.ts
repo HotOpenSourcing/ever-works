@@ -691,6 +691,14 @@ export class IntegrationGoalsController {
             evidence: entry.evidence ?? null,
             note: entry.note ?? null,
         })) as GoalDoDCriterion[];
+        // Gauzy CR-12 — a planner proposal (`proposed: true`) the body does not name is
+        // kept: editing one key result never drops the proposals still awaiting a person.
+        // A proposal the body names is written as the integration sent it (approved).
+        const current = await this.goals.getForUser(user.userId, id, this.ownership());
+        const named = new Set(criteria.map((entry) => entry.id));
+        for (const entry of current.dodCriteria ?? []) {
+            if (entry.proposed === true && !named.has(entry.id)) criteria.push(entry);
+        }
         await withExpectedVersion('goal', id, expected, () =>
             this.orchestrator.setDodCriteria(
                 user.userId,

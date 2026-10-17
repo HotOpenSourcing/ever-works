@@ -270,9 +270,10 @@ metricId}` (the default when omitted is `{pluginId: 'external', metricId: 'value
   target, unit, window, baseline, deadline, `teamIds`, `visibility`. **No** `status`, `outcome`, `metricSource` or
   `goalKind`: an integration never activates, resumes or completes a Goal (D9). `If-Match` optional, re-checked at the
   version bump inside the write's transaction (`412`).
-- **`PUT /goals/:id/criteria`** (`{criteria}`, metric Goals; `[]` clears the weighted path) and **`PUT
-/goals/:id/dod`** (`{dodCriteria}`, written as approved operator items) replace the whole set and answer the Goal
-  DTO (`goal.updated`).
+- **`PUT /goals/:id/criteria`** (`{criteria}`, metric Goals; `[]` clears the weighted path) and
+  **`PUT /goals/:id/dod`** (`{dodCriteria}`, written as approved operator items) replace the whole set and answer the
+  Goal DTO (`goal.updated`). `PUT /goals/:id/dod` keeps every planner proposal (`proposed: true`) the body does not
+  name, so editing one key result never drops proposals awaiting a person (Gauzy CR-12).
 - **`POST /goals/:id/samples`** ([`GoalSample`](./contract/schemas/requests.schema.json) `{criterionId?, value,
 sampledAt}`, `Idempotency-Key` required): appends a `goal_metric_samples` row. Without `criterionId` the newest sample
   becomes `currentValue` (and the baseline when there is none); with `criterionId` it measures that criterion. A Goal
@@ -564,7 +565,8 @@ Additive. Recorded as CR-9 on the plan's STATUS board: the Goals routes of §6.4
 request bodies `CreateGoal`, `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; integrations write only the
 external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.progress_changed` is throttled to one
 per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
-read-only runtime.
+read-only runtime. Also answers the Gauzy request CR-12: `PUT /goals/:id/dod` keeps the planner proposals it does not
+name.
 
 ## 14. Changes in `v1-draft.12` (CR-8, EW-P2-5 Missions)
 
