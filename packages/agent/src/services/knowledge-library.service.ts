@@ -359,9 +359,15 @@ export class KnowledgeLibraryService {
     async createFolder(
         actor: KnowledgeLibraryActor,
         input: { name: string; parentId?: string | null },
+        options: Parameters<MemoryFoldersService['createOrganizationFolder']>[3] = {},
     ): Promise<MemoryFolder> {
         this.assertCanManageOrganization(actor);
-        return this.folders.createOrganizationFolder(actor.organizationId, actor.userId, input);
+        return this.folders.createOrganizationFolder(
+            actor.organizationId,
+            actor.userId,
+            input,
+            options,
+        );
     }
 
     async renameFolder(
