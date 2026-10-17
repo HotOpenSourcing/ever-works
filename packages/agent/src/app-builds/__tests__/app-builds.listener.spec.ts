@@ -73,7 +73,9 @@ describe('AppBuildsListener (APW-05 T22)', () => {
 
     it('treats a spec change that only renames env entries as an env change', async () => {
         const h = harness();
-        await h.listener.onSpecApplied(applied({ changedBlocks: ['env'], changedEnvNames: ['API_KEY'] }));
+        await h.listener.onSpecApplied(
+            applied({ changedBlocks: ['env'], changedEnvNames: ['API_KEY'] }),
+        );
         jest.advanceTimersByTime(APP_BUILD_ENV_DEBOUNCE_MS + 1);
         expect(h.builds.requestPrepare.mock.calls).toEqual([[WORK_ID, 'envChanged']]);
     });
@@ -125,6 +127,8 @@ describe('AppBuildsListener (APW-05 T22)', () => {
     it('never throws into the emitter when a prepare request fails', async () => {
         const h = harness();
         h.builds.requestPrepare.mockRejectedValueOnce(new Error('db down'));
-        await expect(h.listener.onSpecApplied(applied({ changedBlocks: ['build'] }))).resolves.toBeUndefined();
+        await expect(
+            h.listener.onSpecApplied(applied({ changedBlocks: ['build'] })),
+        ).resolves.toBeUndefined();
     });
 });

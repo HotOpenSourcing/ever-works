@@ -54,7 +54,9 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
               state: t(`status.${STATE_LEAF[status.state] ?? STATE_LEAF['not-deployed']}`),
               // Where the app RUNS (the runtime's target), not the saved
               // selection: changing the target removes nothing already running.
-              target: tTarget(`${APP_TARGET_LEAF[status.target] ?? APP_TARGET_LEAF[target.target]}.label`),
+              target: tTarget(
+                  `${APP_TARGET_LEAF[status.target] ?? APP_TARGET_LEAF[target.target]}.label`,
+              ),
           })
         : t('notRunning');
 

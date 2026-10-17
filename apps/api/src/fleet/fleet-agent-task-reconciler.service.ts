@@ -249,7 +249,10 @@ export class FleetAgentTaskReconcilerService {
         if (!event.newWindow || !this.inbox) return;
         await this.bestEffort('usage-limit notice', async () => {
             await this.inbox!.notice(event.userId, {
-                title: truncate(`${nodeLabel}: ${cli} ${window} until ${until}`, INBOX_MAX_TITLE_CHARS),
+                title: truncate(
+                    `${nodeLabel}: ${cli} ${window} until ${until}`,
+                    INBOX_MAX_TITLE_CHARS,
+                ),
                 body: truncate(
                     [
                         `The ${cli} seat on fleet node ${nodeLabel} is out of quota (${window}) until ${until}.`,

@@ -121,7 +121,9 @@ describe('AppBuildsList', () => {
 
         const copy = messages.dashboard.workDetail.builds.status;
         for (const status of statuses) {
-            expect(screen.getByTestId(`app-build-status-${status}`)).toHaveTextContent(copy[status]);
+            expect(screen.getByTestId(`app-build-status-${status}`)).toHaveTextContent(
+                copy[status],
+            );
         }
         // The subtitle names the repository and the image.
         expect(
@@ -145,7 +147,10 @@ describe('AppBuildsList', () => {
         });
 
         expect(screen.getByText('Waiting for 1 build value: LICENSE_KEY')).toBeInTheDocument();
-        expect(screen.getByRole('link', { name: 'Set it' })).toHaveAttribute('href', '/works/w1/settings');
+        expect(screen.getByRole('link', { name: 'Set it' })).toHaveAttribute(
+            'href',
+            '/works/w1/settings',
+        );
     });
 
     it('shows the not-deployable reason under a succeeded pull-request build', () => {

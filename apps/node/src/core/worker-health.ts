@@ -76,7 +76,10 @@ function describeModelThrottles(state: WorkerLoopState): string | null {
 	const throttles = state.modelThrottles ?? [];
 	if (throttles.length === 0) return null;
 	return throttles
-		.map((throttle) => `${throttle.provider}: ${describeFleetModelUsageLimitWindow(throttle.window)} until ${throttle.until}`)
+		.map(
+			(throttle) =>
+				`${throttle.provider}: ${describeFleetModelUsageLimitWindow(throttle.window)} until ${throttle.until}`
+		)
 		.join('; ');
 }
 

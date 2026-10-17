@@ -95,8 +95,8 @@ describe('NewPageClient (chat-open + canvas-route on submit)', () => {
         it('is ABSENT — no button and no "Soon" span — while `app` is disabled', () => {
             const { container } = render(<NewPageClient disabledKinds={['store', 'app']} />);
             expect(container.querySelector('[data-testid="new-chip-app"]')).toBeNull();
-            const labels = Array.from(container.querySelectorAll('button[role="option"]')).map((b) =>
-                b.textContent?.trim(),
+            const labels = Array.from(container.querySelectorAll('button[role="option"]')).map(
+                (b) => b.textContent?.trim(),
             );
             expect(labels).not.toContain('dashboard.newPage.chips.app');
             // Every other disabled kind still renders its inert "Soon" chip.

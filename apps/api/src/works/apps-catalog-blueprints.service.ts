@@ -112,7 +112,9 @@ export function filterBlueprints(
     const needle = (query ?? '').trim().toLowerCase();
     if (needle.length < 2) return [...items];
     return items.filter((item) =>
-        [item.id, item.name, item.summary, item.repo].some((field) => field.toLowerCase().includes(needle)),
+        [item.id, item.name, item.summary, item.repo].some((field) =>
+            field.toLowerCase().includes(needle),
+        ),
     );
 }
 
@@ -167,7 +169,12 @@ export class AppsCatalogBlueprintsService {
             this.logger.warn(
                 `Apps catalog listing failed: ${error instanceof Error ? error.message : String(error)}`,
             );
-            const list: AppsCatalogBlueprintList = { items: [], total: 0, available: false, source: 'github-topic' };
+            const list: AppsCatalogBlueprintList = {
+                items: [],
+                total: 0,
+                available: false,
+                source: 'github-topic',
+            };
             this.cache = { list, expiresAt: now() + APPS_CATALOG_BLUEPRINTS_FAILURE_TTL_MS };
             return list;
         }

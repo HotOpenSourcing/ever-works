@@ -749,7 +749,11 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 	 * GitHub does not know it here. Any other failure is a throw.
 	 */
 	async isCommitReachable(
-		input: { readonly repository: { readonly owner: string; readonly repo: string }; readonly sha: string; readonly branch: string },
+		input: {
+			readonly repository: { readonly owner: string; readonly repo: string };
+			readonly sha: string;
+			readonly branch: string;
+		},
 		auth: BuildAuth
 	): Promise<boolean> {
 		try {

@@ -22,7 +22,9 @@ export interface AppSourceRelationSummary {
 }
 
 /** Reduce the Upstream answer to the header's relation line. */
-export function summarizeAppSourceRelation(state: AppUpstreamStateResponse): AppSourceRelationSummary {
+export function summarizeAppSourceRelation(
+    state: AppUpstreamStateResponse,
+): AppSourceRelationSummary {
     const repository = `${state.dataRepository.owner}/${state.dataRepository.repo}`;
     return {
         relation: state.relation,

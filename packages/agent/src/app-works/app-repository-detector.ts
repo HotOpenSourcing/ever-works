@@ -106,7 +106,8 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
     const has = (path: string) => typeof files[path] === 'string';
     const evidence: string[] = [];
 
-    const existingSpec = has('.works/works.yml') && /\bkind:\s*app\b/.test(files['.works/works.yml']);
+    const existingSpec =
+        has('.works/works.yml') && /\bkind:\s*app\b/.test(files['.works/works.yml']);
     if (existingSpec) evidence.push('.works/works.yml declares kind: app');
 
     // ── container definitions ────────────────────────────────────────────
@@ -125,8 +126,13 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
         );
     }
     const composeFile =
-        ['docker-compose.prod.yml', 'compose.yaml', 'compose.yml', 'docker-compose.yml', 'docker-compose.yaml'].find(has) ??
-        null;
+        [
+            'docker-compose.prod.yml',
+            'compose.yaml',
+            'compose.yml',
+            'docker-compose.yml',
+            'docker-compose.yaml',
+        ].find(has) ?? null;
     let composePort: number | null = null;
     const composeDeps = new Set<DetectedDependency>();
     if (composeFile) {
@@ -178,7 +184,8 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
         defaultPort = fw?.port ?? 3000;
         const scripts = record(pkg?.scripts) ?? {};
         if (typeof scripts['start'] === 'string') {
-            startCommand = packageManager === 'npm' ? ['npm', 'run', 'start'] : [packageManager, 'start'];
+            startCommand =
+                packageManager === 'npm' ? ['npm', 'run', 'start'] : [packageManager, 'start'];
         }
         nodeDependencies(names, files['prisma/schema.prisma']).forEach((dep) => deps.add(dep));
         evidence.push(
@@ -197,13 +204,14 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
               : root.has('poetry.lock') || /\[tool\.poetry\]/.test(text)
                 ? 'poetry'
                 : 'pip';
-        framework = /\bdjango\b/.test(text) || root.has('manage.py')
-            ? 'django'
-            : /\bfastapi\b/.test(text)
-              ? 'fastapi'
-              : /\bflask\b/.test(text)
-                ? 'flask'
-                : null;
+        framework =
+            /\bdjango\b/.test(text) || root.has('manage.py')
+                ? 'django'
+                : /\bfastapi\b/.test(text)
+                  ? 'fastapi'
+                  : /\bflask\b/.test(text)
+                    ? 'flask'
+                    : null;
         defaultPort = 8000;
         if (/psycopg|asyncpg|pg8000/.test(text)) deps.add('postgres');
         if (/\bredis\b|celery/.test(text)) deps.add('redis');
@@ -214,7 +222,13 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
         packageManager = 'go';
         defaultPort = 8080;
         const text = files['go.mod'];
-        framework = /gin-gonic/.test(text) ? 'gin' : /labstack\/echo/.test(text) ? 'echo' : /gofiber/.test(text) ? 'fiber' : null;
+        framework = /gin-gonic/.test(text)
+            ? 'gin'
+            : /labstack\/echo/.test(text)
+              ? 'echo'
+              : /gofiber/.test(text)
+                ? 'fiber'
+                : null;
         if (/jackc\/pgx|lib\/pq/.test(text)) deps.add('postgres');
         if (/go-redis|redis\/go-redis/.test(text)) deps.add('redis');
         if (/minio-go|aws-sdk-go/.test(text)) deps.add('objectStorage');
@@ -223,7 +237,11 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
         language = 'ruby';
         packageManager = 'bundler';
         const text = files['Gemfile'];
-        framework = /['"]rails['"]/.test(text) ? 'rails' : /['"]sinatra['"]/.test(text) ? 'sinatra' : null;
+        framework = /['"]rails['"]/.test(text)
+            ? 'rails'
+            : /['"]sinatra['"]/.test(text)
+              ? 'sinatra'
+              : null;
         defaultPort = 3000;
         if (/['"]pg['"]/.test(text)) deps.add('postgres');
         if (/['"](redis|sidekiq)['"]/.test(text)) deps.add('redis');
@@ -232,14 +250,24 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
     } else if (has('composer.json')) {
         language = 'php';
         packageManager = 'composer';
-        framework = root.has('artisan') ? 'laravel' : /symfony\//.test(files['composer.json']) ? 'symfony' : null;
+        framework = root.has('artisan')
+            ? 'laravel'
+            : /symfony\//.test(files['composer.json'])
+              ? 'symfony'
+              : null;
         defaultPort = 8000;
         evidence.push(`composer.json${framework ? ` (${framework})` : ''}`);
     } else if (has('pom.xml') || has('build.gradle') || has('build.gradle.kts')) {
         language = 'java';
         packageManager = has('pom.xml') ? 'maven' : 'gradle';
-        const text = [files['pom.xml'], files['build.gradle'], files['build.gradle.kts']].filter(Boolean).join('\n');
-        framework = /spring-boot/.test(text) ? 'spring-boot' : /quarkus/.test(text) ? 'quarkus' : null;
+        const text = [files['pom.xml'], files['build.gradle'], files['build.gradle.kts']]
+            .filter(Boolean)
+            .join('\n');
+        framework = /spring-boot/.test(text)
+            ? 'spring-boot'
+            : /quarkus/.test(text)
+              ? 'quarkus'
+              : null;
         defaultPort = 8080;
         if (/postgresql/.test(text)) deps.add('postgres');
         evidence.push(`${packageManager} build${framework ? ` (${framework})` : ''}`);
@@ -247,7 +275,13 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
         language = 'rust';
         packageManager = 'cargo';
         const text = files['Cargo.toml'];
-        framework = /\baxum\b/.test(text) ? 'axum' : /actix-web/.test(text) ? 'actix-web' : /\brocket\b/.test(text) ? 'rocket' : null;
+        framework = /\baxum\b/.test(text)
+            ? 'axum'
+            : /actix-web/.test(text)
+              ? 'actix-web'
+              : /\brocket\b/.test(text)
+                ? 'rocket'
+                : null;
         defaultPort = 8080;
         if (/sqlx|tokio-postgres|diesel/.test(text)) deps.add('postgres');
         if (/\bredis\b/.test(text)) deps.add('redis');
@@ -260,9 +294,12 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
 
     // ── env example ──────────────────────────────────────────────────────
     const envExampleFile = ['.env.example', '.env.sample', 'example.env'].find(has) ?? null;
-    const envNames = envExampleFile ? parseEnvNames(files[envExampleFile]).slice(0, MAX_ENV_ENTRIES) : [];
+    const envNames = envExampleFile
+        ? parseEnvNames(files[envExampleFile]).slice(0, MAX_ENV_ENTRIES)
+        : [];
     for (const name of envNames) {
-        if (/^(DATABASE_URL|POSTGRES_|PG(HOST|USER|PASSWORD|DATABASE))/.test(name)) deps.add('postgres');
+        if (/^(DATABASE_URL|POSTGRES_|PG(HOST|USER|PASSWORD|DATABASE))/.test(name))
+            deps.add('postgres');
         if (/^REDIS_/.test(name)) deps.add('redis');
         if (/^(S3_|AWS_S3|MINIO_)/.test(name)) deps.add('objectStorage');
         if (/^(SMTP_|EMAIL_SERVER|MAIL_)/.test(name)) deps.add('smtp');
@@ -311,11 +348,21 @@ export interface AppSpecDraftContext {
     /** The existing `.works/works.yml`, when the repository has one (its owned blocks are kept). */
     readonly existingText?: string | null;
     /** The source relation, when there is no existing file to read it from. */
-    readonly source?: { relation: string; upstream?: { repo: string; defaultBranch?: string } } | null;
+    readonly source?: {
+        relation: string;
+        upstream?: { repo: string; defaultBranch?: string };
+    } | null;
 }
 
 /** Blocks the provisioner never rewrites (SKILL.md hard rule 5). */
-const OWNED_BLOCKS = ['source', 'blueprint', 'license', 'upstreamSync', 'upstreamPullRequests', 'provisioning'];
+const OWNED_BLOCKS = [
+    'source',
+    'blueprint',
+    'license',
+    'upstreamSync',
+    'upstreamPullRequests',
+    'provisioning',
+];
 
 /**
  * Build a `.works/works.yml` document from a detection. The owned blocks of an existing
@@ -374,7 +421,10 @@ export function draftAppSpecDocument(
     const document: Record<string, unknown> = {
         version: typeof existing?.version === 'number' ? existing.version : 2,
         kind: 'app',
-        name: typeof existing?.name === 'string' && existing.name ? existing.name : slugName(context.name),
+        name:
+            typeof existing?.name === 'string' && existing.name
+                ? existing.name
+                : slugName(context.name),
         spec,
     };
     return stringifyYaml(document, { lineWidth: 0 });
@@ -394,7 +444,10 @@ export function parseDockerfile(text: string): {
     let healthPath: string | null = null;
     // Token-wise, never a backtracking regex over repository text (CodeQL js/polynomial-redos).
     for (const raw of text.split(/\r?\n/)) {
-        const tokens = raw.trim().split(/[ \t]+/).filter(Boolean);
+        const tokens = raw
+            .trim()
+            .split(/[ \t]+/)
+            .filter(Boolean);
         const instruction = (tokens[0] ?? '').toUpperCase();
         if (instruction === 'EXPOSE') {
             for (const token of tokens.slice(1)) {
@@ -414,11 +467,15 @@ export function parseDockerfile(text: string): {
     // production one, otherwise leave `target` unset (the default is the last stage anyway).
     const last = stages[stages.length - 1] ?? null;
     const target =
-        stages.find((stage) => /^(prod|production|runner|runtime|release|final)$/i.test(stage)) ?? null;
+        stages.find((stage) => /^(prod|production|runner|runtime|release|final)$/i.test(stage)) ??
+        null;
     return { ports, target: target && target !== last ? target : null, healthPath };
 }
 
-export function parseCompose(text: string): { port: number | null; dependencies: DetectedDependency[] } {
+export function parseCompose(text: string): {
+    port: number | null;
+    dependencies: DetectedDependency[];
+} {
     const doc = parseExisting(text);
     const services = record(doc?.services) ?? {};
     const dependencies = new Set<DetectedDependency>();
@@ -432,7 +489,8 @@ export function parseCompose(text: string): { port: number | null; dependencies:
         else if (/mailhog|mailpit|smtp/.test(image)) dependencies.add('smtp');
         else if (port === null && Array.isArray(service['ports'])) {
             const first = service['ports'][0];
-            const text = typeof first === 'number' ? String(first) : typeof first === 'string' ? first : '';
+            const text =
+                typeof first === 'number' ? String(first) : typeof first === 'string' ? first : '';
             const container = Number.parseInt(text.split(':').pop() ?? '', 10);
             if (Number.isInteger(container) && container > 0 && container < 65536) port = container;
         }
@@ -451,12 +509,17 @@ export function parseEnvNames(text: string): string[] {
     return names;
 }
 
-const PUBLIC_URL_NAMES = /^(APP_URL|BASE_URL|SITE_URL|PUBLIC_URL|NEXTAUTH_URL|AUTH_URL|ORIGIN|NEXT_PUBLIC_(APP|SITE|BASE)_URL|VITE_(APP|SITE|BASE)_URL)$/;
-const GENERATED_SECRET_NAMES = /(SECRET|SALT|SESSION_KEY|JWT_KEY|SIGNING_KEY|ENCRYPTION_KEY|COOKIE_KEY|APP_KEY)$/;
+const PUBLIC_URL_NAMES =
+    /^(APP_URL|BASE_URL|SITE_URL|PUBLIC_URL|NEXTAUTH_URL|AUTH_URL|ORIGIN|NEXT_PUBLIC_(APP|SITE|BASE)_URL|VITE_(APP|SITE|BASE)_URL)$/;
+const GENERATED_SECRET_NAMES =
+    /(SECRET|SALT|SESSION_KEY|JWT_KEY|SIGNING_KEY|ENCRYPTION_KEY|COOKIE_KEY|APP_KEY)$/;
 const SECRET_NAMES = /(SECRET|TOKEN|PASSWORD|PASS|PRIVATE|API_KEY|_KEY|SALT|DSN|CREDENTIALS?)$/;
 const BUILD_PREFIXES = /^(NEXT_PUBLIC_|VITE_|REACT_APP_|PUBLIC_|NUXT_PUBLIC_|EXPO_PUBLIC_|GATSBY_)/;
 
-function envEntry(name: string, deps: readonly DetectedDependency[]): Record<string, unknown> | null {
+function envEntry(
+    name: string,
+    deps: readonly DetectedDependency[],
+): Record<string, unknown> | null {
     const phase = BUILD_PREFIXES.test(name) ? 'both' : undefined;
     const withPhase = (entry: Record<string, unknown>) => (phase ? { ...entry, phase } : entry);
     if (deps.includes('postgres') && name === 'DATABASE_URL') {
@@ -478,12 +541,18 @@ function envEntry(name: string, deps: readonly DetectedDependency[]): Record<str
         return {
             name,
             secret: true,
-            prompt: { description: `${name} (listed in the repository's example env file).`, required: false },
+            prompt: {
+                description: `${name} (listed in the repository's example env file).`,
+                required: false,
+            },
         };
     }
     return withPhase({
         name,
-        prompt: { description: `${name} (listed in the repository's example env file).`, required: false },
+        prompt: {
+            description: `${name} (listed in the repository's example env file).`,
+            required: false,
+        },
     });
 }
 
@@ -504,12 +573,19 @@ function nodeFramework(names: Set<string>): { name: string; port: number } | nul
 
 function nodeDependencies(names: Set<string>, prismaSchema?: string): DetectedDependency[] {
     const out = new Set<DetectedDependency>();
-    if (names.has('pg') || names.has('postgres') || names.has('pg-promise') || names.has('@neondatabase/serverless')) {
+    if (
+        names.has('pg') ||
+        names.has('postgres') ||
+        names.has('pg-promise') ||
+        names.has('@neondatabase/serverless')
+    ) {
         out.add('postgres');
     }
     if (prismaSchema && /provider\s*=\s*"postgres(ql)?"/.test(prismaSchema)) out.add('postgres');
-    if (names.has('ioredis') || names.has('redis') || names.has('bullmq') || names.has('bull')) out.add('redis');
-    if (names.has('@aws-sdk/client-s3') || names.has('aws-sdk') || names.has('minio')) out.add('objectStorage');
+    if (names.has('ioredis') || names.has('redis') || names.has('bullmq') || names.has('bull'))
+        out.add('redis');
+    if (names.has('@aws-sdk/client-s3') || names.has('aws-sdk') || names.has('minio'))
+        out.add('objectStorage');
     if (names.has('nodemailer')) out.add('smtp');
     return [...out];
 }
@@ -532,7 +608,9 @@ function safeJson(text: string): Record<string, unknown> | null {
 }
 
 function record(value: unknown): Record<string, unknown> | null {
-    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+    return value && typeof value === 'object' && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
 }
 
 function slugName(name: string): string {

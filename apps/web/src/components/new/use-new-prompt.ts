@@ -276,12 +276,14 @@ export function useNewPrompt({
         () => [
             // APW-01 T23 (FR-47, ACC-01-13) — a fail-closed kind that is
             // disabled is left OUT of the row, not rendered as "Soon".
-            ...CHIP_ORDER.filter((c) => !(isHiddenWhenDisabled(c) && disabledSet.has(c))).map((c) => ({
-                value: c,
-                label: t(`chips.${c}`),
-                Icon: CHIP_ICONS[c],
-                comingSoon: disabledSet.has(c),
-            })),
+            ...CHIP_ORDER.filter((c) => !(isHiddenWhenDisabled(c) && disabledSet.has(c))).map(
+                (c) => ({
+                    value: c,
+                    label: t(`chips.${c}`),
+                    Icon: CHIP_ICONS[c],
+                    comingSoon: disabledSet.has(c),
+                }),
+            ),
             // store is flag-controlled via works-store like every other kind.
             // The `works-store` PostHog flag exists as `active: false`, so
             // the chip continues to render as the inert "Soon" baseline

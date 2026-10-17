@@ -26,8 +26,16 @@ describe('withAppWorksScopes', () => {
     beforeEach(() => worksEnabled.mockReturnValue(true));
 
     it('appends `workflow` (and `repo`) to a configured GitHub list that lacks them', () => {
-        expect(withAppWorksScopes('github', ['read:user'])).toEqual(['read:user', 'repo', 'workflow']);
-        expect(withAppWorksScopes('github', ['repo', 'read:org'])).toEqual(['repo', 'read:org', 'workflow']);
+        expect(withAppWorksScopes('github', ['read:user'])).toEqual([
+            'read:user',
+            'repo',
+            'workflow',
+        ]);
+        expect(withAppWorksScopes('github', ['repo', 'read:org'])).toEqual([
+            'repo',
+            'read:org',
+            'workflow',
+        ]);
     });
 
     it('leaves a list that already has both, no list, and other providers untouched', () => {

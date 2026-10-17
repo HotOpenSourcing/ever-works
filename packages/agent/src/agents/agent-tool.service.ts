@@ -568,7 +568,8 @@ export class AgentToolService {
                 buildAppChangeTools({
                     agent,
                     service: appChanges.service,
-                    authorize: (userId, workId, level) => appChanges.authorize(userId, workId, level),
+                    authorize: (userId, workId, level) =>
+                        appChanges.authorize(userId, workId, level),
                 }),
             );
         }
