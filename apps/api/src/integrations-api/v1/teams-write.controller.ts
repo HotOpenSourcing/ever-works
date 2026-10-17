@@ -422,10 +422,17 @@ export class IntegrationTeamsWriteController {
         const kept = new Set(have.map(key));
         for (const ref of wanted.values()) {
             if (kept.has(key(ref))) continue;
-            await this.teamResources.attach(user.userId, organizationId, id, {
-                resourceType: ref.resourceType as TeamResourceType,
-                resourceId: ref.resourceId,
-            });
+            // Review 2026-10-17 F4: a private record answers 404 to an integration.
+            await this.teamResources.attach(
+                user.userId,
+                organizationId,
+                id,
+                {
+                    resourceType: ref.resourceType as TeamResourceType,
+                    resourceId: ref.resourceId,
+                },
+                { viewer: { kind: 'integration' } },
+            );
         }
         return this.answer(organizationId, id, source, res);
     }
