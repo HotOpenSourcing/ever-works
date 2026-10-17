@@ -1,16 +1,23 @@
+import { ActivityLogService } from '@ever-works/agent/activity-log';
 import {
     AuthAccountRepository,
     GitHubAppInstallationRepository,
     GitHubAppUserLinkRepository,
     UserRepository,
 } from '@ever-works/agent/database';
-import { GitHubAppInstallation, User } from '@ever-works/agent/entities';
+import {
+    ActivityActionType,
+    ActivityStatus,
+    GitHubAppInstallation,
+    User,
+} from '@ever-works/agent/entities';
 import {
     BadRequestException,
     ConflictException,
     ForbiddenException,
     Injectable,
     Logger,
+    Optional,
     UnauthorizedException,
 } from '@nestjs/common';
 import { config } from '@src/config/constants';
@@ -51,6 +58,14 @@ type OnboardingRepos = {
     installations: GitHubAppInstallationRepository;
 };
 
+/** Which OAuth-proven identity link tied a GitHub user id to a platform user. */
+type InstallerIdentityLink = 'github-app-user-link' | 'github-auth-account';
+
+/** Outcome of resolving a recorded installer's GitHub id to ONE platform user. */
+type InstallerResolution =
+    | { status: 'resolved'; userId: string; matchedBy: InstallerIdentityLink[] }
+    | { status: 'unresolved'; reason: 'no-linked-user' | 'ambiguous' | 'user-not-active' };
+
 @Injectable()
 export class GitHubAppOnboardingService {
     private readonly logger = new Logger(GitHubAppOnboardingService.name);
@@ -62,6 +77,13 @@ export class GitHubAppOnboardingService {
         private readonly authAccountRepository: AuthAccountRepository,
         private readonly userRepository: UserRepository,
         private readonly usernameAllocator: UsernameAllocatorService,
+        /**
+         * Records the webhook auto-claim in the owner's activity log. Optional
+         * so a context without it still claims — the claim is also written to
+         * the server log either way.
+         */
+        @Optional()
+        private readonly activityLog?: ActivityLogService,
     ) {}
 
     async beginSetup(input: { installationId: string; redirectTo?: string; setupAction?: string }) {
@@ -178,6 +200,146 @@ export class GitHubAppOnboardingService {
                 redirectTo: state.redirectTo,
             };
         });
+    }
+
+    /**
+     * Claim an installation for the platform user behind its RECORDED
+     * installer — on behalf of an `installation` / `installation_repositories`
+     * webhook delivery that verified against the platform App webhook secret.
+     *
+     * Why: once the App is public, an owner can install it straight from
+     * github.com. GitHub then never sends that browser through our setup URL,
+     * so {@link completeUserAuth} never runs and the row the
+     * `installation.created` webhook recorded kept `createdByUserId = NULL`
+     * forever — invisible to its owner, and fleet dispatch refused every repo
+     * it covers (prod 2026-10-17, four orgs claimed by hand).
+     *
+     * Rules — the same authority as rule 1 of `assertMayClaimInstallation`
+     * (item 13, #2578 / #2684): the recorded installer, and nobody else.
+     *
+     *  - The CALLER must only invoke this for an App-secret-verified delivery
+     *    (`GitHubAppSyncService` gates it). `createdByGithubUserId` is written
+     *    only from such a delivery's `sender` on `installation.created`, so it
+     *    is GitHub's own word for who installed the App. The sender of any
+     *    other action (`new_permissions_accepted`, …) is NOT trusted as the
+     *    installer and is never consulted here.
+     *  - The row must be unclaimed, not deleted, and carry a recorded installer.
+     *  - That GitHub id must resolve to EXACTLY ONE active platform user through
+     *    identity links that a GitHub OAuth round-trip proved: the App user link
+     *    (`github_app_user_links`) and the `github` auth account (accountId =
+     *    GitHub user id). Never by email or login. No match, or two links that
+     *    name different users, leaves the row untouched.
+     *  - The write is the conditional `claimOwnershipIfUnassigned` — a row that
+     *    is (or concurrently becomes) claimed is never overwritten.
+     *
+     * Returns the row as claimed for that user, or `null` when nothing was
+     * claimed.
+     */
+    async claimForRecordedInstaller(
+        installation: GitHubAppInstallation,
+    ): Promise<GitHubAppInstallation | null> {
+        const installerGithubUserId = installation.createdByGithubUserId;
+        if (installation.createdByUserId || installation.deletedAt || !installerGithubUserId) {
+            return null;
+        }
+
+        const installationId = installation.installationId;
+        const resolution = await this.resolveRecordedInstaller(installerGithubUserId);
+        if (resolution.status !== 'resolved') {
+            const log = resolution.reason === 'no-linked-user' ? 'log' : 'warn';
+            this.logger[log](
+                `GitHub App installation ${installationId} (${installation.accountLogin}) left unclaimed: recorded installer ${installerGithubUserId} → ${resolution.reason}`,
+            );
+            return null;
+        }
+
+        const claimed = await this.gitHubAppInstallationRepository.claimOwnershipIfUnassigned(
+            installationId,
+            resolution.userId,
+            installerGithubUserId,
+        );
+        if (!claimed || claimed.createdByUserId !== resolution.userId) {
+            // Deleted meanwhile, or claimed concurrently (e.g. the setup URL)
+            // by someone else — the conditional update left it as it was.
+            return null;
+        }
+
+        this.logger.log(
+            `GitHub App installation ${installationId} (${installation.accountLogin}) auto-claimed for user ${resolution.userId}: verified installation webhook sender ${installerGithubUserId} matched by ${resolution.matchedBy.join(' + ')}`,
+        );
+        await this.recordAutoClaim(claimed, resolution.userId, resolution.matchedBy);
+        return claimed;
+    }
+
+    /**
+     * The ONE platform user a GitHub user id belongs to, through the identity
+     * links GitHub OAuth proved — never through an email or a login.
+     */
+    private async resolveRecordedInstaller(githubUserId: string): Promise<InstallerResolution> {
+        const [link, account] = await Promise.all([
+            this.gitHubAppUserLinkRepository.findByGithubUserId(githubUserId),
+            this.authAccountRepository.findProviderAccountByAccountId('github', githubUserId),
+        ]);
+
+        const matches = new Map<string, InstallerIdentityLink[]>();
+        const add = (userId: string | null | undefined, via: InstallerIdentityLink) => {
+            if (userId) {
+                matches.set(userId, [...(matches.get(userId) ?? []), via]);
+            }
+        };
+        add(link?.userId, 'github-app-user-link');
+        add(account?.userId, 'github-auth-account');
+
+        if (matches.size === 0) {
+            return { status: 'unresolved', reason: 'no-linked-user' };
+        }
+        if (matches.size > 1) {
+            return { status: 'unresolved', reason: 'ambiguous' };
+        }
+
+        const [[userId, matchedBy]] = [...matches];
+        const user = await this.userRepository.findById(userId);
+        if (!user || user.isActive === false) {
+            return { status: 'unresolved', reason: 'user-not-active' };
+        }
+
+        return { status: 'resolved', userId, matchedBy };
+    }
+
+    /** Best-effort activity-log record of a webhook auto-claim; never fails the claim. */
+    private async recordAutoClaim(
+        installation: GitHubAppInstallation,
+        userId: string,
+        matchedBy: InstallerIdentityLink[],
+    ): Promise<void> {
+        if (!this.activityLog) {
+            return;
+        }
+
+        try {
+            await this.activityLog.log({
+                userId,
+                actionType: ActivityActionType.PROVIDER_CONNECTED,
+                action: 'github_app_installation_claimed',
+                status: ActivityStatus.COMPLETED,
+                summary: `GitHub App installation on ${installation.accountLogin || 'GitHub'} linked to your account`,
+                details: {
+                    provider: 'github',
+                    source: 'installation-webhook',
+                    installationId: installation.installationId,
+                    accountLogin: installation.accountLogin,
+                    targetType: installation.targetType,
+                    githubUserId: installation.createdByGithubUserId,
+                    matchedBy,
+                },
+            });
+        } catch (error) {
+            this.logger.warn(
+                `Could not record the activity for the GitHub App installation ${installation.installationId} auto-claim: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        }
     }
 
     /**
