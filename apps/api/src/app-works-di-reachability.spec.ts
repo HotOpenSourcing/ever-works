@@ -209,11 +209,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/agent/src/app-runtime/app-hosts.service.ts:142 (owned by APW-05)',
     },
     {
-        key: 'AppDeployRequestModule | AppLicenseGate | APP_LICENSE_SERVICE',
-        reason: "APW-03's licence service is unwritten; the gate answers its documented unreadable verdict (managed target refused, your cluster warned).",
-        source: 'packages/agent/src/app-runtime/app-license-gate.ts:78-109 (APW-03 T42, tasks.md:728)',
-    },
-    {
         key: 'AppEnvModule | AppEnvService | APP_ENV_ACTIVITY',
         reason: 'Provisional: T26 owns `app-env.activity.ts` and the `ActivityActionType.APP_ENV` member it writes with.',
         source: 'packages/agent/src/app-env/app-env.service.ts:331-341,373 (APW-07 T26)',
@@ -259,21 +254,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'apps/api/src/app-launcher/platform-catalog.service.ts:127-132',
     },
     {
-        key: 'AppWorksModule[agent] | APP_SOURCE_CATALOG_PORT (useClass AppSourceCatalogAdapter) | APP_BLUEPRINT_APPLY_SERVICE',
-        reason: 'A Blueprint match stays behind the apply gate until T28 binds the apply service.',
-        source: 'docs/specs/features/app-works/APW-03-app-spec-and-catalog/tasks.md:496 (APW-03 T28)',
-    },
-    {
-        key: 'AppWorksModule[agent] | AppSourceInitializerService | APP_BLUEPRINT_APPLY_SERVICE',
-        reason: "The ready handler's apply step; owned by APW-03 T28.",
-        source: 'packages/agent/src/app-works/app-source-initializer.service.ts:235; apps/api/src/app-works/app-works.module.ts:69-79',
-    },
-    {
-        key: 'AppWorksModule[agent] | AppSourceInitializerService | APP_LICENSE_SERVICE',
-        reason: "APW-03's licence service is unwritten in this tree.",
-        source: 'packages/agent/src/app-runtime/app-license-gate.ts:108 (APW-03 T42, tasks.md:728)',
-    },
-    {
         key: 'AppWorksModule[agent] | AppSourceInitializerService | AppSpecService',
         reason: "The agent module's COPY, which deliberately imports neither AppSpecModule nor WorkModule; the wired copy is the API module's.",
         source: 'apps/api/src/app-works/app-works.module.ts:138-144 (APW-01 T15)',
@@ -289,16 +269,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
     },
     {
-        key: 'AppWorksModule[agent] | AppUpstreamStateService | APP_UPSTREAM_SYNC_DISPATCHER',
-        reason: "The sync dispatcher's runtime binding belongs to APW-02 T31.",
-        source: 'packages/agent/src/app-works/app-upstream-state.service.ts:434; apps/api/src/app-works/app-works.module.ts:69-79',
-    },
-    {
-        key: 'AppWorksModule[agent] | AppUpstreamSyncDispatcherService | APP_UPSTREAM_SYNC_DISPATCHER',
-        reason: "The sync dispatcher's runtime binding belongs to APW-02 T31.",
-        source: 'packages/agent/src/app-works/app-upstream-state.service.ts:434 (APW-02 T31, tasks.md:469)',
-    },
-    {
         key: 'AppWorksModule[agent] | AppWorkCreateService | APPS_TIER_POLICY',
         reason: "APW-10's tier policy is unwritten in this tree.",
         source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
@@ -307,16 +277,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         key: 'AppWorksModule[agent] | AppWorkCreateService | APP_PROMPTED_VALUES_PORT',
         reason: 'Unbound on purpose: binding it means inventing the actor and ordering APW-07 T24/T25 own.',
         source: 'packages/agent/src/app-runtime/__tests__/app-works-port-dormancy.spec.ts:373-379; app-works/app-prompted-values.port.ts:46-53',
-    },
-    {
-        key: 'AppWorksModule[api] | AppSourceInitializerService | APP_BLUEPRINT_APPLY_SERVICE',
-        reason: "The ready handler's apply step; owned by APW-03 T28.",
-        source: 'apps/api/src/app-works/app-works.module.ts:69-79; APW-03 T28 (tasks.md:530)',
-    },
-    {
-        key: 'AppWorksModule[api] | AppSourceInitializerService | APP_LICENSE_SERVICE',
-        reason: "APW-03's licence service is unwritten in this tree.",
-        source: 'packages/agent/src/app-runtime/app-license-gate.ts:108 (APW-03 T42, tasks.md:728)',
     },
     {
         key: 'FacadesModule | AppRuntimeFacadeService | APPS_TIER_POLICY',
@@ -399,6 +359,16 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         key: 'AppDependencyProvisionWorkerModule :: APP_WORK_DELETION_COMPLETION',
         reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_WORK_DELETION_COMPLETION` row for the reason.",
         source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:112 (A0.10, the TriggerAppRuntimeModule import)',
+    },
+    {
+        key: 'AppUpstreamSyncWorkerModule :: APP_UPSTREAM_PRIVATE_COPY_PORT',
+        reason: "FR-63's private-copy compare/move capability is a plugin capability that is not written; unbound, a private copy's sync is `failed/provider_unsupported` (a fork's sync is unaffected).",
+        source: 'packages/agent/src/app-works/app-upstream-sync.service.ts:200-250 (APW-02 P1 plugin capability, FR-63)',
+    },
+    {
+        key: 'AppUpstreamSyncWorkerModule :: ActivityLogService',
+        reason: 'The worker has no `ActivityLogService` and no database module; the sync outcome is settled on the row through the state-service proxy, but its `app.upstream.*` / `app.actions.*` Activity rows are not written from the worker.',
+        source: 'packages/tasks/src/trigger/worker/modules/trigger-worker.module.ts:161-163 (no ActivityLogService in worker scope)',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE',
@@ -2165,6 +2135,7 @@ if (process.env[CHILD_FLAG] === undefined) {
                     'AppBuildWatchWorkerModule',
                     'AppDependencyProvisionWorkerModule',
                     'AppForkReadinessWorkerModule',
+                    'AppUpstreamSyncWorkerModule',
                     'TriggerAppRuntimeModule',
                 ]),
             );
@@ -2214,6 +2185,8 @@ if (process.env[CHILD_FLAG] === undefined) {
                     "AppBuildSweepWorkerModule :: remote 'AppBuildSweepService'",
                     "AppBuildWatchWorkerModule :: remote 'AppBuildWatchRunner'",
                     "AppForkReadinessWorkerModule :: remote 'AppForkReadinessRunner'",
+                    "AppUpstreamSyncWorkerModule :: remote 'AppLicenseService'",
+                    "AppUpstreamSyncWorkerModule :: remote 'AppSpecService'",
                     "TriggerAppRuntimeModule :: remote 'AppDeployBuildSourceAdapter'",
                     "TriggerAppRuntimeModule :: remote 'AppSpecService'",
                 ]),

@@ -85,3 +85,28 @@ describe('UpstreamPullRequestOpenService (APW-09)', () => {
         });
     });
 });
+
+describe('UpstreamPullRequestOpenService operator controls (APW-09 FR-41 / FR-46)', () => {
+    const saved = { ...process.env };
+    afterEach(() => {
+        process.env = { ...saved };
+    });
+
+    it('refuses everything while the kill switch is off', async () => {
+        process.env.APP_WORKS_UPSTREAM_PRS_ENABLED = 'false';
+        const { service, git } = build();
+        await expect(service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' })).resolves.toMatchObject({
+            code: 'upstreamPaused',
+        });
+        expect(git.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('refuses a denied upstream, case-insensitively', async () => {
+        process.env.APP_WORKS_UPSTREAM_DENY_LIST = 'other/thing, Example-Org/Helpdesk';
+        const { service, git } = build();
+        await expect(service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' })).resolves.toMatchObject({
+            code: 'deniedUpstream',
+        });
+        expect(git.createPullRequest).not.toHaveBeenCalled();
+    });
+});

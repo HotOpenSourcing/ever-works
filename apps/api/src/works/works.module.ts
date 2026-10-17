@@ -53,6 +53,10 @@ import { WorkAppRuntimeController } from './work-app-runtime.controller';
 import { WorkEvolveController } from './work-evolve.controller';
 import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
+// Lane aw-web-2 — the attestation dialog's read and the create form's catalog tab.
+import { WorkAppLicenseController } from './work-app-license.controller';
+import { AppsCatalogBlueprintsController } from './apps-catalog-blueprints.controller';
+import { AppsCatalogBlueprintsService } from './apps-catalog-blueprints.service';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
 import { MembersController } from './members.controller';
@@ -146,6 +150,8 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
     ],
     providers: [
         CacheEntryRepository,
+        // `GET /api/apps-catalog/blueprints` — the create form's catalog tab.
+        AppsCatalogBlueprintsService,
         WorksTemplateCatalogService,
         ExistingWebsiteLinkService,
         WorkCleanupService,
@@ -200,6 +206,10 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         WorkAppDeployController,
         WorkAppRuntimeController,
         WorkAppSpecController,
+        // `GET /api/works/:id/app-license` — the attestation dialog's read.
+        WorkAppLicenseController,
+        // `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps catalog".
+        AppsCatalogBlueprintsController,
         // APW-08 T25 + APW-04 (lane aw-ai) — `POST/GET /api/works/:id/evolve`,
         // `POST /api/works/:id/provision`, `GET /api/works/:id/provisioning`. Its services
         // come from `AgentAppWorksModule` (imported above).

@@ -107,6 +107,9 @@ import {
     AppUpstreamSyncDispatcherService,
 } from '@ever-works/agent/app-works';
 import { AppSpecService } from '@ever-works/agent/app-spec';
+// APW-03 T42 — the licence service the `app-upstream-sync` worker proxies for FR-37's
+// `previewUpstream` and FR-40's `request` (`APP_UPSTREAM_LICENSE_SERVICE`).
+import { AppLicenseService } from '@ever-works/agent/app-license';
 // APW-05 T19 + C7 — the `app-build-prepare` runner the worker proxies. The class,
 // not the port of the same name on `./app-builds.service`: the port is T17's
 // provisional seam (`run(payload)`) and is deliberately NOT what the RPC channel
@@ -696,6 +699,15 @@ export class TriggerInternalController implements OnModuleInit {
         // T47/T48 (lane aw-deploy-2) — the worker's `APPS_DOMAIN_DNS_SERVICE` (managed record removal).
         @Optional()
         private readonly appsDomainDnsService?: AppsDomainDnsServiceImpl,
+        // APW-03 T42 / APW-02 T33 — `AppLicenseService`, which the `app-upstream-sync`
+        // worker binds to `APP_UPSTREAM_LICENSE_SERVICE` by this name: FR-37's
+        // `previewUpstream` (is upstream's head licence worse?) and FR-40's `request`
+        // land here, where the spec state row and the licence registry are. Appended
+        // LAST + `@Optional()` per the arity rule above: with it absent the proxy answers
+        // the loud `Unknown remote target: AppLicenseService`, which the sync reads as
+        // "unknown" and takes the pull-request path (never an unasked fast-forward).
+        @Optional()
+        private readonly appLicenseService?: AppLicenseService,
     ) {}
 
     onModuleInit() {
@@ -917,6 +929,23 @@ export class TriggerInternalController implements OnModuleInit {
             // maps to `undefined` answers a loud "Unknown remote target" instead of
             // pretending the source was recorded in the member's repository.
             AppSourceInitializerService: this.appSourceInitializerService,
+            // APW-03 T42 / APW-02 T33 — the licence reads a worker may make, and ONLY
+            // those: a three-member facade (the `PluginAllowlistReader` precedent), so
+            // the derived allow-list never includes the owner-only `attest` or the
+            // evaluation writes. `previewUpstream` + `request` are the sync's
+            // `APP_UPSTREAM_LICENSE_SERVICE`; `getHostingEligibility` is the App runtime
+            // worker's `APP_LICENSE_SERVICE` read. Maps to `undefined` (a loud "Unknown
+            // remote target") when the service is not bound.
+            AppLicenseService: this.appLicenseService
+                ? {
+                      previewUpstream: (workId: string, owner: string, repo: string, sha: string) =>
+                          this.appLicenseService!.previewUpstream(workId, owner, repo, sha),
+                      request: (workId: string, reason?: string) =>
+                          this.appLicenseService!.request(workId, reason),
+                      getHostingEligibility: (workId: string, opts?: { commitSha?: string }) =>
+                          this.appLicenseService!.getHostingEligibility(workId, opts),
+                  }
+                : undefined,
             // AW-22 — `workspace-backup` calls `startFromPayload()` on the
             // runner, then `observeRun()` and `notifyFinished()` on the
             // service; the
