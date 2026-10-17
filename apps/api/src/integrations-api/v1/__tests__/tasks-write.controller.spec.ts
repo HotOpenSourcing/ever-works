@@ -273,7 +273,8 @@ describe('IntegrationTasksWriteController', () => {
                 estimateMinutes: 90,
             }),
             expect.anything(),
-            expect.objectContaining({ withinCreate: expect.any(Function) }),
+            // No externalRef: no link to write inside the create's transaction.
+            {},
         );
 
         await controller.update(
