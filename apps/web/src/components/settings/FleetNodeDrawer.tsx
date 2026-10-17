@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { AlertTriangle, KeyRound, Pin, PinOff, Plus, X } from 'lucide-react';
 import {
+    describeFleetModelProvider,
+    FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON,
     FLEET_NODE_UPGRADE_COMMAND,
     QUEUED_REASON_WAITING_FOR_RUNNER,
 } from '@ever-works/contracts';
@@ -213,7 +215,11 @@ export function FleetNodeDrawer({
     const queuedReasonLabel = (reason: string): string =>
         reason === QUEUED_REASON_WAITING_FOR_RUNNER
             ? t('jobs.queuedReasons.waitingForRunner')
-            : reason;
+            : reason === FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON
+              ? t('jobs.queuedReasons.modelUsageLimit')
+              : reason;
+    // Fleet usage limits: the model CLIs this machine's seat is out of quota on.
+    const modelThrottles = node.modelThrottles ?? [];
 
     // Fleet health signals (EW-776). `unknown` for a node that has never
     // reported — never `idle`, which would claim a readiness nobody has
@@ -328,6 +334,40 @@ export function FleetNodeDrawer({
                                 ) : null}
                             </dd>
                         </div>
+                        {/* Fleet usage limits: a model CLI out of quota on this
+                            machine, and until when. `online` + `idle` + nothing
+                            running is what this used to look like. */}
+                        {modelThrottles.length > 0 ? (
+                            <div
+                                className="col-span-2 sm:col-span-4"
+                                data-testid="fleet-node-drawer-model-throttles"
+                            >
+                                <dt className="text-text-muted dark:text-text-muted-dark text-xs">
+                                    {t('modelThrottles.title')}
+                                </dt>
+                                <dd className="text-text dark:text-text-dark">
+                                    {modelThrottles.map((throttle) => (
+                                        <span
+                                            key={throttle.provider}
+                                            className="block"
+                                            title={throttle.reason}
+                                            data-testid={`fleet-node-drawer-model-throttle-${throttle.provider}`}
+                                        >
+                                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-warning/10 text-warning">
+                                                {t('modelThrottles.entry', {
+                                                    cli: describeFleetModelProvider(throttle.provider),
+                                                    window: t(`modelThrottles.windows.${throttle.window}` as never),
+                                                    until: formatMoment(throttle.until),
+                                                })}
+                                            </span>
+                                        </span>
+                                    ))}
+                                    <span className="block text-xs text-text-muted dark:text-text-muted-dark">
+                                        {t('modelThrottles.hint')}
+                                    </span>
+                                </dd>
+                            </div>
+                        ) : null}
                         {/* Node housekeeping (EW-803): the disk floor this
                             machine enforces on ITSELF, read against the free
                             space it reports, plus what its reaper last
