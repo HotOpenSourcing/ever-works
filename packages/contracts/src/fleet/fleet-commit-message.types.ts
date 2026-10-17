@@ -161,7 +161,11 @@ function stripLeadingTypeWord(title: string, type: FleetCommitType): string {
 }
 
 function toSubjectText(text: string): string {
-	let subject = text.replace(/[.!\s]+$/, '');
+	// Trailing `.` / `!` / whitespace trimmed by hand: `/[.!\s]+$/` is
+	// polynomial on a long inner run of whitespace (CodeQL).
+	let end = text.length;
+	while (end > 0 && '.! \t'.includes(text[end - 1]!)) end -= 1;
+	let subject = text.slice(0, end);
 	// Lower-case the first letter unless it starts an acronym / identifier ("API", "iOS").
 	if (/^[A-Z][a-z]/.test(subject)) subject = subject.charAt(0).toLowerCase() + subject.slice(1);
 	return subject || text;

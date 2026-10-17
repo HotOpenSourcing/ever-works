@@ -447,17 +447,57 @@ function parseResetInstant(text: string, nowMs: number, timeZone: string | undef
 }
 
 function parseDuration(text: string): number {
+	// A hand-rolled scan rather than a global regex: `(\d+)\s*unit` re-tried
+	// from every position is polynomial on a long run of digits (CodeQL), and
+	// this reads untrusted CLI output.
 	let total = 0;
-	const unit = /(\d+)\s*(d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b/gi;
-	for (let match = unit.exec(text); match; match = unit.exec(text)) {
-		const value = Number(match[1]);
-		const name = match[2].toLowerCase();
-		if (name.startsWith('d')) total += value * 86_400_000;
-		else if (name.startsWith('h')) total += value * 3_600_000;
-		else if (name.startsWith('m')) total += value * 60_000;
-		else total += value * 1000;
+	let index = 0;
+	const length = Math.min(text.length, 200);
+	while (index < length) {
+		if (!isDigit(text.charCodeAt(index))) {
+			index += 1;
+			continue;
+		}
+		let value = 0;
+		while (index < length && isDigit(text.charCodeAt(index))) {
+			value = Math.min(value * 10 + (text.charCodeAt(index) - 48), 1_000_000);
+			index += 1;
+		}
+		while (index < length && text[index] === ' ') index += 1;
+		let word = '';
+		while (index < length && /[a-z]/i.test(text[index]!)) {
+			word += text[index]!.toLowerCase();
+			index += 1;
+		}
+		const unitMs = DURATION_UNITS[word];
+		if (unitMs !== undefined) total += value * unitMs;
 	}
 	return total;
+}
+
+const DURATION_UNITS: Record<string, number> = {
+	d: 86_400_000,
+	day: 86_400_000,
+	days: 86_400_000,
+	h: 3_600_000,
+	hr: 3_600_000,
+	hrs: 3_600_000,
+	hour: 3_600_000,
+	hours: 3_600_000,
+	m: 60_000,
+	min: 60_000,
+	mins: 60_000,
+	minute: 60_000,
+	minutes: 60_000,
+	s: 1000,
+	sec: 1000,
+	secs: 1000,
+	second: 1000,
+	seconds: 1000
+};
+
+function isDigit(code: number): boolean {
+	return code >= 48 && code <= 57;
 }
 
 function resolveZone(zone: string | undefined): string | null {
