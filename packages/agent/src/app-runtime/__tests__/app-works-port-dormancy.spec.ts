@@ -156,9 +156,16 @@ function boundTokenNames(): Set<string> {
  * document. Keep it sorted; it is read by people.
  */
 const BOUND: readonly string[] = [
+    // APW-05 T23 / §4.12 — bound 2026-10-17 by `AppBuildsModule` (outstanding-work
+    // A0.4): the Builds controller's edit check over `WorkOwnershipService`, and the
+    // pull token's platform-managed write over
+    // `PluginSettingsService.writePlatformManagedWorkSettings`. Until then every
+    // detail answered `canEdit: false` and every pull-token save `503`.
+    'APP_BUILD_EDIT_ACCESS',
     // APW-05 T16 — `BuildFacadeService`, provided by `AppBuildsModule` (2026-09-21).
     // Four services in this epic inject it; until it was bound every one of them
     // took its `pluginUnavailable` branch and no Build could be requested.
+    'APP_BUILD_PLATFORM_SETTINGS_WRITER',
     'APP_BUILD_PLUGIN_RESOLVER',
     // APW-05 T19/T20 — provided by `AppBuildsModule`. Found by THIS register on
     // its first run: they were in the unbound list when it was drafted from the
@@ -344,8 +351,6 @@ const UNBOUND: readonly string[] = [
     'APPS_DOMAIN_DNS_SERVICE',
     'APPS_TIER_POLICY',
     'APP_BLUEPRINT_APPLY_SERVICE',
-    'APP_BUILD_EDIT_ACCESS',
-    'APP_BUILD_PLATFORM_SETTINGS_WRITER',
     'APP_CLUSTER_OP_DISPATCHER',
     'APP_COMMIT_ANCESTRY',
     'APP_CUSTOM_DOMAIN_STORE',
