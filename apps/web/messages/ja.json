@@ -3643,7 +3643,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -6961,7 +6963,8 @@
                     "managedConcurrencyLimit": "他のビルドを待っています: 同時に実行できるのはアプリごとに最大 {perWork} 件、アカウントごとに最大 {perAccount} 件です。",
                     "buildValueNameReserved": "{name} は Ever Works で予約されているため、ビルドに渡せません。環境のエントリー名を変更してください。",
                     "buildServicePortRequired": "ビルドサービス {service} にはポートが必要です: Ever Works は「{image}」がどのポートで待ち受けるかを把握していません。",
-                    "verificationDependencyUnsupported": "検証ではまだ {kind} を起動できません。代わりにクラスター上でチェックを実行します。"
+                    "verificationDependencyUnsupported": "検証ではまだ {kind} を起動できません。代わりにクラスター上でチェックを実行します。",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "プルリクエストを確認",

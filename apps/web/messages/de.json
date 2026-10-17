@@ -3711,7 +3711,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -7029,7 +7031,8 @@
                     "managedConcurrencyLimit": "Wartet auf andere Builds: Es laufen höchstens {perWork} pro App und {perAccount} pro Konto gleichzeitig.",
                     "buildValueNameReserved": "{name} ist von Ever Works reserviert und kann nicht an einen Build übergeben werden. Benennen Sie den Umgebungseintrag um.",
                     "buildServicePortRequired": "Der Build-Service {service} benötigt einen Port: Ever Works weiß nicht, auf welchem Port „{image}“ lauscht.",
-                    "verificationDependencyUnsupported": "Eine Verifizierung kann {kind} noch nicht starten. Die Prüfung läuft stattdessen im Cluster."
+                    "verificationDependencyUnsupported": "Eine Verifizierung kann {kind} noch nicht starten. Die Prüfung läuft stattdessen im Cluster.",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "Pull Request prüfen",

@@ -495,7 +495,9 @@ describe('runAgentTaskJob — model-cli execution', () => {
 		const io = baseIo({
 			spawnFn,
 			usageLimitClock: { now: () => Date.parse('2026-10-17T15:27:00Z'), timeZone: 'Europe/Paris' },
-			scratchFs: scratchFs(JSON.stringify({ type: 'result', is_error: true, subtype: 'success', result: sentence }))
+			scratchFs: scratchFs(
+				JSON.stringify({ type: 'result', is_error: true, subtype: 'success', result: sentence })
+			)
 		});
 
 		const outcome = await runAgentTaskJob(job(payload), io);

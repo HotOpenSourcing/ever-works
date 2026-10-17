@@ -3643,7 +3643,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -6961,7 +6963,8 @@
                     "managedConcurrencyLimit": "अन्य बिल्ड की प्रतीक्षा है: एक साथ प्रति ऐप अधिकतम {perWork} और प्रति खाता {perAccount} चलते हैं।",
                     "buildValueNameReserved": "{name} Ever Works द्वारा आरक्षित है और बिल्ड में नहीं भेजा जा सकता। एनवायरनमेंट प्रविष्टि का नाम बदलें।",
                     "buildServicePortRequired": "बिल्ड सेवा {service} को एक पोर्ट चाहिए: Ever Works नहीं जानता कि \"{image}\" किस पोर्ट पर सुनता है।",
-                    "verificationDependencyUnsupported": "सत्यापन अभी {kind} शुरू नहीं कर सकता। इसके बजाय जाँच क्लस्टर पर चलती है।"
+                    "verificationDependencyUnsupported": "सत्यापन अभी {kind} शुरू नहीं कर सकता। इसके बजाय जाँच क्लस्टर पर चलती है।",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "पुल रिक्वेस्ट की समीक्षा करें",

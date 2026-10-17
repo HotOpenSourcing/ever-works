@@ -29,7 +29,14 @@ export interface AppModeCardsProps {
  * assistive technology announces why. `↑` / `↓` move between AVAILABLE modes
  * only; a disabled card is skipped but still read out.
  */
-export function AppModeCards({ modes, value, onChange, reasonParams, ownFork, disabled }: AppModeCardsProps) {
+export function AppModeCards({
+    modes,
+    value,
+    onChange,
+    reasonParams,
+    ownFork,
+    disabled,
+}: AppModeCardsProps) {
     const t = useTranslations('dashboard.workCreation.app');
     const tReason = useTranslations('dashboard.workCreation.app.reasons');
     const refs = useRef<Partial<Record<AppRepositoryMode, HTMLButtonElement | null>>>({});
@@ -42,8 +49,7 @@ export function AppModeCards({ modes, value, onChange, reasonParams, ownFork, di
         if (available.length === 0) return;
         const index = available.indexOf(current);
         const step = event.key === 'ArrowDown' ? 1 : -1;
-        const nextIndex =
-            index === -1 ? 0 : (index + step + available.length) % available.length;
+        const nextIndex = index === -1 ? 0 : (index + step + available.length) % available.length;
         const next = available[nextIndex];
         onChange(next);
         refs.current[next]?.focus();
@@ -57,10 +63,14 @@ export function AppModeCards({ modes, value, onChange, reasonParams, ownFork, di
                 const isAvailable = availability.available === true;
                 const checked = value === mode;
                 const reasonCode =
-                    !isAvailable && isAppSourceReasonCode(availability.reason) ? availability.reason : null;
+                    !isAvailable && isAppSourceReasonCode(availability.reason)
+                        ? availability.reason
+                        : null;
                 const reasonId = `app-work-mode-${mode}-reason`;
                 const title =
-                    mode === 'link' && ownFork ? t('modes.link.titleOwnFork') : t(`modes.${mode}.title`);
+                    mode === 'link' && ownFork
+                        ? t('modes.link.titleOwnFork')
+                        : t(`modes.${mode}.title`);
                 return (
                     <button
                         key={mode}

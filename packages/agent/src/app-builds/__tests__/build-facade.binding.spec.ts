@@ -29,9 +29,14 @@ function plugin(overrides: Partial<IBuildPlugin> = {}) {
         id: 'github-actions-build',
         name: 'GitHub Actions builds',
         buildKind: 'github-actions',
-        startBuild: jest.fn(async () => ({ providerRunId: null, dispatchedAt: '2026-10-17T10:00:00Z' })),
+        startBuild: jest.fn(async () => ({
+            providerRunId: null,
+            dispatchedAt: '2026-10-17T10:00:00Z',
+        })),
         cancelBuild: jest.fn(async () => undefined),
-        prepareRepository: jest.fn(async () => ({ workflow: { state: 'unchanged', contentSha256: '' } })),
+        prepareRepository: jest.fn(async () => ({
+            workflow: { state: 'unchanged', contentSha256: '' },
+        })),
         getBuild: jest.fn(async () => null),
         listRecentRuns: jest.fn(async () => ({ notModified: true, runs: [] })),
         repositoryWriter: jest.fn(() => writer),
@@ -39,7 +44,10 @@ function plugin(overrides: Partial<IBuildPlugin> = {}) {
     } as unknown as Record<string, jest.Mock> & { id: string };
 }
 
-function facade(p: ReturnType<typeof plugin>, settings: Record<string, unknown> = { reclaimDisk: true }) {
+function facade(
+    p: ReturnType<typeof plugin>,
+    settings: Record<string, unknown> = { reclaimDisk: true },
+) {
     const registry = {
         getAll: () => [{ state: 'loaded', manifest: { capabilities: ['build'] }, plugin: p }],
     } as never;
@@ -104,7 +112,11 @@ describe('BuildFacadeService — the full binding (A0.4)', () => {
         const binding = (await facade(p).resolve(WORK_ID, USER_ID)) as BuildFacadeBinding;
         const redact = (text: string) => text;
         await binding.getBuild!(
-            { repository: { owner: 'someone', repo: 'else' }, buildId: 'b1', providerRunId: '1' } as never,
+            {
+                repository: { owner: 'someone', repo: 'else' },
+                buildId: 'b1',
+                providerRunId: '1',
+            } as never,
             { token: 'other' },
             redact,
         );
@@ -118,7 +130,12 @@ describe('BuildFacadeService — the full binding (A0.4)', () => {
         const binding = (await facade(p).resolve(WORK_ID, USER_ID)) as BuildFacadeBinding;
         await binding.listRecentRuns!({ perPage: 20, etag: 'e1' });
         expect(p.listRecentRuns).toHaveBeenCalledWith(
-            { repository: { owner: 'acme', name: 'app' }, workflowPath: APP_BUILD_WORKFLOW_PATH, perPage: 20, etag: 'e1' },
+            {
+                repository: { owner: 'acme', name: 'app' },
+                workflowPath: APP_BUILD_WORKFLOW_PATH,
+                perPage: 20,
+                etag: 'e1',
+            },
             { token: TOKEN },
         );
     });
@@ -126,7 +143,12 @@ describe('BuildFacadeService — the full binding (A0.4)', () => {
     it('dispatches with the resolved settings, not an empty map', async () => {
         const p = plugin();
         const binding = (await facade(p).resolve(WORK_ID, USER_ID)) as BuildFacadeBinding;
-        await binding.startBuild!({ buildId: 'b1', ref: 'develop', sha: 'a'.repeat(40), mode: 'build' });
+        await binding.startBuild!({
+            buildId: 'b1',
+            ref: 'develop',
+            sha: 'a'.repeat(40),
+            mode: 'build',
+        });
         expect(p.startBuild.mock.calls[0][0].settings).toEqual({ reclaimDisk: true });
     });
 

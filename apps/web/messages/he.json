@@ -3711,7 +3711,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -7029,7 +7031,8 @@
                     "managedConcurrencyLimit": "ממתין לבניות אחרות: לכל היותר {perWork} לכל אפליקציה ו-{perAccount} לכל חשבון רצות בו-זמנית.",
                     "buildValueNameReserved": "{name} שמור על ידי Ever Works ולא ניתן להעביר אותו לבנייה. שנה את שם רשומת הסביבה.",
                     "buildServicePortRequired": "שירות הבנייה {service} צריך פורט: Ever Works אינו יודע על איזה פורט \"{image}\" מאזין.",
-                    "verificationDependencyUnsupported": "אימות עדיין לא יכול להפעיל {kind}. הבדיקה רצה על האשכול במקום זאת."
+                    "verificationDependencyUnsupported": "אימות עדיין לא יכול להפעיל {kind}. הבדיקה רצה על האשכול במקום זאת.",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "סקור את ה-pull request",

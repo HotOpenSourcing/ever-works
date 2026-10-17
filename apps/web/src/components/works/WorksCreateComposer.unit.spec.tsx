@@ -203,7 +203,9 @@ describe('WorksCreateComposer App chip (APW-01 T23, FR-47, ACC-01-13)', () => {
         const { container } = render(<WorksCreateComposer />);
         expect(container.querySelector('[data-testid="works-quick-add-app"]')).toBeNull();
         // The Repository chip is unaffected.
-        expect(container.querySelector('button[data-testid="works-quick-add-repo"]')).not.toBeNull();
+        expect(
+            container.querySelector('button[data-testid="works-quick-add-repo"]'),
+        ).not.toBeNull();
     });
 
     it('is absent while `app` is in disabledKinds', () => {

@@ -38,7 +38,10 @@ function build(agents: FakeAgent[], tasks: Array<{ agentId: string; updatedAt: D
             const rows = agents.filter((a) => {
                 if (filter.scope && a.scope !== filter.scope) return false;
                 if (filter.workId && a.workId !== filter.workId) return false;
-                if (filter.assignedWorkId && !(a.assigned ?? []).includes(String(filter.assignedWorkId)))
+                if (
+                    filter.assignedWorkId &&
+                    !(a.assigned ?? []).includes(String(filter.assignedWorkId))
+                )
                     return false;
                 return true;
             });
@@ -61,16 +64,26 @@ describe('AppWorkAgentResolverService (APW-08 T25)', () => {
 
     it('1. prefers the Agent of the most recent in_review/done Task', async () => {
         const { service, taskRepo } = build(
-            [agent('old'), agent('recent'), agent('pinned', { scope: AgentScope.WORK, workId: 'w1' })],
+            [
+                agent('old'),
+                agent('recent'),
+                agent('pinned', { scope: AgentScope.WORK, workId: 'w1' }),
+            ],
             [
                 { agentId: 'old', updatedAt: new Date('2026-10-01') },
                 { agentId: 'recent', updatedAt: new Date('2026-10-10') },
             ],
         );
-        await expect(service.resolve(input)).resolves.toEqual({ agentId: 'recent', source: 'recent-task' });
+        await expect(service.resolve(input)).resolves.toEqual({
+            agentId: 'recent',
+            source: 'recent-task',
+        });
         expect(taskRepo.findByUserIdFiltered).toHaveBeenCalledWith(
             'u1',
-            expect.objectContaining({ workId: 'w1', status: [TaskStatus.IN_REVIEW, TaskStatus.DONE] }),
+            expect.objectContaining({
+                workId: 'w1',
+                status: [TaskStatus.IN_REVIEW, TaskStatus.DONE],
+            }),
             undefined,
         );
     });
@@ -87,7 +100,10 @@ describe('AppWorkAgentResolverService (APW-08 T25)', () => {
                 { agentId: 'readonly', updatedAt: new Date('2026-10-09') },
             ],
         );
-        await expect(service.resolve(input)).resolves.toEqual({ agentId: 'pinned', source: 'pinned' });
+        await expect(service.resolve(input)).resolves.toEqual({
+            agentId: 'pinned',
+            source: 'pinned',
+        });
     });
 
     it('2/3. only pinned, then only assigned', async () => {
@@ -95,7 +111,10 @@ describe('AppWorkAgentResolverService (APW-08 T25)', () => {
             agent('a', { scope: AgentScope.TENANT, assigned: ['w1'] }),
             agent('b', { scope: AgentScope.TENANT }),
         ]);
-        await expect(assignedOnly.service.resolve(input)).resolves.toEqual({ agentId: 'a', source: 'assigned' });
+        await expect(assignedOnly.service.resolve(input)).resolves.toEqual({
+            agentId: 'a',
+            source: 'assigned',
+        });
     });
 
     it('4. the only tenant Agent is the default; two are ambiguous → null', async () => {
@@ -114,13 +133,18 @@ describe('AppWorkAgentResolverService (APW-08 T25)', () => {
     });
 
     it('lists committing candidates for the 409 picker', async () => {
-        const { service } = build([agent('a'), agent('b', { permissions: { canCommitToRepo: false } })]);
+        const { service } = build([
+            agent('a'),
+            agent('b', { permissions: { canCommitToRepo: false } }),
+        ]);
         await expect(service.listCandidates('u1')).resolves.toEqual([{ id: 'a', name: 'a' }]);
     });
 
     it('isCommittingAgent', () => {
         expect(isCommittingAgent(null)).toBe(false);
         expect(isCommittingAgent(agent('a') as never)).toBe(true);
-        expect(isCommittingAgent(agent('a', { status: AgentStatus.ARCHIVED }) as never)).toBe(false);
+        expect(isCommittingAgent(agent('a', { status: AgentStatus.ARCHIVED }) as never)).toBe(
+            false,
+        );
     });
 });

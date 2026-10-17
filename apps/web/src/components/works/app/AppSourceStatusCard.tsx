@@ -41,7 +41,9 @@ export type AppSourceFailureCopy =
  * `too_large_for_private_copy`, `access_revoked` and `setup_pull_request_closed`
  * get their own rows, and every other or unknown code uses the generic line.
  */
-export function appSourceFailureCopy(readiness: AppUpstreamStateResponse['readiness']): AppSourceFailureCopy {
+export function appSourceFailureCopy(
+    readiness: AppUpstreamStateResponse['readiness'],
+): AppSourceFailureCopy {
     const raw =
         readiness.reason === 'handler_failed' && readiness.handlerReason?.code
             ? readiness.handlerReason.code
@@ -69,7 +71,11 @@ export interface AppSourceStatusCardProps {
  * times) — and stops on a terminal state and on unmount. Reaching `ready`
  * refreshes the page so the rest of the Overview follows.
  */
-export function AppSourceStatusCard({ workId, initialState, blueprintName }: AppSourceStatusCardProps) {
+export function AppSourceStatusCard({
+    workId,
+    initialState,
+    blueprintName,
+}: AppSourceStatusCardProps) {
     const t = useTranslations('dashboard.workDetail.appSource');
     const router = useRouter();
     const [state, setState] = useState(initialState);
@@ -96,7 +102,9 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
               ? APP_SOURCE_WAITING_POLL_MS
               : null;
     const pollMax =
-        readinessState === 'preparing' ? APP_SOURCE_PREPARING_POLL_MAX : APP_SOURCE_WAITING_POLL_MAX;
+        readinessState === 'preparing'
+            ? APP_SOURCE_PREPARING_POLL_MAX
+            : APP_SOURCE_WAITING_POLL_MAX;
 
     const refresh = useCallback(async () => {
         try {
@@ -132,8 +140,11 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
 
     const relation = state.relation;
     const workRepo = `${state.dataRepository.owner}/${state.dataRepository.repo}`;
-    const upstreamRepo = state.upstream ? `${state.upstream.owner}/${state.upstream.repo}` : workRepo;
-    const outOfRetries = retryLimited || (state.readiness as { manualRetriesLeft?: number }).manualRetriesLeft === 0;
+    const upstreamRepo = state.upstream
+        ? `${state.upstream.owner}/${state.upstream.repo}`
+        : workRepo;
+    const outOfRetries =
+        retryLimited || (state.readiness as { manualRetriesLeft?: number }).manualRetriesLeft === 0;
 
     const onRetry = async () => {
         setRetrying(true);
@@ -141,7 +152,10 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
         try {
             const result = await retryUpstreamReadinessAction(workId);
             if (result.success) {
-                setState((prev) => ({ ...prev, readiness: { ...prev.readiness, state: 'preparing' } }));
+                setState((prev) => ({
+                    ...prev,
+                    readiness: { ...prev.readiness, state: 'preparing' },
+                }));
             } else if (result.code === 'retry_limit_reached') {
                 setRetryLimited(true);
             } else {
@@ -170,11 +184,16 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
                 {t('tryAgain')}
             </Button>
             {outOfRetries && (
-                <p className="text-xs text-text-muted dark:text-text-muted-dark" data-testid="app-source-retry-limit">
+                <p
+                    className="text-xs text-text-muted dark:text-text-muted-dark"
+                    data-testid="app-source-retry-limit"
+                >
                     {t('retryLimit')}
                 </p>
             )}
-            {retryFailed && <p className="text-xs text-red-600 dark:text-red-400">{t('retryFailed')}</p>}
+            {retryFailed && (
+                <p className="text-xs text-red-600 dark:text-red-400">{t('retryFailed')}</p>
+            )}
         </div>
     );
 
@@ -233,7 +252,10 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
             title = t('failedAccess');
             actions = (
                 <div className="flex flex-wrap items-start gap-3">
-                    <Link href={ROUTES.DASHBOARD_SETTINGS_CONNECTIONS} className="text-sm font-medium underline">
+                    <Link
+                        href={ROUTES.DASHBOARD_SETTINGS_CONNECTIONS}
+                        className="text-sm font-medium underline"
+                    >
                         {t('reconnectGitHub')}
                     </Link>
                     {retryButton}
@@ -243,7 +265,9 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
             title = t('setupPrClosed');
             actions = retryButton;
         } else {
-            title = t('failedOther', { reason: t(`failedReasons.${failure.leaf}` as 'failedReasons.other') });
+            title = t('failedOther', {
+                reason: t(`failedReasons.${failure.leaf}` as 'failedReasons.other'),
+            });
             actions = retryButton;
         }
     }
@@ -263,13 +287,23 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
                 {tone === 'warning' ? (
                     <AlertTriangle className="mt-0.5 h-4 w-4 text-amber-600" aria-hidden="true" />
                 ) : (
-                    <Loader2 className="mt-0.5 h-4 w-4 animate-spin text-text-secondary" aria-hidden="true" />
+                    <Loader2
+                        className="mt-0.5 h-4 w-4 animate-spin text-text-secondary"
+                        aria-hidden="true"
+                    />
                 )}
                 <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-text dark:text-text-dark" role="status">
+                    <h3
+                        className="text-sm font-semibold text-text dark:text-text-dark"
+                        role="status"
+                    >
                         {title}
                     </h3>
-                    {body && <p className="text-sm text-text-secondary dark:text-text-secondary-dark">{body}</p>}
+                    {body && (
+                        <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
+                            {body}
+                        </p>
+                    )}
                 </div>
             </div>
             {actions}

@@ -12,7 +12,13 @@ import { ENTRY_POINT_CATEGORY } from '../../safety/action-category';
 
 /** APW-08 T26 (chat tools), APW-04 (the feedback loop) and GAP-14 (the evolve-app template). */
 
-const work = { id: 'w1', userId: 'owner', kind: 'app', tenantId: null, organizationId: null } as never;
+const work = {
+    id: 'w1',
+    userId: 'owner',
+    kind: 'app',
+    tenantId: null,
+    organizationId: null,
+} as never;
 
 describe('request_app_change / get_app_change (APW-08 T26)', () => {
     function build(permissions: Record<string, boolean>, authorized = true) {
@@ -31,7 +37,11 @@ describe('request_app_change / get_app_change (APW-08 T26)', () => {
                 repository: { owner: 'me', repo: 'app' },
                 warnings: [],
             })),
-            getChange: jest.fn(async () => ({ taskId: 't1', taskUrl: '/tasks/t1', prUrl: 'https://github.com/me/app/pull/3' })),
+            getChange: jest.fn(async () => ({
+                taskId: 't1',
+                taskUrl: '/tasks/t1',
+                prUrl: 'https://github.com/me/app/pull/3',
+            })),
             listChanges: jest.fn(async () => []),
         };
         const authorize = jest.fn(async () => (authorized ? work : null));
@@ -46,17 +56,28 @@ describe('request_app_change / get_app_change (APW-08 T26)', () => {
     it('assigns the change to the chatting Agent when it may commit, and returns the Task link', async () => {
         const { tools, service, authorize } = build({ canCommitToRepo: true });
         const request = tools.find((t) => t.name === 'request_app_change')!;
-        const result = (await request.invoke({ workId: 'w1', request: 'Add SMS reminders' })) as Record<string, unknown>;
+        const result = (await request.invoke({
+            workId: 'w1',
+            request: 'Add SMS reminders',
+        })) as Record<string, unknown>;
         expect(authorize).toHaveBeenCalledWith('owner', 'w1', 'edit');
         expect(service.request).toHaveBeenCalledWith(
-            expect.objectContaining({ work, actorUserId: 'owner', request: 'Add SMS reminders', agentId: 'a1', channel: 'chat' }),
+            expect.objectContaining({
+                work,
+                actorUserId: 'owner',
+                request: 'Add SMS reminders',
+                agentId: 'a1',
+                channel: 'chat',
+            }),
         );
         expect(result).toMatchObject({ status: 'started', taskId: 't1', taskUrl: '/tasks/t1' });
     });
 
     it('lets the resolver pick when the chatting Agent may only assign Tasks', async () => {
         const { tools, service } = build({ canAssignTasks: true });
-        await tools.find((t) => t.name === 'request_app_change')!.invoke({ workId: 'w1', request: 'x' });
+        await tools
+            .find((t) => t.name === 'request_app_change')!
+            .invoke({ workId: 'w1', request: 'x' });
         expect((service.request.mock.calls[0] as unknown[])[0]).not.toHaveProperty('agentId');
     });
 
@@ -66,7 +87,9 @@ describe('request_app_change / get_app_change (APW-08 T26)', () => {
 
     it('answers not_found for a Work the owner cannot edit (no existence leak)', async () => {
         const { tools, service } = build({ canCommitToRepo: true }, false);
-        const result = await tools.find((t) => t.name === 'request_app_change')!.invoke({ workId: 'x', request: 'y' });
+        const result = await tools
+            .find((t) => t.name === 'request_app_change')!
+            .invoke({ workId: 'x', request: 'y' });
         expect(result).toMatchObject({ code: 'not_found' });
         expect(service.request).not.toHaveBeenCalled();
     });
@@ -100,8 +123,16 @@ describe('AppProvisioningFeedbackService (APW-04 loop)', () => {
 
     function build(task: Record<string, unknown> | null) {
         const works = { findById: jest.fn(async () => work) };
-        const taskRepo = { findByUserIdFiltered: jest.fn(async () => ({ rows: task ? [task] : [], total: task ? 1 : 0 })) };
-        const tasks = { runTask: jest.fn(async () => ({ runId: 'r2' })), update: jest.fn(async () => ({})) };
+        const taskRepo = {
+            findByUserIdFiltered: jest.fn(async () => ({
+                rows: task ? [task] : [],
+                total: task ? 1 : 0,
+            })),
+        };
+        const tasks = {
+            runTask: jest.fn(async () => ({ runId: 'r2' })),
+            update: jest.fn(async () => ({})),
+        };
         const chat = { post: jest.fn(async () => ({})) };
         const provisioning = { start: jest.fn(async () => ({ started: true, reason: 'queued' })) };
         const service = new AppProvisioningFeedbackService(
@@ -149,12 +180,25 @@ describe('AppProvisioningFeedbackService (APW-04 loop)', () => {
         await service.onBuildFailed(failed());
         expect(chat.post).toHaveBeenCalledWith(
             'owner',
-            expect.objectContaining({ taskId: 't1', body: expect.stringContaining('Build #4 failed') }),
+            expect.objectContaining({
+                taskId: 't1',
+                body: expect.stringContaining('Build #4 failed'),
+            }),
             {},
             expect.anything(),
         );
-        expect(tasks.update).toHaveBeenCalledWith('owner', 't1', { labels: ['app-provision', 'provision-attempt-1'] }, expect.anything());
-        expect(tasks.runTask).toHaveBeenCalledWith('owner', 't1', { agentId: 'a1' }, expect.anything());
+        expect(tasks.update).toHaveBeenCalledWith(
+            'owner',
+            't1',
+            { labels: ['app-provision', 'provision-attempt-1'] },
+            expect.anything(),
+        );
+        expect(tasks.runTask).toHaveBeenCalledWith(
+            'owner',
+            't1',
+            { agentId: 'a1' },
+            expect.anything(),
+        );
     });
 
     it('ignores a build of another branch while the provisioning PR is open', async () => {
@@ -164,7 +208,9 @@ describe('AppProvisioningFeedbackService (APW-04 loop)', () => {
     });
 
     it(`stops after ${MAX_PROVISION_ATTEMPTS} follow-ups`, async () => {
-        const { service, tasks, chat } = build(openTask(['app-provision', `provision-attempt-${MAX_PROVISION_ATTEMPTS}`]));
+        const { service, tasks, chat } = build(
+            openTask(['app-provision', `provision-attempt-${MAX_PROVISION_ATTEMPTS}`]),
+        );
         await service.onBuildFailed(failed());
         expect(tasks.runTask).not.toHaveBeenCalled();
         const body = (chat.post.mock.calls[0] as unknown as [string, { body: string }])[1].body;
@@ -175,26 +221,43 @@ describe('AppProvisioningFeedbackService (APW-04 loop)', () => {
         const { service, provisioning } = build({ ...openTask(), status: TaskStatus.DONE });
         await service.onBuildFailed(failed('main'));
         expect(provisioning.start).toHaveBeenCalledWith(
-            expect.objectContaining({ workId: 'w1', trigger: 'build-failed', restart: true, attempt: 1 }),
+            expect.objectContaining({
+                workId: 'w1',
+                trigger: 'build-failed',
+                restart: true,
+                attempt: 1,
+            }),
         );
     });
 
     it('posts a success without dispatching', async () => {
         const { service, tasks, chat } = build(openTask());
         await service.onBuildSucceeded(
-            new AppBuildSucceededEvent({ ...(failed().payload as object), status: 'succeeded', deployable: true } as never),
+            new AppBuildSucceededEvent({
+                ...(failed().payload as object),
+                status: 'succeeded',
+                deployable: true,
+            } as never),
         );
         expect(chat.post).toHaveBeenCalled();
         expect(tasks.runTask).not.toHaveBeenCalled();
     });
 
     it('reads runtime events in either envelope, and counts attempts from labels', () => {
-        expect(runtimeEvidence({ name: 'app.smoke.failed', payload: { workId: 'w1', code: 'http_500' } }, 'smoke', 'failed')).toMatchObject({
+        expect(
+            runtimeEvidence(
+                { name: 'app.smoke.failed', payload: { workId: 'w1', code: 'http_500' } },
+                'smoke',
+                'failed',
+            ),
+        ).toMatchObject({
             workId: 'w1',
             stage: 'smoke',
             outcome: 'failed',
         });
-        expect(runtimeEvidence({ workId: 'w1' }, 'deploy', 'failed')?.summary).toContain('The deployment failed');
+        expect(runtimeEvidence({ workId: 'w1' }, 'deploy', 'failed')?.summary).toContain(
+            'The deployment failed',
+        );
         expect(attemptOf({ labels: ['provision-attempt-2', 'x', 'provision-attempt-1'] })).toBe(2);
     });
 });
@@ -204,7 +267,10 @@ describe('AgentTemplatesService.createFromDefinition (GAP-14)', () => {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { AgentTemplatesService } = require('../../agents/agent-templates.service');
         const agents = {
-            create: jest.fn(async (_u: string, input: Record<string, unknown>) => ({ id: 'new', ...input })),
+            create: jest.fn(async (_u: string, input: Record<string, unknown>) => ({
+                id: 'new',
+                ...input,
+            })),
             setGuardrails: jest.fn(async () => ({ id: 'new', status: 'draft' })),
             resume: jest.fn(async () => ({ id: 'new', status: 'active' })),
         };
@@ -223,7 +289,9 @@ describe('AgentTemplatesService.createFromDefinition (GAP-14)', () => {
                 permissions: { canCommitToRepo: true, canOpenPullRequests: true },
             }),
         );
-        expect(files.write).toHaveBeenCalledWith(expect.objectContaining({ agentId: 'new', name: 'SOUL.md' }));
+        expect(files.write).toHaveBeenCalledWith(
+            expect.objectContaining({ agentId: 'new', name: 'SOUL.md' }),
+        );
         expect(agents.setGuardrails).toHaveBeenCalledWith('owner', 'new', { mode: 'autonomous' });
         expect(dto).toMatchObject({ status: 'active' });
     });

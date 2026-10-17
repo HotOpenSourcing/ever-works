@@ -26,7 +26,13 @@ export interface AppDeployTargetPickerProps {
  * its reason as text. The picker never invents a provider id — the form reads
  * `providerId` off the chosen target when it submits.
  */
-export function AppDeployTargetPicker({ targets, value, onChange, reasonParams, disabled }: AppDeployTargetPickerProps) {
+export function AppDeployTargetPicker({
+    targets,
+    value,
+    onChange,
+    reasonParams,
+    disabled,
+}: AppDeployTargetPickerProps) {
     const t = useTranslations('dashboard.workCreation.app');
     const tReason = useTranslations('dashboard.workCreation.app.reasons');
 
@@ -40,7 +46,9 @@ export function AppDeployTargetPicker({ targets, value, onChange, reasonParams, 
                 // `none` is always offered, whatever the preview says.
                 const isAvailable = target === 'none' || availability?.available === true;
                 const reasonCode =
-                    !isAvailable && isAppSourceReasonCode(availability?.reason) ? availability?.reason : null;
+                    !isAvailable && isAppSourceReasonCode(availability?.reason)
+                        ? availability?.reason
+                        : null;
                 const reasonId = `app-work-deploy-${target}-reason`;
                 return (
                     <label

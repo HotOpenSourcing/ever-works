@@ -139,7 +139,11 @@ interface LimitSignature {
  */
 const LIMIT_SIGNATURES: readonly LimitSignature[] = [
 	{ pattern: /\bhit (?:your|the) (?:[\w-]+ )?(?:usage |rate )?limit\b/i, strict: true },
-	{ pattern: /\b(?:usage|weekly|daily|session|5[- ]hour|five[- ]hour) limit (?:has been )?(?:reached|exceeded|hit)\b/i, strict: true },
+	{
+		pattern:
+			/\b(?:usage|weekly|daily|session|5[- ]hour|five[- ]hour) limit (?:has been )?(?:reached|exceeded|hit)\b/i,
+		strict: true
+	},
 	{ pattern: /\busage[_ ]limit[_ ](?:reached|exceeded)\b/i, strict: true },
 	{ pattern: /\brate_limit_error\b/, strict: true },
 	{ pattern: /\bexceeded retry limit,? last status:? 429\b/i, strict: true },
@@ -175,7 +179,9 @@ export function detectFleetModelUsageLimit(
 		resetsAt: resetsAt === null ? null : new Date(resetsAt).toISOString(),
 		retryAfter: new Date(
 			clampRetryAfterMs(
-				resetsAt === null ? nowMs + FLEET_MODEL_USAGE_LIMIT_FALLBACK_MS : resetsAt + FLEET_MODEL_USAGE_LIMIT_RESET_SLACK_MS,
+				resetsAt === null
+					? nowMs + FLEET_MODEL_USAGE_LIMIT_FALLBACK_MS
+					: resetsAt + FLEET_MODEL_USAGE_LIMIT_RESET_SLACK_MS,
 				nowMs
 			)
 		).toISOString(),
@@ -346,10 +352,16 @@ function classifyWindow(text: string): FleetModelUsageLimitWindow {
 
 function trimSentence(text: string): string {
 	// eslint-disable-next-line no-control-regex
-	const clean = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+	const clean = text
+		.replace(/[\u0000-\u001f\u007f]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 	const points = Array.from(clean);
 	return points.length > FLEET_MODEL_USAGE_LIMIT_MAX_MESSAGE_LENGTH
-		? `${points.slice(0, FLEET_MODEL_USAGE_LIMIT_MAX_MESSAGE_LENGTH - 1).join('').trimEnd()}…`
+		? `${points
+				.slice(0, FLEET_MODEL_USAGE_LIMIT_MAX_MESSAGE_LENGTH - 1)
+				.join('')
+				.trimEnd()}…`
 		: clean;
 }
 
@@ -390,9 +402,10 @@ function parseResetInstant(text: string, nowMs: number, timeZone: string | undef
 		return epoch[1].length >= 13 ? value : value * 1000;
 	}
 
-	const iso = /\b(?:resets?|reset at|try again at|available again at|until)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/i.exec(
-		text
-	);
+	const iso =
+		/\b(?:resets?|reset at|try again at|available again at|until)\s+(?:at\s+)?(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2}))/i.exec(
+			text
+		);
 	if (iso) {
 		const value = Date.parse(iso[1]);
 		if (Number.isFinite(value)) return value;
@@ -552,7 +565,14 @@ function zoneOffsetMs(instantMs: number, zone: string): number {
 }
 
 /** The UTC instant at which the wall clock in `zone` reads the given time. */
-function zonedWallTimeToUtc(year: number, month: number, day: number, hour: number, minute: number, zone: string): number {
+function zonedWallTimeToUtc(
+	year: number,
+	month: number,
+	day: number,
+	hour: number,
+	minute: number,
+	zone: string
+): number {
 	const asIfUtc = Date.UTC(year, month, day, hour, minute, 0);
 	const firstOffset = zoneOffsetMs(asIfUtc, zone);
 	const guess = asIfUtc - firstOffset;

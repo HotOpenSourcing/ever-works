@@ -72,7 +72,10 @@ export function buildAppChangeTools(args: BuildAppChangeToolsArgs): TaskToolDesc
             parameters: {
                 type: 'object',
                 properties: {
-                    workId: { type: 'string', description: 'The App Work id (the conversation’s Work).' },
+                    workId: {
+                        type: 'string',
+                        description: 'The App Work id (the conversation’s Work).',
+                    },
                     request: {
                         type: 'string',
                         description: 'What to change, in the owner’s words (1–4000 characters).',
@@ -101,7 +104,9 @@ export function buildAppChangeTools(args: BuildAppChangeToolsArgs): TaskToolDesc
                         error: result.message,
                         code: result.code,
                         ...(result.candidates ? { candidates: result.candidates } : {}),
-                        ...(result.createFromTemplate ? { createFromTemplate: result.createFromTemplate } : {}),
+                        ...(result.createFromTemplate
+                            ? { createFromTemplate: result.createFromTemplate }
+                            : {}),
                     };
                 }
                 return {
@@ -130,7 +135,10 @@ export function buildAppChangeTools(args: BuildAppChangeToolsArgs): TaskToolDesc
             type: 'object',
             properties: {
                 workId: { type: 'string', description: 'The App Work id.' },
-                taskId: { type: 'string', description: 'The change Task id from request_app_change (optional).' },
+                taskId: {
+                    type: 'string',
+                    description: 'The change Task id from request_app_change (optional).',
+                },
             },
             required: ['workId'],
         },
@@ -141,7 +149,9 @@ export function buildAppChangeTools(args: BuildAppChangeToolsArgs): TaskToolDesc
             if (!work) return { error: 'App Work not found or not accessible', code: 'not_found' };
             if (a.taskId) {
                 const change = await service.getChange(work, a.taskId);
-                return change ?? { error: 'No such change Task on this App Work', code: 'not_found' };
+                return (
+                    change ?? { error: 'No such change Task on this App Work', code: 'not_found' }
+                );
             }
             return { changes: await service.listChanges(work, 10) };
         },

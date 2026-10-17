@@ -3643,7 +3643,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -6961,7 +6963,8 @@
                     "managedConcurrencyLimit": "다른 빌드를 기다리는 중: 동시에 앱당 최대 {perWork}개, 계정당 최대 {perAccount}개가 실행됩니다.",
                     "buildValueNameReserved": "{name}은(는) Ever Works에서 예약한 이름이므로 빌드에 전달할 수 없습니다. 환경 항목의 이름을 바꾸세요.",
                     "buildServicePortRequired": "빌드 서비스 {service}에 포트가 필요합니다. Ever Works는 \"{image}\"이(가) 어떤 포트에서 수신 대기하는지 알 수 없습니다.",
-                    "verificationDependencyUnsupported": "검증에서는 아직 {kind}을(를) 시작할 수 없습니다. 대신 클러스터에서 검사가 실행됩니다."
+                    "verificationDependencyUnsupported": "검증에서는 아직 {kind}을(를) 시작할 수 없습니다. 대신 클러스터에서 검사가 실행됩니다.",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "풀 리퀘스트 검토",

@@ -90,7 +90,9 @@ export function formatRepositorySizeKb(sizeKb: number | null | undefined): strin
  * picks what it needs. Unknown values fall back to a neutral `—` rather than an
  * empty string, which would read as a sentence with a hole in it.
  */
-export function appSourceReasonParams(partial: Partial<AppSourceReasonParams> = {}): AppSourceReasonParams {
+export function appSourceReasonParams(
+    partial: Partial<AppSourceReasonParams> = {},
+): AppSourceReasonParams {
     const pick = (value: string | undefined) => (value && value.trim().length > 0 ? value : '—');
     return {
         owner: pick(partial.owner),

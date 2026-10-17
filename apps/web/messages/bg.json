@@ -3711,7 +3711,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -7029,7 +7031,8 @@
                     "managedConcurrencyLimit": "Изчакват се други билдове: едновременно се изпълняват най-много {perWork} на приложение и {perAccount} на акаунт.",
                     "buildValueNameReserved": "{name} е запазено от Ever Works и не може да бъде подадено на билд. Преименувайте записа в средата.",
                     "buildServicePortRequired": "Услугата за билд {service} се нуждае от порт: Ever Works не знае на кой порт слуша „{image}“.",
-                    "verificationDependencyUnsupported": "Проверката все още не може да стартира {kind}. Вместо това проверката се изпълнява в клъстера."
+                    "verificationDependencyUnsupported": "Проверката все още не може да стартира {kind}. Вместо това проверката се изпълнява в клъстера.",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "Преглед на pull request",

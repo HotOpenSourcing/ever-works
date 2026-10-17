@@ -239,7 +239,11 @@ export class AppChangeRequestService {
             this.logger.warn(
                 `App change: creating the Task on work ${work.id} failed (${errorText(error)}).`,
             );
-            return refused(422, 'taskCreateFailed', `The change Task could not be created: ${errorText(error)}`);
+            return refused(
+                422,
+                'taskCreateFailed',
+                `The change Task could not be created: ${errorText(error)}`,
+            );
         }
 
         // ── start it, through THE dispatch path ───────────────────────────────
@@ -321,7 +325,9 @@ export class AppChangeRequestService {
         try {
             return await this.resolver.resolve({ userId, workId, scope });
         } catch (error) {
-            this.logger.warn(`App change: the Agent resolver failed for work ${workId} (${errorText(error)}).`);
+            this.logger.warn(
+                `App change: the Agent resolver failed for work ${workId} (${errorText(error)}).`,
+            );
             return null;
         }
     }
@@ -392,7 +398,7 @@ export function changeDescription(
     return [
         `A member asked for a change to the App Work "${work.name ?? work.id}"${channel ? ` (via ${channel})` : ''}.`,
         '',
-        '## Requested change (the member\'s words, verbatim)',
+        "## Requested change (the member's words, verbatim)",
         '',
         '```text',
         request.replace(/```/g, '`​``'),
@@ -401,7 +407,7 @@ export function changeDescription(
         '## How to deliver it',
         '',
         `- Make the change in ${repo} on this Task's branch. The platform pushes the branch and opens a pull request into the repository's base branch; the change reaches the running app when that pull request is merged and the App Work rebuilds and redeploys.`,
-        '- Never push to or merge the default branch yourself, and never merge a pull request — merging is the owner\'s decision (or the merge policy\'s).',
+        "- Never push to or merge the default branch yourself, and never merge a pull request — merging is the owner's decision (or the merge policy's).",
         '- Keep the change focused on the request. Do not edit `.works/works.yml` protected blocks (`source`, `blueprint`, `license`, `upstreamSync`, `upstreamPullRequests`, `provisioning`) or CI workflows unless the request is explicitly about them.',
         '- If the request is ambiguous or needs a secret only the owner knows, ask instead of guessing.',
         '- Summarise what you changed and how to verify it when you finish.',

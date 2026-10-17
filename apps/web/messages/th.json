@@ -3643,7 +3643,9 @@
                         "daily": "daily limit",
                         "rate": "rate limit",
                         "usage": "usage limit"
-                    }
+                    },
+                    "clear": "Clear limit now",
+                    "cleared": "Usage limit cleared — the node takes that CLI’s work again from its next poll"
                 },
                 "housekeeping": {
                     "title": "Disk & workspaces",
@@ -6961,7 +6963,8 @@
                     "managedConcurrencyLimit": "กำลังรอบิลด์อื่น: รันพร้อมกันได้สูงสุด {perWork} ต่อแอป และ {perAccount} ต่อบัญชี",
                     "buildValueNameReserved": "{name} ถูกสงวนไว้โดย Ever Works และส่งให้บิลด์ไม่ได้ เปลี่ยนชื่อรายการสภาพแวดล้อม",
                     "buildServicePortRequired": "บริการบิลด์ {service} ต้องมีพอร์ต: Ever Works ไม่ทราบว่า “{image}” รอรับที่พอร์ตใด",
-                    "verificationDependencyUnsupported": "การตรวจสอบยังเริ่ม {kind} ไม่ได้ การตรวจสอบจึงรันบนคลัสเตอร์แทน"
+                    "verificationDependencyUnsupported": "การตรวจสอบยังเริ่ม {kind} ไม่ได้ การตรวจสอบจึงรันบนคลัสเตอร์แทน",
+                    "workflowPermissionMissing": "Your GitHub connection can't write workflow files, so Ever Works can't add its build workflow. Reconnect GitHub and allow the \"workflow\" permission."
                 },
                 "blockedAction": {
                     "reviewPullRequest": "ตรวจทานพูลรีเควสต์",

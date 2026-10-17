@@ -5,7 +5,10 @@ import { useTranslations } from 'next-intl';
 import { ShieldCheck, ShieldAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { getAppLicenseAction } from '@/app/actions/dashboard/app-license';
-import { APP_LICENSE_ROUTE_UNAVAILABLE, type WorkAppLicenseView } from '@/lib/api/app-license.types';
+import {
+    APP_LICENSE_ROUTE_UNAVAILABLE,
+    type WorkAppLicenseView,
+} from '@/lib/api/app-license.types';
 import { cn } from '@/lib/utils/cn';
 import { AppLicenseAttestationDialog } from './AppLicenseAttestationDialog';
 
@@ -38,7 +41,8 @@ export function AppLicenseCard({ workId, initialLicense = null }: AppLicenseCard
         try {
             const result = await getAppLicenseAction(workId);
             if (result.success && result.data) setState({ kind: 'ready', license: result.data });
-            else if (result.code === APP_LICENSE_ROUTE_UNAVAILABLE) setState({ kind: 'unavailable' });
+            else if (result.code === APP_LICENSE_ROUTE_UNAVAILABLE)
+                setState({ kind: 'unavailable' });
             else setState({ kind: 'error' });
         } catch {
             setState({ kind: 'error' });
@@ -51,14 +55,20 @@ export function AppLicenseCard({ workId, initialLicense = null }: AppLicenseCard
 
     if (state.kind === 'loading') {
         return (
-            <section className="rounded-lg border border-card-border p-4 text-sm text-text-secondary" data-testid="app-license-card">
+            <section
+                className="rounded-lg border border-card-border p-4 text-sm text-text-secondary"
+                data-testid="app-license-card"
+            >
                 {t('loading')}
             </section>
         );
     }
     if (state.kind !== 'ready') {
         return (
-            <section className="rounded-lg border border-card-border p-4 text-sm text-text-secondary" data-testid="app-license-card">
+            <section
+                className="rounded-lg border border-card-border p-4 text-sm text-text-secondary"
+                data-testid="app-license-card"
+            >
                 {state.kind === 'unavailable' ? t('unavailable') : t('error')}
             </section>
         );
@@ -86,22 +96,39 @@ export function AppLicenseCard({ workId, initialLicense = null }: AppLicenseCard
                     <ShieldCheck className="mt-0.5 h-4 w-4 text-emerald-600" aria-hidden="true" />
                 )}
                 <div className="space-y-1">
-                    <h3 className="text-sm font-semibold text-text dark:text-text-dark" data-testid="app-license-headline">
+                    <h3
+                        className="text-sm font-semibold text-text dark:text-text-dark"
+                        data-testid="app-license-headline"
+                    >
                         {license.spdx
-                            ? t('headline', { spdx: license.spdx, classLabel: t(`classes.${classLeaf}`) })
+                            ? t('headline', {
+                                  spdx: license.spdx,
+                                  classLabel: t(`classes.${classLeaf}`),
+                              })
                             : t('headlineUnknown')}
                     </h3>
                     {license.mixed && <p className="text-xs text-text-secondary">{t('mixed')}</p>}
-                    {license.scanIncomplete && <p className="text-xs text-text-secondary">{t('incomplete')}</p>}
+                    {license.scanIncomplete && (
+                        <p className="text-xs text-text-secondary">{t('incomplete')}</p>
+                    )}
                     <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
-                        {license.attestationRequired ? t('yourClusterAfterConfirm') : t('yourClusterAllowed')}
+                        {license.attestationRequired
+                            ? t('yourClusterAfterConfirm')
+                            : t('yourClusterAllowed')}
                     </p>
                     {attestation && !license.attestationRequired && (
-                        <p className="text-xs text-text-secondary" data-testid="app-license-confirmed">
-                            {t('confirmed', { date: new Date(attestation.attestedAt).toLocaleDateString() })}
+                        <p
+                            className="text-xs text-text-secondary"
+                            data-testid="app-license-confirmed"
+                        >
+                            {t('confirmed', {
+                                date: new Date(attestation.attestedAt).toLocaleDateString(),
+                            })}
                         </p>
                     )}
-                    <p className="text-xs text-text-muted dark:text-text-muted-dark">{t('disclaimer')}</p>
+                    <p className="text-xs text-text-muted dark:text-text-muted-dark">
+                        {t('disclaimer')}
+                    </p>
                 </div>
             </div>
 
