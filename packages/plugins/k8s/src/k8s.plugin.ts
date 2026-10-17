@@ -1472,7 +1472,16 @@ export class KubernetesPlugin implements IPlugin, IDeploymentPlugin {
 		);
 		const provider = descriptor ? this.dependencyProviderFor(descriptor.id) : null;
 		if (!provider) return { supported: false, reason: 'providerNotSupported' };
-		return provider.supports(kind, target);
+		return provider.supports(kind, this.dependencyProviderTarget(target));
+	}
+
+	/**
+	 * The target the in-cluster providers are asked about. This class: the target itself. APW-10 lite's
+	 * `k8s-apps-tier` subclass publishes the SAME providers for `ever-works-apps` (they provision inside the
+	 * App's own namespace either way) and maps its target onto the one the providers implement.
+	 */
+	protected dependencyProviderTarget(target: AppDependencyTarget): AppDependencyTarget {
+		return target;
 	}
 
 	/**
