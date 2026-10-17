@@ -80,7 +80,9 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
     // Read through a ref so a router object that is not referentially stable
     // can never restart the poll (and with it the 240 / 120 cap).
     const routerRef = useRef(router);
-    routerRef.current = router;
+    useEffect(() => {
+        routerRef.current = router;
+    }, [router]);
 
     useEffect(() => {
         setState(initialState);
