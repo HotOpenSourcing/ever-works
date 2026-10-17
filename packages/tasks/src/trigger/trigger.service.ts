@@ -100,13 +100,22 @@ import {
     APP_FORK_READINESS_TASK_ID,
     type appForkReadinessTask,
 } from '../tasks/trigger/app-fork-readiness.task';
+// APW-02 T31 — the `app-upstream-sync` one-shot (plan §6.1:656, §6.3). The id is
+// imported from the task module for the same reason the readiness id is.
+import {
+    APP_UPSTREAM_SYNC_TASK_ID,
+    type appUpstreamSyncTask,
+} from '../tasks/trigger/app-upstream-sync.task';
 import type { runPluginOperationTask } from '../tasks/trigger/run-plugin-operation.task';
 import { pluginOperationRunPayload } from './plugin-operation-run-payload';
 import type { NotificationChannelDeliveryPayload } from '@ever-works/agent/facades';
 // C10 — the readiness payload and dispatcher contract T23 declared (provisionally) in
 // `app-upstream-state.service.ts`, imported as a TYPE only: the service that produces the
 // payload is API-side, and this file only needs the shape the SDK call is checked against.
-import type { AppForkReadinessJobPayload } from '@ever-works/agent/app-works';
+import type {
+    AppForkReadinessJobPayload,
+    AppUpstreamSyncJobPayload,
+} from '@ever-works/agent/app-works';
 
 /**
  * EW-742 P3.2 T22 (stamping) — minimal stamp payload set on the
@@ -1491,6 +1500,60 @@ export class TriggerService
             return null;
         }
     }
+
+    /**
+     * APW-02 T31 — the `app-upstream-sync` job (plan §6.1:656, §6.3).
+     *
+     * The agent `AppWorksModule` binds `APP_UPSTREAM_SYNC_DISPATCHER` to this method
+     * (`UPSTREAM_SYNC_DISPATCH_METHOD` there), for the two call sites it declares:
+     * `AppUpstreamStateService` (**Sync now**, the divergence compare, the merged
+     * follow-up) and `AppUpstreamSyncDispatcherService.dispatchDue` (the cron).
+     *
+     * Same `null` contract as {@link dispatchAppForkReadiness}: unconfigured or a
+     * failed enqueue resolves `null` (the callers record "not queued"), never a throw.
+     *
+     * `idempotencyKey` is plan §6.1:662's `app-upstream-sync:<workId>:<trigger>:<minute
+     * bucket>`, so a double-clicked **Sync now** or two dispatcher ticks racing inside
+     * one minute collapse to one run. `concurrencyKey` is per Work, as readiness's is —
+     * the run's own claim (`beginSync`) is the real mutual exclusion.
+     */
+    async dispatchAppUpstreamSync(payload: AppUpstreamSyncJobPayload): Promise<string | null> {
+        if (!this.ensureConfigured()) {
+            return null;
+        }
+
+        const trigger = payload.trigger ?? 'schedule';
+        try {
+            const handle = await tasks.trigger<typeof appUpstreamSyncTask>(
+                APP_UPSTREAM_SYNC_TASK_ID,
+                payload,
+                this.stampTenantOptions({
+                    tags: ['app-upstream-sync', `work:${payload.workId}`, `trigger:${trigger}`],
+                    idempotencyKey: appUpstreamSyncIdempotencyKey(payload.workId, trigger),
+                    machine: this.machine() as any,
+                    concurrencyKey: `app-upstream-sync:${payload.workId}`,
+                }),
+            );
+
+            return handle.id;
+        } catch (error) {
+            this.logger.error('Failed to dispatch app-upstream-sync task', error as Error);
+            return null;
+        }
+    }
+}
+
+/**
+ * Plan §6.1:662 — `app-upstream-sync:<workId>:<trigger>:<minute bucket>`. The bucket is
+ * the UTC minute (`YYYYMMDDHHmm`), so the key is stable for one minute and never longer.
+ */
+export function appUpstreamSyncIdempotencyKey(
+    workId: string,
+    trigger: string,
+    now: Date = new Date(),
+): string {
+    const bucket = now.toISOString().slice(0, 16).replace(/[-:T]/g, '');
+    return `app-upstream-sync:${workId}:${trigger}:${bucket}`;
 }
 
 /**
