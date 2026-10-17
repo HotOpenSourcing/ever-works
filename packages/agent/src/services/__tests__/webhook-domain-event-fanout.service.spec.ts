@@ -22,8 +22,13 @@ import { ApiKey } from '../../entities/api-key.entity';
 import { Organization } from '../../entities/organization.entity';
 import { OrganizationMember } from '../../entities/organization-member.entity';
 import { PluginEventCursor } from '../../entities/plugin-event-cursor.entity';
+import { Task } from '../../entities/task.entity';
+import { Team } from '../../entities/team.entity';
+import { TeamMember } from '../../entities/team-member.entity';
 import { Tenant } from '../../entities/tenant.entity';
 import { User } from '../../entities/user.entity';
+import { Work } from '../../entities/work.entity';
+import { WorkMember } from '../../entities/work-member.entity';
 import { WebhookDelivery } from '../../entities/webhook-delivery.entity';
 import { WebhookSubscription } from '../../entities/webhook-subscription.entity';
 import { WebhookOwnerAccessService } from '../webhook-owner-access.service';
@@ -90,11 +95,27 @@ describe('WebhookDomainEventFanoutService', () => {
             ...overrides,
         });
 
+    const addToRoster = (userId: string, organizationId: string) =>
+        dataSource.getRepository(OrganizationMember).insert({
+            organizationId,
+            tenantId: TENANT,
+            userId,
+            role: 'member',
+            invitedById: null,
+            invitationId: null,
+            joinedAt: new Date(),
+        } as unknown as OrganizationMember);
+
     beforeAll(async () => {
         dataSource = await createDomainEventsDataSource();
         subscriptions = new WebhookSubscriptionRepository(
             dataSource.getRepository(WebhookSubscription),
         );
+    });
+
+    beforeEach(async () => {
+        // A fresh owner-access service per test: its read policy memoizes a user's
+        // roster / Teams / Works for a moment, which would leak between tests.
         fanout = new WebhookDomainEventFanoutService(
             dataSource,
             subscriptions,
@@ -103,16 +124,18 @@ describe('WebhookDomainEventFanoutService', () => {
             new WebhookOwnerAccessService(dataSource),
             enqueuer,
         );
-    });
-
-    beforeEach(async () => {
         await resetDomainEventsTables(dataSource);
         for (const table of [
             'webhook_deliveries',
             'webhook_subscriptions',
             'users',
             'organizations',
+            'organization_members',
             'api_keys',
+            'tasks',
+            'team_members',
+            'works',
+            'work_members',
         ]) {
             await dataSource.query(`DELETE FROM "${table}"`);
         }
@@ -137,6 +160,8 @@ describe('WebhookDomainEventFanoutService', () => {
             slug: `owner-${OWNER.slice(0, 6)}`,
             tenantId: TENANT,
         } as unknown as User);
+        // A user owner receives only the organizations it is on the roster of.
+        await addToRoster(OWNER, ORG_A);
     });
 
     afterAll(async () => {
@@ -420,6 +445,224 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(await verdict(withoutInbox.id, 'inbox.item.answered')).toBe(false);
         expect(await verdict(userOwned.id, 'inbox.item.answered')).toBe(false);
         expect(await verdict(withoutInbox.id, 'task.updated')).toBe(true);
+    });
+
+    describe('a user owner receives only what it could read in the app (review 2026-10-17 F2 / F3)', () => {
+        const MEMBER = randomUUID();
+        let teamId: string;
+
+        const makeUser = (id: string, name: string) =>
+            dataSource.getRepository(User).insert({
+                id,
+                username: name,
+                slug: `${name}-${id.slice(0, 6)}`,
+                tenantId: TENANT,
+            } as unknown as User);
+        const makeTask = async (overrides: Partial<Task>) => {
+            const tasks = dataSource.getRepository(Task);
+            return tasks.save(
+                tasks.create({
+                    userId: MEMBER,
+                    slug: `T-${randomUUID().slice(0, 6)}`,
+                    title: 'Team plan',
+                    createdByType: 'user',
+                    createdById: MEMBER,
+                    tenantId: TENANT,
+                    organizationId: ORG_A,
+                    ...overrides,
+                } as Partial<Task>),
+            );
+        };
+        const taskEvent = (task: Task, visibility: string, type = 'task.updated') =>
+            record({
+                type,
+                aggregate: { type: 'task', id: task.id, version: 2 },
+                data: { id: task.id, title: task.title, visibility, teamIds: [teamId] },
+                visibility,
+            });
+        const delivered = async () =>
+            (await deliveries()).map((row) => [row.subscriptionId, row.event] as const);
+
+        beforeEach(async () => {
+            await makeUser(MEMBER, 'member');
+            await addToRoster(MEMBER, ORG_A);
+            const teams = dataSource.getRepository(Team);
+            const team = await teams.save(
+                teams.create({
+                    userId: MEMBER,
+                    name: 'Core',
+                    slug: `core-${randomUUID().slice(0, 6)}`,
+                    tenantId: TENANT,
+                    organizationId: ORG_A,
+                } as Partial<Team>),
+            );
+            teamId = team.id;
+            await dataSource.getRepository(TeamMember).insert({
+                teamId,
+                memberType: 'user',
+                memberId: MEMBER,
+                tenantId: TENANT,
+                organizationId: ORG_A,
+            } as unknown as TeamMember);
+        });
+
+        it('skips the records of a Team for a user who is not on that Team', async () => {
+            await fanout.catchUp();
+            const outsider = await subscribe({ events: ['task.*'] });
+            const onTeam = await subscribe({
+                events: ['task.*'],
+                accountId: MEMBER,
+                ownerId: MEMBER,
+            });
+            const teamTask = await makeTask({
+                teamId,
+                visibility: 'team',
+                visibilityExplicit: false,
+            });
+            const orgTask = await makeTask({
+                visibility: 'organization',
+                visibilityExplicit: true,
+            });
+            await taskEvent(teamTask, 'team');
+            await taskEvent(orgTask, 'organization', 'task.created');
+            await record({
+                type: 'task.comment.created',
+                aggregate: { type: 'task', id: teamTask.id, version: 3 },
+                data: { id: randomUUID(), body: 'secret plan' },
+                visibility: 'team',
+            });
+            await dispatch();
+            await fanout.catchUp();
+
+            const rows = await delivered();
+            expect(rows.filter(([id]) => id === outsider.id).map(([, event]) => event)).toEqual([
+                'task.created',
+            ]);
+            expect(
+                rows
+                    .filter(([id]) => id === onTeam.id)
+                    .map(([, event]) => event)
+                    .sort(),
+            ).toEqual(['task.comment.created', 'task.created', 'task.updated']);
+        });
+
+        it('skips every event of an organization the user is not on the roster of', async () => {
+            await dataSource.query('DELETE FROM "organization_members"');
+            await fanout.catchUp();
+            await subscribe();
+            const orgTask = await makeTask({
+                visibility: 'organization',
+                visibilityExplicit: true,
+            });
+            await taskEvent(orgTask, 'organization');
+            await dispatch();
+            expect(await fanout.catchUp()).toBe(0);
+        });
+
+        it('the Tenant owner (a member without a roster row) still receives organization events', async () => {
+            await dataSource.query('DELETE FROM "organization_members"');
+            await dataSource.getRepository(Tenant).insert({
+                id: TENANT,
+                ownerUserId: OWNER,
+                slug: `t-${TENANT.slice(0, 6)}`,
+                displayName: 'Tenant',
+            } as unknown as Tenant);
+            await fanout.catchUp();
+            await subscribe();
+            const orgTask = await makeTask({
+                visibility: 'organization',
+                visibilityExplicit: true,
+            });
+            await taskEvent(orgTask, 'organization');
+            await dispatch();
+            expect(await fanout.catchUp()).toBe(1);
+        });
+
+        it('skips work.* events of a Work the user neither created nor is a member of', async () => {
+            await fanout.catchUp();
+            await subscribe({ events: ['work.*'] });
+            const works = dataSource.getRepository(Work);
+            const work = await works.save(
+                works.create({
+                    name: 'Payroll',
+                    slug: `payroll-${randomUUID().slice(0, 6)}`,
+                    userId: MEMBER,
+                    description: 'private work',
+                    tenantId: TENANT,
+                    organizationId: ORG_A,
+                } as Partial<Work>),
+            );
+            const workEvent = () =>
+                record({
+                    type: 'work.updated',
+                    aggregate: { type: 'work', id: work.id, version: 2 },
+                    data: { id: work.id, name: work.name, visibility: 'organization' },
+                    visibility: 'organization',
+                });
+            await workEvent();
+            await dispatch();
+            expect(await fanout.catchUp()).toBe(0);
+
+            await dataSource.getRepository(WorkMember).insert({
+                workId: work.id,
+                userId: OWNER,
+                tenantId: TENANT,
+                organizationId: ORG_A,
+            } as unknown as WorkMember);
+            await workEvent();
+            await dispatch();
+            expect(await fanout.catchUp()).toBe(1);
+        });
+
+        it('judges the tombstone of a deleted record from its own snapshot', async () => {
+            await fanout.catchUp();
+            await subscribe({ events: ['task.*'] });
+            const onTeam = await subscribe({
+                events: ['task.*'],
+                accountId: MEMBER,
+                ownerId: MEMBER,
+            });
+            const goneId = randomUUID();
+            await record({
+                type: 'task.deleted',
+                aggregate: { type: 'task', id: goneId, version: 4 },
+                data: { id: goneId, visibility: 'team', teamIds: [teamId], deleted: true },
+                visibility: 'team',
+            });
+            await dispatch();
+            await fanout.catchUp();
+            expect((await delivered()).map(([id]) => id)).toEqual([onTeam.id]);
+        });
+
+        it('re-checks at send time: a record made private after the fan-out is not sent', async () => {
+            const sub = await subscribe();
+            const orgTask = await makeTask({
+                visibility: 'organization',
+                visibilityExplicit: true,
+            });
+            const envelope = {
+                type: 'task.updated',
+                organizationId: ORG_A,
+                aggregate: { type: 'task', id: orgTask.id, version: 2 },
+                data: { id: orgTask.id, visibility: 'organization' },
+            };
+            const verdict = async (event?: typeof envelope) =>
+                (
+                    await new WebhookOwnerAccessService(dataSource).canReceive(
+                        sub,
+                        ORG_A,
+                        'task.updated',
+                        event,
+                    )
+                ).allowed;
+            expect(await verdict(envelope)).toBe(true);
+            // Without the envelope nothing of an organization goes to a user owner.
+            expect(await verdict()).toBe(false);
+            await dataSource
+                .getRepository(Task)
+                .update({ id: orgTask.id }, { visibility: 'private', visibilityExplicit: true });
+            expect(await verdict(envelope)).toBe(false);
+        });
     });
 
     it('ignores v1 subscriptions and paused v2 ones', async () => {
