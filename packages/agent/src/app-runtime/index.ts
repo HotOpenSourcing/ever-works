@@ -128,6 +128,9 @@ export { AppDeployDeploymentStoreAdapter } from './app-deploy-deployment.store';
 // relays they dial, and the Build-succeeded auto-deploy listener.
 export * from './app-image-reference.resolver';
 export * from './app-runtime-worker.adapters';
+// APW-10's minimal `AppsTierPolicy` — moved out of this folder for Resolution R-5 (it reads the
+// managed-tier ceiling; nothing under `app-runtime/` may), re-exported so importers are unchanged.
+export * from '../apps-tier/config-apps-tier-policy';
 export * from './app-build-succeeded.listener';
 // APW-06 T33 / T31 (lane aw-deploy-2) — the app-target/app-status service and the cluster-op gate.
 export * from './app-target.service';

@@ -9,7 +9,7 @@
 
 import { Logger } from '@nestjs/common';
 
-import { ConfigAppsTierPolicy } from '../app-runtime-worker.adapters';
+import { ConfigAppsTierPolicy } from '../../apps-tier/config-apps-tier-policy';
 import { AppTargetService, parseSettings, runtimeStateOf } from '../app-target.service';
 
 const KUBECONFIG = 'apiVersion: v1\nkind: Config\nclusters: []\n# sentinel-secret-7f3a\n';
