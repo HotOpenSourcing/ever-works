@@ -141,6 +141,17 @@ export interface CreateTaskInput {
      * file work that is invisible to the humans who own the board.
      */
     hiddenFromBoard?: boolean;
+    /**
+     * The Task is derived from a private record (a private Goal's loop
+     * iteration carries its title and brief): create it `private` with
+     * `visibilityExplicit`, instead of the insert-time `team` /
+     * `organization` default (review 2026-10-17 F1).
+     *
+     * SERVER-WRITTEN ONLY, like `delegationDepth`: deliberately absent from
+     * `CreateTaskDto`. A sub-task of a private parent gets the same stamp
+     * without it (the parent is loaded for the scope check anyway).
+     */
+    derivedFromPrivate?: boolean;
 }
 
 export interface UpdateTaskInput {
@@ -844,6 +855,11 @@ export class TasksService {
         // detect existing-cyclic data before insertion. Self-cycle is
         // impossible for a brand-new id, but a malformed parent chain
         // pointing into existing-cyclic data would propagate downstream.
+        // Record visibility (review 2026-10-17 F1): a Task derived from a private
+        // record, or a sub-task of a private Task (an agent breaking it down, a
+        // delegation), is private too. The insert default would make it `team` /
+        // `organization`, and with it the private parent's content and id.
+        let privateSource = input.derivedFromPrivate === true;
         if (input.parentTaskId) {
             const parent = await this.tasks.findByIdAndUser(
                 input.parentTaskId,
@@ -853,6 +869,7 @@ export class TasksService {
             if (!parent) {
                 throw new BadRequestException(`Parent Task ${input.parentTaskId} not found.`);
             }
+            if (parent.visibility === 'private') privateSource = true;
             this.assertParentScopeMatches(
                 {
                     missionId: input.missionId ?? null,
@@ -938,6 +955,9 @@ export class TasksService {
                         estimateMinutes: input.estimateMinutes ?? null,
                         dueSoonNotifiedAt: null,
                         hiddenFromBoard: input.hiddenFromBoard ?? false,
+                        ...(privateSource
+                            ? { visibility: 'private' as const, visibilityExplicit: true }
+                            : {}),
                     },
                     ...managerArg(manager),
                 );
