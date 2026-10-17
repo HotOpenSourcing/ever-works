@@ -201,7 +201,7 @@ visibility is derived (`team` when it sits on a team).
 | Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}` (§6.4)                                                                            | `goals:*`      | [goal](./contract/schemas/resources/goal.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateGoal` |
 | Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea` |
 | Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
-| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST`/`PATCH`/`DELETE /kb/folders`                                                                                                                                              | `kb:*`         | P3                                                                                                                      |
+| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                    |
 | Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                           |
 
 Request bodies for the P1 writes: [`contract/schemas/requests.schema.json`](./contract/schemas/requests.schema.json).
@@ -212,7 +212,8 @@ be `backlog` (default) or `todo`.
 ### 6.1 Creating with an external reference
 
 - Every create accepts `externalRef: {source:'gauzy', externalId, externalUrl}`.
-- The row and its `external_record_links` row are created **atomically**.
+- The row and its `external_record_links` row are created **atomically** (tasks and teams: one transaction, T17a;
+  comments, KB documents and folders: created, then linked, undone on a lost race).
 - A repeat with the same `externalRef` returns **200 with the existing entity**, not a duplicate. Together with
   `Idempotency-Key` this makes creates safe to retry.
 
@@ -408,14 +409,89 @@ Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
   flip (also when a reply whose routing failed leaves the item read), `deleted` with the last snapshot. `webUrl` is the
   Inbox deep link `/inbox?id=<id>`.
 
-## 10. Changes in `v1-draft.5` (CR-5, EW-P2-1 Ideas)
+## 10. Knowledge Base (P3, EW-P3-2) — `v1-draft.6`, CR-7
 
-Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
-[idea DTO](./contract/schemas/resources/idea.schema.json) is the `data` of `idea.created`, `idea.updated`,
-`idea.status_changed` and `idea.deleted` (catalog rows filled); request bodies `CreateIdea` / `UpdateIdea`; `idea` is a
-served link entity type; dismiss / restore are idempotent and answer `422 domain_rule` from any other status; writes act
-as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
-are recorded on the same board.
+The integration sees the Knowledge Base the way the Knowledge library does:
+
+- documents: the organization's own, plus those of every Work in the organization (never a personal Work's);
+- folders: the organization library folders (never a person's own Memory folders).
+
+Documents are Markdown with `[[path]]` wikilinks ([`kb-document`](./contract/schemas/resources/kb-document.schema.json)).
+Folders form a tree ([`kb-folder`](./contract/schemas/resources/kb-folder.schema.json)).
+
+**Reads** (`kb:read`). Each answers with `ETag: "<version>"`.
+
+| Route                   | Notes                                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /kb/documents`     | Filters: `scope=organization\|work`, `workId`, `folderId=<id>\|unfiled`, `class`, `status`, `includeArchived`. Keyset by `(updatedAt, id)`. |
+| `GET /kb/documents/:id` | Always carries the full body.                                                                                                               |
+| `GET /kb/folders`       |                                                                                                                                             |
+| `GET /kb/folders/:id`   |                                                                                                                                             |
+
+**Change detection.**
+
+- `revision` moves only on a real change to the title, description, tags, class or body.
+- `normalizedContentHash` fingerprints the body.
+- `version` moves on every recorded change (status, review, lock, folder) and is the `ETag`.
+
+**Writes** (`kb:write`) go through the app's Knowledge Base and Knowledge library. The Git mirror, embeddings, the
+organization overlay into Works, locks, revisions and the activity trail therefore behave as they do in the app.
+
+- **Who writes:** the `X-Act-As-User` person, else the key's owner.
+- **What they may change** is decided by the app's rules:
+    - a Work's documents need edit access to that Work;
+    - organization documents and library folders need organization admin.
+- **A refusal** answers `422 domain_rule`.
+- **`If-Match`** is compared with the version read just before the write, as for the Inbox (§9). Two writers sending
+  the same version at the same moment can both succeed.
+- **Creates** check `folderId` before writing: a folder that is not one of the organization's library folders answers
+  `404` and creates nothing. An organization document's `path` must stay relative: no `..` segment, `\`, NUL or drive
+  letter (`400`). A Work document's path follows the Work rule, which also requires a class folder first.
+- **An archived document** changes `status` only through `/unarchive`: a `PATCH` with `status` answers `422`. Other
+  edits are allowed.
+
+Document routes:
+
+| Route                              | Body                                                                                                                                         | Behaviour                                                                                                                                                                                |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /kb/documents`               | [`CreateKbDocument`](./contract/schemas/requests.schema.json): `scope {type, id}`, `folderId?`, `path`, `title`, `class`, `body`, `tags?`, … | `scope.type` is `organization` (the pinned organization) or `work` (one of its Works). `Idempotency-Key` is required. A repeated `externalRef` answers `200` with the existing document. |
+| `PATCH /kb/documents/:id`          | `UpdateKbDocument`                                                                                                                           | `If-Match` is optional. A fully locked document answers `422`.                                                                                                                           |
+| `DELETE /kb/documents/:id`         | —                                                                                                                                            | Deletes a Work document. An organization document answers `422 domain_rule`: organization documents are archived, never deleted.                                                         |
+| `POST /kb/documents/:id/accept`    | —                                                                                                                                            | The review.                                                                                                                                                                              |
+| `POST /kb/documents/:id/archive`   | —                                                                                                                                            |                                                                                                                                                                                          |
+| `POST /kb/documents/:id/unarchive` | —                                                                                                                                            |                                                                                                                                                                                          |
+| `POST /kb/documents/:id/move`      | `{folderId}`                                                                                                                                 | `null` means Unfiled.                                                                                                                                                                    |
+
+**Every class may live at organization scope.** Only `legal`, `style` and `seo` are inherited into Works.
+
+Folder routes:
+
+| Route                    | Body                 | Behaviour                                                                                       |
+| ------------------------ | -------------------- | ----------------------------------------------------------------------------------------------- |
+| `POST /kb/folders`       | `CreateKbFolder`     | `Idempotency-Key` is required. A repeated `externalRef` answers `200` with the existing folder. |
+| `PATCH /kb/folders/:id`  | `{name?, parentId?}` | Rename, move, or both.                                                                          |
+| `DELETE /kb/folders/:id` | —                    | Its subfolders are deleted too. Their documents move to Unfiled; no document is deleted.        |
+
+**Events.** `data` carries the same DTOs.
+
+| Event                        | Recorded when                                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------- |
+| `kb.document.created`        | A document is created.                                                                      |
+| `kb.document.updated`        | Content, lock or decision changes.                                                          |
+| `kb.document.moved`          | A document is filed or unfiled.                                                             |
+| `kb.document.archived`       | A document is archived.                                                                     |
+| `kb.document.unarchived`     | A document is restored.                                                                     |
+| `kb.document.review_changed` | A document is accepted, or a decision is accepted.                                          |
+| `kb.document.deleted`        | A document is deleted; `data` is the last snapshot.                                         |
+| `kb.folder.created`          | A folder is created.                                                                        |
+| `kb.folder.updated`          | A rename or a move. One event per folder of the rewritten subtree.                          |
+| `kb.folder.deleted`          | One event per folder of the subtree. The unfiled documents each record `kb.document.moved`. |
+
+- When a body exceeds 262144 UTF-8 bytes, the event carries `body: null, bodyOmitted: true`. `GET` the document for the body.
+- A document of a personal Work records no events.
+
+**Links.** `PUT /links/kb_document|kb_folder/...` still answers `400`. The consumer keys documents and folders by their
+Ever Works id; creates still de-duplicate on `externalRef`.
 
 ## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — `v1-draft.10`, CR-11
 
@@ -472,7 +548,16 @@ that changes nothing the DTO shows (Bcc, provider bookkeeping, metadata) records
 An event whose text + HTML exceed 262144 UTF-8 bytes carries `text: null, html: null, bodyOmitted: true`. A message
 outside any organization records none.
 
-## 12. Changes in `v1-draft.11` (CR-9, EW-P2-2 Goals)
+## 12. Changes in `v1-draft.5` (CR-5, EW-P2-1 Ideas)
+
+Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
+[idea DTO](./contract/schemas/resources/idea.schema.json) is the `data` of `idea.created`, `idea.updated`,
+`idea.status_changed` and `idea.deleted` (catalog rows filled); request bodies `CreateIdea` / `UpdateIdea`; `idea` is a
+served link entity type; dismiss / restore are idempotent and answer `422 domain_rule` from any other status; writes act
+as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
+are recorded on the same board.
+
+## 13. Changes in `v1-draft.11` (CR-9, EW-P2-2 Goals)
 
 Additive. Recorded as CR-9 on the plan's STATUS board: the Goals routes of §6.4 are served; the
 [goal DTO](./contract/schemas/resources/goal.schema.json) is the `data` of every `goal.*` event (catalog rows filled);
@@ -481,7 +566,7 @@ external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.p
 per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
 read-only runtime.
 
-## 13. Changes in `v1-draft.12` (CR-8, EW-P2-5 Missions)
+## 14. Changes in `v1-draft.12` (CR-8, EW-P2-5 Missions)
 
 Additive. Answers the Gauzy request CR-8 on the plan's STATUS board: the Missions routes of §6.5 are served; the
 [mission DTO](./contract/schemas/resources/mission.schema.json) is the `data` of `mission.created` / `updated` /
@@ -494,7 +579,7 @@ resumes it), `PATCH {status: 'failed'}` fails an active or paused Mission, and a
 `422 domain_rule`. A Mission delete also records what its cascade changes (`goal.updated`, `idea.updated`,
 `mission.updated`).
 
-## 14. Changes in `v1-draft.13` (CR-10, EW-P2-6 organizations and members)
+## 15. Changes in `v1-draft.13` (CR-10, EW-P2-6 organizations and members)
 
 Additive. Recorded as CR-10 on the plan's STATUS board: `POST /organizations` (`org:write`, §6.6) with the new catalog
 type `organization.created` (`data` = the organization DTO); member `role` values `owner` / `admin` / `member`

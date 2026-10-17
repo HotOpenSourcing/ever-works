@@ -112,6 +112,13 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       v2 serve them only to an integration key that holds `inbox:read`, never to a user-owned subscription; the gate is
       by event type (`recipientScopeForEventType` in `@ever-works/contracts`, also `email.*` → `email:read`).
       Pinned by `inbox-recording.spec.ts` and `webhook-domain-event-fanout.service.spec.ts`.
+    - The same mode records the **Knowledge Base** (P3, EW-P3-2): `kb.document.*` in `KnowledgeBaseService` (create,
+      edit, lock, decision, accept, archive / restore, delete with a tombstone, for Work and organization documents) and
+      `KnowledgeLibraryService` (`moved` when documents are filed, or unfiled by a folder delete); `kb.folder.*` in
+      `MemoryFoldersService` for organization library folders (a rename or a move records `updated` for the whole
+      rewritten subtree; a delete records `deleted` per folder, tombstones claimed before it). A document of a
+      personal Work records none. Background writers that go straight to the repository (Git-mirror reconcile,
+      consolidation markers) record nothing; the integration's reconcile covers them. Pinned by `kb-recording.spec.ts`.
     - **Agent email** (P4, EW-P4-2) records at the repository: `EmailMessageRepository` is the single writer of
       `email_messages` and reports every write after it lands (a new row, a status move, a delivery status, the Task
       link; inside the send-admission lock the reports wait for the commit), and `EmailMessageDomainEventsBridge`
