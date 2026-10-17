@@ -19,8 +19,22 @@ export interface LicenseHeaderFinding {
     readonly spdx: string;
 }
 
-const SPDX_TAG = /SPDX-License-Identifier:\s*([^\r\n*]+?)\s*(?:\*\/|-->|#\}|$)/gim;
-const LICENSE_TAG = /@license\s+([^\r\n*]+?)\s*(?:\*\/|-->|$)/gim;
+// Linear patterns: the rest of the line is captured whole and cut by `cutExpression`
+// (a lazy group followed by `\s*` and an alternation backtracks polynomially).
+const SPDX_TAG = /SPDX-License-Identifier:[ \t]*([^\r\n]*)/gi;
+const LICENSE_TAG = /@license[ \t]+([^\r\n]*)/gi;
+
+/** The expression part of a tag's line: up to a comment close (`*`, `-->`, `#}`), trimmed. */
+function cutExpression(rest: string): string {
+    let end = rest.length;
+    for (const stop of ['*', '-->', '#}']) {
+        const at = rest.indexOf(stop);
+        if (at !== -1 && at < end) {
+            end = at;
+        }
+    }
+    return rest.slice(0, end).trim();
+}
 
 /** The first 2 KiB of a text, by UTF-8 bytes, never splitting a character. */
 export function licenseHeadOf(text: string): string {
@@ -32,7 +46,16 @@ export function licenseHeadOf(text: string): string {
         return text;
     }
     // `toString` replaces a cut trailing sequence with U+FFFD; drop it.
-    return bytes.subarray(0, LICENSE_HEADER_SCAN_BYTES).toString('utf8').replace(/�+$/, '');
+    return trimTrailing(bytes.subarray(0, LICENSE_HEADER_SCAN_BYTES).toString('utf8'), '�');
+}
+
+/** Drop trailing characters from `chars` — a linear loop, not an end-anchored regex. */
+function trimTrailing(value: string, chars: string): string {
+    let end = value.length;
+    while (end > 0 && chars.includes(value[end - 1])) {
+        end -= 1;
+    }
+    return value.slice(0, end);
 }
 
 function acceptable(expression: string): boolean {
@@ -61,7 +84,7 @@ export function scanLicenseHeaderText(text: string): string[] {
         pattern.lastIndex = 0;
         let match: RegExpExecArray | null;
         while ((match = pattern.exec(head)) !== null) {
-            const expression = match[1].trim().replace(/[;,]+$/, '');
+            const expression = trimTrailing(cutExpression(match[1]), ';,');
             const key = expression.toLowerCase();
             if (!seen.has(key) && acceptable(expression)) {
                 seen.add(key);
