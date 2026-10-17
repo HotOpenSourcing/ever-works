@@ -49,6 +49,10 @@ import { AppSourceController } from './app-source.controller';
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
 import { WorkAppSpecController } from './work-app-spec.controller';
+// Lane aw-web-2 — the attestation dialog's read and the create form's catalog tab.
+import { WorkAppLicenseController } from './work-app-license.controller';
+import { AppsCatalogBlueprintsController } from './apps-catalog-blueprints.controller';
+import { AppsCatalogBlueprintsService } from './apps-catalog-blueprints.service';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
 import { MembersController } from './members.controller';
@@ -139,6 +143,8 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
     ],
     providers: [
         CacheEntryRepository,
+        // `GET /api/apps-catalog/blueprints` — the create form's catalog tab.
+        AppsCatalogBlueprintsService,
         WorksTemplateCatalogService,
         ExistingWebsiteLinkService,
         WorkCleanupService,
@@ -192,6 +198,10 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         // APW-03 T15 — the App spec tab's two routes.
         WorkAppDeployController,
         WorkAppSpecController,
+        // `GET /api/works/:id/app-license` — the attestation dialog's read.
+        WorkAppLicenseController,
+        // `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps catalog".
+        AppsCatalogBlueprintsController,
         // Wave 4 M3 — per-Work AgentRun summary counts.
         WorkRunsController,
         // Wave 7 feature h (v1) — open PRs across the Work's repos.
