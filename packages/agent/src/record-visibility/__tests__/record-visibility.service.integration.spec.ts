@@ -285,8 +285,10 @@ describe('RecordVisibilityService (better-sqlite3)', () => {
             });
             const rows = await repo(TeamResource).find({ where: { resourceId: goal.id } });
             expect(rows.map((row) => [row.resourceType, row.teamId])).toEqual([['goal', ids.team]]);
-            // Goals carry no `version` column yet: their visibility_changed records in P2.
-            expect(await events(goal.id)).toEqual([]);
+            // Goals are versioned since P2 (EW-P2-2): the narrowing records one notice.
+            expect((await events(goal.id)).map((event) => event.type)).toEqual([
+                'goal.visibility_changed',
+            ]);
         });
 
         it('a Team of another Organization is a 404 and changes nothing', async () => {

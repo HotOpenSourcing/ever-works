@@ -1,3 +1,13 @@
+// The `@ever-works/agent/services` barrel pulls in the whole agent graph (work module ->
+// subscriptions -> api notifications/auth -> ESM-only better-auth, website-generator
+// config), which this jest environment cannot load. The controller only needs these
+// classes as DI tokens and the spec hands it fakes: stub the barrel, as the other api
+// specs do.
+jest.mock('@ever-works/agent/services', () => ({
+    WorkLifecycleService: class WorkLifecycleService {},
+    WorkQueryService: class WorkQueryService {},
+}));
+
 jest.mock('@ever-works/agent/config', () => ({
     config: { everWorks: { projectWorks: { enabled: jest.fn(() => true) } } },
 }));

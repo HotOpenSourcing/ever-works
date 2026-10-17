@@ -212,9 +212,15 @@ describe('DomainEventRecorder', () => {
             ).toBe(1);
         });
 
-        it('refuses an aggregate that has no version column yet', async () => {
+        it('refuses an aggregate type that has no version column', async () => {
+            // Every catalog type is versioned since P2-P4 (goal, mission, kb_*,
+            // email_message); the guard still stands for a type outside the map.
             await expect(
-                recorder.bumpAggregateVersion(dataSource.manager, 'goal', randomUUID()),
+                recorder.bumpAggregateVersion(
+                    dataSource.manager,
+                    'not_an_aggregate' as never,
+                    randomUUID(),
+                ),
             ).rejects.toThrow(/no version column/);
         });
     });
