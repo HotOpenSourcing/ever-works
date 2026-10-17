@@ -14,7 +14,7 @@ import {
     type IntegrationVisibility,
     type IntegrationWorkDto,
 } from '@ever-works/contracts';
-import type { EntityManager } from 'typeorm';
+import { type EntityManager, In } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { ExternalIdentity } from '../entities/external-identity.entity';
 import { Goal } from '../entities/goal.entity';
@@ -252,6 +252,33 @@ export function toTaskCommentDto(
     };
 }
 
+/** The tables of the team-resource types that carry a record visibility (EW-P1-3). */
+const VISIBILITY_RESOURCE_ENTITIES = {
+    task: Task,
+    goal: Goal,
+    mission: Mission,
+    idea: WorkProposal,
+    agent: Agent,
+} as const;
+
+/** `type:id` of the team resources whose record is `private`. */
+async function privateTeamResources(
+    manager: EntityManager,
+    rows: readonly TeamResource[],
+): Promise<Set<string>> {
+    const hidden = new Set<string>();
+    for (const [type, entity] of Object.entries(VISIBILITY_RESOURCE_ENTITIES)) {
+        const ids = rows.filter((row) => row.resourceType === type).map((row) => row.resourceId);
+        if (ids.length === 0) continue;
+        const found = await manager.getRepository<{ id: string; visibility: string }>(entity).find({
+            where: { id: In(ids), visibility: 'private' },
+            select: { id: true },
+        });
+        for (const row of found) hidden.add(`${type}:${row.id}`);
+    }
+    return hidden;
+}
+
 /** The team's integration DTO (members and resources embedded), or `null` when gone. */
 export async function buildTeamSnapshot(
     manager: EntityManager,
@@ -259,12 +286,16 @@ export async function buildTeamSnapshot(
 ): Promise<AggregateSnapshot<IntegrationTeamDto> | null> {
     const team = await manager.getRepository(Team).findOne({ where: { id: teamId } });
     if (!team) return null;
-    const [members, resources] = await Promise.all([
+    const [members, linked] = await Promise.all([
         manager.getRepository(TeamMember).find({ where: { teamId }, order: { createdAt: 'ASC' } }),
         manager
             .getRepository(TeamResource)
             .find({ where: { teamId }, order: { createdAt: 'ASC' } }),
     ]);
+    // Review 2026-10-17 F4: a record made private keeps its `team_resources` row, but
+    // its id never goes to an integration (nor can a full-set PUT detach it).
+    const hidden = await privateTeamResources(manager, linked);
+    const resources = linked.filter((row) => !hidden.has(`${row.resourceType}:${row.resourceId}`));
     const dto: IntegrationTeamDto = {
         id: team.id,
         organizationId: team.organizationId ?? '',

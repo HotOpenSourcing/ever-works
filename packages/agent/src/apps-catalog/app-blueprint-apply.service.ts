@@ -115,6 +115,12 @@ export interface AppBlueprintInlineApplyCapability extends AppBlueprintApplyCapa
         relation: AppBlueprintRelation;
         matchSource?: string | null;
         userId?: string;
+        /**
+         * The SOURCE repository's owner (the upstream for a fork or private copy, the
+         * Work Repository for a link) — what decides whether a private Blueprint may be
+         * read (`allowsPrivateBlueprint`).
+         */
+        sourceOwner?: string | null;
     }): Promise<AppBlueprintComposeResult | AppBlueprintComposeRefusal>;
     recordOutcome(
         workId: string,
@@ -248,15 +254,16 @@ export class AppBlueprintApplyService implements AppBlueprintInlineApplyCapabili
         if (!work) {
             return { code: APP_BLUEPRINT_APPLY_CODES.workNotFound };
         }
-        const relation: AppBlueprintRelation = relationOf(
-            (work.sourceRepository ?? {}) as AppSourceRecord,
-        );
+        const record = (work.sourceRepository ?? {}) as AppSourceRecord;
+        const relation: AppBlueprintRelation = relationOf(record);
         const composed = await this.compose({
             workId,
             blueprintId,
             relation,
             matchSource: options?.matchSource ?? null,
             userId: options?.userId,
+            sourceOwner:
+                relation === 'link' ? (record.owner ?? null) : (record.upstream?.owner ?? null),
         });
         return composed.status === 'composed' ? { status: 'composed' } : { code: composed.code };
     }
@@ -267,6 +274,12 @@ export class AppBlueprintApplyService implements AppBlueprintInlineApplyCapabili
         relation: AppBlueprintRelation;
         matchSource?: string | null;
         userId?: string;
+        /**
+         * The SOURCE repository's owner (the upstream for a fork or private copy, the
+         * Work Repository for a link) — what decides whether a private Blueprint may be
+         * read (`allowsPrivateBlueprint`).
+         */
+        sourceOwner?: string | null;
     }): Promise<AppBlueprintComposeResult | AppBlueprintComposeRefusal> {
         if (!this.resolver) {
             return { status: 'refused', code: APP_BLUEPRINT_APPLY_CODES.catalogUnavailable };
@@ -276,7 +289,9 @@ export class AppBlueprintApplyService implements AppBlueprintInlineApplyCapabili
         try {
             // G05 — the explicit path names `ever-works/<id>-template` directly, whatever
             // the Work's relation; the Work Repository itself is never read as a Blueprint.
-            read = await this.resolver.readBlueprintDocument(input.blueprintId);
+            read = await this.resolver.readBlueprintDocument(input.blueprintId, {
+                sourceOwner: input.sourceOwner ?? null,
+            });
         } catch (error) {
             if (!(error instanceof AppsCatalogCredentialUnavailableError)) {
                 this.logger.warn(
