@@ -35,7 +35,7 @@ import {
     DomainEventPublisher,
     recordAfterWrite,
 } from '../domain-events/domain-event-publisher.service';
-import { withoutAggregateVersion } from '../domain-events/domain-event-context';
+import { saveGoalColumns } from './goal-column-save';
 import {
     ownershipRelationScopeOf,
     ownershipScopeOf,
@@ -90,6 +90,25 @@ export const MAX_MODEL_HINT_CHARS = 120;
 
 /** Bound on a single nudge so a steering message can't be a payload. */
 export const MAX_NUDGE_CHARS = 2000;
+
+/**
+ * The columns each orchestrator write decides (EW-P2-2 follow-up): saves write only these,
+ * never the rest of a Goal read earlier (see {@link saveGoalColumns}).
+ */
+const LIMIT_COLUMNS = [
+    'spendCapCents',
+    'wallClockLimitHours',
+    'stuckThresholdIterations',
+    'maxConcurrentIterations',
+    'sessionBudgetMinutes',
+    'gracePeriodMinutes',
+    'executionTarget',
+    'plannerModelHint',
+    'workerModelHint',
+    'assignedAgentId',
+] as const satisfies ReadonlyArray<keyof Goal & keyof UpdateGoalLimitsInput>;
+/** A Definition-of-Done write: the checklist and the progress mark it may move. */
+const DOD_COLUMNS: ReadonlyArray<keyof Goal> = ['dodCriteria', 'lastProgressIteration'];
 
 /** How many iteration Tasks one rollup will ever consider. */
 const MAX_GOAL_TASKS = 500;
@@ -273,7 +292,13 @@ export class GoalOrchestratorService {
             );
         }
 
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        // Only the limits this call set (EW-P2-2 follow-up): the copy was read before the
+        // checks above, so its other columns may be stale.
+        const saved = await saveGoalColumns(
+            this.goals,
+            goal,
+            LIMIT_COLUMNS.filter((column) => input[column] !== undefined),
+        );
         const after = this.limitsSnapshot(saved);
         await this.recordEvent(saved, {
             kind: 'control',
@@ -316,13 +341,13 @@ export class GoalOrchestratorService {
         const publisher = this.domainEvents;
         const saved = publisher
             ? await publisher.transaction(async (manager) => {
-                  const row = await manager.getRepository(Goal).save(withoutAggregateVersion(goal));
+                  const row = await saveGoalColumns(manager.getRepository(Goal), goal, DOD_COLUMNS);
                   await publisher.changed(manager, 'goal', row.id, 'goal.updated', {
                       changedFields: ['dodCriteria', 'progress'],
                   });
                   return row;
               })
-            : await this.goals.save(withoutAggregateVersion(goal));
+            : await saveGoalColumns(this.goals, goal, DOD_COLUMNS);
         const summary = summarizeDoD(saved.dodCriteria);
         await this.recordEvent(saved, {
             kind: 'dod',
@@ -367,7 +392,7 @@ export class GoalOrchestratorService {
         this.assertDod(merged);
         goal.dodCriteria = merged;
 
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, DOD_COLUMNS);
         await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         await this.recordEvent(saved, {
             kind: 'dod',
@@ -416,7 +441,7 @@ export class GoalOrchestratorService {
         }
         this.markProgressIfChanged(goal, beforeSignature);
 
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, DOD_COLUMNS);
         await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         await this.recordEvent(saved, {
             kind: 'dod',
@@ -463,7 +488,7 @@ export class GoalOrchestratorService {
         goal.dodCriteria = normalizeDoDCriteria(next);
         this.markProgressIfChanged(goal, beforeSignature);
 
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, DOD_COLUMNS);
         await this.recordGoalEvent(saved.id, 'goal.updated', ['dodCriteria', 'progress']);
         const summary = summarizeDoD(saved.dodCriteria);
         await this.recordEvent(saved, {
@@ -505,7 +530,7 @@ export class GoalOrchestratorService {
         if (!goal.loopStartedAt) {
             goal.loopStartedAt = new Date();
         }
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['loopStatus', 'loopStartedAt']);
         await this.recordEvent(saved, {
             kind: 'control',
             message: resuming
@@ -530,7 +555,7 @@ export class GoalOrchestratorService {
             );
         }
         goal.loopStatus = 'paused';
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['loopStatus']);
         await this.recordEvent(saved, {
             kind: 'control',
             message: `Loop paused by operator at iteration ${saved.iteration}.`,
@@ -551,7 +576,7 @@ export class GoalOrchestratorService {
         const cancelled = await this.cancelActiveRun(goal, userId);
         goal.loopStatus = 'cancelled';
         goal.activeAgentId = null;
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['loopStatus', 'activeAgentId']);
         await this.recordEvent(saved, {
             kind: 'complete',
             message:
@@ -585,7 +610,7 @@ export class GoalOrchestratorService {
         const cancelled = await this.cancelActiveRun(goal, userId);
         goal.loopStatus = 'running';
         if (!goal.loopStartedAt) goal.loopStartedAt = new Date();
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['loopStatus', 'loopStartedAt']);
         await this.recordEvent(saved, {
             kind: 'control',
             message: cancelled
@@ -674,7 +699,7 @@ export class GoalOrchestratorService {
         if (goal.loopStatus === 'running') {
             goal.loopStatus = 'paused';
         }
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['archivedAt', 'loopStatus']);
         await this.recordGoalEvent(saved.id, 'goal.archived', ['archivedAt']);
         await this.recordEvent(saved, { kind: 'control', message: 'Goal archived.' });
         await this.recordActivity(saved, ActivityActionType.GOAL_ARCHIVED, 'archive', {});
@@ -685,7 +710,7 @@ export class GoalOrchestratorService {
         const goal = await this.findOrThrow(userId, goalId);
         if (!goal.archivedAt) return toGoalDto(goal);
         goal.archivedAt = null;
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['archivedAt']);
         await this.recordGoalEvent(saved.id, 'goal.unarchived', ['archivedAt']);
         await this.recordEvent(saved, { kind: 'control', message: 'Goal unarchived.' });
         await this.recordActivity(saved, ActivityActionType.GOAL_UNARCHIVED, 'unarchive', {});
@@ -746,7 +771,7 @@ export class GoalOrchestratorService {
         const spent = await this.computeSpend(goal.id);
         if (goal.spentCents !== spent) {
             goal.spentCents = spent;
-            return toGoalDto(await this.goals.save(withoutAggregateVersion(goal)));
+            return toGoalDto(await saveGoalColumns(this.goals, goal, ['spentCents']));
         }
         return toGoalDto(goal);
     }
@@ -825,7 +850,7 @@ export class GoalOrchestratorService {
         const spent = await this.computeSpend(goal.id);
         if (goal.spentCents !== spent) {
             goal.spentCents = spent;
-            await this.goals.save(withoutAggregateVersion(goal));
+            await saveGoalColumns(this.goals, goal, ['spentCents']);
         }
 
         const activeRuns = await this.findActiveRuns(goal.id);
@@ -1007,7 +1032,7 @@ export class GoalOrchestratorService {
         const last = slots[slots.length - 1];
         goal.iteration = last.iteration;
         goal.activeAgentId = last.agentId;
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, ['iteration', 'activeAgentId']);
 
         for (const slot of slots) {
             await this.recordEvent(saved, {
@@ -1092,7 +1117,13 @@ export class GoalOrchestratorService {
             goal.outcome = GoalOutcome.ACHIEVED;
             goal.nextCheckAt = null;
         }
-        const saved = await this.goals.save(withoutAggregateVersion(goal));
+        const saved = await saveGoalColumns(this.goals, goal, [
+            'loopStatus',
+            'activeAgentId',
+            'status',
+            'outcome',
+            'nextCheckAt',
+        ]);
         if (saved.status !== statusBefore) {
             await this.recordGoalEvent(saved.id, 'goal.status_changed', ['status', 'outcome'], {
                 status: statusBefore,
