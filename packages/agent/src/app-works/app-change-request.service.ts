@@ -69,8 +69,12 @@ export interface AppChangeAccepted {
     readonly httpStatus: 202;
     readonly taskId: string;
     readonly taskSlug: string;
+    /** The Task's page — what a chat reply links to (`/tasks/<id>`). */
+    readonly taskUrl: string;
     readonly runId: string | null;
     readonly agentId: string;
+    /** `true` when this request created the Agent (GAP-14's one-click path). */
+    readonly agentCreated?: boolean;
     readonly agentSource: AppWorkAgentSource | 'explicit';
     readonly dispatched: boolean;
     readonly parked: boolean;
@@ -104,6 +108,8 @@ export type AppChangeRequestResult = AppChangeAccepted | AppChangeRefused;
 export interface AppChangeSummary {
     readonly taskId: string;
     readonly taskSlug: string;
+    /** `/tasks/<id>` — the chat reply's link. `prUrl` is the PR's, once the run opened one. */
+    readonly taskUrl: string;
     readonly title: string;
     readonly status: string;
     readonly agentId: string | null;
@@ -269,6 +275,7 @@ export class AppChangeRequestService {
             httpStatus: 202,
             taskId: task.id,
             taskSlug: task.slug,
+            taskUrl: taskUrlOf(task.id),
             runId,
             agentId,
             agentSource,
@@ -291,19 +298,18 @@ export class AppChangeRequestService {
         );
         return [...rows]
             .sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt))
-            .map((task) => ({
-                taskId: task.id,
-                taskSlug: task.slug,
-                title: task.title,
-                status: String(task.status),
-                agentId: task.agentId ?? null,
-                branch: task.branchRef ?? null,
-                prUrl: task.prUrl ?? null,
-                prState: task.prState ?? null,
-                ciState: task.ciState ?? null,
-                createdAt: isoOf(task.createdAt),
-                updatedAt: isoOf(task.updatedAt),
-            }));
+            .map((task) => summaryOf(task));
+    }
+
+    /**
+     * One change Task of this Work — the chat tool's "what happened to my change?" read.
+     * `null` for a Task that is not on this Work (no existence leak across Works).
+     */
+    async getChange(work: Work, taskId: string): Promise<AppChangeSummary | null> {
+        if (!this.taskRepository || !taskId) return null;
+        const task = await this.taskRepository.findById(taskId).catch(() => null);
+        if (!task || task.workId !== work.id || task.userId !== work.userId) return null;
+        return summaryOf(task);
     }
 
     private async resolve(
@@ -324,6 +330,28 @@ export class AppChangeRequestService {
 /* -------------------------------------------------------------------------- *
  * Pure helpers
  * -------------------------------------------------------------------------- */
+
+/** The Task page a chat reply or card links to. */
+export function taskUrlOf(taskId: string): string {
+    return `/tasks/${taskId}`;
+}
+
+function summaryOf(task: Task): AppChangeSummary {
+    return {
+        taskId: task.id,
+        taskSlug: task.slug,
+        taskUrl: taskUrlOf(task.id),
+        title: task.title,
+        status: String(task.status),
+        agentId: task.agentId ?? null,
+        branch: task.branchRef ?? null,
+        prUrl: task.prUrl ?? null,
+        prState: task.prState ?? null,
+        ciState: task.ciState ?? null,
+        createdAt: isoOf(task.createdAt),
+        updatedAt: isoOf(task.updatedAt),
+    };
+}
 
 function refused(
     httpStatus: AppChangeRefused['httpStatus'],

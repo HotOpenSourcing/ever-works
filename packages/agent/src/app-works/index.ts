@@ -155,3 +155,10 @@ export * from './app-change-request.service';
 // APW-04 — the provisioner (declarative check + AI path) and its events port.
 export * from './app-repository-detector';
 export * from './app-provisioning.service';
+
+// APW-08 GAP-14 / T26 — the `evolve-app` Agent template and the App change chat tools.
+export * from './evolve-app-agent-template';
+export * from './agent-app-change-tools';
+
+// APW-04 — the provisioning feedback loop (build / deploy / smoke → the provisioning Task).
+export * from './app-provisioning-feedback.service';
