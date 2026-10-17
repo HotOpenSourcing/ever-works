@@ -154,7 +154,7 @@ function cleanText(value: string | null | undefined): string {
 function stripLeadingTypeWord(title: string, type: FleetCommitType): string {
 	if (type === 'feat') return title;
 	const stripped = title.replace(
-		/^(?:fix(?:es|ed)?|bug ?fix|hot ?fix|docs?|tests?|refactor|perf|chore|ci|build|style)\s*[:\-–—]?\s+/i,
+		/^(?:fix(?:es|ed)?|bug ?fix|hot ?fix|docs?|tests?|refactor|perf|chore|ci|build|style)(?: ?[:\-–—])? /i,
 		''
 	);
 	return stripped || title;

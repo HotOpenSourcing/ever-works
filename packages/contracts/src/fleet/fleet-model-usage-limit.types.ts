@@ -399,7 +399,7 @@ function parseResetInstant(text: string, nowMs: number, timeZone: string | undef
 	}
 
 	const relative =
-		/\b(?:resets?|reset|try again|available again|retry)\s+in\s+((?:\d+\s*(?:d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b(?:\s*,?\s*(?:and\s+)?)?)+)/i.exec(
+		/\b(?:resets?|reset|try again|available again|retry)\s+in\s+((?:\d+\s*(?:d|days?|h|hrs?|hours?|m|mins?|minutes?|s|secs?|seconds?)\b(?:[\s,]+(?:and )?)?)+)/i.exec(
 			text
 		);
 	if (relative) {
