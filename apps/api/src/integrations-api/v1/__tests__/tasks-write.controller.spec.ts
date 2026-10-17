@@ -266,6 +266,26 @@ describe('IntegrationTasksWriteController', () => {
         ).rejects.toThrow('Team not found');
         expect(second.tasks.remove).toHaveBeenCalledWith('owner-1', 'task-1', expect.anything());
         expect(teamResources.attach).not.toHaveBeenCalled();
+
+        // The task could not be removed: its link stays, so a retry finds it (no duplicate),
+        // and the original error still answers.
+        const stuck = setup();
+        stuck.tasks.addAssignee.mockRejectedValueOnce(new Error('Task actor is not reachable'));
+        stuck.tasks.remove.mockRejectedValueOnce(new Error('db down'));
+        await expect(
+            stuck.controller.create(
+                user,
+                {
+                    title: 'Ship it',
+                    assignees: [{ type: 'agent', id: 'foreign-agent' }],
+                    externalRef: { source: 'gauzy', externalId: 'g-1' },
+                },
+                'gauzy:conn-1',
+                req(),
+                res(),
+            ),
+        ).rejects.toThrow('Task actor is not reachable');
+        expect(stuck.links.removeAllFor).not.toHaveBeenCalled();
     });
 
     it("refuses an externalRef of another integration's source", async () => {

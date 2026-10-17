@@ -565,11 +565,18 @@ export class IntegrationTasksWriteController {
         });
     }
 
-    /** Review 2026-10-17 F8: remove a task whose create failed part-way, and its links. */
+    /**
+     * Review 2026-10-17 F8: remove a task whose create failed part-way, then its links.
+     * When the task cannot be removed its link is KEPT, so a retry with the same
+     * externalRef finds this task instead of creating a duplicate. Either way the
+     * caller answers the original error, which is what the client has to fix.
+     */
     private async undoCreate(userId: string, organizationId: string, taskId: string) {
-        await this.tasks
-            .remove(userId, taskId, this.scope.getScope() as never)
-            .catch(() => undefined);
+        try {
+            await this.tasks.remove(userId, taskId, this.scope.getScope() as never);
+        } catch {
+            return;
+        }
         await this.links.removeAllFor(organizationId, 'task', taskId).catch(() => undefined);
     }
 
