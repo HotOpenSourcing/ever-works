@@ -320,6 +320,8 @@ export const GOAL_EXECUTION_TARGETS: readonly GoalExecutionTarget[] = ['cloud', 
  */
 @Entity({ name: 'goals' })
 @Index('idx_goals_org_visibility', ['organizationId', 'visibility'])
+// Integration API v1 keyset lists (EW-P2, migration 1795120000000-AddP2IntegrationKeysetIndexes).
+@Index('idx_goals_org_updated', ['organizationId', 'updatedAt', 'id'])
 @Index('idx_goals_user_status', ['userId', 'status'])
 @Index('idx_goals_status_next_check', ['status', 'nextCheckAt'])
 // Autonomy layer — the orchestrator's due-scan predicate. NULL loopStatus

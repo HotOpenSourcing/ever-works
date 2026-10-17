@@ -1,7 +1,7 @@
 import { runExpectingAggregateVersion } from '@ever-works/agent/domain-events';
 import type { AuthenticatedUser, IntegrationPrincipal } from '../../auth/types/auth.types';
 import { IntegrationHttpException } from '../../auth/integration/integration-http.exception';
-import { InvalidCursorError } from '@ever-works/agent/integrations-api';
+import { InvalidCursorError, parseIfMatch } from '@ever-works/agent/integrations-api';
 
 /**
  * Request helpers of `/api/integrations/v1` (EW-P1-4). The guards
@@ -102,4 +102,47 @@ export function withExpectedVersion<T>(
 ): Promise<T> {
     if (expected === null) return fn();
     return runExpectingAggregateVersion({ aggregateType, id, version: expected }, fn);
+}
+
+/**
+ * `If-Match` → version | null (no precondition); `400 validation_failed` when the
+ * header is not an ETag this API issued (`"<version>"`).
+ */
+export function expectedVersionOf(header: string | undefined): number | null {
+    const parsed = parseIfMatch(header);
+    if (parsed === undefined) {
+        throw validationFailed('If-Match', 'must be the "<version>" ETag of the record');
+    }
+    return parsed;
+}
+
+/**
+ * Integrations may set `team` or `organization` only (contract v1 B.1):
+ * `private` answers `422 domain_rule` (the record would vanish from the
+ * integration's own view), anything else `400 validation_failed`.
+ */
+export function assertWritableVisibility(visibility: string | undefined): void {
+    if (visibility === undefined) return;
+    if (visibility === 'private') {
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            'An integration cannot make a record private.',
+            { field: 'visibility' },
+        );
+    }
+    if (visibility !== 'team' && visibility !== 'organization') {
+        throw validationFailed('visibility', 'must be team or organization');
+    }
+}
+
+/**
+ * `422 domain_rule` for a write the record's state refuses (e.g. dismissing an
+ * Idea that is being built). `details.status` names the current state.
+ */
+export function domainRule(
+    message: string,
+    details?: Record<string, unknown>,
+): IntegrationHttpException {
+    return new IntegrationHttpException(422, 'domain_rule', message, details);
 }

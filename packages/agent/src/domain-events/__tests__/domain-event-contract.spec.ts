@@ -126,6 +126,8 @@ describe('integration contract v1 (published schemas)', () => {
             ['work.json', 'resources/work.schema.json'],
             ['agent.json', 'resources/agent.schema.json'],
             ['idea.json', 'resources/idea.schema.json'],
+            ['goal.json', 'resources/goal.schema.json'],
+            ['mission.json', 'resources/mission.schema.json'],
             ['comment.json', 'resources/task-comment.schema.json'],
             ['member.json', 'resources/member.schema.json'],
             ['organization.json', 'resources/organization.schema.json'],

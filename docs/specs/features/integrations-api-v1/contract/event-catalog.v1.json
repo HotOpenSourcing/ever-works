@@ -6,6 +6,14 @@
 	"description": "Event catalog v1 (03 Part B.4). One row per event type. `dataSchema` is the JSON Schema of the envelope `data` (null = reserved for a later phase; the type name is fixed but its data schema is published with that phase). `child` marks events about an edge/child row: `aggregate` is the parent with its new version. `optIn` events are excluded from the feed/webhooks unless requested by exact name. Delete/removed events carry the last snapshot plus `deleted: true`.",
 	"events": [
 		{
+			"type": "organization.created",
+			"version": 1,
+			"domain": "organization",
+			"aggregateType": "organization",
+			"dataSchema": "schemas/resources/organization.schema.json",
+			"phase": "P2"
+		},
+		{
 			"type": "organization.updated",
 			"version": 1,
 			"domain": "organization",
@@ -213,7 +221,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -221,7 +229,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -229,7 +237,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -237,7 +245,7 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/mission.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -245,39 +253,43 @@
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionGoalLinkEvent",
+			"phase": "P2",
+			"child": "goal"
 		},
 		{
 			"type": "mission.goal.unlinked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionGoalLinkEvent",
+			"phase": "P2",
+			"child": "goal"
 		},
 		{
 			"type": "mission.work.linked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionWorkLinkEvent",
+			"phase": "P2",
+			"child": "work"
 		},
 		{
 			"type": "mission.work.unlinked",
 			"version": 1,
 			"domain": "missions",
 			"aggregateType": "mission",
-			"dataSchema": null,
-			"phase": "P2"
+			"dataSchema": "schemas/resources/mission.schema.json#/$defs/MissionWorkLinkEvent",
+			"phase": "P2",
+			"child": "work"
 		},
 		{
 			"type": "goal.created",
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -285,7 +297,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -293,7 +305,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -301,7 +313,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -309,7 +321,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -317,7 +329,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2"
 		},
 		{
@@ -325,7 +337,7 @@
 			"version": 1,
 			"domain": "goals",
 			"aggregateType": "goal",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/goal.schema.json",
 			"phase": "P2",
 			"notes": "Throttled to at most 1 per goal per 5 min."
 		},

@@ -31,6 +31,8 @@ const CONTROLLER_FILES: readonly string[] = [
     'works/members.controller.ts',
     'works/works.controller.ts',
     'work-proposals/work-proposals.controller.ts',
+    'goals/goals.controller.ts',
+    'missions/missions.controller.ts',
     // Inbox (EW-P3-1) and the other doors that close an Inbox mirror.
     'inbox/inbox.controller.ts',
     'escalations/escalations.controller.ts',
@@ -46,6 +48,12 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/tasks-sets.controller.ts',
     'integrations-api/v1/task-comments.controller.ts',
     'integrations-api/v1/teams-write.controller.ts',
+    // P2 resources (EW-P2-1 ideas).
+    'integrations-api/v1/ideas.controller.ts',
+    'integrations-api/v1/goals.controller.ts',
+    'integrations-api/v1/missions.controller.ts',
+    'integrations-api/v1/organizations-write.controller.ts',
+    'integrations-api/v1/works-write.controller.ts',
     'integrations-api/v1/inbox.controller.ts',
     'integrations-api/v1/kb.controller.ts',
     'integrations-api/v1/email.controller.ts',

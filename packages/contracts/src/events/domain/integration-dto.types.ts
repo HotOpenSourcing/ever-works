@@ -340,3 +340,149 @@ export interface IntegrationIdeaDto extends IntegrationResourceBase {
 	readonly failureMessage: string | null;
 	readonly webUrl?: string | null;
 }
+
+/** Lifecycle of a Goal (Ever Works `goals.status`). Integration creates are always `draft` (D9). */
+export type IntegrationGoalStatus = 'draft' | 'active' | 'paused' | 'completed';
+
+/** How a completed Goal ended. */
+export type IntegrationGoalOutcome = 'achieved' | 'missed' | 'abandoned';
+
+/**
+ * The plugin id of an EXTERNAL metric source (EW-P2-2): no provider is read, the
+ * values arrive through `POST /goals/:id/samples`. Integrations may only write this
+ * source (a provider read can be metered spend, D9).
+ */
+export const INTEGRATION_EXTERNAL_METRIC_PLUGIN_ID = 'external';
+
+/** Where a Goal (or one criterion) reads its metric. */
+export interface IntegrationGoalMetricSource {
+	readonly pluginId: string;
+	readonly metricId: string;
+	readonly params?: Record<string, unknown>;
+}
+
+/** One weighted success criterion (Gauzy: a numeric KeyResult). */
+export interface IntegrationGoalCriterion {
+	readonly id: string;
+	readonly name: string;
+	readonly weight: number;
+	readonly target: number;
+	readonly direction: 'gte' | 'lte';
+	readonly unit?: string;
+	readonly metricSource?: IntegrationGoalMetricSource;
+	readonly window?: 'day' | 'week' | 'month' | 'total' | 'point';
+}
+
+/** One Definition-of-Done item (Gauzy: a True/False KeyResult). */
+export interface IntegrationGoalDoDCriterion {
+	readonly id: string;
+	readonly text: string;
+	readonly status: 'open' | 'done' | 'waived';
+	readonly evidence?: string | null;
+	readonly note?: string | null;
+	readonly source?: string;
+	readonly proposed?: boolean;
+	readonly updatedAt?: string;
+}
+
+/**
+ * Goal DTO (B.6, `GET /goals`, `GET /goals/:id`) and the `data` of `goal.*` events.
+ * `progress` is EW's 0..100 view (weighted score, metric ratio or DoD share);
+ * `loop` is the EW-only execution loop, read-only and runtime (it never bumps the
+ * version). An integration creates Goals `draft` and never activates or resumes one.
+ */
+export interface IntegrationGoalDto extends IntegrationResourceBase {
+	readonly teamIds: readonly string[];
+	readonly title: string;
+	readonly description: string | null;
+	readonly goalKind: 'metric' | 'delivery';
+	readonly status: IntegrationGoalStatus;
+	readonly outcome: IntegrationGoalOutcome | null;
+	readonly metricSource: IntegrationGoalMetricSource | null;
+	readonly comparator: 'gte' | 'lte' | null;
+	readonly targetValue: number | null;
+	readonly unit: string | null;
+	readonly window: 'day' | 'week' | 'month' | 'total' | 'point';
+	readonly baselineValue: number | null;
+	readonly currentValue: number | null;
+	readonly currentValueAt: string | null;
+	readonly deadline: string | null;
+	readonly criteria: readonly IntegrationGoalCriterion[] | null;
+	readonly resolvedScore: {
+		readonly score: number;
+		readonly criteria: ReadonlyArray<{
+			readonly id: string;
+			readonly value: number | null;
+			readonly target: number;
+			readonly weight: number;
+			readonly ratio: number;
+			readonly satisfied: boolean;
+			readonly error?: string;
+		}>;
+		readonly violatedConstraintIds: readonly string[];
+		readonly violatedHardConstraintIds: readonly string[];
+		readonly at: string;
+	} | null;
+	readonly dodCriteria: readonly IntegrationGoalDoDCriterion[] | null;
+	readonly progress: number | null;
+	readonly missionIds: readonly string[];
+	readonly primaryMissionId: string | null;
+	readonly assignedAgentId: string | null;
+	readonly activeAgentId: string | null;
+	readonly loop: {
+		readonly status: 'running' | 'paused' | 'done' | 'cancelled' | 'stuck' | null;
+		readonly iteration: number;
+		readonly spentCents: number;
+	};
+	readonly archivedAt: string | null;
+	readonly webUrl?: string | null;
+}
+
+/** Lifecycle of a Mission (Ever Works `missions.status`). Integration creates are always `paused` (D9). */
+export type IntegrationMissionStatus = 'active' | 'paused' | 'completed' | 'failed';
+
+/** How a completed Mission concluded (human judgment). */
+export type IntegrationMissionOutcome = 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled' | 'superseded';
+
+/** How a Mission relates to a Work (`mission_works.relation`). */
+export type IntegrationMissionWorkRelation = 'created' | 'improves' | 'operates' | 'markets' | 'researches' | 'retires';
+
+/** A Mission ↔ Goal link (`mission_goals`); also the `data` of `mission.goal.*` events. */
+export interface IntegrationMissionGoalLink {
+	readonly missionId: string;
+	readonly goalId: string;
+	readonly isPrimary: boolean;
+	/** Only on `mission.goal.unlinked`. */
+	readonly deleted?: true;
+}
+
+/** A Mission ↔ Work link (`mission_works`); also the `data` of `mission.work.*` events. */
+export interface IntegrationMissionWorkLink {
+	readonly missionId: string;
+	readonly workId: string;
+	readonly relation: IntegrationMissionWorkRelation;
+	/** Only on `mission.work.unlinked`. */
+	readonly deleted?: true;
+}
+
+/**
+ * Mission DTO (B.6, `GET /missions`, `GET /missions/:id`) and the `data` of
+ * `mission.*` events (plan D3b: a Gauzy Strategic Initiative). An integration
+ * creates Missions `paused` and can never set `active` (D9): only a person resumes a
+ * Mission in Ever Works, which is what starts its ticks.
+ */
+export interface IntegrationMissionDto extends IntegrationResourceBase {
+	readonly teamIds: readonly string[];
+	readonly title: string;
+	readonly description: string;
+	readonly type: 'one-shot' | 'scheduled';
+	readonly status: IntegrationMissionStatus;
+	readonly outcome: IntegrationMissionOutcome | null;
+	readonly completedAt: string | null;
+	readonly schedule: string | null;
+	readonly autoBuildWorks: boolean;
+	readonly goals: readonly Omit<IntegrationMissionGoalLink, 'missionId' | 'deleted'>[];
+	readonly works: readonly Omit<IntegrationMissionWorkLink, 'missionId' | 'deleted'>[];
+	readonly sourceMissionId: string | null;
+	readonly webUrl?: string | null;
+}

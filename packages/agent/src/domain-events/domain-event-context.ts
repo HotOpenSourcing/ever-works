@@ -158,3 +158,16 @@ export function assertExpectedAggregateVersion(
         );
     }
 }
+
+/**
+ * Clear a loaded aggregate's `version` before a TypeORM `save()` (EW-P2 review).
+ * `version` is a plain column that only {@link DomainEventRecorder.bumpAggregateVersion}
+ * moves; `save()` writes back whatever the instance holds, so a copy loaded before a
+ * concurrent bump would roll the column back and the next event would reuse a version.
+ * TypeORM skips an `undefined` property on update (and uses the column default on insert).
+ * Returns the same instance.
+ */
+export function withoutAggregateVersion<T extends { version?: number }>(entity: T): T {
+    (entity as { version?: number }).version = undefined;
+    return entity;
+}

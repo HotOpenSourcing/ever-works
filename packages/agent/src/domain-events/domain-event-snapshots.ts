@@ -2,9 +2,11 @@ import {
     getWorkCapabilities,
     RECIPIENT_EVENT_VISIBILITY,
     type IntegrationAgentDto,
+    type IntegrationGoalDto,
     type IntegrationInboxItemDto,
     type IntegrationIdeaDto,
     type IntegrationMemberDto,
+    type IntegrationMissionDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
     type IntegrationTaskDto,
@@ -15,7 +17,11 @@ import {
 import type { EntityManager } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { ExternalIdentity } from '../entities/external-identity.entity';
+import { Goal } from '../entities/goal.entity';
 import { InboxItem } from '../entities/inbox-item.entity';
+import { MissionGoal } from '../entities/mission-goal.entity';
+import { Mission } from '../entities/mission.entity';
+import { MissionWork } from '../entities/mission-work.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
@@ -381,6 +387,153 @@ export async function buildIdeaSnapshot(
     return { dto, tenantId: idea.tenantId ?? null, organizationId: idea.organizationId ?? null };
 }
 
+/**
+ * EW's 0..100 progress view of a Goal (plan 01 §6, mapped to the Gauzy Goal's
+ * `progress`): the weighted score when the Goal has criteria and was scored; for a
+ * metric Goal the baseline → current → target ratio; for a delivery Goal the share
+ * of its approved Definition of Done that is closed. `null` when nothing is known.
+ */
+export function goalProgress(goal: Goal): number | null {
+    const clamp = (ratio: number) => Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    if (goal.goalKind === 'delivery') {
+        const approved = (Array.isArray(goal.dodCriteria) ? goal.dodCriteria : []).filter(
+            (criterion) => criterion.proposed !== true,
+        );
+        if (approved.length === 0) return null;
+        const closed = approved.filter(
+            (criterion) => criterion.status === 'done' || criterion.status === 'waived',
+        ).length;
+        return clamp(closed / approved.length);
+    }
+    if (Array.isArray(goal.criteria) && goal.criteria.length > 0 && goal.resolvedScore) {
+        const score = Number(goal.resolvedScore.score);
+        return Number.isFinite(score) ? clamp(score) : null;
+    }
+    const current = goal.currentValue;
+    const target = goal.targetValue;
+    if (typeof current !== 'number' || typeof target !== 'number') return null;
+    const baseline = typeof goal.baselineValue === 'number' ? goal.baselineValue : 0;
+    if (target === baseline)
+        return clamp(
+            goal.comparator === 'lte' ? (current <= target ? 1 : 0) : current >= target ? 1 : 0,
+        );
+    return clamp((current - baseline) / (target - baseline));
+}
+
+/** The Goal's integration DTO (teams and mission links embedded), or `null` when gone (EW-P2-2). */
+export async function buildGoalSnapshot(
+    manager: EntityManager,
+    goalId: string,
+): Promise<AggregateSnapshot<IntegrationGoalDto> | null> {
+    const goal = await manager.getRepository(Goal).findOne({ where: { id: goalId } });
+    if (!goal) return null;
+    const [resourceTeams, missionLinks] = await Promise.all([
+        teamResourceIds(manager, 'goal', goalId),
+        manager.getRepository(MissionGoal).find({ where: { goalId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const primary = missionLinks.find((link) => link.isPrimary) ?? null;
+    const dto: IntegrationGoalDto = {
+        id: goal.id,
+        organizationId: goal.organizationId ?? '',
+        version: Number(goal.version) || 1,
+        createdAt: isoRequired(goal.createdAt),
+        updatedAt: isoRequired(goal.updatedAt ?? goal.createdAt),
+        ...recordVisibility(goal, teamIds),
+        owner: { type: 'user', id: goal.userId },
+        createdBy: p2CreatedBy(goal),
+        externalLinks: [],
+        teamIds,
+        title: goal.title,
+        description: goal.description ?? null,
+        goalKind: goal.goalKind === 'delivery' ? 'delivery' : 'metric',
+        status: goal.status as IntegrationGoalDto['status'],
+        outcome: (goal.outcome ?? null) as IntegrationGoalDto['outcome'],
+        metricSource: goal.metricSource ?? null,
+        comparator: goal.comparator ?? null,
+        targetValue: goal.targetValue ?? null,
+        unit: goal.unit ?? null,
+        window: goal.window,
+        baselineValue: goal.baselineValue ?? null,
+        currentValue: goal.currentValue ?? null,
+        currentValueAt: iso(goal.currentValueAt),
+        deadline: iso(goal.deadline),
+        criteria: goal.criteria ?? null,
+        resolvedScore: goal.resolvedScore ?? null,
+        dodCriteria: (goal.dodCriteria ?? null) as IntegrationGoalDto['dodCriteria'],
+        progress: goalProgress(goal),
+        missionIds: unique(missionLinks.map((link) => link.missionId)),
+        primaryMissionId: primary?.missionId ?? null,
+        assignedAgentId: goal.assignedAgentId ?? null,
+        activeAgentId: goal.activeAgentId ?? null,
+        loop: {
+            status: goal.loopStatus ?? null,
+            iteration: Number(goal.iteration) || 0,
+            spentCents: Number(goal.spentCents) || 0,
+        },
+        archivedAt: iso(goal.archivedAt),
+        webUrl: webUrl(`/goals/${goal.id}`),
+    };
+    return { dto, tenantId: goal.tenantId ?? null, organizationId: goal.organizationId ?? null };
+}
+
+/**
+ * The Mission's integration DTO (plan D3b: a Gauzy Strategic Initiative) with its
+ * Teams, Goal links (primary first) and typed Work links, or `null` when gone (EW-P2-5).
+ */
+export async function buildMissionSnapshot(
+    manager: EntityManager,
+    missionId: string,
+): Promise<AggregateSnapshot<IntegrationMissionDto> | null> {
+    const mission = await manager.getRepository(Mission).findOne({ where: { id: missionId } });
+    if (!mission) return null;
+    const [resourceTeams, goalLinks, workLinks] = await Promise.all([
+        teamResourceIds(manager, 'mission', missionId),
+        manager
+            .getRepository(MissionGoal)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+        manager
+            .getRepository(MissionWork)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const goals = [...goalLinks]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((link) => ({ goalId: link.goalId, isPrimary: link.isPrimary === true }));
+    const dto: IntegrationMissionDto = {
+        id: mission.id,
+        organizationId: mission.organizationId ?? '',
+        version: Number(mission.version) || 1,
+        createdAt: isoRequired(mission.createdAt),
+        updatedAt: isoRequired(mission.updatedAt ?? mission.createdAt),
+        ...recordVisibility(mission, teamIds),
+        owner: { type: 'user', id: mission.userId },
+        createdBy: p2CreatedBy(mission),
+        externalLinks: [],
+        teamIds,
+        title: mission.title,
+        description: mission.description,
+        type: mission.type as IntegrationMissionDto['type'],
+        status: mission.status as IntegrationMissionDto['status'],
+        outcome: (mission.outcome ?? null) as IntegrationMissionDto['outcome'],
+        completedAt: iso(mission.completedAt),
+        schedule: mission.schedule ?? null,
+        autoBuildWorks: mission.autoBuildWorks === true,
+        goals,
+        works: workLinks.map((link) => ({
+            workId: link.workId,
+            relation: link.relation as IntegrationMissionDto['works'][number]['relation'],
+        })),
+        sourceMissionId: mission.sourceMissionId ?? null,
+        webUrl: webUrl(`/missions/${mission.id}`),
+    };
+    return {
+        dto,
+        tenantId: mission.tenantId ?? null,
+        organizationId: mission.organizationId ?? null,
+    };
+}
+
 /** The work's integration DTO (members and repositories embedded), or `null` when gone. */
 export async function buildWorkSnapshot(
     manager: EntityManager,
@@ -482,7 +635,8 @@ export async function buildMemberSnapshot(
         organizationId: member.organizationId,
         userId: member.userId,
         username: user.username,
-        displayName: null,
+        // EW-P2-6 — the optional `users.displayName` (null = the username).
+        displayName: user.displayName ?? null,
         email: user.email ?? null,
         emailVerified: !!user.emailVerified,
         avatarUrl: user.avatar || null,

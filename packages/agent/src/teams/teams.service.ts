@@ -268,7 +268,13 @@ export class TeamsService {
             const resnapshotted = new Set<string>([
                 ...agentMembers.map((row) => `agent:${row.memberId}`),
                 ...links
-                    .filter((link) => link.resourceType === 'task' || link.resourceType === 'idea')
+                    .filter(
+                        (link) =>
+                            link.resourceType === 'task' ||
+                            link.resourceType === 'idea' ||
+                            link.resourceType === 'goal' ||
+                            link.resourceType === 'mission',
+                    )
                     .map((link) => `${link.resourceType}:${link.resourceId}`),
             ]);
             for (const record of affected) {
@@ -291,7 +297,9 @@ export class TeamsService {
                 if (
                     link.resourceType === 'task' ||
                     link.resourceType === 'work' ||
-                    link.resourceType === 'idea'
+                    link.resourceType === 'idea' ||
+                    link.resourceType === 'goal' ||
+                    link.resourceType === 'mission'
                 ) {
                     await publisher.changed(
                         em,

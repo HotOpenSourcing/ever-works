@@ -23,10 +23,13 @@ import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import { DomainEventRecorder } from '../domain-events/domain-event-recorder.service';
+import { assertExpectedAggregateVersion } from '../domain-events/domain-event-context';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
+    buildGoalSnapshot,
     buildIdeaSnapshot,
+    buildMissionSnapshot,
     buildTaskSnapshot,
 } from '../domain-events/domain-event-snapshots';
 import { VISIBILITY_AGGREGATE_SHAPES } from './record-access.types';
@@ -83,8 +86,8 @@ const ENTITY_OF: Record<VisibilityAggregate, EntityTarget<ObjectLiteral>> = {
 /**
  * Aggregates whose `visibility_changed` (and Teams `<aggregate>.updated`) is recorded
  * today, with their integration snapshot: the P1 aggregates that carry a `version`
- * column (EW-P1-1), then the P2 ones as their recording points land (ideas: EW-P2-1).
- * Goals and missions join with theirs (see {@link RecordVisibilityService.recordChange}).
+ * column (EW-P1-1), then the P2 ones as their recording points land (ideas: EW-P2-1,
+ * goals: EW-P2-2, missions: EW-P2-5). Every visibility aggregate records now (see {@link RecordVisibilityService.recordChange}).
  */
 const SNAPSHOT_OF: Partial<
     Record<
@@ -95,6 +98,8 @@ const SNAPSHOT_OF: Partial<
     task: buildTaskSnapshot,
     agent: buildAgentSnapshot,
     idea: buildIdeaSnapshot,
+    goal: buildGoalSnapshot,
+    mission: buildMissionSnapshot,
 };
 
 /** Thrown for an integration write of `private` (contract: `422 domain_rule`). */
@@ -520,6 +525,9 @@ export class RecordVisibilityService {
         if (!this.recorder || !build || !row.organizationId) return;
         const aggregateType = aggregate;
         const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, row.id);
+        // An integration write under `If-Match` (runExpectingAggregateVersion) is refused
+        // here, in the change's transaction, when a concurrent write bumped first.
+        assertExpectedAggregateVersion(aggregateType, row.id, version);
         let data: Record<string, unknown>;
         if (next.visibility === 'private') {
             data = { id: row.id, visibility: 'private' };
@@ -562,6 +570,7 @@ export class RecordVisibilityService {
         const build = SNAPSHOT_OF[aggregate];
         if (!this.recorder || !build) return;
         const version = await this.recorder.bumpAggregateVersion(manager, aggregate, id);
+        assertExpectedAggregateVersion(aggregate, id, version);
         const snapshot = await build(manager, id);
         if (!snapshot?.organizationId) return;
         await this.recorder.record(manager, {

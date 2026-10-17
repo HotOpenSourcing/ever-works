@@ -524,6 +524,61 @@ export class OrganizationInvitationFlowService {
     }
 
     /**
+     * EW-P2-6 — promote a roster member to `admin` or demote them to `member`.
+     *
+     * Only the Tenant owner decides (the owner role is the Tenant owner's alone and
+     * cannot be granted); the target must be on the roster and cannot be the owner.
+     * An `admin` may create integration keys pinned to this Organization; a demotion
+     * takes that away at once — the key principal re-reads the roster on every
+     * request. Records `organization.member.updated` (child: the member).
+     */
+    async setMemberRole(
+        orgId: string,
+        targetUserId: string,
+        role: string,
+        actorUserId: string,
+    ): Promise<OrganizationMemberView> {
+        const organization = await this.membership.ensureMember(orgId, actorUserId);
+        if (!(await this.isTenantOwner(actorUserId, organization.tenantId))) {
+            throw new ForbiddenException('only_the_owner_changes_roles');
+        }
+        if (role !== 'admin' && role !== 'member') {
+            throw new BadRequestException('invalid_role');
+        }
+        if (await this.isTenantOwner(targetUserId, organization.tenantId)) {
+            throw new BadRequestException('cannot_change_owner_role');
+        }
+        const existing = await this.members.findByOrgAndUser(orgId, targetUserId);
+        if (!existing) {
+            throw new BadRequestException('not_a_member');
+        }
+        if (existing.role !== role) {
+            await this.members.updateRole(orgId, targetUserId, role);
+            await recordAfterWrite(
+                this.domainEvents,
+                async (publisher, manager) => {
+                    const member = await buildMemberSnapshot(manager, { ...existing, role });
+                    if (!member) return;
+                    await publisher.child(
+                        manager,
+                        'organization',
+                        orgId,
+                        'organization.member.updated',
+                        member as unknown as Record<string, unknown>,
+                        { changedFields: ['members'], previous: { role: existing.role } },
+                    );
+                },
+                (message) => this.logger.warn(message),
+                `organization.member.updated for ${orgId}`,
+            );
+        }
+        const views = await this.listMembers(orgId, actorUserId);
+        const view = views.find((entry) => entry.userId === targetUserId);
+        if (!view) throw new BadRequestException('not_a_member');
+        return view;
+    }
+
+    /**
      * `tenants.ownerUserId` is UNIQUE, so a single read settles ownership.
      * The owner is a member of every Organization in their Tenant by
      * construction — there is no roster row to delete and removing them

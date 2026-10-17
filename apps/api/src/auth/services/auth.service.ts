@@ -726,6 +726,9 @@ export class AuthService {
         const updateFields: Record<string, any> = {};
         if (isNotNull(updateData.username)) updateFields.username = updateData.username;
         if (isNotNull(updateData.avatar)) updateFields.avatar = updateData.avatar;
+        // EW-P2-6 — `null` / empty clears the display name back to the username.
+        if (updateData.displayName !== undefined)
+            updateFields.displayName = updateData.displayName?.trim() || null;
         // Allow explicitly setting committer fields to null (to clear them)
         if (updateData.committerName !== undefined)
             updateFields.committerName = updateData.committerName || null;

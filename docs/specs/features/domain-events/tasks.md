@@ -34,9 +34,21 @@
 
 - [x] **T20** Ideas (EW-P2-1): `version` + `createdBy` columns (migration `1795100000000`), `idea.*` recorded by
       `WorkProposalRepository`, `WorkProposalService.createExternal` / `updateContent` / `restore`, idea DTO schema
-      (`idea-recording.spec.ts`; the coverage gate now scans `work-proposals.controller.ts`).
-- [ ] **T21** Goals (EW-P2-2).
-- [ ] **T22** Missions (EW-P2-5), incl. the Ideas a Mission clone copies.
+      (`idea-recording.spec.ts`; the coverage gate now scans `work-proposals.controller.ts`). The integration `PATCH`
+      records title / description edits in the edit's own transaction, so a stale `If-Match` rolls back; the routes
+      are [`integrations-api-v1`](../integrations-api-v1/tasks.md) T35.
+- [x] **T21** Goals (EW-P2-2): `goal.*` recorded by `GoalsService` (create, update, delete tombstone, activate,
+      pause, external samples) in the write's transaction, by `GoalEvaluationService` (auto-outcome, progress) and the
+      orchestrator (Definition of Done, archive, a loop's terminal status) best-effort after the save; loop control is
+      runtime (no event, no version). `goal.progress_changed` is throttled to one per Goal per 5 minutes and the
+      version still moves (`goal-domain-events.ts`). Goal Teams record `goal.updated`. `goal-recording.spec.ts`; the
+      coverage gate scans `goals/goals.controller.ts` and `integrations-api/v1/goals.controller.ts`.
+- [x] **T22** Missions (EW-P2-5): `mission.*` recorded by `MissionsService` (create, update, transitions, delete
+      tombstone in the write's transaction; typed Work links as children, best-effort after the write), Mission ↔ Goal
+      links by `GoalsService` (`mission.goal.*` + the Goal's `goal.updated`), the clone (`mission.created` and the
+      copied Ideas' `idea.created`, in the clone's transaction) and a fatal tick (`mission.status_changed` to
+      `failed`). Mission Teams record `mission.updated`. `mission-recording.spec.ts`; the coverage gate scans
+      `missions/missions.controller.ts` and `integrations-api/v1/missions.controller.ts`.
 
 ## P3 — Inbox (EW-P3-1)
 

@@ -39,4 +39,5 @@
 - [x] EW-P1-7: Settings → API keys integration dialog (Ever Gauzy preset, deep link), list with Rotate; Integrations
       card (`IntegrationKeysSection`, `EverGauzyIntegrationCard`, `/settings/integrations/ever-gauzy`).
 - [ ] EW-P1-5: list the key's webhook subscriptions on the Ever Gauzy card; revoke disables both.
-- [ ] EW-P2-6: org owner/admin roles may create integration keys.
+- [x] EW-P2-6: org owner/admin roles may create integration keys (admins: the organizations they administer; pins
+      re-read per request).
