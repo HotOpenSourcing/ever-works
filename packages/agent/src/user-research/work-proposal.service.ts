@@ -20,7 +20,7 @@ import type { IdeaWorkKind } from '../entities/idea-work.entity';
 import { WorkProposalAttachmentRepository } from '../database/repositories/attachment.repositories';
 import { WorkProposalAttachment } from '../entities/work-proposal-attachment.entity';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Not, Repository } from 'typeorm';
+import { Not, Repository, type EntityManager } from 'typeorm';
 import { UserUpload } from '../entities/user-upload.entity';
 import { Agent, AgentStatus } from '../entities/agent.entity';
 import { Mission } from '../entities/mission.entity';
@@ -976,11 +976,21 @@ export class WorkProposalService {
      *
      * `missionId` must name the caller's own non-`private` Mission of the same
      * Organization (404 otherwise). The row, its Teams and `idea.created` commit together.
+     *
+     * `withinCreate` (T17a pattern) runs in that same transaction, after the row and its
+     * event: the integration API links the new Idea to its `externalRef` there, so the
+     * Idea and its link commit, or roll back, together. A throw undoes the create.
      */
     async createExternal(
         input: Omit<CreateExternalIdeaInput, 'slugSuggestion'> & {
             teamIds?: readonly string[];
         },
+        options: {
+            readonly withinCreate?: (
+                idea: { readonly id: string },
+                manager: EntityManager,
+            ) => Promise<void>;
+        } = {},
     ): Promise<WorkProposal> {
         if (input.visibility !== undefined) {
             RecordVisibilityService.assertIntegrationVisibility(input.visibility);
@@ -1024,6 +1034,7 @@ export class WorkProposalService {
             }
             await visibility.recomputeAutomaticIn(manager, 'idea', row.id, { recordEvent: false });
             await publisher.created(manager, 'idea', row.id, 'idea.created');
+            if (options.withinCreate) await options.withinCreate({ id: row.id }, manager);
             return row.id;
         });
         const created = await this.repo.findById(id);

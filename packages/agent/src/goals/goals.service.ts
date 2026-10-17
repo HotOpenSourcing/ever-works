@@ -98,6 +98,16 @@ const MAX_METRIC_SOURCE_JSON_CHARS = 4000;
  * Evaluation itself lives in {@link GoalEvaluationService}; this
  * service only delegates for `evaluateNow`.
  */
+/**
+ * Runs inside a Goal create's transaction, after the row and its `goal.created` event (T17a
+ * pattern): the integration API links the new Goal to its `externalRef` there. A throw rolls
+ * the create back.
+ */
+export type GoalWithinCreate = (
+    goal: { readonly id: string },
+    manager: EntityManager,
+) => Promise<void>;
+
 @Injectable()
 export class GoalsService {
     private readonly logger = new Logger(GoalsService.name);
@@ -236,9 +246,12 @@ export class GoalsService {
         userId: string,
         input: CreateGoalInput,
         scope?: OwnershipScope,
-        options: { automaticVisibility?: boolean } = {},
+        options: { automaticVisibility?: boolean; withinCreate?: GoalWithinCreate } = {},
     ): Promise<GoalDto> {
         const goalKind = this.resolveWriteKind(input.goalKind);
+        if (options.withinCreate && !this.domainEvents) {
+            throw new Error('Goal withinCreate needs DomainEventsModule (one transaction)');
+        }
 
         let metricSource: GoalMetricSource | null = null;
         if (goalKind === 'metric') {
@@ -326,6 +339,9 @@ export class GoalsService {
                     });
                 }
                 await publisher.created(manager, 'goal', row.id, 'goal.created');
+                // T17a pattern — e.g. the integration API's externalRef link, in this
+                // transaction: a throw rolls the Goal back.
+                if (options.withinCreate) await options.withinCreate({ id: row.id }, manager);
             },
         );
         return toGoalDto(saved);
@@ -338,12 +354,15 @@ export class GoalsService {
      * criterion's: a provider read can be metered spend, and an integration pushes its
      * values through {@link recordExternalSample} instead. `teamIds` become
      * `team_resources` rows of the Organization and decide the scope (D11) unless
-     * `visibility` is set by hand. The row, its Teams and `goal.created` commit together.
+     * `visibility` is set by hand. The row, its Teams and `goal.created` commit together,
+     * and so does `withinCreate` (T17a pattern: the integration API's `externalRef` link,
+     * so a throw there undoes the create).
      */
     async createExternal(
         userId: string,
         input: CreateGoalInput,
         scope: OwnershipScope,
+        options: { withinCreate?: GoalWithinCreate } = {},
     ): Promise<GoalDto> {
         GoalsService.assertExternalSources(input);
         if (input.visibility !== undefined) {
@@ -359,7 +378,7 @@ export class GoalsService {
                 teamIds: input.teamIds ? [...new Set(input.teamIds)] : undefined,
             },
             scope,
-            { automaticVisibility: true },
+            { automaticVisibility: true, withinCreate: options.withinCreate },
         );
     }
 

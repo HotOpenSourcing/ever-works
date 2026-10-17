@@ -1,3 +1,5 @@
+jest.mock('@ever-works/agent/missions', () => ({ MissionsService: class {} }));
+import { DuplicateExternalRefError } from '@ever-works/agent/integrations-api';
 import { IntegrationMissionsController } from '../missions.controller';
 
 /**
@@ -31,7 +33,22 @@ describe('IntegrationMissionsController', () => {
         goals: Array<{ goalId: string; isPrimary: boolean }> = [],
     ) => {
         const missions = {
-            createExternal: jest.fn().mockResolvedValue({ id: 'mission-1' }),
+            // As MissionsService.createExternal: `withinCreate` runs in the create's transaction
+            // (T17a pattern), and its throw rolls the Mission back.
+            createExternal: jest.fn(
+                async (
+                    _userId: string,
+                    _input: unknown,
+                    _scope: unknown,
+                    options?: {
+                        withinCreate?: (row: { id: string }, manager: unknown) => Promise<void>;
+                    },
+                ) => {
+                    if (options?.withinCreate)
+                        await options.withinCreate({ id: 'mission-1' }, 'tx-manager');
+                    return { id: 'mission-1' };
+                },
+            ),
             update: jest.fn().mockResolvedValue({}),
             pause: jest.fn().mockResolvedValue({}),
             complete: jest.fn().mockResolvedValue({}),
@@ -97,8 +114,68 @@ describe('IntegrationMissionsController', () => {
                 createdBy: { type: 'integration', id: 'key-1' },
             }),
             { tenantId: 'tenant-1', organizationId: ORG },
+            {},
         );
         expect(response.status).toHaveBeenCalledWith(201);
+    });
+
+    it('creates the Mission and its externalRef link in one transaction (T17a pattern)', async () => {
+        const { controller, missions, links } = setup();
+        const response = res();
+        await controller.create(
+            user,
+            {
+                ...{ title: 'Win SMB', description: 'From Gauzy.' },
+                externalRef: { source: 'gauzy', externalId: 'g-1' },
+            } as never,
+            'gauzy:conn-1',
+            req(),
+            response,
+        );
+        expect(missions.createExternal).toHaveBeenCalledWith(
+            'owner-1',
+            expect.anything(),
+            expect.anything(),
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
+        );
+        expect(links.create).toHaveBeenCalledWith(
+            expect.objectContaining({
+                organizationId: ORG,
+                source: 'gauzy',
+                installationId: 'conn-1',
+            }),
+            expect.objectContaining({
+                entityType: 'mission',
+                entityId: 'mission-1',
+                externalId: 'g-1',
+            }),
+            'tx-manager',
+        );
+        expect(response.status).toHaveBeenCalledWith(201);
+    });
+
+    it('a lost externalRef race rolls the create back (nothing to undo) and answers the winner', async () => {
+        const { controller, missions, links } = setup();
+        links.findByExternal
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ entityId: 'mission-w' });
+        links.create.mockRejectedValue(
+            new DuplicateExternalRefError('external', 'mission-w', 'g-1'),
+        );
+        const response = res();
+        const body = await controller.create(
+            user,
+            {
+                ...{ title: 'Win SMB', description: 'From Gauzy.' },
+                externalRef: { source: 'gauzy', externalId: 'g-1' },
+            } as never,
+            undefined,
+            req(),
+            response,
+        );
+        expect(missions.delete).not.toHaveBeenCalled();
+        expect(response.status).toHaveBeenCalledWith(200);
+        expect(body).toMatchObject({ id: 'mission-w' });
     });
 
     it('PATCH never sets a Mission active (422) and refuses an outcome without completing', async () => {

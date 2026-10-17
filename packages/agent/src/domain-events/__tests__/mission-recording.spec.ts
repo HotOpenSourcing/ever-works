@@ -120,6 +120,31 @@ describe('mission recording points', () => {
             scope,
         );
 
+    it('createExternal runs withinCreate in its transaction: a throw rolls the Mission and its event back', async () => {
+        let seen: unknown;
+        await expect(
+            missions.createExternal(
+                OWNER,
+                {
+                    title: 'Linked',
+                    description: 'From Gauzy.',
+                    createdBy: { type: 'integration', id: KEY },
+                },
+                scope,
+                {
+                    withinCreate: async (mission, manager) => {
+                        seen = await manager.getRepository(Mission).findOneBy({ id: mission.id });
+                        throw new Error('the link lost its race');
+                    },
+                },
+            ),
+        ).rejects.toThrow('the link lost its race');
+        // The row existed inside the transaction, and is gone after it.
+        expect(seen).toBeTruthy();
+        expect(await dataSource.getRepository(Mission).count()).toBe(0);
+        expect(await events()).toEqual([]);
+    });
+
     it('createExternal stores a PAUSED one-shot Mission with no auto-build and records mission.created', async () => {
         const team = await dataSource.getRepository(Team).save(
             dataSource.getRepository(Team).create({
