@@ -233,11 +233,8 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         reason: "APW-06's `AppHostsService` binds it and its stores are unbound; unbound, the FR-16 order applies.",
         source: 'packages/agent/src/app-launcher/managed-host-root.resolver.ts:117-130 (APW-06 T26)',
     },
-    {
-        key: 'AppLauncherModule[agent] | AppLauncherService | APP_SPEC_DISPLAY_NAMES',
-        reason: "APW-03's display-name reader; unbound, the launcher shows the Work's own name.",
-        source: 'packages/agent/src/app-launcher/app-launcher.service.ts:238 (bound by APW-03)',
-    },
+    // `AppLauncherModule[agent] | AppLauncherService | APP_SPEC_DISPLAY_NAMES` left this list
+    // on 2026-10-17: the agent AppLauncherModule now binds it over the real WorkAppSpecState rows.
     {
         key: 'AppLauncherModule[api] | LauncherDelegatedCorsMiddleware (middleware) | Object',
         reason: 'A test seam (`origins?: readonly string[]`), never a DI token; `@Optional()` is what lets the API boot.',

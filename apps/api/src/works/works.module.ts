@@ -57,6 +57,9 @@ import { WorkAppSpecController } from './work-app-spec.controller';
 import { WorkAppLicenseController } from './work-app-license.controller';
 import { AppsCatalogBlueprintsController } from './apps-catalog-blueprints.controller';
 import { AppsCatalogBlueprintsService } from './apps-catalog-blueprints.service';
+// Lane aw-web-3 — the manifest-backed Apps catalog (APW-03).
+import { AppsCatalogController } from './apps-catalog.controller';
+import { AppsCatalogManifestService } from './apps-catalog-manifest.service';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
 import { MembersController } from './members.controller';
@@ -152,6 +155,8 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         CacheEntryRepository,
         // `GET /api/apps-catalog/blueprints` — the create form's catalog tab.
         AppsCatalogBlueprintsService,
+        // `GET /api/apps-catalog` (+ `/:id`) — the manifest-backed Apps catalog.
+        AppsCatalogManifestService,
         WorksTemplateCatalogService,
         ExistingWebsiteLinkService,
         WorkCleanupService,
@@ -210,6 +215,8 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         WorkAppLicenseController,
         // `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps catalog".
         AppsCatalogBlueprintsController,
+        // AFTER the Blueprint listing: its fixed `blueprints` segment must win over `:id`.
+        AppsCatalogController,
         // APW-08 T25 + APW-04 (lane aw-ai) — `POST/GET /api/works/:id/evolve`,
         // `POST /api/works/:id/provision`, `GET /api/works/:id/provisioning`. Its services
         // come from `AgentAppWorksModule` (imported above).
