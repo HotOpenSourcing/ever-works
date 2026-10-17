@@ -15,7 +15,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -73,28 +73,52 @@ const IDEA_DESCRIPTION_MAX = 100_000;
 
 /** Contract v1 `requests.schema.json#/$defs/CreateIdea`. */
 export class IntegrationCreateIdeaDto {
+    @ApiProperty({ minLength: 1, maxLength: IDEA_TITLE_MAX })
     @IsString()
     @Length(1, IDEA_TITLE_MAX)
     title!: string;
 
+    @ApiProperty({ minLength: 1, maxLength: IDEA_DESCRIPTION_MAX })
     @IsString()
     @Length(1, IDEA_DESCRIPTION_MAX)
     description!: string;
 
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        format: 'uuid',
+        description:
+            "The caller's own non-private Mission of the pinned organization (404 otherwise).",
+    })
     @IsOptional()
     @IsUUID()
     missionId?: string | null;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
@@ -103,22 +127,38 @@ export class IntegrationCreateIdeaDto {
 
 /** Contract v1 `requests.schema.json#/$defs/UpdateIdea` (no `status`: dismiss / restore). */
 export class IntegrationUpdateIdeaDto {
+    @ApiProperty({ required: false, minLength: 1, maxLength: IDEA_TITLE_MAX })
     @IsOptional()
     @IsString()
     @Length(1, IDEA_TITLE_MAX)
     title?: string;
 
+    @ApiProperty({ required: false, minLength: 1, maxLength: IDEA_DESCRIPTION_MAX })
     @IsOptional()
     @IsString()
     @Length(1, IDEA_DESCRIPTION_MAX)
     description?: string;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
