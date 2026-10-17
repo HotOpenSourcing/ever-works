@@ -426,6 +426,19 @@ export interface IBuildPlugin extends IPlugin {
 	): Promise<{ notModified: boolean; etag?: string; runs: BuildRunRef[] }>;
 	/** Registry access for a private image and the pull token's validity (plan §4.12). */
 	checkImageAccess?(input: { imageRepository: string; tag: string; pullToken?: string }): Promise<ImageAccessResult>;
+	/**
+	 * A clone-free {@link RepositoryWriter} for one repository, from the plugin's
+	 * own provider client (APW-05 T16 remainder, outstanding-work A0.4).
+	 *
+	 * Optional and additive: plan §4.1 has the FACADE bind the writer over
+	 * `GitFacadeService`, which today lacks `commitFiles` (APW-03 T22). A plugin
+	 * that can write to its provider without a clone supplies one here and the
+	 * facade prefers it; a plugin without it is given the facade's writer.
+	 */
+	repositoryWriter?(
+		repository: { readonly owner: string; readonly repo: string; readonly trackedBranch?: string },
+		auth: BuildAuth
+	): RepositoryWriter;
 }
 
 /**

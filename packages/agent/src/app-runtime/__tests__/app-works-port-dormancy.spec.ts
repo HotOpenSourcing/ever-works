@@ -163,9 +163,16 @@ const BOUND: readonly string[] = [
     // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
     // beside the adapter whose apply gate it opens.
     'APP_BLUEPRINT_APPLY_SERVICE',
+    // APW-05 T23 / §4.12 — bound 2026-10-17 by `AppBuildsModule` (outstanding-work
+    // A0.4): the Builds controller's edit check over `WorkOwnershipService`, and the
+    // pull token's platform-managed write over
+    // `PluginSettingsService.writePlatformManagedWorkSettings`. Until then every
+    // detail answered `canEdit: false` and every pull-token save `503`.
+    'APP_BUILD_EDIT_ACCESS',
     // APW-05 T16 — `BuildFacadeService`, provided by `AppBuildsModule` (2026-09-21).
     // Four services in this epic inject it; until it was bound every one of them
     // took its `pluginUnavailable` branch and no Build could be requested.
+    'APP_BUILD_PLATFORM_SETTINGS_WRITER',
     'APP_BUILD_PLUGIN_RESOLVER',
     // APW-05 T19/T20 — provided by `AppBuildsModule`. Found by THIS register on
     // its first run: they were in the unbound list when it was drafted from the
@@ -290,6 +297,9 @@ const BOUND: readonly string[] = [
     // register like any other port — a new token in NEITHER list fails the
     // "classifies every token …" case below.
     'BUILD_REPOSITORY_FACTS_SOURCE',
+    // 2026-10-17 (A0.4) — the build plugin's resolved Work settings, lazily over
+    // `PluginSettingsService`; provided by `AppBuildsModule` beside the two above.
+    'BUILD_SETTINGS_SOURCE',
     'BUILD_TOKEN_SOURCE',
     // APW-06 — `DefaultManagedHostRootResolver`, provided by `AppLauncherModule`
     // (`useClass`). Provided and unlisted until 2026-09-26, like the readiness
@@ -359,8 +369,6 @@ const WORKER_BOUND: readonly string[] = [
 const UNBOUND: readonly string[] = [
     'APPS_DOMAIN_DNS_SERVICE',
     'APPS_TIER_POLICY',
-    'APP_BUILD_EDIT_ACCESS',
-    'APP_BUILD_PLATFORM_SETTINGS_WRITER',
     'APP_CLUSTER_OP_DISPATCHER',
     'APP_COMMIT_ANCESTRY',
     'APP_CUSTOM_DOMAIN_STORE',
@@ -523,8 +531,12 @@ describe('App Works port dormancy register (§5.10)', () => {
         //
         // 48/25 → 45/28 on 2026-10-17: APW-03 T28 binds `APP_BLUEPRINT_APPLY_SERVICE`,
         // T42 binds `APP_LICENSE_SERVICE` and `APP_UPSTREAM_LICENSE_SERVICE`.
-        expect(UNBOUND).toHaveLength(45);
-        expect(BOUND).toHaveLength(28);
+        //
+        // 45/28 → 43/31 on 2026-10-17 (outstanding-work A0.4, merged from develop):
+        // APW-05's `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER`
+        // moved across, and the new `BUILD_SETTINGS_SOURCE` is provided.
+        expect(UNBOUND).toHaveLength(43);
+        expect(BOUND).toHaveLength(31);
     });
 
     it('names where the worker binds what this package does not', () => {
