@@ -17,7 +17,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -95,14 +95,21 @@ const DEFAULT_EXTERNAL_SOURCE = {
 
 /** `requests.schema.json#/$defs/GoalMetricSource`: only `pluginId: 'external'` is accepted. */
 export class IntegrationGoalMetricSourceDto {
+    @ApiProperty({
+        minLength: 1,
+        maxLength: 100,
+        description: "Integrations may only use 'external' (422 domain_rule otherwise).",
+    })
     @IsString()
     @Length(1, 100)
     pluginId!: string;
 
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     metricId!: string;
 
+    @ApiProperty({ required: false, type: 'object', additionalProperties: true })
     @IsOptional()
     @IsObject()
     params?: Record<string, unknown>;
@@ -110,33 +117,41 @@ export class IntegrationGoalMetricSourceDto {
 
 /** One weighted criterion (Gauzy: a numeric KeyResult). */
 export class IntegrationGoalCriterionDto {
+    @ApiProperty({ minLength: 1, maxLength: 64 })
     @IsString()
     @Length(1, 64)
     id!: string;
 
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     name!: string;
 
+    @ApiProperty({ type: Number, description: 'Greater than 0.' })
     @IsNumber()
     weight!: number;
 
+    @ApiProperty({ type: Number })
     @IsNumber()
     target!: number;
 
+    @ApiProperty({ enum: ['gte', 'lte'] })
     @IsIn(COMPARATORS)
     direction!: GoalComparator;
 
+    @ApiProperty({ required: false, maxLength: 32 })
     @IsOptional()
     @IsString()
     @MaxLength(32)
     unit?: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationGoalMetricSourceDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationGoalMetricSourceDto)
     metricSource?: IntegrationGoalMetricSourceDto;
 
+    @ApiProperty({ required: false, enum: ['day', 'week', 'month', 'total', 'point'] })
     @IsOptional()
     @IsIn(WINDOWS)
     window?: GoalWindow;
@@ -144,22 +159,27 @@ export class IntegrationGoalCriterionDto {
 
 /** One Definition-of-Done item (Gauzy: a True/False KeyResult). */
 export class IntegrationGoalDoDCriterionDto {
+    @ApiProperty({ minLength: 1, maxLength: 64 })
     @IsString()
     @Length(1, 64)
     id!: string;
 
+    @ApiProperty({ minLength: 1, maxLength: 500 })
     @IsString()
     @Length(1, 500)
     text!: string;
 
+    @ApiProperty({ enum: ['open', 'done', 'waived'] })
     @IsIn(DOD_STATUSES)
     status!: (typeof DOD_STATUSES)[number];
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 1000 })
     @IsOptional()
     @IsString()
     @MaxLength(1000)
     evidence?: string | null;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 500 })
     @IsOptional()
     @IsString()
     @MaxLength(500)
@@ -168,51 +188,66 @@ export class IntegrationGoalDoDCriterionDto {
 
 /** Contract v1 `requests.schema.json#/$defs/CreateGoal` (always created `draft`). */
 export class IntegrationCreateGoalDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     title!: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100000 })
     @IsOptional()
     @IsString()
     @MaxLength(100_000)
     description?: string | null;
 
+    @ApiProperty({ required: false, enum: ['metric', 'delivery'] })
     @IsOptional()
     @IsIn(['metric', 'delivery'])
     goalKind?: 'metric' | 'delivery';
 
+    @ApiProperty({
+        required: false,
+        type: () => IntegrationGoalMetricSourceDto,
+        description: "Default { pluginId: 'external', metricId: 'value' } for a metric Goal.",
+    })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationGoalMetricSourceDto)
     metricSource?: IntegrationGoalMetricSourceDto;
 
+    @ApiProperty({ required: false, enum: ['gte', 'lte'] })
     @IsOptional()
     @IsIn(COMPARATORS)
     comparator?: GoalComparator;
 
+    @ApiProperty({ required: false, type: Number })
     @IsOptional()
     @IsNumber()
     targetValue?: number;
 
+    @ApiProperty({ required: false, minLength: 1, maxLength: 32 })
     @IsOptional()
     @IsString()
     @Length(1, 32)
     unit?: string;
 
+    @ApiProperty({ required: false, enum: ['day', 'week', 'month', 'total', 'point'] })
     @IsOptional()
     @IsIn(WINDOWS)
     window?: GoalWindow;
 
+    @ApiProperty({ required: false, nullable: true, type: Number })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsNumber()
     baselineValue?: number | null;
 
+    @ApiProperty({ required: false, nullable: true, format: 'date-time' })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsDateString()
     deadline?: string | null;
 
+    @ApiProperty({ required: false, type: () => [IntegrationGoalCriterionDto], maxItems: 20 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(20)
@@ -220,6 +255,7 @@ export class IntegrationCreateGoalDto {
     @Type(() => IntegrationGoalCriterionDto)
     criteria?: IntegrationGoalCriterionDto[];
 
+    @ApiProperty({ required: false, type: () => [IntegrationGoalDoDCriterionDto], maxItems: 50 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
@@ -227,16 +263,31 @@ export class IntegrationCreateGoalDto {
     @Type(() => IntegrationGoalDoDCriterionDto)
     dodCriteria?: IntegrationGoalDoDCriterionDto[];
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
@@ -250,49 +301,71 @@ export class IntegrationCreateGoalDto {
  * immutable).
  */
 export class IntegrationUpdateGoalDto {
+    @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
     @IsOptional()
     @IsString()
     @Length(1, 200)
     title?: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100000 })
     @IsOptional()
     @IsString()
     @MaxLength(100_000)
     description?: string | null;
 
+    @ApiProperty({ required: false, enum: ['gte', 'lte'] })
     @IsOptional()
     @IsIn(COMPARATORS)
     comparator?: GoalComparator;
 
+    @ApiProperty({ required: false, type: Number })
     @IsOptional()
     @IsNumber()
     targetValue?: number;
 
+    @ApiProperty({ required: false, minLength: 1, maxLength: 32 })
     @IsOptional()
     @IsString()
     @Length(1, 32)
     unit?: string;
 
+    @ApiProperty({ required: false, enum: ['day', 'week', 'month', 'total', 'point'] })
     @IsOptional()
     @IsIn(WINDOWS)
     window?: GoalWindow;
 
+    @ApiProperty({ required: false, nullable: true, type: Number })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsNumber()
     baselineValue?: number | null;
 
+    @ApiProperty({ required: false, nullable: true, format: 'date-time' })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsDateString()
     deadline?: string | null;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
@@ -300,6 +373,7 @@ export class IntegrationUpdateGoalDto {
 
 /** `PUT /goals/:id/criteria` — the full set (`[]` clears the weighted path). */
 export class IntegrationPutGoalCriteriaDto {
+    @ApiProperty({ type: () => [IntegrationGoalCriterionDto], maxItems: 20 })
     @IsArray()
     @ArrayMaxSize(20)
     @ValidateNested({ each: true })
@@ -309,6 +383,7 @@ export class IntegrationPutGoalCriteriaDto {
 
 /** `PUT /goals/:id/dod` — the full Definition of Done (`[]` clears it on a metric Goal). */
 export class IntegrationPutGoalDodDto {
+    @ApiProperty({ type: () => [IntegrationGoalDoDCriterionDto], maxItems: 50 })
     @IsArray()
     @ArrayMaxSize(50)
     @ValidateNested({ each: true })
@@ -318,14 +393,23 @@ export class IntegrationPutGoalDodDto {
 
 /** `POST /goals/:id/samples` — one externally measured value. */
 export class IntegrationGoalSampleDto {
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        minLength: 1,
+        maxLength: 64,
+        description: 'A criterion reading the external source; omitted: the Goal itself.',
+    })
     @IsOptional()
     @IsString()
     @Length(1, 64)
     criterionId?: string | null;
 
+    @ApiProperty({ type: Number })
     @IsNumber({ allowNaN: false, allowInfinity: false })
     value!: number;
 
+    @ApiProperty({ format: 'date-time' })
     @IsDateString()
     sampledAt!: string;
 }

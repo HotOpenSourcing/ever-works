@@ -41,8 +41,27 @@ import {
     IntegrationUpdateKbDocumentDto,
     IntegrationUpdateKbFolderDto,
 } from '../kb.controller';
+import {
+    IntegrationCreateGoalDto,
+    IntegrationGoalCriterionDto,
+    IntegrationGoalDoDCriterionDto,
+    IntegrationGoalMetricSourceDto,
+    IntegrationGoalSampleDto,
+    IntegrationPutGoalCriteriaDto,
+    IntegrationPutGoalDodDto,
+    IntegrationUpdateGoalDto,
+} from '../goals.controller';
+import { IntegrationCreateIdeaDto, IntegrationUpdateIdeaDto } from '../ideas.controller';
 import { IntegrationExceptionFilter } from '../integration-exception.filter';
 import { IntegrationPutLinkDto } from '../links.controller';
+import {
+    IntegrationCreateMissionDto,
+    IntegrationMissionGoalLinkDto,
+    IntegrationMissionWorkLinkDto,
+    IntegrationPutMissionGoalsDto,
+    IntegrationPutMissionWorksDto,
+    IntegrationUpdateMissionDto,
+} from '../missions.controller';
 import {
     IntegrationCreateCommentDto,
     IntegrationExternalAuthorDto,
@@ -239,6 +258,12 @@ interface BodyPair {
 }
 
 const EXTERNAL_REF: BodyPair = { dto: IntegrationExternalRefDto };
+const GOAL_METRIC_SOURCE: BodyPair = { dto: IntegrationGoalMetricSourceDto };
+const GOAL_CRITERION: BodyPair = {
+    dto: IntegrationGoalCriterionDto,
+    nested: { metricSource: GOAL_METRIC_SOURCE },
+};
+const GOAL_DOD_ITEM: BodyPair = { dto: IntegrationGoalDoDCriterionDto };
 
 /** `requests.schema.json` `$defs` → the DTO its route validates the body with. */
 const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
@@ -296,6 +321,35 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
     CreateKbFolder: { dto: IntegrationCreateKbFolderDto, nested: { externalRef: EXTERNAL_REF } },
     UpdateKbFolder: { dto: IntegrationUpdateKbFolderDto },
     PutLink: { dto: IntegrationPutLinkDto },
+    // EW-P2-1 — Ideas.
+    CreateIdea: { dto: IntegrationCreateIdeaDto, nested: { externalRef: EXTERNAL_REF } },
+    UpdateIdea: { dto: IntegrationUpdateIdeaDto },
+    // EW-P2-2 — Goals.
+    CreateGoal: {
+        dto: IntegrationCreateGoalDto,
+        nested: {
+            metricSource: GOAL_METRIC_SOURCE,
+            criteria: GOAL_CRITERION,
+            dodCriteria: GOAL_DOD_ITEM,
+            externalRef: EXTERNAL_REF,
+        },
+    },
+    UpdateGoal: { dto: IntegrationUpdateGoalDto },
+    PutGoalCriteria: { dto: IntegrationPutGoalCriteriaDto, nested: { criteria: GOAL_CRITERION } },
+    PutGoalDod: { dto: IntegrationPutGoalDodDto, nested: { dodCriteria: GOAL_DOD_ITEM } },
+    GoalDoDItem: GOAL_DOD_ITEM,
+    GoalSample: { dto: IntegrationGoalSampleDto },
+    // EW-P2-5 — Missions.
+    CreateMission: { dto: IntegrationCreateMissionDto, nested: { externalRef: EXTERNAL_REF } },
+    UpdateMission: { dto: IntegrationUpdateMissionDto },
+    PutMissionGoals: {
+        dto: IntegrationPutMissionGoalsDto,
+        nested: { goals: { dto: IntegrationMissionGoalLinkDto } },
+    },
+    PutMissionWorks: {
+        dto: IntegrationPutMissionWorksDto,
+        nested: { works: { dto: IntegrationMissionWorkLinkDto } },
+    },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
     Batch: {
