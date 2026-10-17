@@ -1493,7 +1493,9 @@ function toIso(value: Date | string): string {
 
 /** The model CLIs this node's seat is out of quota on right now. */
 function throttledProviders(node: Pick<FleetNode, 'modelThrottles'>): ReadonlySet<string> {
-    return new Set(activeFleetNodeModelThrottles(node.modelThrottles).map((entry) => entry.provider));
+    return new Set(
+        activeFleetNodeModelThrottles(node.modelThrottles).map((entry) => entry.provider),
+    );
 }
 
 /**

@@ -2051,7 +2051,11 @@ async function assertRealWriteTarget(
                     ? {
                           appChanges: {
                               service: appChangeService,
-                              async authorize(userId: string, workId: string, level: 'edit' | 'view') {
+                              async authorize(
+                                  userId: string,
+                                  workId: string,
+                                  level: 'edit' | 'view',
+                              ) {
                                   try {
                                       const access =
                                           level === 'edit'

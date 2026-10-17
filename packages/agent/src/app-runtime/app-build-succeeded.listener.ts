@@ -102,8 +102,10 @@ export class AppBuildSucceededListener {
     private async handleSucceeded(
         payload: AppBuildEventPayload | null,
     ): Promise<AppBuildTriggerOutcome> {
-        if (!config.everWorks?.apps?.worksEnabled?.()) return { requested: false, reason: 'disabled' };
-        if (!payload?.workId || !payload.buildId) return { requested: false, reason: 'invalid_payload' };
+        if (!config.everWorks?.apps?.worksEnabled?.())
+            return { requested: false, reason: 'disabled' };
+        if (!payload?.workId || !payload.buildId)
+            return { requested: false, reason: 'invalid_payload' };
         if (!this.requests?.request || !this.states?.getOrCreate) {
             return { requested: false, reason: 'unbound' };
         }
@@ -165,7 +167,9 @@ export class AppBuildSucceededListener {
         } catch (error) {
             // Unreadable history: asking is the safer error — the request path dedupes a queued
             // entry by Build and refuses a second concurrent one with the lock.
-            this.logger.warn(`Recent Deployments of Work ${workId} unreadable: ${messageOf(error)}`);
+            this.logger.warn(
+                `Recent Deployments of Work ${workId} unreadable: ${messageOf(error)}`,
+            );
             return false;
         }
     }

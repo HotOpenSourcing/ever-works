@@ -49,7 +49,9 @@ export function useStartAppBuild({
                         commitSha ? { commitSha } : {},
                     );
                     if (result.success) {
-                        toast.success(t(result.data?.deduped ? 'toasts.deduped' : 'toasts.started'));
+                        toast.success(
+                            t(result.data?.deduped ? 'toasts.deduped' : 'toasts.started'),
+                        );
                         await onStarted?.(result.data?.build ?? null);
                         return;
                     }

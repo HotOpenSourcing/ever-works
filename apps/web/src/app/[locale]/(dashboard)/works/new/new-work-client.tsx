@@ -253,12 +253,14 @@ export default function NewWorkClient({
         () => [
             // APW-01 T23 (FR-47, ACC-01-13) — a fail-closed kind that is
             // disabled is left OUT of the row, not rendered as "Soon".
-            ...WORK_KIND_ORDER.filter((k) => !(isHiddenWhenDisabled(k) && disabledSet.has(k))).map((k) => ({
-                value: k,
-                label: t(`kinds.${k}`),
-                Icon: WORK_KIND_ICONS[k],
-                comingSoon: disabledSet.has(k),
-            })),
+            ...WORK_KIND_ORDER.filter((k) => !(isHiddenWhenDisabled(k) && disabledSet.has(k))).map(
+                (k) => ({
+                    value: k,
+                    label: t(`kinds.${k}`),
+                    Icon: WORK_KIND_ICONS[k],
+                    comingSoon: disabledSet.has(k),
+                }),
+            ),
             // store is flag-controlled via works-store like every other kind.
             // The `works-store` PostHog flag exists as `active: false`, so
             // the chip continues to render as the inert "Soon" baseline

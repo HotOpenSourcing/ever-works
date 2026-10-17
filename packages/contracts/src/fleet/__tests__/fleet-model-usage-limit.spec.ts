@@ -84,7 +84,9 @@ describe('detectFleetModelUsageLimit', () => {
 
 	it('does not read ordinary failures — or the model talking about rate limits in strict mode', () => {
 		expect(detectFleetModelUsageLimit('blew up', { now: NOW })).toBeNull();
-		expect(detectFleetModelUsageLimit('TypeError: cannot read property limit of undefined', { now: NOW })).toBeNull();
+		expect(
+			detectFleetModelUsageLimit('TypeError: cannot read property limit of undefined', { now: NOW })
+		).toBeNull();
 		expect(detectFleetModelUsageLimit('', { now: NOW })).toBeNull();
 		expect(detectFleetModelUsageLimit(null, { now: NOW })).toBeNull();
 		expect(
@@ -167,9 +169,25 @@ describe('readFleetJobModelUsageLimit', () => {
 	});
 
 	it('ignores succeeded runs, red gates and non-model failures', () => {
-		expect(readFleetJobModelUsageLimit({ status: 'succeeded', model: { status: 'succeeded', summary: "You've hit your weekly limit" } }, { now: NOW })).toBeNull();
-		expect(readFleetJobModelUsageLimit({ status: 'failed', failureReason: 'a required acceptance check did not pass', model: { status: 'succeeded', summary: 'done' } }, { now: NOW })).toBeNull();
-		expect(readFleetJobModelUsageLimit({ status: 'failed', failureReason: 'git finalize failed' }, { now: NOW })).toBeNull();
+		expect(
+			readFleetJobModelUsageLimit(
+				{ status: 'succeeded', model: { status: 'succeeded', summary: "You've hit your weekly limit" } },
+				{ now: NOW }
+			)
+		).toBeNull();
+		expect(
+			readFleetJobModelUsageLimit(
+				{
+					status: 'failed',
+					failureReason: 'a required acceptance check did not pass',
+					model: { status: 'succeeded', summary: 'done' }
+				},
+				{ now: NOW }
+			)
+		).toBeNull();
+		expect(
+			readFleetJobModelUsageLimit({ status: 'failed', failureReason: 'git finalize failed' }, { now: NOW })
+		).toBeNull();
 		expect(readFleetJobModelUsageLimit(null)).toBeNull();
 	});
 });
@@ -178,16 +196,40 @@ describe('activeFleetNodeModelThrottles', () => {
 	it('returns only unexpired entries, the latest window per CLI', () => {
 		const active = activeFleetNodeModelThrottles(
 			[
-				{ provider: 'claude-code', window: 'session', until: '2026-10-17T16:00:00.000Z', reason: 'a', since: '2026-10-17T11:00:00.000Z' },
-				{ provider: 'claude-code', window: 'weekly', until: '2026-10-19T01:01:00.000Z', reason: 'b', since: '2026-10-17T15:27:00.000Z' },
-				{ provider: 'codex', window: 'usage', until: '2026-10-17T15:00:00.000Z', reason: 'expired', since: '2026-10-17T14:00:00.000Z' },
+				{
+					provider: 'claude-code',
+					window: 'session',
+					until: '2026-10-17T16:00:00.000Z',
+					reason: 'a',
+					since: '2026-10-17T11:00:00.000Z'
+				},
+				{
+					provider: 'claude-code',
+					window: 'weekly',
+					until: '2026-10-19T01:01:00.000Z',
+					reason: 'b',
+					since: '2026-10-17T15:27:00.000Z'
+				},
+				{
+					provider: 'codex',
+					window: 'usage',
+					until: '2026-10-17T15:00:00.000Z',
+					reason: 'expired',
+					since: '2026-10-17T14:00:00.000Z'
+				},
 				'junk',
 				{ provider: '', until: 'never' }
 			],
 			NOW
 		);
 		expect(active).toEqual([
-			{ provider: 'claude-code', window: 'weekly', until: '2026-10-19T01:01:00.000Z', reason: 'b', since: '2026-10-17T15:27:00.000Z' }
+			{
+				provider: 'claude-code',
+				window: 'weekly',
+				until: '2026-10-19T01:01:00.000Z',
+				reason: 'b',
+				since: '2026-10-17T15:27:00.000Z'
+			}
 		]);
 		expect(activeFleetNodeModelThrottles(null, NOW)).toEqual([]);
 	});

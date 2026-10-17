@@ -480,7 +480,8 @@ export async function inspectAppSourceAction(input: {
     }
 
     const t = await getTranslations('actions.works');
-    const repositoryUrl = typeof input?.repositoryUrl === 'string' ? input.repositoryUrl.trim() : '';
+    const repositoryUrl =
+        typeof input?.repositoryUrl === 'string' ? input.repositoryUrl.trim() : '';
     if (!repositoryUrl || appRepositoryUrlLengthExceeded(repositoryUrl)) {
         return { success: false, error: t('app.invalidUrl'), code: 'invalid_url' };
     }

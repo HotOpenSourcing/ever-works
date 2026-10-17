@@ -278,7 +278,9 @@ describe('AppBuildsController — Rebuild (ACC-05-08)', () => {
         ['commitNotReachable', HttpStatus.UNPROCESSABLE_ENTITY],
         ['buildProviderUnavailable', HttpStatus.SERVICE_UNAVAILABLE],
     ])('%s answers %d', async (code, expected) => {
-        const builds = buildsService({ requestRebuild: jest.fn(async () => ({ ok: false, code })) });
+        const builds = buildsService({
+            requestRebuild: jest.fn(async () => ({ ok: false, code })),
+        });
         const { status, body } = await refusalOf(
             controller('owner', { builds }).subject.request(USER, WORK_ID, {}),
         );

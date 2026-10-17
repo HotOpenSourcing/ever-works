@@ -16,7 +16,10 @@ jest.mock('../ingest/github/github-webhook-dispatcher.service', () => ({
 
 import { config } from '@ever-works/agent/config';
 import { APP_BUILD_WORKFLOW_PATH } from '@ever-works/contracts';
-import { AppBuildWorkflowRunConsumer, isBuildWorkflowPath } from './app-build-workflow-run.consumer';
+import {
+    AppBuildWorkflowRunConsumer,
+    isBuildWorkflowPath,
+} from './app-build-workflow-run.consumer';
 
 /**
  * APW-05 T24 — the `workflow_run` consumer (plan §7.5).
@@ -57,9 +60,15 @@ function body(run: Record<string, unknown> = {}, fullName = 'Acme/App') {
 }
 
 function harness(options: { works?: unknown[]; workflowState?: string } = {}) {
-    const works = { findAppWorksByDataRepository: jest.fn(async () => options.works ?? [{ id: WORK_ID }]) };
+    const works = {
+        findAppWorksByDataRepository: jest.fn(async () => options.works ?? [{ id: WORK_ID }]),
+    };
     const builds = {
-        recordProviderRun: jest.fn(async () => ({ accepted: true, build: { id: 'b1' }, created: true })),
+        recordProviderRun: jest.fn(async () => ({
+            accepted: true,
+            build: { id: 'b1' },
+            created: true,
+        })),
         requestPrepare: jest.fn(async () => ({ prepareSeq: 1, dispatched: true })),
     };
     const preparations = {
@@ -118,7 +127,11 @@ describe('AppBuildWorkflowRunConsumer (APW-05 T24)', () => {
     it('ignores other workflow paths, other events, unknown repositories and the switch off', async () => {
         const h = harness();
         expect(
-            await h.consumer.handle(BINDING, 'workflow_run', body({ path: '.github/workflows/ci.yml' })),
+            await h.consumer.handle(
+                BINDING,
+                'workflow_run',
+                body({ path: '.github/workflows/ci.yml' }),
+            ),
         ).toEqual({ recorded: 0, ignored: 'workflowPath' });
         expect(await h.consumer.handle(BINDING, 'check_run', body())).toEqual({
             recorded: 0,

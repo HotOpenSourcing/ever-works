@@ -58,8 +58,18 @@ describe('AppModeCards', () => {
     });
 
     it('titles Link “don’t follow upstream” on the member’s own fork', () => {
-        wrap(<AppModeCards modes={modes} value="link" onChange={vi.fn()} reasonParams={params} ownFork />);
-        expect(screen.getByTestId('app-work-mode-link').textContent).toContain("Link — don't follow upstream");
+        wrap(
+            <AppModeCards
+                modes={modes}
+                value="link"
+                onChange={vi.fn()}
+                reasonParams={params}
+                ownFork
+            />,
+        );
+        expect(screen.getByTestId('app-work-mode-link').textContent).toContain(
+            "Link — don't follow upstream",
+        );
     });
 });
 
@@ -79,11 +89,25 @@ describe('AppTargetOwnerPicker', () => {
             },
         },
         { login: 'big-org', type: 'organization', available: true, existingForkChecked: false },
-        { login: 'locked-org', type: 'organization', available: false, reason: 'target_owner_forbidden', existingForkChecked: true },
+        {
+            login: 'locked-org',
+            type: 'organization',
+            available: false,
+            reason: 'target_owner_forbidden',
+            existingForkChecked: true,
+        },
     ];
 
     it('shows the existing fork line for a checked owner that has one', () => {
-        wrap(<AppTargetOwnerPicker owners={owners} value="me" onChange={vi.fn()} mode="fork" reasonParams={params} />);
+        wrap(
+            <AppTargetOwnerPicker
+                owners={owners}
+                value="me"
+                onChange={vi.fn()}
+                mode="fork"
+                reasonParams={params}
+            />,
+        );
         expect(screen.getByTestId('app-work-existing-fork').textContent).toBe(
             'You already have a fork: me/tasks-app. Ever Works will use it.',
         );
@@ -91,7 +115,13 @@ describe('AppTargetOwnerPicker', () => {
 
     it('keeps an owner the scan did not reach selectable, with no existing-fork line (ACC-01-26)', () => {
         wrap(
-            <AppTargetOwnerPicker owners={owners} value="big-org" onChange={vi.fn()} mode="fork" reasonParams={params} />,
+            <AppTargetOwnerPicker
+                owners={owners}
+                value="big-org"
+                onChange={vi.fn()}
+                mode="fork"
+                reasonParams={params}
+            />,
         );
         const option = screen.getByRole('option', { name: /big-org/ }) as HTMLOptionElement;
         expect(option.disabled).toBe(false);
@@ -100,7 +130,15 @@ describe('AppTargetOwnerPicker', () => {
     });
 
     it('disables an owner the member cannot create in, naming it in the reason', () => {
-        wrap(<AppTargetOwnerPicker owners={owners} value="me" onChange={vi.fn()} mode="fork" reasonParams={params} />);
+        wrap(
+            <AppTargetOwnerPicker
+                owners={owners}
+                value="me"
+                onChange={vi.fn()}
+                mode="fork"
+                reasonParams={params}
+            />,
+        );
         const option = screen.getByRole('option', { name: /locked-org/ }) as HTMLOptionElement;
         expect(option.disabled).toBe(true);
         expect(option.textContent).toContain("You can't create repositories in locked-org.");
@@ -113,7 +151,15 @@ describe('AppTargetOwnerPicker', () => {
             available: true,
             existingForkChecked: false,
         }));
-        wrap(<AppTargetOwnerPicker owners={many} value="org-0" onChange={vi.fn()} mode="fork" reasonParams={params} />);
+        wrap(
+            <AppTargetOwnerPicker
+                owners={many}
+                value="org-0"
+                onChange={vi.fn()}
+                mode="fork"
+                reasonParams={params}
+            />,
+        );
         const filter = screen.getByTestId('app-work-owner-filter');
         fireEvent.change(filter, { target: { value: 'org-1' } });
         // org-1 and org-10 match, and the selected org-0 always stays listed.

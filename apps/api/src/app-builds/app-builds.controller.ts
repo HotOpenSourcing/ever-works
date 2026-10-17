@@ -101,7 +101,10 @@ export class AppBuildsController {
     })
     @ApiParam({ name: 'id', description: 'Work ID' })
     @ApiResponse({ status: 200, description: 'The page.' })
-    @ApiResponse({ status: 404, description: 'Missing, invisible, not an App Work, or App Works off.' })
+    @ApiResponse({
+        status: 404,
+        description: 'Missing, invisible, not an App Work, or App Works off.',
+    })
     async list(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
@@ -321,7 +324,10 @@ export class AppBuildsController {
             try {
                 access = await this.ownership.ensureCanEdit(workId, userId);
             } catch (error) {
-                if (isStatus(error, HttpStatus.FORBIDDEN) || isStatus(error, HttpStatus.NOT_FOUND)) {
+                if (
+                    isStatus(error, HttpStatus.FORBIDDEN) ||
+                    isStatus(error, HttpStatus.NOT_FOUND)
+                ) {
                     throw refusal(
                         'editAccessRequired',
                         HttpStatus.FORBIDDEN,

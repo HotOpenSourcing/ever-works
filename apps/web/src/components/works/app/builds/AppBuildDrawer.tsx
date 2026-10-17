@@ -12,7 +12,13 @@ import {
 } from '@ever-works/contracts';
 import { getAppBuildAction } from '@/app/actions/dashboard/app-builds';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+    Dialog,
+    DialogClose,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import {
     appBuildImageReference,
     appBuildMessageParams,
@@ -44,7 +50,10 @@ export interface AppBuildDrawerProps {
 }
 
 function isFailureClass(value: unknown): value is AppBuildFailureClass {
-    return typeof value === 'string' && (APP_BUILD_FAILURE_CLASSES as readonly string[]).includes(value);
+    return (
+        typeof value === 'string' &&
+        (APP_BUILD_FAILURE_CLASSES as readonly string[]).includes(value)
+    );
 }
 
 /**
@@ -166,7 +175,10 @@ export function AppBuildDrawer({
             if (event.key !== 'c' && event.key !== 'C') return;
             if (event.metaKey || event.ctrlKey || event.altKey) return;
             const target = event.target as HTMLElement | null;
-            if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) {
+            if (
+                target &&
+                (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))
+            ) {
                 return;
             }
             copyImage();
@@ -250,14 +262,19 @@ export function AppBuildDrawer({
                                     })}
                                 </code>
                             </Row>
-                            {view.runnerLabel && <Row label={t('detail.runner')}>{view.runnerLabel}</Row>}
+                            {view.runnerLabel && (
+                                <Row label={t('detail.runner')}>{view.runnerLabel}</Row>
+                            )}
                             <Row label={t('detail.duration')}>
-                                {formatAppBuildDuration(view.durationSeconds) || t('detail.notAvailable')}
+                                {formatAppBuildDuration(view.durationSeconds) ||
+                                    t('detail.notAvailable')}
                             </Row>
                             {imageReference && (
                                 <Row label={t('detail.image')}>
                                     <span className="inline-flex flex-wrap items-center gap-2">
-                                        <code className="font-mono text-xs break-all">{imageReference}</code>
+                                        <code className="font-mono text-xs break-all">
+                                            {imageReference}
+                                        </code>
                                         <Button
                                             type="button"
                                             variant="ghost"
@@ -273,7 +290,9 @@ export function AppBuildDrawer({
                             )}
                             {view.imageTags && view.imageTags.length > 0 && (
                                 <Row label={t('detail.tags')}>
-                                    <span className="font-mono text-xs">{view.imageTags.join('  ')}</span>
+                                    <span className="font-mono text-xs">
+                                        {view.imageTags.join('  ')}
+                                    </span>
                                 </Row>
                             )}
                             {view.status === 'succeeded' && (
@@ -316,7 +335,10 @@ export function AppBuildDrawer({
                             )}
                             {view.verificationResult && (
                                 <Row label={t('detail.verification')}>
-                                    <ul className="space-y-0.5" data-testid="app-build-verification">
+                                    <ul
+                                        className="space-y-0.5"
+                                        data-testid="app-build-verification"
+                                    >
                                         <li>
                                             {view.verificationResult.componentsReady
                                                 ? t('verification.componentsReady')
@@ -325,7 +347,9 @@ export function AppBuildDrawer({
                                         {view.verificationResult.jobs.map((job) => (
                                             <li key={`job-${job.name}`}>
                                                 {job.exitCode === null
-                                                    ? t('verification.jobNoExit', { name: job.name })
+                                                    ? t('verification.jobNoExit', {
+                                                          name: job.name,
+                                                      })
                                                     : t('verification.job', {
                                                           name: job.name,
                                                           exitCode: job.exitCode,
@@ -335,7 +359,9 @@ export function AppBuildDrawer({
                                         {view.verificationResult.smoke.map((smoke) => (
                                             <li key={`smoke-${smoke.name}`}>
                                                 {smoke.passed
-                                                    ? t('verification.smokePassed', { name: smoke.name })
+                                                    ? t('verification.smokePassed', {
+                                                          name: smoke.name,
+                                                      })
                                                     : t('verification.smokeFailed', {
                                                           name: smoke.name,
                                                           expected: smoke.expected,

@@ -68,7 +68,9 @@ export function AppBuildsList({ workId, initialState, canEdit }: AppBuildsListPr
                 setState({ kind: 'ok', list });
                 // Keep the open drawer in step with its row.
                 setOpenBuild((current) =>
-                    current ? (list.items.find((entry) => entry.id === current.id) ?? current) : null,
+                    current
+                        ? (list.items.find((entry) => entry.id === current.id) ?? current)
+                        : null,
                 );
             } else if (result.statusCode === 404) {
                 setState({ kind: 'unavailable' });
@@ -243,7 +245,11 @@ export function AppBuildsList({ workId, initialState, canEdit }: AppBuildsListPr
                         className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card dark:divide-border-dark dark:border-border-dark dark:bg-transparent"
                     >
                         {list.items.map((build, index) => (
-                            <li key={build.id} className="px-3 py-2" data-testid={`app-build-row-${build.id}`}>
+                            <li
+                                key={build.id}
+                                className="px-3 py-2"
+                                data-testid={`app-build-row-${build.id}`}
+                            >
                                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                                     <button
                                         type="button"
@@ -305,7 +311,9 @@ export function AppBuildsList({ workId, initialState, canEdit }: AppBuildsListPr
                                             disabled={!canEdit || cancelling !== null}
                                             title={canEdit ? undefined : t('viewerDisabled')}
                                         >
-                                            {cancelling === build.id ? t('cancelling') : t('cancel')}
+                                            {cancelling === build.id
+                                                ? t('cancelling')
+                                                : t('cancel')}
                                         </Button>
                                     )}
                                 </div>
@@ -314,7 +322,9 @@ export function AppBuildsList({ workId, initialState, canEdit }: AppBuildsListPr
                                     build.notDeployableReason && (
                                         <p className="mt-1 text-xs text-text-muted dark:text-text-muted-dark">
                                             {t('notDeployableLine', {
-                                                reason: t(`notDeployable.${build.notDeployableReason}`),
+                                                reason: t(
+                                                    `notDeployable.${build.notDeployableReason}`,
+                                                ),
                                             })}
                                         </p>
                                     )}

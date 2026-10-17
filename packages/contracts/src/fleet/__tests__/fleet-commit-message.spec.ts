@@ -30,15 +30,21 @@ describe('composeFleetTaskCommitMessage', () => {
 	});
 
 	it('keeps acronyms, cuts long subjects at a word, and never invents a summary', () => {
-		expect(composeFleetTaskCommitMessage({ title: 'API keys page', slug: 'T-8' }).split('\n')[0]).toBe('feat: API keys page');
+		expect(composeFleetTaskCommitMessage({ title: 'API keys page', slug: 'T-8' }).split('\n')[0]).toBe(
+			'feat: API keys page'
+		);
 		const long = composeFleetTaskCommitMessage({
 			title: 'Implement the brand new onboarding wizard with workspace, repository and agent creation steps',
 			slug: 'T-9'
 		}).split('\n')[0];
 		expect(Array.from(long).length).toBeLessThanOrEqual(72);
 		expect(long.endsWith('…')).toBe(true);
-		expect(composeFleetTaskCommitMessage({ title: '', slug: 'T-10' })).toBe('feat: agent run output for T-10\n\nTask: T-10');
-		expect(composeFleetTaskCommitMessage({ title: 'Line one\r\nline two', slug: null })).toBe('feat: line one line two');
+		expect(composeFleetTaskCommitMessage({ title: '', slug: 'T-10' })).toBe(
+			'feat: agent run output for T-10\n\nTask: T-10'
+		);
+		expect(composeFleetTaskCommitMessage({ title: 'Line one\r\nline two', slug: null })).toBe(
+			'feat: line one line two'
+		);
 	});
 });
 
@@ -59,7 +65,11 @@ describe('classifyFleetChangedPaths', () => {
 	it('tells docs-only and tests-only changes from mixed ones', () => {
 		expect(classifyFleetChangedPaths(['README.md', 'docs/features/fleet.md', 'apps/web/CHANGELOG'])).toBe('docs');
 		expect(
-			classifyFleetChangedPaths(['apps/api/src/fleet/__tests__/a.spec.ts', 'packages/x/src/b.test.tsx', 'e2e/c.ts'])
+			classifyFleetChangedPaths([
+				'apps/api/src/fleet/__tests__/a.spec.ts',
+				'packages/x/src/b.test.tsx',
+				'e2e/c.ts'
+			])
 		).toBe('test');
 		expect(classifyFleetChangedPaths(['README.md', 'apps/api/src/main.ts'])).toBe('mixed');
 		expect(classifyFleetChangedPaths([])).toBe('none');

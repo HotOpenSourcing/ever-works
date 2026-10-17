@@ -2659,8 +2659,17 @@ export class AppBuildsService {
      */
     async reconfirmUnconfirmedDigests(
         workId: string,
-    ): Promise<{ readonly checked: number; readonly reconfirmed: number; readonly failed: number }> {
-        const page = await this.builds.findPage(workId, { status: ['succeeded'] }, 1, APP_BUILD_LIST_PAGE_SIZE);
+    ): Promise<{
+        readonly checked: number;
+        readonly reconfirmed: number;
+        readonly failed: number;
+    }> {
+        const page = await this.builds.findPage(
+            workId,
+            { status: ['succeeded'] },
+            1,
+            APP_BUILD_LIST_PAGE_SIZE,
+        );
         let checked = 0;
         let reconfirmed = 0;
         let failed = 0;

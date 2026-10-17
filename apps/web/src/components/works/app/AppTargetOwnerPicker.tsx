@@ -44,16 +44,23 @@ export function AppTargetOwnerPicker({
         if (!needle) return owners;
         // The selected owner always stays in the list so the select never
         // silently shows a different value than the form holds.
-        return owners.filter((owner) => owner.login.toLowerCase().includes(needle) || owner.login === value);
+        return owners.filter(
+            (owner) => owner.login.toLowerCase().includes(needle) || owner.login === value,
+        );
     }, [owners, filter, value]);
 
     const selected = owners.find((owner) => owner.login === value) ?? null;
     const selectedReason =
-        selected && !selected.available && isAppSourceReasonCode(selected.reason) ? selected.reason : null;
+        selected && !selected.available && isAppSourceReasonCode(selected.reason)
+            ? selected.reason
+            : null;
 
     return (
         <div className="space-y-2" data-testid="app-work-owner-picker">
-            <label htmlFor={selectId} className="block text-sm font-medium text-text dark:text-text-dark">
+            <label
+                htmlFor={selectId}
+                className="block text-sm font-medium text-text dark:text-text-dark"
+            >
                 {mode === 'fork' ? t('forkInto') : t('copyInto')}
             </label>
             {owners.length > APP_OWNER_FILTER_THRESHOLD && (
@@ -95,7 +102,10 @@ export function AppTargetOwnerPicker({
                 })}
             </select>
             {selectedReason && selected && (
-                <p className="text-xs text-red-600 dark:text-red-400" data-testid="app-work-owner-reason">
+                <p
+                    className="text-xs text-red-600 dark:text-red-400"
+                    data-testid="app-work-owner-reason"
+                >
                     {tReason(selectedReason, { ...reasonParams, owner: selected.login })}
                 </p>
             )}

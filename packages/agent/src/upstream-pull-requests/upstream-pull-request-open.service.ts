@@ -94,15 +94,24 @@ export class UpstreamPullRequestOpenService {
 
     async open(input: UpstreamPullRequestOpenInput): Promise<UpstreamPullRequestOpenResult> {
         if (!this.works || !this.git || !this.credentials) {
-            return refused(503, 'unavailable', 'Upstream pull requests are not available in this process.');
+            return refused(
+                503,
+                'unavailable',
+                'Upstream pull requests are not available in this process.',
+            );
         }
         // FR-46 — the operator kill switch, before anything is read.
         if (!config.everWorks.apps.upstreamPullRequestsEnabled()) {
-            return refused(422, 'upstreamPaused', 'Upstream pull requests are paused by the platform.');
+            return refused(
+                422,
+                'upstreamPaused',
+                'Upstream pull requests are paused by the platform.',
+            );
         }
         const work = await this.works.findById(input.workId);
         if (!work) return refused(404, 'not_found', `Work ${input.workId} not found.`);
-        if (!isAppWorkKind(work.kind)) return refused(422, 'notAppWork', 'Only an App Work has an upstream.');
+        if (!isAppWorkKind(work.kind))
+            return refused(422, 'notAppWork', 'Only an App Work has an upstream.');
 
         const record = (work.sourceRepository ?? {}) as AppSourceRecord;
         if (relationOf(record) !== 'fork') {
@@ -114,7 +123,11 @@ export class UpstreamPullRequestOpenService {
         }
         const upstream = record.upstream;
         if (!upstream?.owner || !upstream?.repo) {
-            return refused(422, 'upstreamUnknown', 'This App Work has no recorded upstream repository.');
+            return refused(
+                422,
+                'upstreamUnknown',
+                'This App Work has no recorded upstream repository.',
+            );
         }
         // FR-41 — the operator deny list; an App Work cannot be configured around it.
         const upstreamFullName = `${upstream.owner}/${upstream.repo}`.toLowerCase();
@@ -126,27 +139,41 @@ export class UpstreamPullRequestOpenService {
             );
         }
         const fork = safeTarget(work);
-        if (!fork) return refused(422, 'upstreamUnknown', 'The fork repository could not be resolved.');
+        if (!fork)
+            return refused(422, 'upstreamUnknown', 'The fork repository could not be resolved.');
 
         // ── the branch: named, or one of THIS Work's Tasks ────────────────────
         let branch = typeof input.branch === 'string' ? input.branch.trim() : '';
         let taskTitle: string | null = null;
         let recordOn: { id: string; userId: string } | null = null;
         if (input.taskId) {
-            const task = this.tasks ? await this.tasks.findById(input.taskId).catch(() => null) : null;
+            const task = this.tasks
+                ? await this.tasks.findById(input.taskId).catch(() => null)
+                : null;
             if (!task || task.workId !== work.id) {
-                return refused(404, 'taskNotOnWork', `Task ${input.taskId} is not a Task of this App Work.`);
+                return refused(
+                    404,
+                    'taskNotOnWork',
+                    `Task ${input.taskId} is not a Task of this App Work.`,
+                );
             }
             branch = branch || (task.branchRef ?? '');
             taskTitle = task.title ?? null;
             recordOn = { id: task.id, userId: task.userId };
         }
         if (!branch || !BRANCH_PATTERN.test(branch)) {
-            return refused(422, 'branchRequired', 'Name the fork branch to offer upstream (or a Task that has one).');
+            return refused(
+                422,
+                'branchRequired',
+                'Name the fork branch to offer upstream (or a Task that has one).',
+            );
         }
 
         // ── the publishing member's own credential (FR-24) ────────────────────
-        const publishing = await this.credentials.resolveForPublishingMember(work.id, input.callerUserId);
+        const publishing = await this.credentials.resolveForPublishingMember(
+            work.id,
+            input.callerUserId,
+        );
         if (publishing.usable !== true) {
             return refused(
                 422,
@@ -158,7 +185,11 @@ export class UpstreamPullRequestOpenService {
 
         const draft = input.draft !== false;
         const base = upstream.defaultBranch || 'main';
-        const title = (input.title?.trim() || taskTitle?.replace(/^Change:\s*/, '') || `Changes from ${fork.owner}/${fork.repo}`).slice(0, 256);
+        const title = (
+            input.title?.trim() ||
+            taskTitle?.replace(/^Change:\s*/, '') ||
+            `Changes from ${fork.owner}/${fork.repo}`
+        ).slice(0, 256);
         const body = [
             input.body?.trim() || 'A change made in an Ever Works App Work, offered back upstream.',
             '',
@@ -179,7 +210,12 @@ export class UpstreamPullRequestOpenService {
                     draft,
                     maintainerCanModify: input.maintainerCanModify !== false,
                 },
-                { token: credential.token, providerId: credential.providerId, userId: credential.userId, workId: work.id },
+                {
+                    token: credential.token,
+                    providerId: credential.providerId,
+                    userId: credential.userId,
+                    workId: work.id,
+                },
             );
             if (recordOn) await this.record(recordOn, pr.url, `${fork.owner}:${branch}`, draft);
             return {
@@ -195,7 +231,11 @@ export class UpstreamPullRequestOpenService {
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             this.logger.warn(`Upstream PR for work ${work.id} (${branch}) was refused: ${message}`);
-            return refused(502, 'providerRefused', `The provider refused the pull request: ${message}`);
+            return refused(
+                502,
+                'providerRefused',
+                `The provider refused the pull request: ${message}`,
+            );
         }
     }
 
@@ -215,7 +255,9 @@ export class UpstreamPullRequestOpenService {
                 body: `Offered upstream${draft ? ' as a draft' : ''}: ${url} (head \`${head}\`).`,
             });
         } catch (error) {
-            this.logger.warn(`Recording the upstream PR on Task ${task.id} failed: ${error instanceof Error ? error.message : String(error)}`);
+            this.logger.warn(
+                `Recording the upstream PR on Task ${task.id} failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
         }
     }
 }
@@ -228,7 +270,9 @@ function refused(
     return { status: 'refused', httpStatus, code, message };
 }
 
-function safeTarget(work: Parameters<typeof resolveTaskRepository>[0]): { owner: string; repo: string } | null {
+function safeTarget(
+    work: Parameters<typeof resolveTaskRepository>[0],
+): { owner: string; repo: string } | null {
     try {
         const target = resolveTaskRepository(work);
         return target ? { owner: target.owner, repo: target.repo } : null;

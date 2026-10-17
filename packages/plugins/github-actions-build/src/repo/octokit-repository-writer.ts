@@ -118,7 +118,8 @@ function messageOf(error: unknown): string {
 }
 
 /** GitHub's wording for a ref update a rule refused (branch protection, rulesets). */
-const RULE_REFUSAL = /protected branch|ruleset|rule violation|required status|required review|push declined|cannot be updated/i;
+const RULE_REFUSAL =
+	/protected branch|ruleset|rule violation|required status|required review|push declined|cannot be updated/i;
 
 /**
  * GitHub's wordings for "this credential may not touch a workflow file":
@@ -250,7 +251,11 @@ export function octokitRepositoryWriter(
 			const status = statusOf(error);
 			const message = messageOf(error);
 			if (status === 422 && /fast[ -]?forward/i.test(message)) {
-				throw new RepositoryWriteError('nonFastForward', `${input.branch} moved; retry from its new head`, error);
+				throw new RepositoryWriteError(
+					'nonFastForward',
+					`${input.branch} moved; retry from its new head`,
+					error
+				);
 			}
 			if ((status === 409 || status === 422 || status === 403) && RULE_REFUSAL.test(message)) {
 				throw new RepositoryWriteError('refRejectedByRule', `${input.branch} refused the update`, error);

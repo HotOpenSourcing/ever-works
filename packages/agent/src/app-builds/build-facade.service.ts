@@ -1,5 +1,9 @@
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { APP_BUILD_IMAGE_NAME, APP_BUILD_WORKFLOW_PATH, type AppBuildKind } from '@ever-works/contracts';
+import {
+    APP_BUILD_IMAGE_NAME,
+    APP_BUILD_WORKFLOW_PATH,
+    type AppBuildKind,
+} from '@ever-works/contracts';
 import type {
     BuildAuth,
     BuildRef,
@@ -321,7 +325,10 @@ export class BuildFacadeService implements AppBuildPluginResolver {
                       }) =>
                           plugin.listRecentRuns!(
                               {
-                                  repository: { owner: repositoryRef.owner, name: repositoryRef.repo },
+                                  repository: {
+                                      owner: repositoryRef.owner,
+                                      name: repositoryRef.repo,
+                                  },
                                   workflowPath: APP_BUILD_WORKFLOW_PATH,
                                   perPage: input.perPage,
                                   ...(input.etag ? { etag: input.etag } : {}),
@@ -337,7 +344,10 @@ export class BuildFacadeService implements AppBuildPluginResolver {
                       isCommitReachable: async (sha: string) =>
                           plugin.isCommitReachable!(
                               {
-                                  repository: { owner: repositoryRef.owner, repo: repositoryRef.repo },
+                                  repository: {
+                                      owner: repositoryRef.owner,
+                                      repo: repositoryRef.repo,
+                                  },
                                   sha,
                                   branch: repositoryRef.trackedBranch,
                               },

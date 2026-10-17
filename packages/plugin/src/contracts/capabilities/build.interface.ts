@@ -468,7 +468,11 @@ export interface IBuildPlugin extends IPlugin {
 	 * A failure to tell is a throw, never `true`.
 	 */
 	isCommitReachable?(
-		input: { readonly repository: { readonly owner: string; readonly repo: string }; readonly sha: string; readonly branch: string },
+		input: {
+			readonly repository: { readonly owner: string; readonly repo: string };
+			readonly sha: string;
+			readonly branch: string;
+		},
 		auth: BuildAuth
 	): Promise<boolean>;
 	/**

@@ -785,13 +785,52 @@ describe('FleetNodeDrawer — model usage limits', () => {
         });
         renderDrawer({ node: throttled, detail: detail({ node: throttled }) });
         const entry = screen.getByTestId('fleet-node-drawer-model-throttle-claude-code');
-        expect(entry.textContent).toContain('modelThrottles.entry:Claude Code,modelThrottles.windows.weekly');
+        expect(entry.textContent).toContain(
+            'modelThrottles.entry:Claude Code,modelThrottles.windows.weekly',
+        );
         expect(entry.getAttribute('title')).toBe("You've hit your weekly limit");
-        expect(screen.getByTestId('fleet-node-drawer-model-throttles').textContent).toContain('modelThrottles.hint');
+        expect(screen.getByTestId('fleet-node-drawer-model-throttles').textContent).toContain(
+            'modelThrottles.hint',
+        );
     });
 
     it('renders nothing for a node with no limit in force', () => {
         renderDrawer();
         expect(screen.queryByTestId('fleet-node-drawer-model-throttles')).toBeNull();
+    });
+});
+
+describe('FleetNodeDrawer — clear limit now', () => {
+    it('offers "Clear limit now" per CLI and reports which one', async () => {
+        const onClearModelThrottle = vi.fn();
+        const throttled = node({
+            modelThrottles: [
+                {
+                    provider: 'claude-code',
+                    window: 'weekly',
+                    until: '2026-10-19T01:01:00.000Z',
+                    reason: "You've hit your weekly limit",
+                    since: '2026-10-17T15:27:00.000Z',
+                },
+            ],
+        });
+        render(
+            <FleetNodeDrawer
+                node={throttled}
+                detail={detail({ node: throttled })}
+                loading={false}
+                error={null}
+                isPending={false}
+                onClose={() => undefined}
+                onSaveCapabilities={() => undefined}
+                onSaveCostCeiling={() => undefined}
+                onSaveLimitCeiling={() => undefined}
+                onClearModelThrottle={onClearModelThrottle}
+                onRotate={() => undefined}
+                onDrain={() => undefined}
+            />,
+        );
+        await userEvent.click(screen.getByTestId('fleet-node-drawer-clear-throttle-claude-code'));
+        expect(onClearModelThrottle).toHaveBeenCalledWith('claude-code');
     });
 });

@@ -37,8 +37,12 @@ describe('AddFleetModelUsageLimits1795161700000', () => {
                 "status" varchar(16) NOT NULL
             )
         `);
-        await dataSource.query(`INSERT INTO "fleet_nodes" ("id", "userId", "name") VALUES ('n1', 'u1', 'everdesk4')`);
-        await dataSource.query(`INSERT INTO "fleet_jobs" ("id", "userId", "status") VALUES ('j1', 'u1', 'queued')`);
+        await dataSource.query(
+            `INSERT INTO "fleet_nodes" ("id", "userId", "name") VALUES ('n1', 'u1', 'everdesk4')`,
+        );
+        await dataSource.query(
+            `INSERT INTO "fleet_jobs" ("id", "userId", "status") VALUES ('j1', 'u1', 'queued')`,
+        );
     });
 
     afterEach(async () => {
@@ -48,10 +52,14 @@ describe('AddFleetModelUsageLimits1795161700000', () => {
     it('adds a nullable modelThrottles and a NOT NULL usageLimitParks defaulting to 0', async () => {
         await migration.up(dataSource.createQueryRunner());
 
-        const throttles = (await columns('fleet_nodes')).find((column) => column.name === 'modelThrottles');
+        const throttles = (await columns('fleet_nodes')).find(
+            (column) => column.name === 'modelThrottles',
+        );
         expect(throttles?.notnull).toBe(0);
         expect(throttles?.dflt_value).toBeNull();
-        const parks = (await columns('fleet_jobs')).find((column) => column.name === 'usageLimitParks');
+        const parks = (await columns('fleet_jobs')).find(
+            (column) => column.name === 'usageLimitParks',
+        );
         expect(parks?.notnull).toBe(1);
         expect(parks?.dflt_value).toBe('0');
 
@@ -67,7 +75,11 @@ describe('AddFleetModelUsageLimits1795161700000', () => {
         await migration.up(dataSource.createQueryRunner());
         await expect(migration.up(dataSource.createQueryRunner())).resolves.toBeUndefined();
         await migration.down(dataSource.createQueryRunner());
-        expect((await columns('fleet_nodes')).some((column) => column.name === 'modelThrottles')).toBe(false);
-        expect((await columns('fleet_jobs')).some((column) => column.name === 'usageLimitParks')).toBe(false);
+        expect(
+            (await columns('fleet_nodes')).some((column) => column.name === 'modelThrottles'),
+        ).toBe(false);
+        expect(
+            (await columns('fleet_jobs')).some((column) => column.name === 'usageLimitParks'),
+        ).toBe(false);
     });
 });

@@ -5,7 +5,9 @@ import messages from '../../../../messages/en.json';
 import type { AppsCatalogBlueprintItem } from '@/lib/api/apps-catalog.types';
 
 const { listMock } = vi.hoisted(() => ({ listMock: vi.fn() }));
-vi.mock('@/app/actions/dashboard/apps-catalog', () => ({ listAppsCatalogBlueprintsAction: listMock }));
+vi.mock('@/app/actions/dashboard/apps-catalog', () => ({
+    listAppsCatalogBlueprintsAction: listMock,
+}));
 
 import { APPS_CATALOG_SEARCH_DEBOUNCE_MS, AppsCatalogBrowser } from './AppsCatalogBrowser';
 
@@ -46,7 +48,10 @@ afterEach(() => {
 
 describe('AppsCatalogBrowser', () => {
     it('lists the Blueprints at once and hands a pick to the form', async () => {
-        listMock.mockResolvedValue({ success: true, data: { items: [UMAMI], total: 1, available: true, source: 'github-topic' } });
+        listMock.mockResolvedValue({
+            success: true,
+            data: { items: [UMAMI], total: 1, available: true, source: 'github-topic' },
+        });
         const onPick = renderBrowser();
         await flush();
         expect(listMock).toHaveBeenCalledWith(undefined);
@@ -58,7 +63,10 @@ describe('AppsCatalogBrowser', () => {
     });
 
     it('searches only from two characters, after the debounce', async () => {
-        listMock.mockResolvedValue({ success: true, data: { items: [], total: 0, available: true, source: 'github-topic' } });
+        listMock.mockResolvedValue({
+            success: true,
+            data: { items: [], total: 0, available: true, source: 'github-topic' },
+        });
         renderBrowser();
         await flush();
         expect(listMock).toHaveBeenCalledTimes(1);
@@ -72,17 +80,27 @@ describe('AppsCatalogBrowser', () => {
         expect(listMock).not.toHaveBeenLastCalledWith('um');
         await flush(1);
         expect(listMock).toHaveBeenLastCalledWith('um');
-        expect(screen.getByTestId('apps-catalog-empty').textContent).toBe('No apps match your search.');
+        expect(screen.getByTestId('apps-catalog-empty').textContent).toBe(
+            'No apps match your search.',
+        );
     });
 
     it('says when the catalog cannot be read, and when App Works are off', async () => {
-        listMock.mockResolvedValueOnce({ success: true, data: { items: [], total: 0, available: false, source: 'github-topic' } });
+        listMock.mockResolvedValueOnce({
+            success: true,
+            data: { items: [], total: 0, available: false, source: 'github-topic' },
+        });
         renderBrowser();
         await flush();
         expect(screen.getByTestId('apps-catalog-unavailable')).toBeTruthy();
         cleanup();
 
-        listMock.mockResolvedValueOnce({ success: false, error: 'x', code: 'app_works_disabled', httpStatus: 400 });
+        listMock.mockResolvedValueOnce({
+            success: false,
+            error: 'x',
+            code: 'app_works_disabled',
+            httpStatus: 400,
+        });
         renderBrowser();
         await flush();
         expect(screen.getByTestId('apps-catalog-disabled').textContent).toBe(

@@ -14,7 +14,9 @@ vi.mock('@/app/actions/dashboard/app-license', () => ({
 // a Next runtime that jsdom does not provide.
 vi.mock('@/i18n/navigation', () => ({
     useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: vi.fn() }),
-    Link: ({ children, href }: { children: React.ReactNode; href: string }) => <a href={href}>{children}</a>,
+    Link: ({ children, href }: { children: React.ReactNode; href: string }) => (
+        <a href={href}>{children}</a>
+    ),
 }));
 
 import { AppLicenseAttestationDialog } from './AppLicenseAttestationDialog';
@@ -35,7 +37,10 @@ function license(over: Partial<WorkAppLicenseView> = {}): WorkAppLicenseView {
         evaluatedAt: null,
         attestationRequired: true,
         attestation: null,
-        attestationText: { textId: 'busl-1.1-v1', text: 'I will not offer this as a competing hosted service.' },
+        attestationText: {
+            textId: 'busl-1.1-v1',
+            text: 'I will not offer this as a competing hosted service.',
+        },
         isOwner: true,
         ...over,
     };
@@ -121,12 +126,18 @@ describe('AppLicenseAttestationDialog (APW-03 §6.3, ACC-06-39)', () => {
             "Only the App Work's owner can attest.",
         );
 
-        attestMock.mockResolvedValueOnce({ success: false, code: 'licenseChanged', httpStatus: 409 });
+        attestMock.mockResolvedValueOnce({
+            success: false,
+            code: 'licenseChanged',
+            httpStatus: 409,
+        });
         await act(async () => {
             fireEvent.click(screen.getByTestId('app-license-attest-confirm'));
         });
         expect(onLicenseChanged).toHaveBeenCalledTimes(1);
-        expect(screen.getByTestId('app-license-attest-error').textContent).toBe(COPY.refusals.licenseChanged);
+        expect(screen.getByTestId('app-license-attest-error').textContent).toBe(
+            COPY.refusals.licenseChanged,
+        );
     });
 });
 

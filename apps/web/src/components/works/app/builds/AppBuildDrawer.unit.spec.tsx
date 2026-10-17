@@ -63,7 +63,12 @@ const detail: AppBuildDetail = {
     failureDetail: { memory: '7 GB', max: '14 GB' },
     failureExcerpt: ['FATAL ERROR: Reached heap limit', 'Allocation failed'],
     verificationResult: null,
-    receipt: { billableMinutes: 11, checksBillableMinutes: null, payer: 'workspace', costKnown: true },
+    receipt: {
+        billableMinutes: 11,
+        checksBillableMinutes: null,
+        payer: 'workspace',
+        costKnown: true,
+    },
     triggeredBy: { userId: 'u1', name: 'Maya' },
     canEdit: true,
 };
@@ -90,7 +95,13 @@ describe('AppBuildDrawer', () => {
 
         render(
             withIntl(
-                <AppBuildDrawer workId="w1" build={summary} onClose={vi.fn()} canEdit onRebuild={vi.fn()} />,
+                <AppBuildDrawer
+                    workId="w1"
+                    build={summary}
+                    onClose={vi.fn()}
+                    canEdit
+                    onRebuild={vi.fn()}
+                />,
             ),
         );
 
@@ -101,7 +112,9 @@ describe('AppBuildDrawer', () => {
             ),
         ).toBeInTheDocument();
         expect(screen.getByText(/Reached heap limit/)).toBeInTheDocument();
-        expect(screen.getByText('11 runner minutes · paid by your GitHub account')).toBeInTheDocument();
+        expect(
+            screen.getByText('11 runner minutes · paid by your GitHub account'),
+        ).toBeInTheDocument();
         expect(screen.getByText('Manual — by Maya')).toBeInTheDocument();
         expect(getMock).toHaveBeenCalledWith('w1', 'b14');
     });
@@ -120,7 +133,12 @@ describe('AppBuildFailurePanel', () => {
             withIntl(
                 <AppBuildFailurePanel
                     failureClass="dockerfileError"
-                    failureDetail={{ step: 4, total: 9, command: 'RUN pnpm build', dockerfile: 'Dockerfile' }}
+                    failureDetail={{
+                        step: 4,
+                        total: 9,
+                        command: 'RUN pnpm build',
+                        dockerfile: 'Dockerfile',
+                    }}
                 />,
             ),
         );
