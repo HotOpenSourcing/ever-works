@@ -18,6 +18,7 @@ import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { User } from '../entities/user.entity';
 import { slugifyText } from '../utils/text.utils';
+import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 import {
     AddTeamMemberInput,
     CreateTeamInput,
@@ -232,7 +233,11 @@ export class TeamsService {
         };
         const publisher = this.domainEvents;
         if (!publisher) {
-            await this.teams.manager.transaction(removeIn);
+            // Queued on single-connection drivers, like every other transaction that can
+            // overlap a queued one there.
+            await serializeOnSingleConnection(this.teams.manager, () =>
+                this.teams.manager.transaction(removeIn),
+            );
             await this.recomputeVisibilityOf(affected);
             return;
         }
