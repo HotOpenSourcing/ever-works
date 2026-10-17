@@ -144,8 +144,9 @@ export class WorkAppRuntimeController {
         await this.authorize(id, auth.userId, 'edit');
         const answer = await this.targets.rollback(id, auth.userId, body ?? {});
         if ('refusal' in answer) throw refusalException(answer.refusal);
-        const result = (answer as { result: Record<string, unknown> & { httpStatus: number } })
-            .result;
+        const result = (
+            answer as unknown as { result: Record<string, unknown> & { httpStatus: number } }
+        ).result;
         response.status(result.httpStatus);
         const notices = (list: unknown) =>
             (Array.isArray(list) ? list : []).map(
