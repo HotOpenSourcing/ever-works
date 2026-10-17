@@ -9440,6 +9440,40 @@
                         "route_unavailable": "License confirmation isn't available on this instance yet.",
                         "failed": "Couldn't record the confirmation. Try again."
                     }
+                },
+                "rollback": {
+                    "button": "Roll back",
+                    "title": "Roll back to an earlier Deployment",
+                    "description": "Pick a Deployment that went live before. Its image and App spec run again; nothing is rebuilt.",
+                    "pickLabel": "Deployment to return to",
+                    "liveAt": "Live since {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Went live earlier",
+                    "none": "There is no earlier live Deployment to roll back to.",
+                    "runJobs": "Run the pre-deploy jobs again",
+                    "confirm": "Roll back",
+                    "cancel": "Cancel",
+                    "started": "Rollback started.",
+                    "failed": "Couldn't start the rollback: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Pause",
+                    "resume": "Resume",
+                    "remove": "Remove from cluster",
+                    "removeTitle": "Remove this App from its cluster",
+                    "removeDescription": "The running app stops and its Kubernetes objects are deleted. The App Work and its Builds stay.",
+                    "deleteData": "Also delete stored data (volumes and dependency databases)",
+                    "deleteDataWarning": "This cannot be undone.",
+                    "confirmSlugLabel": "Type {slug} to confirm",
+                    "confirmRemove": "Remove",
+                    "cancel": "Cancel",
+                    "failed": "Couldn't do that: {reason}",
+                    "slugMismatch": "The slug you typed doesn't match this App Work.",
+                    "accepted": {
+                        "pause": "Pause requested.",
+                        "resume": "Resume requested.",
+                        "remove": "Removal requested.",
+                        "cancelDeploy": "Cancellation requested."
+                    }
                 }
             }
         },

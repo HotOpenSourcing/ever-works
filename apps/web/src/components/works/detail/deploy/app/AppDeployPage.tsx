@@ -4,13 +4,14 @@ import { useState } from 'react';
 import { useTranslations } from 'next-intl';
 import { ExternalLink, Package } from 'lucide-react';
 import type { AppRuntimeState } from '@ever-works/contracts';
-import { Link } from '@/i18n/navigation';
+import { Link, useRouter } from '@/i18n/navigation';
 import { ROUTES } from '@/lib/constants';
 import type { AppStatusView, AppTargetView } from '@/lib/api/app-runtime.types';
 import { AppTargetCard, APP_TARGET_LEAF } from './AppTargetCard';
 import { ConnectClusterDialog } from './ConnectClusterDialog';
 import { AppDeployNowButton } from './AppDeployNowButton';
 import { AppLicenseCard } from './AppLicenseCard';
+import { AppLifecycleActions } from './AppLifecycleActions';
 
 const STATE_LEAF = {
     'not-deployed': 'notDeployed',
@@ -47,6 +48,7 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
     const tTarget = useTranslations('dashboard.workDetail.appDeploy.target');
     const [target, setTarget] = useState<AppTargetView>(initialTarget);
     const [connectOpen, setConnectOpen] = useState(false);
+    const router = useRouter();
 
     const running = status && status.state !== 'not-deployed';
     const stateLine = running
@@ -124,6 +126,16 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
             <AppLicenseCard workId={work.id} />
 
             {target.target !== 'none' && canEdit && <AppDeployNowButton workId={work.id} />}
+
+            {/* Lane aw-deploy-3 — Roll back, Pause / Resume and Remove (T63's live / failed /
+                rollback / remove states), once something has been deployed. */}
+            {canEdit && status && status.state !== 'not-deployed' && (
+                <AppLifecycleActions
+                    work={{ id: work.id, slug: work.slug }}
+                    status={status}
+                    onChanged={() => router.refresh()}
+                />
+            )}
 
             <p className="flex items-center gap-2 text-sm text-text-secondary dark:text-text-secondary-dark">
                 <Package className="h-4 w-4" aria-hidden="true" />

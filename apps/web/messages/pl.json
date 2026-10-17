@@ -7321,6 +7321,40 @@
                         "route_unavailable": "Potwierdzanie licencji nie jest jeszcze dostępne w tej instancji.",
                         "failed": "Nie udało się zapisać potwierdzenia. Spróbuj ponownie."
                     }
+                },
+                "rollback": {
+                    "button": "Przywróć",
+                    "title": "Przywróć wcześniejsze wdrożenie",
+                    "description": "Wybierz wdrożenie, które było już aktywne. Jego obraz i specyfikacja aplikacji zostaną uruchomione ponownie; nic nie jest budowane od nowa.",
+                    "pickLabel": "Wdrożenie do przywrócenia",
+                    "liveAt": "Aktywne od {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Było wcześniej aktywne",
+                    "none": "Brak wcześniejszego aktywnego wdrożenia do przywrócenia.",
+                    "runJobs": "Uruchom ponownie zadania przed wdrożeniem",
+                    "confirm": "Przywróć",
+                    "cancel": "Anuluj",
+                    "started": "Przywracanie rozpoczęte.",
+                    "failed": "Nie udało się rozpocząć przywracania: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Wstrzymaj",
+                    "resume": "Wznów",
+                    "remove": "Usuń z klastra",
+                    "removeTitle": "Usuń tę aplikację z jej klastra",
+                    "removeDescription": "Działająca aplikacja zostaje zatrzymana, a jej obiekty Kubernetes usunięte. App Work i jego buildy pozostają.",
+                    "deleteData": "Usuń też zapisane dane (wolumeny i bazy danych zależności)",
+                    "deleteDataWarning": "Tej operacji nie można cofnąć.",
+                    "confirmSlugLabel": "Wpisz {slug}, aby potwierdzić",
+                    "confirmRemove": "Usuń",
+                    "cancel": "Anuluj",
+                    "failed": "Nie udało się tego zrobić: {reason}",
+                    "slugMismatch": "Wpisany slug nie pasuje do tego App Work.",
+                    "accepted": {
+                        "pause": "Zażądano wstrzymania.",
+                        "resume": "Zażądano wznowienia.",
+                        "remove": "Zażądano usunięcia.",
+                        "cancelDeploy": "Zażądano anulowania."
+                    }
                 }
             },
             "appEnv": {

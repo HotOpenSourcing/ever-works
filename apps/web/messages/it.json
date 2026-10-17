@@ -7321,6 +7321,40 @@
                         "route_unavailable": "La conferma della licenza non è ancora disponibile su questa istanza.",
                         "failed": "Impossibile registrare la conferma. Riprova."
                     }
+                },
+                "rollback": {
+                    "button": "Ripristina",
+                    "title": "Ripristina un deployment precedente",
+                    "description": "Scegli un deployment che è già stato live. La sua immagine e la sua specifica dell'app vengono eseguite di nuovo; non viene ricostruito nulla.",
+                    "pickLabel": "Deployment a cui tornare",
+                    "liveAt": "Live dal {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Era live in precedenza",
+                    "none": "Non esiste un deployment live precedente da ripristinare.",
+                    "runJobs": "Esegui di nuovo i job pre-deployment",
+                    "confirm": "Ripristina",
+                    "cancel": "Annulla",
+                    "started": "Ripristino avviato.",
+                    "failed": "Impossibile avviare il ripristino: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Metti in pausa",
+                    "resume": "Riprendi",
+                    "remove": "Rimuovi dal cluster",
+                    "removeTitle": "Rimuovi questa app dal suo cluster",
+                    "removeDescription": "L'app in esecuzione si ferma e i suoi oggetti Kubernetes vengono eliminati. L'App Work e le sue build restano.",
+                    "deleteData": "Elimina anche i dati archiviati (volumi e database delle dipendenze)",
+                    "deleteDataWarning": "Questa azione non può essere annullata.",
+                    "confirmSlugLabel": "Digita {slug} per confermare",
+                    "confirmRemove": "Rimuovi",
+                    "cancel": "Annulla",
+                    "failed": "Impossibile completare: {reason}",
+                    "slugMismatch": "Lo slug digitato non corrisponde a questo App Work.",
+                    "accepted": {
+                        "pause": "Pausa richiesta.",
+                        "resume": "Ripresa richiesta.",
+                        "remove": "Rimozione richiesta.",
+                        "cancelDeploy": "Annullamento richiesto."
+                    }
                 }
             },
             "appEnv": {

@@ -75,6 +75,46 @@ export interface AppStatusView {
     url: string | null;
     sourceOffer: { url: string } | null;
     currentDeployment: { id: string; state: string; phase?: string } | null;
+    /** Recent runtime operations, newest first (lane aw-deploy-3); absent on an older API. */
+    ops?: AppStatusOpView[];
+}
+
+/** One `GET app-status` `ops` entry — ids, states and timestamps only. */
+export interface AppStatusOpView {
+    kind: 'deploy' | 'rollback' | 'pause' | 'remove' | 'delete';
+    state: 'running' | 'done' | 'failed' | 'cancelled';
+    at: string | null;
+    deploymentId?: string;
+    trigger?: string;
+    code?: string;
+}
+
+/** The actions `POST /api/works/:id/app-lifecycle` accepts. */
+export const APP_LIFECYCLE_ACTIONS = ['pause', 'resume', 'remove', 'cancel-deploy'] as const;
+export type AppLifecycleActionChoice = (typeof APP_LIFECYCLE_ACTIONS)[number];
+
+/** `POST /api/works/:id/app-lifecycle`'s `202` body. */
+export interface AppLifecycleView {
+    status: 'accepted';
+    action: AppLifecycleActionChoice;
+    requestId: string;
+    dispatched: boolean;
+}
+
+/**
+ * The earlier Live Deployments a rollback may return to: every `ops` deploy or rollback
+ * that went live, except the one running now, newest first.
+ */
+export function rollbackCandidates(status: AppStatusView | null | undefined): AppStatusOpView[] {
+    const current = status?.currentDeployment?.id ?? null;
+    const seen = new Set<string>();
+    return (status?.ops ?? []).filter((op) => {
+        if (op.kind !== 'deploy' && op.kind !== 'rollback') return false;
+        if (op.state !== 'done' || !op.deploymentId || op.deploymentId === current) return false;
+        if (seen.has(op.deploymentId)) return false;
+        seen.add(op.deploymentId);
+        return true;
+    });
 }
 
 /** One `{ code, message }` entry of the deploy answer's lists. */

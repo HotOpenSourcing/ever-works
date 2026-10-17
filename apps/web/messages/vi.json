@@ -7321,6 +7321,40 @@
                         "route_unavailable": "Xác nhận giấy phép chưa khả dụng trên phiên bản này.",
                         "failed": "Không thể ghi lại xác nhận. Hãy thử lại."
                     }
+                },
+                "rollback": {
+                    "button": "Hoàn tác",
+                    "title": "Quay lại một lần triển khai trước đó",
+                    "description": "Chọn một lần triển khai đã từng hoạt động. Image và đặc tả ứng dụng của nó sẽ chạy lại; không có gì được build lại.",
+                    "pickLabel": "Lần triển khai để quay lại",
+                    "liveAt": "Hoạt động từ {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Đã từng hoạt động trước đây",
+                    "none": "Không có lần triển khai đang hoạt động nào trước đó để quay lại.",
+                    "runJobs": "Chạy lại các tác vụ trước khi triển khai",
+                    "confirm": "Hoàn tác",
+                    "cancel": "Hủy",
+                    "started": "Đã bắt đầu hoàn tác.",
+                    "failed": "Không thể bắt đầu hoàn tác: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Tạm dừng",
+                    "resume": "Tiếp tục",
+                    "remove": "Gỡ khỏi cụm",
+                    "removeTitle": "Gỡ ứng dụng này khỏi cụm của nó",
+                    "removeDescription": "Ứng dụng đang chạy sẽ dừng và các đối tượng Kubernetes của nó bị xóa. App Work và các bản build vẫn được giữ lại.",
+                    "deleteData": "Xóa cả dữ liệu đã lưu (volume và cơ sở dữ liệu phụ thuộc)",
+                    "deleteDataWarning": "Không thể hoàn tác thao tác này.",
+                    "confirmSlugLabel": "Nhập {slug} để xác nhận",
+                    "confirmRemove": "Gỡ",
+                    "cancel": "Hủy",
+                    "failed": "Không thể thực hiện: {reason}",
+                    "slugMismatch": "Slug bạn nhập không khớp với App Work này.",
+                    "accepted": {
+                        "pause": "Đã yêu cầu tạm dừng.",
+                        "resume": "Đã yêu cầu tiếp tục.",
+                        "remove": "Đã yêu cầu gỡ.",
+                        "cancelDeploy": "Đã yêu cầu hủy."
+                    }
                 }
             },
             "appEnv": {

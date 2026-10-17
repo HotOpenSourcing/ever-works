@@ -7321,6 +7321,40 @@
                         "route_unavailable": "이 인스턴스에서는 아직 라이선스 확인을 사용할 수 없습니다.",
                         "failed": "확인을 기록할 수 없습니다. 다시 시도해 주세요."
                     }
+                },
+                "rollback": {
+                    "button": "롤백",
+                    "title": "이전 배포로 롤백",
+                    "description": "이전에 라이브였던 배포를 선택하세요. 해당 이미지와 앱 사양이 다시 실행되며, 아무것도 다시 빌드되지 않습니다.",
+                    "pickLabel": "되돌아갈 배포",
+                    "liveAt": "{when, date, medium} {when, time, short}부터 라이브",
+                    "liveAtUnknown": "이전에 라이브였음",
+                    "none": "롤백할 이전 라이브 배포가 없습니다.",
+                    "runJobs": "배포 전 작업 다시 실행",
+                    "confirm": "롤백",
+                    "cancel": "취소",
+                    "started": "롤백이 시작되었습니다.",
+                    "failed": "롤백을 시작할 수 없습니다: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "일시 중지",
+                    "resume": "재개",
+                    "remove": "클러스터에서 제거",
+                    "removeTitle": "이 앱을 클러스터에서 제거",
+                    "removeDescription": "실행 중인 앱이 중지되고 Kubernetes 객체가 삭제됩니다. App Work와 빌드는 유지됩니다.",
+                    "deleteData": "저장된 데이터도 삭제(볼륨 및 종속성 데이터베이스)",
+                    "deleteDataWarning": "이 작업은 되돌릴 수 없습니다.",
+                    "confirmSlugLabel": "확인하려면 {slug}을(를) 입력하세요",
+                    "confirmRemove": "제거",
+                    "cancel": "취소",
+                    "failed": "작업을 수행할 수 없습니다: {reason}",
+                    "slugMismatch": "입력한 슬러그가 이 App Work와 일치하지 않습니다.",
+                    "accepted": {
+                        "pause": "일시 중지를 요청했습니다.",
+                        "resume": "재개를 요청했습니다.",
+                        "remove": "제거를 요청했습니다.",
+                        "cancelDeploy": "취소를 요청했습니다."
+                    }
                 }
             },
             "appEnv": {

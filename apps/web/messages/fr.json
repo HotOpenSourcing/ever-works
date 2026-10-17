@@ -7389,6 +7389,40 @@
                         "route_unavailable": "La confirmation de licence n'est pas encore disponible sur cette instance.",
                         "failed": "Impossible d'enregistrer la confirmation. Réessayez."
                     }
+                },
+                "rollback": {
+                    "button": "Revenir en arrière",
+                    "title": "Revenir à un déploiement antérieur",
+                    "description": "Choisissez un déploiement qui a déjà été en ligne. Son image et sa spécification d'app s'exécutent à nouveau ; rien n'est reconstruit.",
+                    "pickLabel": "Déploiement à restaurer",
+                    "liveAt": "En ligne depuis {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Était en ligne auparavant",
+                    "none": "Il n'y a aucun déploiement en ligne antérieur vers lequel revenir.",
+                    "runJobs": "Relancer les tâches de pré-déploiement",
+                    "confirm": "Revenir en arrière",
+                    "cancel": "Annuler",
+                    "started": "Retour en arrière lancé.",
+                    "failed": "Impossible de lancer le retour en arrière : {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Mettre en pause",
+                    "resume": "Reprendre",
+                    "remove": "Retirer du cluster",
+                    "removeTitle": "Retirer cette app de son cluster",
+                    "removeDescription": "L'app en cours s'arrête et ses objets Kubernetes sont supprimés. L'App Work et ses builds sont conservés.",
+                    "deleteData": "Supprimer aussi les données stockées (volumes et bases de données des dépendances)",
+                    "deleteDataWarning": "Cette action est irréversible.",
+                    "confirmSlugLabel": "Saisissez {slug} pour confirmer",
+                    "confirmRemove": "Retirer",
+                    "cancel": "Annuler",
+                    "failed": "Impossible d'effectuer cette action : {reason}",
+                    "slugMismatch": "Le slug saisi ne correspond pas à cet App Work.",
+                    "accepted": {
+                        "pause": "Mise en pause demandée.",
+                        "resume": "Reprise demandée.",
+                        "remove": "Retrait demandé.",
+                        "cancelDeploy": "Annulation demandée."
+                    }
                 }
             },
             "appEnv": {
