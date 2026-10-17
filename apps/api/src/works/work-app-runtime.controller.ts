@@ -80,8 +80,8 @@ export class WorkAppRuntimeController {
     ): Promise<AppTargetBody> {
         await this.authorize(id, auth.userId, 'edit');
         const result = await this.targets.putTarget(id, auth.userId, body ?? {});
-        if (!result.ok) throw refusalException(result.refusal);
-        return result.body;
+        if ('refusal' in result) throw refusalException(result.refusal);
+        return (result as { body: AppTargetBody }).body;
     }
 
     @Post(':id/app-target/check')
@@ -101,9 +101,10 @@ export class WorkAppRuntimeController {
     ): Promise<{ status: 'accepted'; requestId: string; dispatched: boolean }> {
         await this.authorize(id, auth.userId, 'edit');
         const result = await this.targets.check(id, auth.userId, body ?? {});
-        if (!result.ok) throw refusalException(result.refusal);
+        if ('refusal' in result) throw refusalException(result.refusal);
         response.status(HttpStatus.ACCEPTED);
-        return { status: 'accepted', requestId: result.requestId, dispatched: result.dispatched };
+        const accepted = result as { requestId: string; dispatched: boolean };
+        return { status: 'accepted', requestId: accepted.requestId, dispatched: accepted.dispatched };
     }
 
     @Get(':id/app-status')
