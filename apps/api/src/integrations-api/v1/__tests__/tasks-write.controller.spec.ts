@@ -273,6 +273,8 @@ describe('IntegrationTasksWriteController', () => {
                 estimateMinutes: 90,
             }),
             expect.anything(),
+            // No externalRef: no link to write inside the create's transaction.
+            {},
         );
 
         await controller.update(

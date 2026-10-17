@@ -1,5 +1,13 @@
-jest.mock('@ever-works/agent/missions', () => ({ MissionsService: class {} }));
 import { DuplicateExternalRefError } from '@ever-works/agent/integrations-api';
+// The `@ever-works/agent/missions` barrel pulls in the whole agent graph (work module ->
+// subscriptions -> api notifications/auth -> ESM-only better-auth, website-generator
+// config), which this jest environment cannot load. The controller only needs these
+// classes as DI tokens and the spec hands it fakes: stub the barrel, as the other api
+// specs do.
+jest.mock('@ever-works/agent/missions', () => ({
+    MissionsService: class MissionsService {},
+}));
+
 import { IntegrationMissionsController } from '../missions.controller';
 
 /**

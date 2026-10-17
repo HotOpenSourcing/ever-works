@@ -182,7 +182,8 @@ describe('IntegrationIdeasController', () => {
                 user,
                 { title: 't', description: 'd' },
                 undefined,
-                req(undefined),
+                // '' (not `undefined`, which takes the default key): no header at all.
+                req(''),
                 res(),
             ),
         ).rejects.toBeInstanceOf(IntegrationHttpException);

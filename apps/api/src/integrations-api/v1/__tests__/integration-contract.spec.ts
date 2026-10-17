@@ -1,3 +1,28 @@
+// The `@ever-works/agent/services` barrel pulls in the whole agent graph (work module ->
+// subscriptions -> api notifications/auth -> ESM-only better-auth, website-generator
+// config), which this jest environment cannot load. The controller only needs these
+// classes as DI tokens and the spec hands it fakes: stub the barrel, as the other api
+// specs do.
+jest.mock('@ever-works/agent/services', () => ({
+    KnowledgeBaseService: class KnowledgeBaseService {},
+    KnowledgeLibraryService: class KnowledgeLibraryService {},
+    WorkLifecycleService: class WorkLifecycleService {},
+    WorkQueryService: class WorkQueryService {},
+    KnowledgeBaseModule: class KnowledgeBaseModule {},
+    KnowledgeLibraryModule: class KnowledgeLibraryModule {},
+    WorkModule: class WorkModule {},
+}));
+
+// The `@ever-works/agent/missions` barrel pulls in the whole agent graph (work module ->
+// subscriptions -> api notifications/auth -> ESM-only better-auth, website-generator
+// config), which this jest environment cannot load. The controller only needs these
+// classes as DI tokens and the spec hands it fakes: stub the barrel, as the other api
+// specs do.
+jest.mock('@ever-works/agent/missions', () => ({
+    MissionsService: class MissionsService {},
+    MissionsModule: class MissionsModule {},
+}));
+
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import {
