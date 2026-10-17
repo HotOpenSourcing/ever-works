@@ -130,7 +130,22 @@ export class GoalEvaluationService {
             }
 
             try {
-                const entry = await this.evaluateOne(goal);
+                // EW-P2-2 follow-up — decide on a fresh read, not on the due scan's copy.
+                // One tick reads up to `limit` providers in turn, so by the time a Goal's
+                // turn comes an integration may have pushed a newer sample, a person may
+                // have ticked a Definition-of-Done item, moved the target or deadline, or
+                // paused / completed the Goal. Only a still-ACTIVE Goal is evaluated.
+                const fresh = await this.goals.findOne({ where: { id: goal.id } });
+                if (!fresh || fresh.status !== GoalStatus.ACTIVE) {
+                    summary.skipped += 1;
+                    summary.entries.push({
+                        goalId: goal.id,
+                        outcome: 'skipped',
+                        message: 'Goal is no longer active',
+                    });
+                    continue;
+                }
+                const entry = await this.evaluateOne(fresh);
                 summary.evaluated += 1;
                 summary.entries.push(entry);
             } catch (error) {
