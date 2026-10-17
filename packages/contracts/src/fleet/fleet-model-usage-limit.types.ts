@@ -255,9 +255,14 @@ export function readFleetJobModelUsageLimit(
 	if (!model || typeof model !== 'object') return null;
 	const step = model as Record<string, unknown>;
 	if (step.status === 'succeeded') return null;
+	// `strict`: only the CLIs' own unambiguous sentences. This path parks work
+	// and throttles a node on the strength of text alone, from a node that did
+	// not classify it itself, so a generic "rate limit exceeded" in a failed
+	// run's final message is not enough.
 	return detectFleetModelUsageLimit(step.summary, {
 		provider: typeof step.provider === 'string' ? step.provider : undefined,
 		now: nowMs,
+		strict: true,
 		...(options.timeZone ? { timeZone: options.timeZone } : {})
 	});
 }

@@ -150,6 +150,22 @@ describe('readFleetJobModelUsageLimit', () => {
 		expect(limit?.resetsAt).toBe('2026-10-19T01:00:00.000Z');
 	});
 
+	it("does not park an older node's run on a generic rate-limit phrase in the model's own words", () => {
+		expect(
+			readFleetJobModelUsageLimit(
+				{
+					status: 'failed',
+					model: {
+						provider: 'claude-code',
+						status: 'failed',
+						summary: 'Stopped: the GitHub API rate limit exceeded while listing issues'
+					}
+				},
+				{ now: NOW }
+			)
+		).toBeNull();
+	});
+
 	it('ignores succeeded runs, red gates and non-model failures', () => {
 		expect(readFleetJobModelUsageLimit({ status: 'succeeded', model: { status: 'succeeded', summary: "You've hit your weekly limit" } }, { now: NOW })).toBeNull();
 		expect(readFleetJobModelUsageLimit({ status: 'failed', failureReason: 'a required acceptance check did not pass', model: { status: 'succeeded', summary: 'done' } }, { now: NOW })).toBeNull();

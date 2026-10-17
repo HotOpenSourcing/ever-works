@@ -122,6 +122,7 @@ Every heartbeat now carries what the node's **worker** is doing, alongside the r
 | `paused`      | drained on purpose — an operator pause, or draining the last in-flight jobs before a stop |
 | `quarantined` | the fail-closed stop the node imposed on ITSELF; only clearable at that machine           |
 | `throttled`   | over a resource ceiling (CPU / memory, disk floor): keeps its jobs, leases no more        |
+|               | — or idle while a model CLI is out of quota (see "Model usage limits" below)             |
 
 `workerStateReason` carries the sentence that explains it — the quarantine's own message, the ceiling that was crossed — and `workerStateChangedAt` moves only on a TRANSITION, so "quarantined since 03:14" survives the hundreds of beats that follow. A node that has never reported one shows **unknown**, never `idle`: a fabricated readiness for a machine nobody has heard from is the thing these signals exist to end.
 
@@ -134,6 +135,25 @@ The drawer judges a job FAILED on the reconciled run outcome — the badge, the 
 
 Availability counts a node as **free** only when its worker state is not `quarantined`, `throttled` or `paused`. It stays counted as ONLINE — the operator must keep seeing it — but the run router no longer places work on a machine that will refuse it.
 
+### Model usage limits
+
+A model CLI on a node can run out of quota: Claude Code's weekly or 5-hour limit (`You've hit your weekly limit · resets Oct 19, 3am (Europe/Paris)`), an API `429` / `rate_limit_error`, Codex's `You've hit your usage limit … try again in 2 days`. That is a property of the SEAT the CLI is logged in as and it ends at a known instant, so it is not treated as a failure of the work, the Agent or the machine. (Before this, prod 2026-10-17: the node stayed `online`, kept leasing agent-task jobs that each failed in ~30 s, the Agent's error count climbed until `pauseAfterFailures` halted it, and the owner was told nothing actionable.)
+
+**On the node** (`ever-works-node`):
+
+- The agent-task executor recognises the CLI's sentence (the CLI's final message first, the raw output tail only for unambiguous phrases), parses the reset in the zone it names — else the machine's own zone — and reports the result with `failureKind: 'model_usage_limit'` + `modelUsageLimit { provider, window, resetsAt, retryAfter, message }`. Steps, acceptance checks and the publish are skipped: the model never finished the change. No reset named → retry after 1 h; always clamped to [1 min, 8 days].
+- The worker loop throttles THAT CLI until `retryAfter`: when every CLI the node has is out of quota it leases with `excludeKinds: ['agent-task']`; an agent-task for a throttled CLI that still arrives is handed back with the same outcome without starting anything. Other job kinds — and the other CLI's work — keep leasing. The throttle lifts by itself at the reset (and on a restart).
+- The heartbeat says so: an otherwise idle worker reports `workerState: 'throttled'` with `claude-code: weekly limit until 2026-10-19T01:01:00.000Z`; a busy one stays `working` and carries the same reason.
+
+**On the platform:**
+
+- A usage-limit result is **parked**, never settled: the job goes back to `queued` with its attempt refunded, `queuedReason: 'model-usage-limit'` and `queuedAt` = the reset (so the queue SLA measures from when the work can run again). No `fleet.job.completed` fires — so no AgentRun fails, no Agent error is counted, no Task fails — a `fleet.job.parked` event does instead. One job can be parked at most `FLEET_JOB_MAX_USAGE_LIMIT_PARKS` (20) times; past that its result settles the ordinary way, so a mis-recognised failure cannot requeue forever.
+- The node is throttled for that CLI on its row (`fleet_nodes.modelThrottles`) until the reset, and the LEASE skips that CLI's work for it — a job requiring the CLI's capability tag, or an agent-task whose execution names it. A job **pinned** to the node (Agent ↔ node affinity) therefore waits for it; an **unpinned** one is leased by another node with quota. This is enforced server-side, so it also holds an older daemon off — and the platform recognises an older daemon's plain failure (`model.summary` carrying the CLI's sentence) the same way, so the fix works before any machine upgrades.
+- The AgentRun goes back to `queued` with the same reason (exempt from the stuck-run and queued-too-long sweeps, not counted as in-flight by the dispatch gate) and its activity line reads `Waiting for everdesk4: Claude Code weekly limit until 2026-10-19 01:01 UTC`. The next lease flips it to `running` and clears the reason.
+- The Fleet node list shows a `Claude Code: weekly limit until …` badge under the status; the drawer lists every CLI out of quota with its reset.
+
+To resume sooner, sign that CLI on that machine in to a seat with quota left, then restart the node service (the node-side throttle is in memory) — the platform-side throttle still holds until the stated reset.
+
 ### Inbox notices
 
 Three notices, each filed **exactly once per event** and re-armed when the node recovers:
@@ -143,6 +163,7 @@ Three notices, each filed **exactly once per event** and re-armed when the node 
 | `Fleet node offline`       | the heartbeat-expiry sweep, on the flip to offline                   | the next accepted heartbeat            |
 | `Fleet node still offline` | the sweep, once the node has been gone longer than the notice window | the next accepted heartbeat            |
 | `Fleet node quarantined`   | the first heartbeat reporting `quarantined`                          | the first beat reporting anything else |
+| `<node>: <CLI> <window> until <UTC>` | the first park that opens a NEW model usage-limit window on that node + CLI | the window ending (the next limit after the reset is news again) |
 
 Each names the node, its kind, the reason where there is one, and when it was last seen. The dedup markers live on the `fleet_nodes` row (`offlineNoticedAt`, `offlineLongNoticedAt`, `quarantineNoticedAt`) and are claimed by a conditional UPDATE, so two API replicas sweeping the same owner produce one notice rather than two.
 
@@ -936,6 +957,24 @@ answer that names a machine other than itself. The `Ever-Works-` trailer namespa
 a commit message that already contains one — a Task title can reach the message — fails the run
 rather than being appended to, because a trailer a reader cannot distinguish from the platform's own
 is worse than no trailer at all. If you see that failure, rename the Task.
+
+### What a fleet commit says
+
+Every fleet commit used to read `feat(task): T-2 agent run output`, whatever it changed. The planner
+now writes a **conventional commit from the Task title**, with the Task slug in the body:
+
+```
+fix: login redirect losing the return URL
+
+Task: T-13
+```
+
+The type is read from the title (`Fix …` / `… crashes` → `fix`, `Refactor …` → `refactor`, `Docs …` →
+`docs`, `Add tests …` → `test`, `Bump …` → `chore`, otherwise `feat`); a title that already IS a
+conventional commit (`docs(api): …`) is kept as written. Once the change is staged, the node
+**re-types** the subject from the paths it actually touches — a docs-only change commits as `docs`, a
+tests-only change as `test` — changing only the type token; scope, subject, body and the trailer
+block are kept byte-for-byte. Long subjects are cut at a word boundary at 72 characters.
 
 ### What a fleet run leaves behind
 
