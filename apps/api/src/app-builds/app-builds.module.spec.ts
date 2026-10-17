@@ -2,10 +2,25 @@
 // pulls `better-auth` (ESM, which jest cannot parse) and whose services barrel is
 // large. The guard is never exercised here — no request is routed — so both are
 // replaced by the one class each this graph needs, as `catalog.module.spec.ts` does.
-jest.mock('../auth', () => ({
-    AuthSessionGuard: class AuthSessionGuard {},
-    CurrentUser: () => () => undefined,
-}));
+//
+// #2680 (02c5c1228) made the module import `AuthModule` from `@src/auth` — the
+// same barrel this mock replaces — because the guard injects the non-global
+// `AUTH_PROVIDER` in the real API. Without an `AuthModule` in the stand-in, the
+// module's `imports[2]` is `undefined` and nothing compiles; an EMPTY module is
+// the stand-in, exactly as `catalog.module.spec.ts` / `changelog.module.spec.ts`
+// stand it in. The real graph's auth wiring is pinned by
+// `app-works-di-reachability.spec.ts`, not here.
+jest.mock('../auth', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { Module } = require('@nestjs/common');
+    class AuthModule {}
+    Module({})(AuthModule);
+    return {
+        AuthModule,
+        AuthSessionGuard: class AuthSessionGuard {},
+        CurrentUser: () => () => undefined,
+    };
+});
 jest.mock('@ever-works/agent/services', () => ({
     ...jest.requireActual('../../../../packages/agent/src/services/work-ownership.service'),
 }));
