@@ -21,6 +21,11 @@ import { AppActionsHygieneService } from './app-actions-hygiene.service';
 import { AppSourceInitializerService } from './app-source-initializer.service';
 import { AppWorksTelemetryService } from './app-works-telemetry.service';
 import { APP_SOURCE_CATALOG_PORT } from './app-source-catalog.port';
+import { APP_WORK_AGENT_RESOLVER, AppWorkAgentResolverService } from './app-work-agent-resolver';
+import { AppChangeRequestService } from './app-change-request.service';
+import { AppProvisionEventsService, AppProvisioningService } from './app-provisioning.service';
+import { APP_PROVISIONING_SERVICE } from './app-source-initializer.service';
+import { APP_PROVISION_EVENTS_PORT } from './app-fork-readiness.service';
 import { AppBlueprintResolverService } from '../apps-catalog/app-blueprint-resolver.service';
 import { AppSourceCatalogAdapter } from '../apps-catalog/app-source-catalog.adapter';
 import {
@@ -340,6 +345,23 @@ export function buildAppForkReadinessDispatcherProvider(): FactoryProvider {
         // APW-01 T36 — FR-53's five events. Its sink is the API's to bind (a global
         // alias); unbound, events are counted and dropped. See the docstring above.
         AppWorksTelemetryService,
+        // APW-08 T25 (lane aw-ai, 2026-10-17) — the agent-resolution rule, bound where
+        // APW-02's `AppUpstreamStateService` (declared here) can see it (APW08-G18). Its
+        // own dependencies are repository providers only (`DatabaseModule`).
+        AppWorkAgentResolverService,
+        { provide: APP_WORK_AGENT_RESOLVER, useExisting: AppWorkAgentResolverService },
+        // APW-08 T25 — `POST /api/works/:id/evolve`'s service: a Task on the Work, started
+        // through `TasksService.runTask` (THE dispatch path — the Self-Build Fleet's).
+        AppChangeRequestService,
+        // APW-04 — the provisioner (inspect → draft → validate → an `app-provision` Task
+        // for the resolved Agent) and its events port. `APP_PROVISIONING_SERVICE` is read
+        // by both copies of `AppSourceInitializerService` (this module's and the API's),
+        // which is why it is bound and exported here. `APP_TARGET_UPDATED_PORT` has no
+        // consumer in the API graph; the worker binds it to the same class by name.
+        AppProvisioningService,
+        { provide: APP_PROVISIONING_SERVICE, useExisting: AppProvisioningService },
+        AppProvisionEventsService,
+        { provide: APP_PROVISION_EVENTS_PORT, useExisting: AppProvisionEventsService },
     ],
     exports: [
         WorkUpstreamStateRepository,
@@ -360,6 +382,17 @@ export function buildAppForkReadinessDispatcherProvider(): FactoryProvider {
         // APW-01 T36 — exported so the API-side ready handler and `WorkModule`'s
         // `WorkLifecycleService` receive the same instance the services here do.
         AppWorksTelemetryService,
+        // APW-08 T25 / APW-04 — exported so the API's controllers, its copy of the ready
+        // handler (`APP_PROVISIONING_SERVICE`), its readiness service
+        // (`APP_PROVISION_EVENTS_PORT`) and the `remoteMap` (`AppProvisionEventsService`)
+        // all resolve the SAME instances.
+        AppWorkAgentResolverService,
+        APP_WORK_AGENT_RESOLVER,
+        AppChangeRequestService,
+        AppProvisioningService,
+        APP_PROVISIONING_SERVICE,
+        AppProvisionEventsService,
+        APP_PROVISION_EVENTS_PORT,
     ],
 })
 export class AppWorksModule {}
