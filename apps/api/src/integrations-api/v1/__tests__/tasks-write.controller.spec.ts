@@ -239,10 +239,13 @@ describe('IntegrationTasksWriteController', () => {
             { title: 'New', teamId: 'team-a' },
             expect.anything(),
         );
-        expect(teamResources.attach).toHaveBeenCalledWith('owner-1', ORG, 'team-c', {
-            resourceType: 'task',
-            resourceId: 'task-1',
-        });
+        expect(teamResources.attach).toHaveBeenCalledWith(
+            'owner-1',
+            ORG,
+            'team-c',
+            { resourceType: 'task', resourceId: 'task-1' },
+            { viewer: { kind: 'integration' } },
+        );
         expect(teamResources.detach).toHaveBeenCalledWith(ORG, 'team-b', 'task', 'task-1');
         expect(response.setHeader).toHaveBeenCalledWith('ETag', '"3"');
         await expect(

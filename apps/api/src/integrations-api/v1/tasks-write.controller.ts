@@ -522,10 +522,13 @@ export class IntegrationTasksWriteController {
                 throw error;
             }
             for (const extra of extraTeams) {
-                await this.teamResources.attach(user.userId, organizationId, extra, {
-                    resourceType: 'task',
-                    resourceId: task.id,
-                });
+                await this.teamResources.attach(
+                    user.userId,
+                    organizationId,
+                    extra,
+                    { resourceType: 'task', resourceId: task.id },
+                    { viewer: { kind: 'integration' } },
+                );
             }
             for (const assignee of dto.assignees ?? []) {
                 await this.tasks.addAssignee(
@@ -668,10 +671,13 @@ export class IntegrationTasksWriteController {
             await this.teamResources.listTeamsForResource(organizationId, 'task', taskId)
         ).map((team) => team.teamId);
         for (const teamId of wanted.filter((team) => !currentLinks.includes(team))) {
-            await this.teamResources.attach(userId, organizationId, teamId, {
-                resourceType: 'task',
-                resourceId: taskId,
-            });
+            await this.teamResources.attach(
+                userId,
+                organizationId,
+                teamId,
+                { resourceType: 'task', resourceId: taskId },
+                { viewer: { kind: 'integration' } },
+            );
         }
         for (const teamId of currentLinks.filter((team) => !wanted.includes(team))) {
             await this.teamResources.detach(organizationId, teamId, 'task', taskId);
