@@ -55,6 +55,14 @@ import { IntegrationCreateIdeaDto, IntegrationUpdateIdeaDto } from '../ideas.con
 import { IntegrationExceptionFilter } from '../integration-exception.filter';
 import { IntegrationPutLinkDto } from '../links.controller';
 import {
+    IntegrationCreateMissionDto,
+    IntegrationMissionGoalLinkDto,
+    IntegrationMissionWorkLinkDto,
+    IntegrationPutMissionGoalsDto,
+    IntegrationPutMissionWorksDto,
+    IntegrationUpdateMissionDto,
+} from '../missions.controller';
+import {
     IntegrationCreateCommentDto,
     IntegrationExternalAuthorDto,
     IntegrationUpdateCommentDto,
@@ -331,6 +339,17 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
     PutGoalDod: { dto: IntegrationPutGoalDodDto, nested: { dodCriteria: GOAL_DOD_ITEM } },
     GoalDoDItem: GOAL_DOD_ITEM,
     GoalSample: { dto: IntegrationGoalSampleDto },
+    // EW-P2-5 — Missions.
+    CreateMission: { dto: IntegrationCreateMissionDto, nested: { externalRef: EXTERNAL_REF } },
+    UpdateMission: { dto: IntegrationUpdateMissionDto },
+    PutMissionGoals: {
+        dto: IntegrationPutMissionGoalsDto,
+        nested: { goals: { dto: IntegrationMissionGoalLinkDto } },
+    },
+    PutMissionWorks: {
+        dto: IntegrationPutMissionWorksDto,
+        nested: { works: { dto: IntegrationMissionWorkLinkDto } },
+    },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
     Batch: {
