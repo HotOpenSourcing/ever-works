@@ -163,7 +163,8 @@ export class ConfigAppsTierPolicy implements AppsTierPolicy {
         return {
             className: (this.env.EVER_WORKS_APPS_MANAGED_INGRESS_CLASS ?? '').trim() || 'nginx',
             controllerNamespace:
-                (this.env.EVER_WORKS_APPS_MANAGED_INGRESS_NAMESPACE ?? '').trim() || 'ingress-nginx',
+                (this.env.EVER_WORKS_APPS_MANAGED_INGRESS_NAMESPACE ?? '').trim() ||
+                'ingress-nginx',
             edgeTlsMode: 'edge',
         };
     }
@@ -276,7 +277,10 @@ export interface AppPullCredentialGitTokens {
     }): Promise<string | null>;
 }
 
-type FetchLike = (input: string, init?: Record<string, unknown>) => Promise<{
+type FetchLike = (
+    input: string,
+    init?: Record<string, unknown>,
+) => Promise<{
     status: number;
     ok: boolean;
     headers: { get(name: string): string | null };
@@ -301,7 +305,9 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
 
     constructor(
         private readonly builds: AppDeployBuildSource | undefined,
-        private readonly works: { findById(id: string): Promise<AppPullCredentialWorkView | null> } | undefined,
+        private readonly works:
+            | { findById(id: string): Promise<AppPullCredentialWorkView | null> }
+            | undefined,
         private readonly git: AppPullCredentialGitTokens | undefined,
         private readonly fetchImpl?: FetchLike,
     ) {}
@@ -321,7 +327,13 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
             );
         }
 
-        if (await this.isPublic(parsed.registry, parsed.repository, parsed.tag ?? parsed.digest ?? 'latest')) {
+        if (
+            await this.isPublic(
+                parsed.registry,
+                parsed.repository,
+                parsed.tag ?? parsed.digest ?? 'latest',
+            )
+        ) {
             return null;
         }
 
@@ -357,7 +369,10 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
         );
         return {
             server: 'ghcr.io',
-            username: (work?.owner && String(work.owner)) || parsed.repository.split('/')[0] || 'x-access-token',
+            username:
+                (work?.owner && String(work.owner)) ||
+                parsed.repository.split('/')[0] ||
+                'x-access-token',
             password: token,
         };
     }
@@ -384,7 +399,9 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
                     method: 'GET',
                 })) as Awaited<ReturnType<FetchLike>> & { json?: () => Promise<unknown> };
                 if (!tokenAnswer.ok || typeof tokenAnswer.json !== 'function') return false;
-                const body = (await tokenAnswer.json().catch(() => null)) as { token?: string } | null;
+                const body = (await tokenAnswer.json().catch(() => null)) as {
+                    token?: string;
+                } | null;
                 if (!body?.token) return false;
                 answer = await fetchImpl(url, {
                     method: 'HEAD',
@@ -463,13 +480,15 @@ export class AppRuntimeTargetAdapter implements AppRuntimeTargetPort {
         if (answer.outcome !== 'access') return { unavailable: unavailableFor(answer.refusal) };
 
         const { ref, credential, plugin } = answer.access;
-        const prepare = (plugin as {
-            prepareAppNamespace?: (
-                ref: AppTargetRef,
-                credential: string,
-                opts: { isolation: boolean; limitRange: AppLimitRangeInput },
-            ) => Promise<unknown>;
-        })?.prepareAppNamespace;
+        const prepare = (
+            plugin as {
+                prepareAppNamespace?: (
+                    ref: AppTargetRef,
+                    credential: string,
+                    opts: { isolation: boolean; limitRange: AppLimitRangeInput },
+                ) => Promise<unknown>;
+            }
+        )?.prepareAppNamespace;
 
         if (typeof prepare === 'function') {
             let isolation = true;
@@ -567,7 +586,11 @@ export class AppRuntimeNotificationProducersAdapter implements AppRuntimeNotific
             actionUrl: deployTabUrl(args.workId),
             actionLabel: 'Open Deploy',
             deduplicationKey: `app-deploy:${args.deploymentId}`,
-            metadata: { eventKey: 'app_deploy_failed', workId: args.workId, deploymentId: args.deploymentId },
+            metadata: {
+                eventKey: 'app_deploy_failed',
+                workId: args.workId,
+                deploymentId: args.deploymentId,
+            },
         });
     }
 
@@ -582,7 +605,8 @@ export class AppRuntimeNotificationProducersAdapter implements AppRuntimeNotific
             type: NotificationType.ERROR,
             category: NotificationCategory.SYSTEM,
             title: 'App rollback failed',
-            message: 'A failed Deployment of your App could not be rolled back. Check the Deploy tab now.',
+            message:
+                'A failed Deployment of your App could not be rolled back. Check the Deploy tab now.',
             actionUrl: deployTabUrl(args.workId),
             actionLabel: 'Open Deploy',
             isPersistent: true,
@@ -616,7 +640,10 @@ function deployTabUrl(workId: string): string {
  */
 export class PublicGitHubCommitAncestry implements AppCommitAncestry {
     constructor(
-        private readonly fetchImpl?: (input: string, init?: Record<string, unknown>) => Promise<{
+        private readonly fetchImpl?: (
+            input: string,
+            init?: Record<string, unknown>,
+        ) => Promise<{
             ok: boolean;
             json(): Promise<unknown>;
         }>,
@@ -636,9 +663,11 @@ export class PublicGitHubCommitAncestry implements AppCommitAncestry {
 
         const fetchImpl =
             this.fetchImpl ??
-            ((globalThis as unknown as {
-                fetch: NonNullable<PublicGitHubCommitAncestry['fetchImpl']>;
-            }).fetch);
+            (
+                globalThis as unknown as {
+                    fetch: NonNullable<PublicGitHubCommitAncestry['fetchImpl']>;
+                }
+            ).fetch;
 
         try {
             const answer = await fetchImpl(
@@ -714,12 +743,16 @@ export class AppRuntimeEventRelayService implements AppRuntimeEventSink {
     async emit(event: { name: string; payload: Record<string, unknown> }): Promise<void> {
         const name = typeof event?.name === 'string' ? event.name : '';
         if (!APP_RUNTIME_RELAYED_EVENTS.has(name)) {
-            throw new Error(`Refusing to relay an unknown App runtime event '${name.slice(0, 60)}'.`);
+            throw new Error(
+                `Refusing to relay an unknown App runtime event '${name.slice(0, 60)}'.`,
+            );
         }
         const payload = (event?.payload ?? {}) as Record<string, unknown>;
         const forbidden = forbiddenKey(payload, 0);
         if (forbidden) {
-            throw new Error(`Refusing to relay ${name}: its payload carries the forbidden key '${forbidden}'.`);
+            throw new Error(
+                `Refusing to relay ${name}: its payload carries the forbidden key '${forbidden}'.`,
+            );
         }
         if (!this.emitter) {
             this.logger.warn(`No EventEmitter2 is bound, so ${name} was not relayed.`);
@@ -732,7 +765,8 @@ export class AppRuntimeEventRelayService implements AppRuntimeEventSink {
 function forbiddenKey(value: unknown, depth: number): string | null {
     if (depth > 4 || value === null || typeof value !== 'object') return null;
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-        if ((APP_RUNTIME_EVENT_FORBIDDEN_KEYS as readonly string[]).includes(key.toLowerCase())) return key;
+        if ((APP_RUNTIME_EVENT_FORBIDDEN_KEYS as readonly string[]).includes(key.toLowerCase()))
+            return key;
         const nested = forbiddenKey(entry, depth + 1);
         if (nested) return nested;
     }

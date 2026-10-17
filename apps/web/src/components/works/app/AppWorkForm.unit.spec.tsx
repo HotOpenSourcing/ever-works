@@ -15,10 +15,15 @@ import messages from '../../../../messages/en.json';
  * actions are mocked at their module boundary.
  */
 
-const { inspectMock, createMock, pushMock } = vi.hoisted(() => ({
+const { inspectMock, createMock, pushMock, catalogMock } = vi.hoisted(() => ({
     inspectMock: vi.fn(),
     createMock: vi.fn(),
     pushMock: vi.fn(),
+    catalogMock: vi.fn(),
+}));
+
+vi.mock('@/app/actions/dashboard/apps-catalog', () => ({
+    listAppsCatalogBlueprintsAction: catalogMock,
 }));
 
 vi.mock('@/app/actions/dashboard/works', () => ({
@@ -30,7 +35,9 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 vi.mock('@/i18n/navigation', () => ({
     useRouter: () => ({ push: pushMock, back: vi.fn(), refresh: vi.fn() }),
-    Link: ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>,
+    Link: ({ children, href }: { children: ReactNode; href: string }) => (
+        <a href={href}>{children}</a>
+    ),
 }));
 
 import { AppWorkForm } from './AppWorkForm';
@@ -157,9 +164,13 @@ describe('AppWorkForm', () => {
         await pasteAndCheck();
         const link = await screen.findByTestId('app-work-mode-link');
         expect(link.getAttribute('aria-disabled')).toBe('true');
-        expect(screen.getByTestId('app-work-mode-link-reason').textContent).toBe(REASONS.no_push_access);
+        expect(screen.getByTestId('app-work-mode-link-reason').textContent).toBe(
+            REASONS.no_push_access,
+        );
         expect(screen.getByTestId('app-work-mode-fork').getAttribute('aria-checked')).toBe('true');
-        expect(screen.getByTestId('app-work-submit').textContent).toContain('Fork and create App Work');
+        expect(screen.getByTestId('app-work-submit').textContent).toContain(
+            'Fork and create App Work',
+        );
     });
 
     it('defaults the deploy target to None and disables Ever Works Apps with its reason', async () => {
@@ -167,7 +178,9 @@ describe('AppWorkForm', () => {
         renderForm();
         await pasteAndCheck();
         expect((screen.getByTestId('app-work-deploy-none') as HTMLInputElement).checked).toBe(true);
-        expect((screen.getByTestId('app-work-deploy-ever-works-apps') as HTMLInputElement).disabled).toBe(true);
+        expect(
+            (screen.getByTestId('app-work-deploy-ever-works-apps') as HTMLInputElement).disabled,
+        ).toBe(true);
         expect(screen.getByTestId('app-work-deploy-ever-works-apps-reason').textContent).toBe(
             REASONS.managed_hosting_unavailable,
         );
@@ -211,7 +224,9 @@ describe('AppWorkForm', () => {
                     id: 'umami',
                     name: 'Umami',
                     verified: true,
-                    prompts: [{ name: 'APP_SECRET', description: 'A random secret', required: true }],
+                    prompts: [
+                        { name: 'APP_SECRET', description: 'A random secret', required: true },
+                    ],
                 },
             }),
         });
@@ -225,7 +240,9 @@ describe('AppWorkForm', () => {
         expect(screen.getByTestId('app-work-prompts-incomplete').textContent).toBe(
             'Fill in the values the app needs first.',
         );
-        fireEvent.change(screen.getByTestId('app-work-prompt-APP_SECRET'), { target: { value: 's3cret' } });
+        fireEvent.change(screen.getByTestId('app-work-prompt-APP_SECRET'), {
+            target: { value: 's3cret' },
+        });
         await act(async () => {
             fireEvent.click(screen.getByTestId('app-work-submit'));
         });
@@ -249,6 +266,44 @@ describe('AppWorkForm', () => {
         });
         expect(createMock).toHaveBeenCalledTimes(1);
         await act(async () => resolve({ success: true, work: { id: 'w-3' } }));
+    });
+
+    it('a catalog pick fills the URL and inspects it exactly once (ACC-01-19)', async () => {
+        catalogMock.mockResolvedValue({
+            success: true,
+            data: {
+                items: [
+                    {
+                        id: 'umami',
+                        name: 'Umami',
+                        summary: '',
+                        repo: 'ever-works/umami-template',
+                        url: 'https://github.com/ever-works/umami-template',
+                        stars: null,
+                        spdx: 'MIT',
+                        topics: [],
+                    },
+                ],
+                total: 1,
+                available: true,
+                source: 'github-topic',
+            },
+        });
+        inspectMock.mockResolvedValue({ success: true, data: preview() });
+        renderForm();
+        fireEvent.click(screen.getByTestId('app-work-tab-catalog'));
+        const card = await screen.findByTestId('apps-catalog-card');
+        await act(async () => {
+            fireEvent.click(card);
+        });
+        expect(inspectMock).toHaveBeenCalledTimes(1);
+        expect(inspectMock.mock.calls[0][0].repositoryUrl).toBe(
+            'https://github.com/ever-works/umami-template',
+        );
+        expect((screen.getByTestId('app-work-url') as HTMLInputElement).value).toBe(
+            'https://github.com/ever-works/umami-template',
+        );
+        expect(await screen.findByTestId('app-work-preview')).toBeTruthy();
     });
 
     it('renders a create refusal’s §6.3 copy instead of the API message', async () => {
@@ -279,6 +334,8 @@ describe('AppWorkForm', () => {
         );
         fireEvent.change(screen.getByTestId('app-work-owner'), { target: { value: 'my-org' } });
         expect(inspectMock).toHaveBeenCalledTimes(1);
-        expect(screen.getByTestId('app-work-submit').textContent).toContain('Copy and create App Work');
+        expect(screen.getByTestId('app-work-submit').textContent).toContain(
+            'Copy and create App Work',
+        );
     });
 });

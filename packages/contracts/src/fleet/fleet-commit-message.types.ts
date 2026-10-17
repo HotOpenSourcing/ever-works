@@ -86,10 +86,7 @@ export function isFleetCommitType(value: unknown): value is FleetCommitType {
  * included). Without a title the subject still says what it is — the run's
  * output for that Task — rather than inventing a summary.
  */
-export function composeFleetTaskCommitMessage(input: {
-	title?: string | null;
-	slug?: string | null;
-}): string {
+export function composeFleetTaskCommitMessage(input: { title?: string | null; slug?: string | null }): string {
 	const slug = cleanText(input.slug).slice(0, 64);
 	const title = cleanText(input.title);
 	const conventional = title ? CONVENTIONAL_SUBJECT.exec(title) : null;
@@ -147,7 +144,10 @@ export function retypeFleetCommitMessage(message: string, changedPaths: readonly
 function cleanText(value: string | null | undefined): string {
 	if (typeof value !== 'string') return '';
 	// eslint-disable-next-line no-control-regex
-	return value.replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim();
+	return value
+		.replace(/[\u0000-\u001f\u007f]+/g, ' ')
+		.replace(/\s+/g, ' ')
+		.trim();
 }
 
 /** `Fix login redirect` read as `fix:` → `login redirect`, so the type is not said twice. */
@@ -181,7 +181,8 @@ function cutSubject(subject: string): string {
 
 const DOC_EXTENSIONS = /\.(?:md|mdx|markdown|rst|adoc|txt)$/i;
 const DOC_DIRECTORY = /(?:^|\/)(?:docs?|documentation)\//i;
-const DOC_FILENAMES = /(?:^|\/)(?:readme|changelog|contributing|license|licence|notice|authors|code_of_conduct)(?:\.[a-z]+)?$/i;
+const DOC_FILENAMES =
+	/(?:^|\/)(?:readme|changelog|contributing|license|licence|notice|authors|code_of_conduct)(?:\.[a-z]+)?$/i;
 
 function isDocsPath(path: string): boolean {
 	return DOC_EXTENSIONS.test(path) || DOC_DIRECTORY.test(path) || DOC_FILENAMES.test(path);

@@ -10,6 +10,7 @@ import type { AppStatusView, AppTargetView } from '@/lib/api/app-runtime.types';
 import { AppTargetCard, APP_TARGET_LEAF } from './AppTargetCard';
 import { ConnectClusterDialog } from './ConnectClusterDialog';
 import { AppDeployNowButton } from './AppDeployNowButton';
+import { AppLicenseCard } from './AppLicenseCard';
 
 const STATE_LEAF = {
     'not-deployed': 'notDeployed',
@@ -53,7 +54,9 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
               state: t(`status.${STATE_LEAF[status.state] ?? STATE_LEAF['not-deployed']}`),
               // Where the app RUNS (the runtime's target), not the saved
               // selection: changing the target removes nothing already running.
-              target: tTarget(`${APP_TARGET_LEAF[status.target] ?? APP_TARGET_LEAF[target.target]}.label`),
+              target: tTarget(
+                  `${APP_TARGET_LEAF[status.target] ?? APP_TARGET_LEAF[target.target]}.label`,
+              ),
           })
         : t('notRunning');
 
@@ -115,6 +118,10 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
                 onConnectCluster={() => setConnectOpen(true)}
                 onSaved={setTarget}
             />
+
+            {/* APW-03 T44 / APW-06 T37 (R-3) — the licence and, when it still
+                needs one, the owner's confirmation before a your-cluster deploy. */}
+            <AppLicenseCard workId={work.id} />
 
             {target.target !== 'none' && canEdit && <AppDeployNowButton workId={work.id} />}
 

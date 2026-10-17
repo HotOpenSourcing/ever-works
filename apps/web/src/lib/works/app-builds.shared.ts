@@ -154,9 +154,15 @@ export function normalizeStartBuildAnswer(raw: unknown): {
     deduped: boolean;
 } {
     const body = isRecord(raw) ? raw : {};
-    const candidate = isRecord(body.build) ? body.build : isRecord(raw) && 'status' in body ? body : null;
+    const candidate = isRecord(body.build)
+        ? body.build
+        : isRecord(raw) && 'status' in body
+          ? body
+          : null;
     const build =
-        candidate && typeof candidate.id === 'string' ? (candidate as unknown as AppBuildSummary) : null;
+        candidate && typeof candidate.id === 'string'
+            ? (candidate as unknown as AppBuildSummary)
+            : null;
     return {
         build,
         buildId: build?.id ?? stringOrNull(body.buildId),
@@ -210,7 +216,9 @@ export function formatAppBuildDuration(seconds: number | null | undefined): stri
 }
 
 /** The i18n leaf under `builds.trigger.*` for a trigger (`pull_request` → `pullRequest`). */
-export function appBuildTriggerKey(trigger: AppBuildTrigger): 'push' | 'pullRequest' | 'manual' | 'verification' {
+export function appBuildTriggerKey(
+    trigger: AppBuildTrigger,
+): 'push' | 'pullRequest' | 'manual' | 'verification' {
     return trigger === 'pull_request' ? 'pullRequest' : trigger;
 }
 

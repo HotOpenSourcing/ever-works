@@ -1,6 +1,9 @@
 import type { BuildRunRef } from '@ever-works/contracts';
 
-import { APP_BUILD_DISCOVERY_RECHECK_MARGIN_MS, AppBuildRunDiscoveryService } from '../app-build-run-discovery.service';
+import {
+    APP_BUILD_DISCOVERY_RECHECK_MARGIN_MS,
+    AppBuildRunDiscoveryService,
+} from '../app-build-run-discovery.service';
 
 /**
  * APW-05 T21a — run discovery (plan §7.4a, `APW05-G01`, ACC-05-11).
@@ -28,11 +31,13 @@ function run(overrides: Partial<BuildRunRef> = {}): BuildRunRef {
     };
 }
 
-function harness(options: {
-    rows?: Array<Record<string, unknown>>;
-    page?: { notModified: boolean; etag?: string; runs: BuildRunRef[] };
-    binding?: unknown;
-} = {}) {
+function harness(
+    options: {
+        rows?: Array<Record<string, unknown>>;
+        page?: { notModified: boolean; etag?: string; runs: BuildRunRef[] };
+        binding?: unknown;
+    } = {},
+) {
     const rows = options.rows ?? [
         { workId: 'w1', runsEtag: 'old', runsCheckedAt: null, workflowWrittenAt: WRITTEN },
     ];
@@ -41,15 +46,15 @@ function harness(options: {
         upsertAfterPrepare: jest.fn(async () => ({})),
     };
     const builds = {
-        recordProviderRun: jest.fn(
-            async (_workId: string, _run: BuildRunRef, _source: string) => ({
-                accepted: true,
-                build: { id: 'b' },
-                created: true,
-            }),
-        ),
+        recordProviderRun: jest.fn(async (_workId: string, _run: BuildRunRef, _source: string) => ({
+            accepted: true,
+            build: { id: 'b' },
+            created: true,
+        })),
     };
-    const listRecentRuns = jest.fn(async () => options.page ?? { notModified: false, etag: 'new', runs: [run()] });
+    const listRecentRuns = jest.fn(
+        async () => options.page ?? { notModified: false, etag: 'new', runs: [run()] },
+    );
     const binding = 'binding' in options ? options.binding : { pluginId: 'p', listRecentRuns };
     const works = { read: jest.fn(async (workId: string) => ({ workId, userId: 'u1' })) };
     const plugins = { resolve: jest.fn(async () => binding) };
@@ -68,7 +73,11 @@ describe('AppBuildRunDiscoveryService (APW-05 T21a)', () => {
         const summary = await h.service.discover(NOW);
 
         expect(h.listRecentRuns).toHaveBeenCalledWith({ perPage: 20, etag: 'old' });
-        expect(h.builds.recordProviderRun).toHaveBeenCalledWith('w1', expect.objectContaining({ providerRunId: '1' }), 'poll');
+        expect(h.builds.recordProviderRun).toHaveBeenCalledWith(
+            'w1',
+            expect.objectContaining({ providerRunId: '1' }),
+            'poll',
+        );
         expect(h.preparations.upsertAfterPrepare).toHaveBeenCalledWith('w1', {
             runsCheckedAt: new Date(NOW),
             runsEtag: 'new',
@@ -80,7 +89,9 @@ describe('AppBuildRunDiscoveryService (APW-05 T21a)', () => {
         const h = harness({ page: { notModified: true, runs: [] } });
         const summary = await h.service.discover(NOW);
         expect(h.builds.recordProviderRun).not.toHaveBeenCalled();
-        expect(h.preparations.upsertAfterPrepare).toHaveBeenCalledWith('w1', { runsCheckedAt: new Date(NOW) });
+        expect(h.preparations.upsertAfterPrepare).toHaveBeenCalledWith('w1', {
+            runsCheckedAt: new Date(NOW),
+        });
         expect(summary.worksNotModified).toBe(1);
     });
 
@@ -105,9 +116,15 @@ describe('AppBuildRunDiscoveryService (APW-05 T21a)', () => {
                     run({
                         providerRunId: 'old',
                         status: 'completed',
-                        createdAt: new Date(checked.getTime() - APP_BUILD_DISCOVERY_RECHECK_MARGIN_MS - 1).toISOString(),
+                        createdAt: new Date(
+                            checked.getTime() - APP_BUILD_DISCOVERY_RECHECK_MARGIN_MS - 1,
+                        ).toISOString(),
                     }),
-                    run({ providerRunId: 'fresh', status: 'completed', createdAt: new Date(NOW - 30_000).toISOString() }),
+                    run({
+                        providerRunId: 'fresh',
+                        status: 'completed',
+                        createdAt: new Date(NOW - 30_000).toISOString(),
+                    }),
                     run({
                         providerRunId: 'open',
                         status: 'running',
@@ -120,10 +137,11 @@ describe('AppBuildRunDiscoveryService (APW-05 T21a)', () => {
             },
         });
         await h.service.discover(NOW);
-        expect(h.builds.recordProviderRun.mock.calls.map((call) => (call[1] as BuildRunRef).providerRunId)).toEqual([
-            'fresh',
-            'open',
-        ]);
+        expect(
+            h.builds.recordProviderRun.mock.calls.map(
+                (call) => (call[1] as BuildRunRef).providerRunId,
+            ),
+        ).toEqual(['fresh', 'open']);
     });
 
     it('skips a plugin without listRecentRuns, and one Work failing does not stop the rest', async () => {

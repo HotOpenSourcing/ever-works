@@ -46,6 +46,7 @@ import {
     rotateFleetNodeCredentialAction,
     updateFleetNodeAction,
     setFleetNodeLimitCeilingAction,
+    clearFleetNodeModelThrottleAction,
 } from '@/app/actions/settings/fleet';
 import { formatBytes } from '@/components/dashboard/runner-status.shared';
 import { FleetCostCeiling } from './FleetCostCeiling';
@@ -383,6 +384,27 @@ export function FleetSettings({
         });
     };
 
+    /** Fleet usage limits: "clear limit now" for one CLI on the open node. */
+    const handleClearModelThrottle = (provider: string | null) => {
+        const target = drawerNode;
+        if (!target) return;
+        startTransition(async () => {
+            const result = await clearFleetNodeModelThrottleAction(target.id, provider);
+            if (result.success) {
+                setNodes((prev) =>
+                    prev.map((entry) => (entry.id === target.id ? result.data : entry)),
+                );
+                setDrawerNode((prev) => keepIfStillOpen(prev, result.data));
+                setDrawerDetail((prev) =>
+                    prev && prev.node.id === result.data.id ? { ...prev, node: result.data } : prev,
+                );
+                toast.success(t('modelThrottles.cleared'));
+            } else {
+                toast.error(result.error);
+            }
+        });
+    };
+
     const handleDrain = (drain: boolean) => {
         const target = drawerNode;
         if (!target) return;
@@ -539,9 +561,15 @@ export function FleetSettings({
                                                 data-testid={`fleet-node-throttle-${node.id}-${throttle.provider}`}
                                             >
                                                 {t('modelThrottles.entry', {
-                                                    cli: describeFleetModelProvider(throttle.provider),
-                                                    window: t(`modelThrottles.windows.${throttle.window}` as never),
-                                                    until: new Date(throttle.until).toLocaleString(),
+                                                    cli: describeFleetModelProvider(
+                                                        throttle.provider,
+                                                    ),
+                                                    window: t(
+                                                        `modelThrottles.windows.${throttle.window}` as never,
+                                                    ),
+                                                    until: new Date(
+                                                        throttle.until,
+                                                    ).toLocaleString(),
                                                 })}
                                             </span>
                                         ))}
@@ -891,6 +919,7 @@ export function FleetSettings({
                 onSaveCapabilities={handleSaveCapabilities}
                 onSaveCostCeiling={handleSaveCostCeiling}
                 onSaveLimitCeiling={handleSaveLimitCeiling}
+                onClearModelThrottle={handleClearModelThrottle}
                 onRotate={handleRotate}
                 onDrain={handleDrain}
             />

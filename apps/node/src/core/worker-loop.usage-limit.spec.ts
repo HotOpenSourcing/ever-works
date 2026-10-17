@@ -121,7 +121,11 @@ describe('WorkerLoop — model usage limits', () => {
 	});
 
 	it('keeps leasing when another CLI is still available, and refuses the throttled CLI’s job without starting it', async () => {
-		const client = recordingClient([[], [agentJob('job-claude', 'claude-code'), agentJob('job-codex', 'codex')], []]);
+		const client = recordingClient([
+			[],
+			[agentJob('job-claude', 'claude-code'), agentJob('job-codex', 'codex')],
+			[]
+		]);
 		const loop = new WorkerLoop({
 			client,
 			scheduler: manualScheduler(),
@@ -164,8 +168,49 @@ describe('WorkerLoop — model usage limits', () => {
 	it('never lets an earlier reset shorten a later one, and ignores a reset already past', () => {
 		const loop = new WorkerLoop({ client: recordingClient([[]]), scheduler: manualScheduler(), now: () => NOW });
 		loop.noteModelUsageLimit({ provider: 'codex', window: 'usage', retryAfter: RESET, message: 'a' });
-		loop.noteModelUsageLimit({ provider: 'codex', window: 'session', retryAfter: '2026-10-17T18:00:00.000Z', message: 'b' });
-		loop.noteModelUsageLimit({ provider: 'claude-code', window: 'rate', retryAfter: '2026-10-17T15:00:00.000Z', message: 'c' });
-		expect(loop.activeModelThrottles()).toEqual([{ provider: 'codex', window: 'usage', until: RESET, reason: 'a' }]);
+		loop.noteModelUsageLimit({
+			provider: 'codex',
+			window: 'session',
+			retryAfter: '2026-10-17T18:00:00.000Z',
+			message: 'b'
+		});
+		loop.noteModelUsageLimit({
+			provider: 'claude-code',
+			window: 'rate',
+			retryAfter: '2026-10-17T15:00:00.000Z',
+			message: 'c'
+		});
+		expect(loop.activeModelThrottles()).toEqual([
+			{ provider: 'codex', window: 'usage', until: RESET, reason: 'a' }
+		]);
+	});
+
+	it('adopts the platform throttles after a restart and lifts one the owner cleared', () => {
+		let now = NOW;
+		const loop = new WorkerLoop({ client: recordingClient([[]]), scheduler: manualScheduler(), now: () => now });
+
+		// A fresh daemon learns from the beat that its CLI is still out.
+		loop.syncModelThrottles([{ provider: 'claude-code', window: 'weekly', until: RESET, reason: 'weekly' }]);
+		expect(loop.activeModelThrottles()).toEqual([
+			{ provider: 'claude-code', window: 'weekly', until: RESET, reason: 'weekly' }
+		]);
+
+		// The owner pressed "clear limit now": the beat no longer lists it.
+		now += 5 * 60_000;
+		loop.syncModelThrottles([]);
+		expect(loop.activeModelThrottles()).toEqual([]);
+	});
+
+	it('keeps a throttle it JUST recorded when a beat answered before the platform did', () => {
+		let now = NOW;
+		const loop = new WorkerLoop({ client: recordingClient([[]]), scheduler: manualScheduler(), now: () => now });
+		loop.noteModelUsageLimit({ provider: 'claude-code', window: 'weekly', retryAfter: RESET, message: 'x' });
+		now += 10_000;
+		loop.syncModelThrottles([]);
+		expect(loop.activeModelThrottles()).toHaveLength(1);
+		// An API older than the field says nothing at all: nothing changes.
+		now += 10 * 60_000;
+		loop.syncModelThrottles(undefined);
+		expect(loop.activeModelThrottles()).toHaveLength(1);
 	});
 });

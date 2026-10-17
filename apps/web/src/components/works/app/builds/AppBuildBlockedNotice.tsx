@@ -36,7 +36,10 @@ export interface AppBuildBlockedNoticeProps {
 
 function linkFor(
     action: AppBuildBlockedAction,
-    props: Pick<AppBuildBlockedNoticeProps, 'workId' | 'workflowPullRequestUrl' | 'repositoryFullName'>,
+    props: Pick<
+        AppBuildBlockedNoticeProps,
+        'workId' | 'workflowPullRequestUrl' | 'repositoryFullName'
+    >,
 ): AppBuildBlockedLink {
     const repo = props.repositoryFullName;
     switch (action) {
@@ -45,7 +48,9 @@ function linkFor(
                 ? { kind: 'external', href: props.workflowPullRequestUrl }
                 : null;
         case 'turnOnActions':
-            return repo ? { kind: 'external', href: `https://github.com/${repo}/settings/actions` } : null;
+            return repo
+                ? { kind: 'external', href: `https://github.com/${repo}/settings/actions` }
+                : null;
         case 'openRepositorySettings':
             return repo ? { kind: 'external', href: `https://github.com/${repo}/settings` } : null;
         case 'setValue':
@@ -85,7 +90,12 @@ export function AppBuildBlockedNotice(props: AppBuildBlockedNoticeProps) {
                 {t(`blocked.${reason}`, params)}
             </span>
             {action && link?.kind === 'external' && (
-                <a href={link.href} target="_blank" rel="noopener noreferrer" className={actionClass}>
+                <a
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={actionClass}
+                >
                     {t(`blockedAction.${action}`)}
                     <ExternalLink className="h-3 w-3" aria-hidden="true" />
                 </a>

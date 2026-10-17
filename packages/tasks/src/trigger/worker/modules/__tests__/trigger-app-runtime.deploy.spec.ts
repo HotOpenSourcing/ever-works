@@ -97,7 +97,10 @@ describe('TriggerAppRuntimeModule — a Deployment end to end (A0.7)', () => {
         ['AppEnvRuntimeSource.resolve', ENV],
         ['WorkRepository.findById', WORK],
         ['WorkCustomDomainRepository.findByWork', []],
-        ['WorkDeploymentRepository.findById', { id: 'dep-1', workId: 'work-1', appRender: { preconditions: [] } }],
+        [
+            'WorkDeploymentRepository.findById',
+            { id: 'dep-1', workId: 'work-1', appRender: { preconditions: [] } },
+        ],
         ['WorkDeploymentRepository.update', null],
         ['AppRuntimeEventRelayService.emit', null],
         ['WorkUpstreamStateRepository.findByWorkId', null],
@@ -123,7 +126,9 @@ describe('TriggerAppRuntimeModule — a Deployment end to end (A0.7)', () => {
                     const key = `${body.name}.${body.method}`;
                     if (remoteAnswers.has(key)) {
                         response.writeHead(200, { 'content-type': 'application/json' });
-                        response.end(JSON.stringify({ result: superjson.serialize(remoteAnswers.get(key)) }));
+                        response.end(
+                            JSON.stringify({ result: superjson.serialize(remoteAnswers.get(key)) }),
+                        );
                         return;
                     }
                 }
@@ -258,22 +263,35 @@ describe('TriggerAppRuntimeModule — a Deployment end to end (A0.7)', () => {
         expect(result.lockReleased).toBe(true);
 
         // The row went DEPLOYING, then READY with the pinned image recorded (§5.8).
-        const updates = called('WorkDeploymentRepository', 'update').map((call) => call.args[1] as Record<string, unknown>);
-        expect(updates.map((fields) => fields.state).filter(Boolean)).toEqual(['DEPLOYING', 'READY']);
+        const updates = called('WorkDeploymentRepository', 'update').map(
+            (call) => call.args[1] as Record<string, unknown>,
+        );
+        expect(updates.map((fields) => fields.state).filter(Boolean)).toEqual([
+            'DEPLOYING',
+            'READY',
+        ]);
         expect((updates.at(-1)?.appRender as { image?: { digest?: string } }).image?.digest).toBe(
             `sha256:${'d'.repeat(64)}`,
         );
 
         // The env came from the API's env source, at the spec commit.
-        expect(called('AppEnvRuntimeSource', 'resolve')[0]?.args.slice(0, 2)).toEqual(['work-1', 'c0ffee']);
+        expect(called('AppEnvRuntimeSource', 'resolve')[0]?.args.slice(0, 2)).toEqual([
+            'work-1',
+            'c0ffee',
+        ]);
 
         // The runtime state recorded the live Deployment, and the lock was released by THIS one.
-        expect(called('WorkAppRuntimeStateRepository', 'patchRuntimeState')[0]?.args[1]).toMatchObject({
+        expect(
+            called('WorkAppRuntimeStateRepository', 'patchRuntimeState')[0]?.args[1],
+        ).toMatchObject({
             currentDeploymentId: 'dep-1',
             clusterFingerprint: 'fp-1',
             namespace: 'ew-acme-app',
         });
-        expect(called('WorkAppRuntimeStateRepository', 'releaseDeployLock')[0]?.args).toEqual(['work-1', 'dep-1']);
+        expect(called('WorkAppRuntimeStateRepository', 'releaseDeployLock')[0]?.args).toEqual([
+            'work-1',
+            'dep-1',
+        ]);
 
         // §9.4's events, relayed to the API in order, names and ids only.
         const events = called('AppRuntimeEventRelayService', 'emit').map(
@@ -283,7 +301,10 @@ describe('TriggerAppRuntimeModule — a Deployment end to end (A0.7)', () => {
     });
 
     it('refuses a dequeued Deployment that no longer holds the lock (B1) — nothing is deployed', async () => {
-        remoteAnswers.set('WorkAppRuntimeStateRepository.getOrCreate', { ...STATE, deployLockId: 'dep-other' });
+        remoteAnswers.set('WorkAppRuntimeStateRepository.getOrCreate', {
+            ...STATE,
+            deployLockId: 'dep-other',
+        });
         let deployed = 0;
         const orchestrator = new AppDeployOrchestrator(
             get(AppDeployPreconditionsService),

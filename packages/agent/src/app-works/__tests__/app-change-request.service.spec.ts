@@ -4,7 +4,11 @@ import {
     AppChangeRequestService,
     changeTitle,
 } from '../app-change-request.service';
-import { AppProvisioningService, AppProvisionEventsService, extractYaml } from '../app-provisioning.service';
+import {
+    AppProvisioningService,
+    AppProvisionEventsService,
+    extractYaml,
+} from '../app-provisioning.service';
 import { PROVISION_LABEL } from '../app-change-guard';
 
 /** APW-08 T25 (`POST /api/works/:id/evolve`) and APW-04 (`start`) over the Task machinery. */
@@ -74,7 +78,11 @@ describe('AppChangeRequestService (APW-08 T25)', () => {
             resolver,
             resolverService as never,
         );
-        const result = await service.request({ work: appWork(), actorUserId: 'owner', request: 'x' });
+        const result = await service.request({
+            work: appWork(),
+            actorUserId: 'owner',
+            request: 'x',
+        });
         expect(result).toMatchObject({
             status: 'refused',
             httpStatus: 409,
@@ -86,7 +94,9 @@ describe('AppChangeRequestService (APW-08 T25)', () => {
 
     it('creates an app-change Task for the resolved Agent and starts it through runTask', async () => {
         const tasks = tasksDouble();
-        const resolver = { resolve: jest.fn(async () => ({ agentId: 'a1', source: 'pinned' as const })) };
+        const resolver = {
+            resolve: jest.fn(async () => ({ agentId: 'a1', source: 'pinned' as const })),
+        };
         const service = new AppChangeRequestService(tasks as never, undefined, undefined, resolver);
         const result = await service.request({
             work: appWork(),
@@ -116,7 +126,12 @@ describe('AppChangeRequestService (APW-08 T25)', () => {
         });
         expect(String(input.description)).toContain('and persist it.');
         expect(String(input.description)).toContain('Never push to or merge the default branch');
-        expect(tasks.runTask).toHaveBeenCalledWith('owner', 't1', { agentId: 'a1' }, expect.anything());
+        expect(tasks.runTask).toHaveBeenCalledWith(
+            'owner',
+            't1',
+            { agentId: 'a1' },
+            expect.anything(),
+        );
     });
 
     it('refuses an explicit Agent that may not commit', async () => {
@@ -131,8 +146,17 @@ describe('AppChangeRequestService (APW-08 T25)', () => {
             })),
         };
         const service = new AppChangeRequestService(tasks as never, undefined, agents as never);
-        const result = await service.request({ work: appWork(), actorUserId: 'owner', request: 'x', agentId: 'a2' });
-        expect(result).toMatchObject({ status: 'refused', httpStatus: 422, code: 'agentNotEligible' });
+        const result = await service.request({
+            work: appWork(),
+            actorUserId: 'owner',
+            request: 'x',
+            agentId: 'a2',
+        });
+        expect(result).toMatchObject({
+            status: 'refused',
+            httpStatus: 422,
+            code: 'agentNotEligible',
+        });
     });
 
     it('titles are short', () => {
@@ -149,10 +173,13 @@ describe('AppProvisioningService (APW-04)', () => {
                 { name: 'package.json', type: 'file', path: 'package.json' },
             ]),
             getFileContent: jest.fn(async (_o: string, _r: string, path: string) => {
-                if (path === 'Dockerfile') return { content: 'FROM node:22\nEXPOSE 3000\n', encoding: 'utf-8' };
+                if (path === 'Dockerfile')
+                    return { content: 'FROM node:22\nEXPOSE 3000\n', encoding: 'utf-8' };
                 if (path === 'package.json')
                     return {
-                        content: Buffer.from(JSON.stringify({ dependencies: { express: '4' } })).toString('base64'),
+                        content: Buffer.from(
+                            JSON.stringify({ dependencies: { express: '4' } }),
+                        ).toString('base64'),
                         encoding: 'base64',
                     };
                 return null;
@@ -164,7 +191,9 @@ describe('AppProvisioningService (APW-04)', () => {
         const tasks = tasksDouble();
         const works = { findById: jest.fn(async () => appWork()) };
         const taskRepo = { findByUserIdFiltered: jest.fn(async () => ({ rows: [], total: 0 })) };
-        const resolver = { resolve: jest.fn(async () => ({ agentId: 'a1', source: 'tenant-default' as const })) };
+        const resolver = {
+            resolve: jest.fn(async () => ({ agentId: 'a1', source: 'tenant-default' as const })),
+        };
         const service = new AppProvisioningService(
             works as never,
             git() as never,
@@ -178,8 +207,18 @@ describe('AppProvisioningService (APW-04)', () => {
             reason: 'queued',
         });
         const result = await service.whenSettled('w1')!;
-        expect(result).toMatchObject({ started: true, taskId: 't1', agentId: 'a1', runId: 'r1', draftValid: true });
-        expect(result.detection).toMatchObject({ dockerfile: 'Dockerfile', framework: 'express', port: 3000 });
+        expect(result).toMatchObject({
+            started: true,
+            taskId: 't1',
+            agentId: 'a1',
+            runId: 'r1',
+            draftValid: true,
+        });
+        expect(result.detection).toMatchObject({
+            dockerfile: 'Dockerfile',
+            framework: 'express',
+            port: 3000,
+        });
         const [, input] = tasks.create.mock.calls[0];
         expect(input.labels).toEqual([PROVISION_LABEL]);
         expect(String(input.description)).toContain('Dockerfile found (EXPOSE 3000)');
@@ -191,9 +230,17 @@ describe('AppProvisioningService (APW-04)', () => {
         const tasks = tasksDouble();
         const works = { findById: jest.fn(async () => appWork()) };
         const taskRepo = {
-            findByUserIdFiltered: jest.fn(async () => ({ rows: [{ id: 'open', slug: 'T-9' }], total: 1 })),
+            findByUserIdFiltered: jest.fn(async () => ({
+                rows: [{ id: 'open', slug: 'T-9' }],
+                total: 1,
+            })),
         };
-        const service = new AppProvisioningService(works as never, git() as never, tasks as never, taskRepo as never);
+        const service = new AppProvisioningService(
+            works as never,
+            git() as never,
+            tasks as never,
+            taskRepo as never,
+        );
         await expect(service.start({ workId: 'w1', trigger: 'manual' })).resolves.toMatchObject({
             started: false,
             reason: 'alreadyProvisioning',
@@ -230,7 +277,9 @@ describe('AppProvisioningService (APW-04)', () => {
     });
 
     it('extractYaml takes the fenced block of a model answer', () => {
-        expect(extractYaml('Sure:\n```yaml\nversion: 2\nkind: app\n```\nDone')).toBe('version: 2\nkind: app\n');
+        expect(extractYaml('Sure:\n```yaml\nversion: 2\nkind: app\n```\nDone')).toBe(
+            'version: 2\nkind: app\n',
+        );
         expect(extractYaml('no spec here')).toBeNull();
     });
 });

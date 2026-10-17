@@ -159,15 +159,15 @@ export class AppWorkAgentResolverService implements AppWorkAgentResolver {
             return null;
         }
 
-        const ordered = [...rows].sort(
-            (a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt),
-        );
+        const ordered = [...rows].sort((a, b) => timeOf(b.updatedAt) - timeOf(a.updatedAt));
         const seen = new Set<string>();
         for (const row of ordered) {
             const agentId = row.agentId;
             if (!agentId || seen.has(agentId)) continue;
             seen.add(agentId);
-            const agent = await this.agents.findByIdAndUser(agentId, userId, scope).catch(() => null);
+            const agent = await this.agents
+                .findByIdAndUser(agentId, userId, scope)
+                .catch(() => null);
             if (isCommittingAgent(agent) && ownershipScopeMatches(agent as Agent, scope)) {
                 return agentId;
             }
