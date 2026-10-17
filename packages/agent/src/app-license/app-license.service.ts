@@ -368,8 +368,14 @@ export class AppLicenseService {
         if (!states) return null;
         let state = await states.findByWorkId(workId);
         if (!state) return null;
-        if (!state.licenseClass) {
-            // Never classified yet: classify now rather than judge an empty row.
+        const declaredNow = firstNonEmpty(
+            (state.effectiveSpec as { license?: { spdx?: string } } | null | undefined)?.license
+                ?.spdx,
+        );
+        if (!state.licenseClass || (declaredNow && declaredNow !== state.licenseSpdx)) {
+            // Never classified yet, or the effective App spec now declares a licence the
+            // stored classification did not use (the first classification ran before the
+            // spec evaluation landed): classify now rather than judge a stale row.
             await this.evaluate(workId, 'eligibility');
             state = await states.findByWorkId(workId);
             if (!state?.licenseClass) return null;

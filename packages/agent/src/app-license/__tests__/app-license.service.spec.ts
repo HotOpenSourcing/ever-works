@@ -203,6 +203,25 @@ describe('AppLicenseService (APW-03 T42)', () => {
         });
     });
 
+    describe('getHostingEligibility', () => {
+        it('re-classifies when the effective spec now declares a different licence', async () => {
+            const h = build({
+                row: {
+                    licenseSpdx: 'MIT',
+                    licenseClass: 'green',
+                    licenseSource: 'detected',
+                    effectiveSpec: { license: { spdx: 'BUSL-1.1' } },
+                },
+                detected: 'MIT',
+            });
+
+            const eligibility = await h.service.getHostingEligibility(WORK_ID);
+
+            expect(eligibility?.yourCluster).toBe('attestationRequired');
+            expect(h.states.row.licenseSpdx).toBe('BUSL-1.1');
+        });
+    });
+
     describe('attest (T44)', () => {
         it('records the owner with the text id and hash, then eligibility allows your cluster', async () => {
             const h = build({
