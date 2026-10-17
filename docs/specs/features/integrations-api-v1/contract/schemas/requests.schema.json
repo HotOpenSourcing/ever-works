@@ -581,7 +581,7 @@
 			"additionalProperties": false
 		},
 		"PutGoalDod": {
-			"description": "PUT /goals/:id/dod (If-Match optional): the full Definition of Done (`[]` clears it on a metric Goal; a delivery Goal must keep one item). Items are written as approved operator items. Answers the Goal DTO.",
+			"description": "PUT /goals/:id/dod (If-Match optional): the full Definition of Done (`[]` clears it on a metric Goal; a delivery Goal must keep one item). Items are written as approved operator items; a planner proposal (`proposed: true`) the body does not name is kept (Gauzy CR-12). Answers the Goal DTO.",
 			"type": "object",
 			"required": ["dodCriteria"],
 			"properties": {
