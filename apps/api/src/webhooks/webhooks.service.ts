@@ -43,6 +43,11 @@ export interface WebhookSubscriptionView {
     version: 1 | 2;
     /** v2 fields (null on v1 rows). */
     ownerType: WebhookSubscriptionOwnerType;
+    /**
+     * The owning user or integration key (`api_keys.id`); null on v1 rows. Lets
+     * Settings → Integrations → Ever Gauzy list each key's subscriptions (EW-P1-7).
+     */
+    ownerId: string | null;
     events: string[] | null;
     organizationIds: string[] | null;
     excludeOriginTags: string[] | null;
@@ -406,6 +411,7 @@ export class WebhooksService {
             updatedAt: row.updatedAt,
             version: Number(row.version) === 2 ? 2 : 1,
             ownerType: row.ownerType ?? 'user',
+            ownerId: row.ownerId ?? null,
             events: row.events ?? null,
             organizationIds: row.organizationIds ?? null,
             excludeOriginTags: row.excludeOriginTags ?? null,

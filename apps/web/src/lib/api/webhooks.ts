@@ -22,6 +22,8 @@ export interface WebhookSubscription {
     /** 1 = legacy work/deploy events; 2 = domain events. */
     version: 1 | 2;
     ownerType: 'user' | 'integration_key';
+    /** The owning user or integration key id (null on v1 rows). */
+    ownerId?: string | null;
     events: string[] | null;
     organizationIds: string[] | null;
     excludeOriginTags: string[] | null;
