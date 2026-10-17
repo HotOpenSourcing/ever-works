@@ -9,7 +9,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, Length, Matches } from 'class-validator';
 import { OrganizationMemberRepository, TenantRepository } from '@ever-works/agent/database';
 import {
@@ -40,19 +40,28 @@ import { domainRule, principalOf } from './integration-request';
 
 /** Contract v1 `requests.schema.json#/$defs/CreateOrganization` (EW-P2-6). */
 export class IntegrationCreateOrganizationDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     displayName!: string;
 
+    @ApiProperty({
+        required: false,
+        pattern: '^[a-z0-9][a-z0-9-]{0,63}$',
+        description:
+            'Optional; allocated from displayName when omitted (a taken slug gets a suffix).',
+    })
     @IsOptional()
     @Matches(/^[a-z0-9][a-z0-9-]{0,63}$/)
     slug?: string;
 
+    @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
     @IsOptional()
     @IsString()
     @Length(1, 200)
     legalName?: string;
 
+    @ApiProperty({ required: false, pattern: '^[A-Za-z]{2}$' })
     @IsOptional()
     @Matches(/^[A-Za-z]{2}$/)
     countryCode?: string;
