@@ -33,7 +33,7 @@ import {
 } from './app-hosts.service';
 import { AppDomainsService } from './app-domains.service';
 import { APP_DEPLOY_HOST_SOURCE } from './app-deploy-preconditions.service';
-import { ConfigAppsTierPolicy } from './app-runtime-worker.adapters';
+import { ConfigAppsTierPolicy } from '../apps-tier/config-apps-tier-policy';
 import { APPS_TIER_POLICY } from './ports';
 import { APP_DEPLOY_DEPLOYMENT_STORE, AppDeployRequestService } from './app-deploy-request.service';
 import { AppLicenseGate } from './app-license-gate';
@@ -253,7 +253,8 @@ import {
         AppDeployDispatchRelay,
         // APW-06 T31/T33 (lane aw-deploy-2) — the API's `app-cluster-op` gate, its worker-facing
         // relay, the app-target/app-status service, and APW-10's minimal tier policy (the managed
-        // target opens only with EVER_WORKS_APPS_MANAGED_ENABLED; the worker binds the same class).
+        // target opens only when the operator's ceiling switch is on — read by APW-10's
+        // `apps-tier/config-apps-tier-policy.ts`, never here (R-5); the worker binds the same class).
         ...buildAppClusterOpDispatcherProviders(),
         AppClusterOpDispatchRelay,
         AppTargetService,
