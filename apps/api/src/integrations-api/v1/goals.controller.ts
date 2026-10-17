@@ -109,7 +109,11 @@ export class IntegrationGoalMetricSourceDto {
     @Length(1, 200)
     metricId!: string;
 
-    @ApiProperty({ required: false, type: 'object', additionalProperties: true })
+    @ApiProperty({
+        required: false,
+        type: Object,
+        description: 'Provider parameters (unused by the external source).',
+    })
     @IsOptional()
     @IsObject()
     params?: Record<string, unknown>;
