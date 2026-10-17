@@ -35,6 +35,7 @@ import { APP_SOURCE_CATALOG_PORT } from './app-source-catalog.port';
 import { APP_WORK_AGENT_RESOLVER, AppWorkAgentResolverService } from './app-work-agent-resolver';
 import { AppChangeRequestService } from './app-change-request.service';
 import { AppProvisionEventsService, AppProvisioningService } from './app-provisioning.service';
+import { AppProvisioningFeedbackService } from './app-provisioning-feedback.service';
 import { APP_PROVISIONING_SERVICE } from './app-source-initializer.service';
 import { APP_PROVISION_EVENTS_PORT } from './app-fork-readiness.service';
 import { AppBlueprintResolverService } from '../apps-catalog/app-blueprint-resolver.service';
@@ -437,6 +438,9 @@ export function buildAppUpstreamSyncDispatcherProvider(): FactoryProvider {
         { provide: APP_PROVISIONING_SERVICE, useExisting: AppProvisioningService },
         AppProvisionEventsService,
         { provide: APP_PROVISION_EVENTS_PORT, useExisting: AppProvisionEventsService },
+        // APW-04 — the feedback loop: build / deploy / smoke outcomes back to the
+        // provisioning Task as bounded follow-up iterations (`@OnEvent` listeners).
+        AppProvisioningFeedbackService,
     ],
     exports: [
         WorkUpstreamStateRepository,

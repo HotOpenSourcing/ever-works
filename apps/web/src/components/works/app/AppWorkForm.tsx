@@ -34,6 +34,7 @@ import { AppModeCards } from './AppModeCards';
 import { AppTargetOwnerPicker } from './AppTargetOwnerPicker';
 import { AppDeployTargetPicker } from './AppDeployTargetPicker';
 import { AppBlueprintPrompts, hasMissingRequiredPrompt } from './AppBlueprintPrompts';
+import { AppsCatalogBrowser } from './AppsCatalogBrowser';
 
 export interface AppWorkFormProps {
     /** Git provider plugin id selected in the sidebar (inspect + connection gate). */
@@ -182,14 +183,19 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
         if (preview || inspectRefusal) clearPreview();
     };
 
-    const inspect = () => {
-        if (!parsed || inspecting) return;
+    /**
+     * Inspect the URL in the field — or, from a catalog pick, the URL it hands
+     * over (state has not caught up with it yet inside the same click).
+     */
+    const inspect = (urlOverride?: string) => {
+        const target = urlOverride ?? repositoryUrl;
+        if (!parseRepositoryUrl(target) || inspecting) return;
         const ticket = ++inspectTicket.current;
         setInspectRefusal(null);
         setCreateRefusal(null);
         startInspect(async () => {
             const result = await inspectAppSourceAction({
-                repositoryUrl: canonicalRepositoryUrl(repositoryUrl) ?? repositoryUrl.trim(),
+                repositoryUrl: canonicalRepositoryUrl(target) ?? target.trim(),
                 ...(gitProvider ? { gitProvider } : {}),
                 ...(initialBlueprintId ? { blueprintId: initialBlueprintId } : {}),
             });
@@ -318,9 +324,18 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
             </div>
 
             {tab === 'catalog' ? (
-                <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="app-work-catalog">
-                    {t('catalogComingSoon')}
-                </p>
+                <div data-testid="app-work-catalog">
+                    {/* APW-01 T22 — a pick fills the URL and inspects it exactly once;
+                        the Blueprint match comes from inspect, never from the card. */}
+                    <AppsCatalogBrowser
+                        disabled={busy}
+                        onPick={(item) => {
+                            onUrlChange(item.url);
+                            setTab('paste');
+                            inspect(item.url);
+                        }}
+                    />
+                </div>
             ) : (
                 <div
                     className={cn(
@@ -349,7 +364,7 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
                         <Button
                             type="button"
                             variant="secondary"
-                            onClick={inspect}
+                            onClick={() => inspect()}
                             disabled={!parsed || busy}
                             loading={inspecting}
                             data-testid="app-work-check"

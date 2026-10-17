@@ -32,6 +32,16 @@ export class EvolveWorkDto {
     @IsOptional()
     @IsIn(['chat', 'card', 'api'])
     channel?: 'chat' | 'card' | 'api';
+
+    @ApiPropertyOptional({
+        description:
+            'GAP-14’s one-click path (owner only): when no Agent that may commit exists, create one from the ' +
+            '`evolve-app` template (pinned to this Work, active, may commit and open pull requests), then ' +
+            'create and start the Task — one round trip. Ignored when an Agent resolves.',
+    })
+    @IsOptional()
+    @IsBoolean()
+    createAgentFromTemplate?: boolean;
 }
 
 /** APW-04 — `POST /api/works/:id/provision` (plan §4.1: `{ restart?, note? (≤ 500) }`). */
