@@ -10073,7 +10073,16 @@
                     "error": "Couldn't load the Apps catalog. Try again, or paste a repository URL.",
                     "empty": "No App Blueprints are published yet. Paste a repository URL instead.",
                     "noMatches": "No apps match your search.",
-                    "pick": "Start from {name}"
+                    "pick": "Start from {name}",
+                    "statusBeta": "Beta",
+                    "statusPlaceholder": "Coming soon",
+                    "verified": "Verified",
+                    "upstreamLine": "From {repo}",
+                    "runsOn": "Runs on: {targets}",
+                    "targetYourCluster": "Your cluster",
+                    "targetManaged": "Ever Works Apps",
+                    "notSelectable": "Not available yet",
+                    "fallbackNote": "Showing the App Blueprints found on GitHub — the curated catalog isn't available right now."
                 }
             }
         },
