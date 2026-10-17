@@ -33,6 +33,7 @@ import {
     buildTaskSnapshot,
 } from '../domain-events/domain-event-snapshots';
 import { VISIBILITY_AGGREGATE_SHAPES } from './record-access.types';
+import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
 
 /** A hand-picked visibility, or `automatic` to hand the choice back to D11. */
 export type VisibilityChoice = RecordVisibility | 'automatic';
@@ -141,6 +142,18 @@ export class PrivateVisibilityForbiddenError extends UnprocessableEntityExceptio
 export class RecordVisibilityService {
     private readonly logger = new Logger(RecordVisibilityService.name);
 
+    /**
+     * A transaction queued with every other queued writer of this DataSource on a
+     * single-connection driver (better-sqlite3), run at once on Postgres. The work must
+     * never queue again on the same DataSource (it would wait on itself): everything
+     * inside goes through the given `manager`.
+     */
+    private inQueuedTransaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+        return serializeOnSingleConnection(this.dataSource.manager, () =>
+            this.dataSource.transaction(work),
+        );
+    }
+
     constructor(
         @InjectDataSource() private readonly dataSource: DataSource,
         @Optional() private readonly recorder?: DomainEventRecorder,
@@ -171,7 +184,12 @@ export class RecordVisibilityService {
                 `visibility must be one of: ${VISIBILITY_CHOICES.join(', ')}`,
             );
         }
-        return this.dataSource.transaction(async (manager) => {
+        // Queued on single-connection drivers (better-sqlite3): every caller shares ONE
+        // query runner there, so an unqueued transaction overlapping a queued one (the
+        // domain-event publisher's) nests as its savepoint and fails on commit ("no such
+        // savepoint" / "cannot start a transaction within a transaction"). Postgres runs
+        // it immediately, unchanged.
+        return this.inQueuedTransaction(async (manager) => {
             const row = await this.load(manager, aggregate, id);
             if (!row) return null;
             if (!row.organizationId && choice !== 'private' && choice !== 'automatic') {
@@ -203,7 +221,7 @@ export class RecordVisibilityService {
      */
     async recomputeAutomatic(aggregate: VisibilityAggregate, id: string): Promise<void> {
         try {
-            await this.dataSource.transaction((manager) =>
+            await this.inQueuedTransaction((manager) =>
                 this.recomputeAutomaticIn(manager, aggregate, id),
             );
         } catch (error) {
@@ -306,7 +324,7 @@ export class RecordVisibilityService {
         teamIds: readonly string[],
         addedById: string | null,
     ): Promise<VisibilityState | null> {
-        const state = await this.dataSource.transaction(async (manager) => {
+        const state = await this.inQueuedTransaction(async (manager) => {
             const result = await this.setTeamsIn(manager, aggregate, id, teamIds, addedById);
             if (!result) return null;
             // D11 in the same transaction: a scope move records `visibility_changed`

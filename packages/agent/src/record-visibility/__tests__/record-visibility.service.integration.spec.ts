@@ -17,6 +17,7 @@ import { TeamResource } from '../../entities/team-resource.entity';
 import { Tenant } from '../../entities/tenant.entity';
 import { User } from '../../entities/user.entity';
 import { RecordVisibilitySubscriber } from '../../database/record-visibility.subscriber';
+import { serializeOnSingleConnection } from '../../database/repositories/single-connection-write-queue';
 import {
     PrivateVisibilityForbiddenError,
     RecordVisibilityService,
@@ -419,6 +420,65 @@ describe('RecordVisibilityService (better-sqlite3)', () => {
             expect(() => RecordVisibilityService.assertIntegrationVisibility('automatic')).toThrow(
                 BadRequestException,
             );
+        });
+    });
+
+    describe('one SQLite connection: overlapping transactions are queued, never nested', () => {
+        // better-sqlite3 hands every caller the SAME query runner, so an unqueued
+        // transaction that overlaps a queued one (the domain-event publisher queues
+        // its transactions) nests as a savepoint of it and fails on commit with
+        // "no such savepoint" (stage E2E, cascade 3: the teams concurrency matrix).
+        it('recomputeAutomatic / setVisibility / setTeams racing queued transactions all succeed', async () => {
+            const logger = (service as unknown as { logger: { warn: (message: string) => void } })
+                .logger;
+            const warn = jest.spyOn(logger, 'warn');
+            const tasks = await Promise.all(Array.from({ length: 6 }, () => newTask()));
+            for (const task of tasks) {
+                await repo(TeamResource).save(
+                    repo(TeamResource).create({
+                        teamId: ids.team,
+                        resourceType: 'task',
+                        resourceId: task.id,
+                        tenantId: ids.tenant,
+                        organizationId: ids.org,
+                        createdAt: new Date(),
+                    }),
+                );
+            }
+            // A writer queued the way the publisher queues, holding its transaction
+            // open across an await (the window an unqueued transaction nests into).
+            const queuedWriter = (task: Task) =>
+                serializeOnSingleConnection(dataSource.manager, () =>
+                    dataSource.transaction(async (manager) => {
+                        await manager
+                            .getRepository(Task)
+                            .update({ id: task.id }, { title: `${task.title} (queued)` });
+                        await new Promise((resolve) => setTimeout(resolve, 2));
+                        await manager.getRepository(Task).findOneByOrFail({ id: task.id });
+                    }),
+                );
+            const results = await Promise.allSettled(
+                tasks.flatMap((task, index) => [
+                    queuedWriter(task),
+                    service.recomputeAutomatic('task', task.id),
+                    index % 2 === 0
+                        ? service.setVisibility('task', task.id, 'automatic')
+                        : service.setTeams('task', task.id, [ids.team], ids.user),
+                    queuedWriter(task),
+                ]),
+            );
+            const failures = results
+                .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+                .map((r) => String(r.reason));
+            const swallowed = warn.mock.calls
+                .map(([m]) => String(m))
+                .filter((m) => m.includes('failed'));
+            warn.mockRestore();
+            expect(failures).toEqual([]);
+            expect(swallowed).toEqual([]);
+            for (const task of tasks) {
+                expect((await reload(task.id)).visibility).toBe('team');
+            }
         });
     });
 });
