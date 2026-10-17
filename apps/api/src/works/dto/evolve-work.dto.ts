@@ -54,7 +54,10 @@ export class ProvisionWorkDto {
     @IsBoolean()
     restart?: boolean;
 
-    @ApiPropertyOptional({ description: 'A note for the provisioning Agent (≤ 500 characters).', maxLength: 500 })
+    @ApiPropertyOptional({
+        description: 'A note for the provisioning Agent (≤ 500 characters).',
+        maxLength: 500,
+    })
     @IsOptional()
     @IsString()
     @MaxLength(500)
@@ -75,12 +78,18 @@ export class ProvisionWorkDto {
 
 /** APW-09 — `POST /api/works/:id/upstream-pr`. */
 export class UpstreamPullRequestDto {
-    @ApiPropertyOptional({ description: 'A Task of this Work whose branch is offered upstream.', format: 'uuid' })
+    @ApiPropertyOptional({
+        description: 'A Task of this Work whose branch is offered upstream.',
+        format: 'uuid',
+    })
     @IsOptional()
     @IsUUID()
     taskId?: string;
 
-    @ApiPropertyOptional({ description: 'The fork branch, named directly (used when `taskId` is absent).', maxLength: 255 })
+    @ApiPropertyOptional({
+        description: 'The fork branch, named directly (used when `taskId` is absent).',
+        maxLength: 255,
+    })
     @IsOptional()
     @IsString()
     @MaxLength(255)
@@ -103,7 +112,9 @@ export class UpstreamPullRequestDto {
     @IsBoolean()
     draft?: boolean;
 
-    @ApiPropertyOptional({ description: 'GitHub’s “allow edits by maintainers”; `true` when absent.' })
+    @ApiPropertyOptional({
+        description: 'GitHub’s “allow edits by maintainers”; `true` when absent.',
+    })
     @IsOptional()
     @IsBoolean()
     maintainerCanModify?: boolean;

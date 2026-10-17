@@ -107,11 +107,11 @@ export default async function WorkOverviewPage({ params }: Params) {
     const showStatusCard =
         !isApp &&
         (!work.generateStatus?.status ||
-        work.generateStatus?.status === GenerateStatusType.ERROR ||
-        work.generateStatus?.status === GenerateStatusType.GENERATING ||
-        work.generateStatus?.status === GenerateStatusType.CANCELLED ||
-        (work.generateStatus?.status === GenerateStatusType.GENERATED &&
-            !!work.generateStatus?.warnings?.length));
+            work.generateStatus?.status === GenerateStatusType.ERROR ||
+            work.generateStatus?.status === GenerateStatusType.GENERATING ||
+            work.generateStatus?.status === GenerateStatusType.CANCELLED ||
+            (work.generateStatus?.status === GenerateStatusType.GENERATED &&
+                !!work.generateStatus?.warnings?.length));
 
     return (
         <div className="space-y-6">

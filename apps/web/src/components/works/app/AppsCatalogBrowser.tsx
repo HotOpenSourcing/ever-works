@@ -57,7 +57,9 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                         return;
                     }
                     setState(
-                        result.data.available ? { kind: 'ready', items: result.data.items } : { kind: 'unavailable' },
+                        result.data.available
+                            ? { kind: 'ready', items: result.data.items }
+                            : { kind: 'unavailable' },
                     );
                 } catch {
                     if (mine === ticket.current) setState({ kind: 'error' });
@@ -90,34 +92,55 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
 
             <div aria-live="polite">
                 {state.kind === 'loading' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-loading">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-loading"
+                    >
                         {t('loading')}
                     </p>
                 )}
                 {state.kind === 'unavailable' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-unavailable">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-unavailable"
+                    >
                         {t('unavailable')}
                     </p>
                 )}
                 {state.kind === 'disabled' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-disabled">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-disabled"
+                    >
                         {t('disabled')}
                     </p>
                 )}
                 {state.kind === 'error' && (
-                    <p className="text-sm text-red-600 dark:text-red-400" data-testid="apps-catalog-error" role="alert">
+                    <p
+                        className="text-sm text-red-600 dark:text-red-400"
+                        data-testid="apps-catalog-error"
+                        role="alert"
+                    >
                         {t('error')}
                     </p>
                 )}
                 {state.kind === 'ready' && state.items.length === 0 && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-empty">
-                        {query.trim().length >= APPS_CATALOG_SEARCH_MIN_CHARS ? t('noMatches') : t('empty')}
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-empty"
+                    >
+                        {query.trim().length >= APPS_CATALOG_SEARCH_MIN_CHARS
+                            ? t('noMatches')
+                            : t('empty')}
                     </p>
                 )}
             </div>
 
             {state.kind === 'ready' && state.items.length > 0 && (
-                <ul className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3" aria-label={t('listLabel')}>
+                <ul
+                    className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3"
+                    aria-label={t('listLabel')}
+                >
                     {state.items.map((item) => (
                         <li key={item.repo}>
                             <button
@@ -134,7 +157,9 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                                 )}
                             >
                                 <span className="flex items-baseline justify-between gap-2">
-                                    <span className="font-semibold text-text dark:text-text-dark">{item.name}</span>
+                                    <span className="font-semibold text-text dark:text-text-dark">
+                                        {item.name}
+                                    </span>
                                     {typeof item.stars === 'number' && (
                                         <span className="inline-flex items-center gap-1 text-xs text-text-secondary">
                                             <Star className="h-3 w-3" aria-hidden="true" />

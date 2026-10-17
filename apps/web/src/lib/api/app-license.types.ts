@@ -51,7 +51,10 @@ export interface AppLicenseActionResult<T> {
 }
 
 /** Map an attest answer's status / code onto the dialog's refusal copy. */
-export function attestRefusalOf(result: { code?: string; httpStatus?: number }): AppLicenseAttestRefusal | null {
+export function attestRefusalOf(result: {
+    code?: string;
+    httpStatus?: number;
+}): AppLicenseAttestRefusal | null {
     if (result.code && (APP_LICENSE_ATTEST_REFUSALS as readonly string[]).includes(result.code)) {
         return result.code as AppLicenseAttestRefusal;
     }

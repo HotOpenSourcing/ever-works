@@ -3,7 +3,10 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@ne
 import { Throttle } from '@nestjs/throttler';
 import { config } from '@ever-works/agent/config';
 import { AuthSessionGuard } from '../auth';
-import { AppsCatalogBlueprintsService, type AppsCatalogBlueprintList } from './apps-catalog-blueprints.service';
+import {
+    AppsCatalogBlueprintsService,
+    type AppsCatalogBlueprintList,
+} from './apps-catalog-blueprints.service';
 
 /**
  * `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps

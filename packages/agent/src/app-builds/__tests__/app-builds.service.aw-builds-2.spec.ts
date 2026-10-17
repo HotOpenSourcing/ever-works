@@ -39,7 +39,9 @@ function service(options: {
     };
     const rows = {
         findOne: jest.fn(async () => options.rowById ?? null),
-        merge: jest.fn((row: Record<string, unknown>, patch: Record<string, unknown>) => Object.assign(row, patch)),
+        merge: jest.fn((row: Record<string, unknown>, patch: Record<string, unknown>) =>
+            Object.assign(row, patch),
+        ),
         save: jest.fn(async (row: unknown) => row),
     };
     const works = {
@@ -53,12 +55,19 @@ function service(options: {
         })),
     };
     const specs = {
-        read: jest.fn(async () => ({ spec: { build: { strategy: 'dockerfile' } }, commitSha: SHA })),
+        read: jest.fn(async () => ({
+            spec: { build: { strategy: 'dockerfile' } },
+            commitSha: SHA,
+        })),
     };
     const plugins = {
         resolve: jest.fn(async () =>
             options.binding === undefined
-                ? { pluginId: 'github-actions-build', buildKind: 'github-actions', imageRepository: IMAGE }
+                ? {
+                      pluginId: 'github-actions-build',
+                      buildKind: 'github-actions',
+                      imageRepository: IMAGE,
+                  }
                 : options.binding,
         ),
     };
@@ -82,8 +91,17 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
     describe('requestRebuild: a named commit must be on the tracked branch (plan §5)', () => {
         it('refuses a commit the tracked branch does not contain', async () => {
             const isCommitReachable = jest.fn(async () => false);
-            const h = service({ binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, isCommitReachable } });
-            await expect(h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) })).resolves.toEqual({
+            const h = service({
+                binding: {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                    isCommitReachable,
+                },
+            });
+            await expect(
+                h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) }),
+            ).resolves.toEqual({
                 ok: false,
                 code: 'commitNotReachable',
             });
@@ -93,7 +111,9 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
 
         it('refuses a named commit when no build plugin can be resolved to check it', async () => {
             const h = service({ binding: null });
-            await expect(h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) })).resolves.toEqual({
+            await expect(
+                h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) }),
+            ).resolves.toEqual({
                 ok: false,
                 code: 'buildProviderUnavailable',
             });
@@ -110,7 +130,9 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
                     }),
                 },
             });
-            await expect(h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) })).resolves.toEqual({
+            await expect(
+                h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) }),
+            ).resolves.toEqual({
                 ok: false,
                 code: 'buildProviderUnavailable',
             });
@@ -118,8 +140,17 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
 
         it('builds a reachable commit, and does not check when no commit is named', async () => {
             const isCommitReachable = jest.fn(async () => true);
-            const h = service({ binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, isCommitReachable } });
-            const named = await h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) });
+            const h = service({
+                binding: {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                    isCommitReachable,
+                },
+            });
+            const named = await h.svc.requestRebuild(WORK_ID, USER_ID, {
+                commitSha: 'c'.repeat(40),
+            });
             expect(named.ok).toBe(true);
 
             isCommitReachable.mockClear();
@@ -149,11 +180,20 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
                 failed: 1,
             });
             expect(reconfirm.mock.calls.map((call) => call[0])).toEqual(['b1', 'b3']);
-            expect(h.builds.findPage).toHaveBeenCalledWith(WORK_ID, { status: ['succeeded'] }, 1, 20);
+            expect(h.builds.findPage).toHaveBeenCalledWith(
+                WORK_ID,
+                { status: ['succeeded'] },
+                1,
+                20,
+            );
         });
 
         it('reads a private image WITH the saved pull token', async () => {
-            const checkImageAccess = jest.fn(async () => ({ visibility: 'private', readable: true, digest: DIGEST }));
+            const checkImageAccess = jest.fn(async () => ({
+                visibility: 'private',
+                readable: true,
+                digest: DIGEST,
+            }));
             const h = service({
                 binding: {
                     pluginId: 'p',
@@ -194,18 +234,30 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
                 verifySecretNames: ['EW_VERIFY__PROMPTED'],
             };
             const h = service({
-                binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+                binding: {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                    deleteVerifyPromptedSecret,
+                },
                 rowById: row as Partial<WorkBuild>,
             });
             await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(true);
             expect(deleteVerifyPromptedSecret).toHaveBeenCalledTimes(1);
-            expect(h.rows.save).toHaveBeenCalledWith(expect.objectContaining({ verifySecretNames: [] }));
+            expect(h.rows.save).toHaveBeenCalledWith(
+                expect.objectContaining({ verifySecretNames: [] }),
+            );
         });
 
         it('leaves the shared secret to a newer open verification Build, clearing only this record', async () => {
             const deleteVerifyPromptedSecret = jest.fn(async () => ({ deleted: true }));
             const h = service({
-                binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+                binding: {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                    deleteVerifyPromptedSecret,
+                },
                 rowById: {
                     id: 'v1',
                     workId: WORK_ID,
@@ -217,13 +269,20 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
             });
             await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
             expect(deleteVerifyPromptedSecret).not.toHaveBeenCalled();
-            expect(h.rows.save).toHaveBeenCalledWith(expect.objectContaining({ verifySecretNames: [] }));
+            expect(h.rows.save).toHaveBeenCalledWith(
+                expect.objectContaining({ verifySecretNames: [] }),
+            );
         });
 
         it('never deletes under a Build that is still running', async () => {
             const deleteVerifyPromptedSecret = jest.fn(async () => ({ deleted: true }));
             const h = service({
-                binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+                binding: {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                    deleteVerifyPromptedSecret,
+                },
                 rowById: {
                     id: 'v1',
                     workId: WORK_ID,
@@ -237,10 +296,19 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
         });
 
         it('does nothing for a non-verification Build, an empty record, or a binding without the member', async () => {
-            const push = service({ rowById: { id: 'p1', workId: WORK_ID, trigger: 'push', verifySecretNames: ['X'] } });
+            const push = service({
+                rowById: { id: 'p1', workId: WORK_ID, trigger: 'push', verifySecretNames: ['X'] },
+            });
             await expect(push.svc.removeOrphanedVerifySecret('p1')).resolves.toBe(false);
 
-            const empty = service({ rowById: { id: 'v1', workId: WORK_ID, trigger: 'verification', verifySecretNames: [] } });
+            const empty = service({
+                rowById: {
+                    id: 'v1',
+                    workId: WORK_ID,
+                    trigger: 'verification',
+                    verifySecretNames: [],
+                },
+            });
             await expect(empty.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
 
             const bare = service({

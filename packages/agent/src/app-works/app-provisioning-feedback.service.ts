@@ -165,10 +165,17 @@ export class AppProvisioningFeedbackService {
             await this.label(work, task, attempt);
             if (task.agentId && this.tasks) {
                 try {
-                    await this.tasks.runTask(work.userId, task.id, { agentId: task.agentId }, ownershipScopeOf(work));
+                    await this.tasks.runTask(
+                        work.userId,
+                        task.id,
+                        { agentId: task.agentId },
+                        ownershipScopeOf(work),
+                    );
                 } catch (error) {
                     // RUN_ALREADY_IN_FLIGHT included: the live run reads the new comment.
-                    this.logger.log(`Provisioning follow-up for Task ${task.id} not dispatched (${errorText(error)}).`);
+                    this.logger.log(
+                        `Provisioning follow-up for Task ${task.id} not dispatched (${errorText(error)}).`,
+                    );
                 }
             }
             return 'iterated';
@@ -198,7 +205,9 @@ export class AppProvisioningFeedbackService {
         return (
             [...rows]
                 .filter((task) => task.status !== TaskStatus.CANCELLED)
-                .filter((task) => now - timeOf(task.updatedAt ?? task.createdAt) <= RELEVANT_WINDOW_MS)
+                .filter(
+                    (task) => now - timeOf(task.updatedAt ?? task.createdAt) <= RELEVANT_WINDOW_MS,
+                )
                 .sort((a, b) => timeOf(b.createdAt) - timeOf(a.createdAt))[0] ?? null
         );
     }
@@ -213,20 +222,26 @@ export class AppProvisioningFeedbackService {
                 ownershipScopeOf(work),
             );
         } catch (error) {
-            this.logger.warn(`Posting provisioning feedback on Task ${task.id} failed (${errorText(error)}).`);
+            this.logger.warn(
+                `Posting provisioning feedback on Task ${task.id} failed (${errorText(error)}).`,
+            );
         }
     }
 
     private async label(work: Work, task: Task, attempt: number): Promise<void> {
         if (!this.tasks) return;
         const labels = [
-            ...(task.labels ?? []).filter((label) => !label.startsWith(PROVISION_ATTEMPT_LABEL_PREFIX)),
+            ...(task.labels ?? []).filter(
+                (label) => !label.startsWith(PROVISION_ATTEMPT_LABEL_PREFIX),
+            ),
             `${PROVISION_ATTEMPT_LABEL_PREFIX}${attempt}`,
         ];
         try {
             await this.tasks.update(work.userId, task.id, { labels }, ownershipScopeOf(work));
         } catch (error) {
-            this.logger.warn(`Counting provisioning attempt ${attempt} on Task ${task.id} failed (${errorText(error)}).`);
+            this.logger.warn(
+                `Counting provisioning attempt ${attempt} on Task ${task.id} failed (${errorText(error)}).`,
+            );
         }
     }
 
@@ -261,11 +276,21 @@ export function buildEvidence(
     const summary =
         outcome === 'succeeded'
             ? `Build #${payload.number} succeeded on ${where}${
-                  payload.deployable ? ' and is deployable' : payload.notDeployableReason ? ` but is not deployable (${payload.notDeployableReason})` : ''
+                  payload.deployable
+                      ? ' and is deployable'
+                      : payload.notDeployableReason
+                        ? ` but is not deployable (${payload.notDeployableReason})`
+                        : ''
               }.`
             : `Build #${payload.number} failed on ${where}${payload.failureClass ? ` (failure class: ${payload.failureClass})` : ''}. ` +
               `The build log is on the Work's Builds tab (/works/${payload.workId}/builds).`;
-    return { workId: payload.workId, outcome, stage: 'build', branch: payload.branch || null, summary };
+    return {
+        workId: payload.workId,
+        outcome,
+        stage: 'build',
+        branch: payload.branch || null,
+        summary,
+    };
 }
 
 export function runtimeEvidence(

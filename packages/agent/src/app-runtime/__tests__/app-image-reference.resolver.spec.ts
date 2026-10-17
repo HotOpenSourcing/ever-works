@@ -71,12 +71,17 @@ describe('parseBearerChallenge', () => {
             parseBearerChallenge(
                 'Bearer realm="https://ghcr.io/token",service="ghcr.io",scope="repository:a/b:pull"',
             ),
-        ).toEqual({ realm: 'https://ghcr.io/token', service: 'ghcr.io', scope: 'repository:a/b:pull' });
+        ).toEqual({
+            realm: 'https://ghcr.io/token',
+            service: 'ghcr.io',
+            scope: 'repository:a/b:pull',
+        });
         expect(parseBearerChallenge('Bearer realm="http://x/token"')).toBeNull();
         expect(parseBearerChallenge('Basic realm="x"')).toBeNull();
         // A multi-action scope keeps its first action; a hostile header is bounded, not scanned.
         expect(
-            parseBearerChallenge('Bearer realm="https://r/t",scope="repository:a/b:pull,push"')?.scope,
+            parseBearerChallenge('Bearer realm="https://r/t",scope="repository:a/b:pull,push"')
+                ?.scope,
         ).toBe('repository:a/b:pull');
         expect(parseBearerChallenge(`Bearer ${'0'.repeat(100_000)}`)).toBeNull();
     });
@@ -108,7 +113,11 @@ describe('RegistryAppImageReferenceResolver', () => {
             request(`nginx@${DIGEST}`),
         );
 
-        expect(result).toMatchObject({ status: 'resolved', digest: DIGEST, resolvedFromTag: false });
+        expect(result).toMatchObject({
+            status: 'resolved',
+            digest: DIGEST,
+            resolvedFromTag: false,
+        });
     });
 
     it('answers a 401 challenge with ONE anonymous token request, then retries with it', async () => {
@@ -123,40 +132,57 @@ describe('RegistryAppImageReferenceResolver', () => {
             { status: 200, body: { token: 'anon-token' } },
             { status: 200, headers: { 'Docker-Content-Digest': DIGEST } },
         ]);
-        const result = await new RegistryAppImageReferenceResolver(fetchImpl).resolve(request('nginx:1.27'));
+        const result = await new RegistryAppImageReferenceResolver(fetchImpl).resolve(
+            request('nginx:1.27'),
+        );
 
         expect(result).toMatchObject({ status: 'resolved', reference: `nginx@${DIGEST}` });
         expect(calls[0].url).toBe('https://registry-1.docker.io/v2/library/nginx/manifests/1.27');
         expect(calls[1].url).toContain('https://auth.docker.io/token?service=registry.docker.io');
-        expect((calls[2].init?.headers as Record<string, string>).Authorization).toBe('Bearer anon-token');
+        expect((calls[2].init?.headers as Record<string, string>).Authorization).toBe(
+            'Bearer anon-token',
+        );
     });
 
     it('maps 404 to image_not_found', async () => {
         const { fetchImpl } = fakeFetch([{ status: 404 }]);
         await expect(
-            new RegistryAppImageReferenceResolver(fetchImpl).resolve(request('ghcr.io/acme/gone:1')),
+            new RegistryAppImageReferenceResolver(fetchImpl).resolve(
+                request('ghcr.io/acme/gone:1'),
+            ),
         ).resolves.toMatchObject({ status: 'refused', code: 'image_not_found' });
     });
 
     it('maps a refused anonymous pull to image_private_unsupported', async () => {
         const { fetchImpl } = fakeFetch([
-            { status: 401, headers: { 'WWW-Authenticate': 'Bearer realm="https://ghcr.io/token",service="ghcr.io"' } },
+            {
+                status: 401,
+                headers: {
+                    'WWW-Authenticate': 'Bearer realm="https://ghcr.io/token",service="ghcr.io"',
+                },
+            },
             { status: 403 },
         ]);
         await expect(
-            new RegistryAppImageReferenceResolver(fetchImpl).resolve(request('ghcr.io/acme/private:1')),
+            new RegistryAppImageReferenceResolver(fetchImpl).resolve(
+                request('ghcr.io/acme/private:1'),
+            ),
         ).resolves.toMatchObject({ status: 'refused', code: 'image_private_unsupported' });
     });
 
     it('maps a missing digest, a 5xx and a thrown fetch to image_unresolvable', async () => {
         const noDigest = fakeFetch([{ status: 200, headers: {} }]);
         await expect(
-            new RegistryAppImageReferenceResolver(noDigest.fetchImpl).resolve(request('ghcr.io/a/b:1')),
+            new RegistryAppImageReferenceResolver(noDigest.fetchImpl).resolve(
+                request('ghcr.io/a/b:1'),
+            ),
         ).resolves.toMatchObject({ code: 'image_unresolvable' });
 
         const serverError = fakeFetch([{ status: 503 }]);
         await expect(
-            new RegistryAppImageReferenceResolver(serverError.fetchImpl).resolve(request('ghcr.io/a/b:1')),
+            new RegistryAppImageReferenceResolver(serverError.fetchImpl).resolve(
+                request('ghcr.io/a/b:1'),
+            ),
         ).resolves.toMatchObject({ code: 'image_unresolvable' });
 
         const thrown = new RegistryAppImageReferenceResolver(async () => {

@@ -14,7 +14,11 @@ const OPTIONS = { providerId: 'github', userId: 'user-1', workId: 'work-1' } as 
 type Internals = {
     resolvePlugin: (providerId: string, userId?: string, workId?: string) => Promise<unknown>;
     getInstallationTokenForWork: (options: unknown) => Promise<string | null>;
-    getPatFromSettings: (pluginId: string, userId: string, workId?: string) => Promise<string | null>;
+    getPatFromSettings: (
+        pluginId: string,
+        userId: string,
+        workId?: string,
+    ) => Promise<string | null>;
 };
 
 function makeFacade(accounts: {
@@ -39,7 +43,9 @@ function makeFacade(accounts: {
     );
     const internals = facade as unknown as Internals;
     jest.spyOn(internals, 'resolvePlugin').mockResolvedValue({ id: 'github' });
-    const installation = jest.spyOn(internals, 'getInstallationTokenForWork').mockResolvedValue(null);
+    const installation = jest
+        .spyOn(internals, 'getInstallationTokenForWork')
+        .mockResolvedValue(null);
     const pat = jest.spyOn(internals, 'getPatFromSettings').mockResolvedValue(null);
     return { facade, authAccountRepository, installation, pat };
 }
@@ -73,7 +79,9 @@ describe('GitFacadeService.getBuildCredential', () => {
             scopes: null,
         });
 
-        const repoOnly = makeFacade({ repoOnly: { accessToken: 'gho_repo', scope: 'repo read:user' } });
+        const repoOnly = makeFacade({
+            repoOnly: { accessToken: 'gho_repo', scope: 'repo read:user' },
+        });
         await expect(repoOnly.facade.getBuildCredential(OPTIONS)).resolves.toEqual({
             token: 'gho_repo',
             credential: 'oauth',
@@ -92,10 +100,14 @@ describe('GitFacadeService.getBuildCredential', () => {
     it('answers null with no credential, and never throws', async () => {
         const none = makeFacade({});
         await expect(none.facade.getBuildCredential(OPTIONS)).resolves.toBeNull();
-        await expect(none.facade.getBuildCredential({ providerId: 'github', userId: '' } as never)).resolves.toBeNull();
+        await expect(
+            none.facade.getBuildCredential({ providerId: 'github', userId: '' } as never),
+        ).resolves.toBeNull();
 
         const broken = makeFacade({});
-        jest.spyOn(broken.facade as unknown as Internals, 'resolvePlugin').mockRejectedValue(new Error('no plugin'));
+        jest.spyOn(broken.facade as unknown as Internals, 'resolvePlugin').mockRejectedValue(
+            new Error('no plugin'),
+        );
         await expect(broken.facade.getBuildCredential(OPTIONS)).resolves.toBeNull();
     });
 });

@@ -12,7 +12,14 @@ import {
     Res,
     UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+    ApiBearerAuth,
+    ApiOperation,
+    ApiParam,
+    ApiQuery,
+    ApiResponse,
+    ApiTags,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { isAppWorkKind } from '@ever-works/contracts';
 import {
@@ -83,10 +90,25 @@ export class WorkEvolveController {
             '(APP_WORKS_CLOUD_PUSH_ENABLED is off).',
     })
     @ApiParam({ name: 'id', description: 'Work ID' })
-    @ApiResponse({ status: 202, description: '`{ status: "accepted", taskId, taskSlug, runId, agentId, agentSource, dispatched, parked, repository, warnings }`' })
-    @ApiResponse({ status: 404, description: 'The Work is missing, not visible, or another account’s; or `agentNotEligible` for an unknown agentId.' })
-    @ApiResponse({ status: 409, description: '`agentRequired` with `candidates` (≤ 20) and, when none exist, `createFromTemplate`.' })
-    @ApiResponse({ status: 422, description: '`notAppWork`, `invalidRequest`, `agentNotEligible`, `taskCreateFailed`.' })
+    @ApiResponse({
+        status: 202,
+        description:
+            '`{ status: "accepted", taskId, taskSlug, runId, agentId, agentSource, dispatched, parked, repository, warnings }`',
+    })
+    @ApiResponse({
+        status: 404,
+        description:
+            'The Work is missing, not visible, or another account’s; or `agentNotEligible` for an unknown agentId.',
+    })
+    @ApiResponse({
+        status: 409,
+        description:
+            '`agentRequired` with `candidates` (≤ 20) and, when none exist, `createFromTemplate`.',
+    })
+    @ApiResponse({
+        status: 422,
+        description: '`notAppWork`, `invalidRequest`, `agentNotEligible`, `taskCreateFailed`.',
+    })
     async evolve(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
@@ -141,7 +163,12 @@ export class WorkEvolveController {
     ) {
         const access = await this.authorize(id, auth.userId, 'view');
         const parsed = Number.parseInt(limit ?? '', 10);
-        return { data: await this.changes.listChanges(access.work, Number.isFinite(parsed) ? parsed : 20) };
+        return {
+            data: await this.changes.listChanges(
+                access.work,
+                Number.isFinite(parsed) ? parsed : 20,
+            ),
+        };
     }
 
     @Post(':id/provision')
@@ -176,7 +203,11 @@ export class WorkEvolveController {
             agentId: body?.agentId ?? null,
             restart: body?.restart === true,
         });
-        response.status(result.started || result.reason === 'alreadyProvisioning' ? HttpStatus.ACCEPTED : HttpStatus.UNPROCESSABLE_ENTITY);
+        response.status(
+            result.started || result.reason === 'alreadyProvisioning'
+                ? HttpStatus.ACCEPTED
+                : HttpStatus.UNPROCESSABLE_ENTITY,
+        );
         return {
             status: result.started ? 'started' : 'refused',
             deduplicated: result.reason === 'alreadyProvisioning',
@@ -262,7 +293,11 @@ export class WorkEvolveController {
                 const status = error.getStatus();
                 if (status === HttpStatus.NOT_FOUND || status === HttpStatus.FORBIDDEN) {
                     throw new HttpException(
-                        { status: 'error', code: 'not_found', message: `Work ${workId} not found.` },
+                        {
+                            status: 'error',
+                            code: 'not_found',
+                            message: `Work ${workId} not found.`,
+                        },
                         HttpStatus.NOT_FOUND,
                     );
                 }
@@ -271,7 +306,11 @@ export class WorkEvolveController {
         }
         if (requireApp && !isAppWorkKind(access.work.kind)) {
             throw new HttpException(
-                { status: 'error', code: 'notAppWork', message: `Work ${workId} is not an App Work.` },
+                {
+                    status: 'error',
+                    code: 'notAppWork',
+                    message: `Work ${workId} is not an App Work.`,
+                },
                 HttpStatus.UNPROCESSABLE_ENTITY,
             );
         }

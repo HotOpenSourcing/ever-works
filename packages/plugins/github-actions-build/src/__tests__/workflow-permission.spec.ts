@@ -31,7 +31,10 @@ const WORKFLOW_COMMIT = {
 	files: [{ path: APP_BUILD_WORKFLOW_PATH, content: 'name: x', encoding: 'utf-8' as const }]
 };
 
-function scripted(table: Record<string, (params: Record<string, unknown>) => unknown>, headers?: Record<string, unknown>) {
+function scripted(
+	table: Record<string, (params: Record<string, unknown>) => unknown>,
+	headers?: Record<string, unknown>
+) {
 	const calls: string[] = [];
 	const octokit: OctokitRequester = {
 		async request(route, params = {}) {
@@ -58,7 +61,10 @@ const COMMIT_ROUTES = {
 describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 	it('refuses up front, writing nothing, when the recorded OAuth scopes lack `workflow`', async () => {
 		const { octokit, calls } = scripted({});
-		const writer = octokitRepositoryWriter(octokit, repository, { credential: 'oauth', scopes: ['repo', 'read:user'] });
+		const writer = octokitRepositoryWriter(octokit, repository, {
+			credential: 'oauth',
+			scopes: ['repo', 'read:user']
+		});
 		await expect(writer.commitFiles(WORKFLOW_COMMIT)).rejects.toSatisfy(
 			(error: unknown) => repositoryWriteErrorCode(error) === 'workflowPermissionMissing'
 		);
@@ -67,7 +73,9 @@ describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 
 	it('reads the scopes from x-oauth-scopes when they are not recorded', async () => {
 		const lacking = scripted({ 'GET /user': () => ({}) }, { 'x-oauth-scopes': 'repo, read:user' });
-		await expect(octokitRepositoryWriter(lacking.octokit, repository).commitFiles(WORKFLOW_COMMIT)).rejects.toMatchObject({
+		await expect(
+			octokitRepositoryWriter(lacking.octokit, repository).commitFiles(WORKFLOW_COMMIT)
+		).rejects.toMatchObject({
 			code: 'workflowPermissionMissing',
 			missing: 'workflow'
 		});
@@ -77,7 +85,9 @@ describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 			{ 'GET /user': () => ({}), ...COMMIT_ROUTES, 'PATCH /repos/{owner}/{repo}/git/refs/{ref}': () => ({}) },
 			{ 'x-oauth-scopes': 'repo, workflow' }
 		);
-		await expect(octokitRepositoryWriter(granted.octokit, repository).commitFiles(WORKFLOW_COMMIT)).resolves.toEqual({
+		await expect(
+			octokitRepositoryWriter(granted.octokit, repository).commitFiles(WORKFLOW_COMMIT)
+		).resolves.toEqual({
 			commitSha: 'c1'
 		});
 	});
@@ -110,7 +120,7 @@ describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 		);
 	});
 
-	it("translates GitHub's \"without `workflow` scope\" refusal too", async () => {
+	it('translates GitHub\'s "without `workflow` scope" refusal too', async () => {
 		const { octokit } = scripted({
 			...COMMIT_ROUTES,
 			'PATCH /repos/{owner}/{repo}/git/refs/{ref}': () => {
@@ -125,9 +135,15 @@ describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 	});
 
 	it('leaves a commit outside .github/workflows/ alone', async () => {
-		const { octokit, calls } = scripted({ ...COMMIT_ROUTES, 'PATCH /repos/{owner}/{repo}/git/refs/{ref}': () => ({}) });
+		const { octokit, calls } = scripted({
+			...COMMIT_ROUTES,
+			'PATCH /repos/{owner}/{repo}/git/refs/{ref}': () => ({})
+		});
 		const writer = octokitRepositoryWriter(octokit, repository, { credential: 'oauth', scopes: ['repo'] });
-		await writer.commitFiles({ ...WORKFLOW_COMMIT, files: [{ path: 'README.md', content: 'x', encoding: 'utf-8' }] });
+		await writer.commitFiles({
+			...WORKFLOW_COMMIT,
+			files: [{ path: 'README.md', content: 'x', encoding: 'utf-8' }]
+		});
 		expect(calls).not.toContain('GET /user');
 	});
 });

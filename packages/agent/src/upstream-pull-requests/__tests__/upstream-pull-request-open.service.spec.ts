@@ -23,7 +23,14 @@ function build(w = work()) {
     const works = { findById: jest.fn(async () => w) };
     const tasks = {
         findById: jest.fn(async (id: string) =>
-            id === 't1' ? { id: 't1', workId: 'w1', branchRef: 'ever-works/t-1', title: 'Change: Add dark mode' } : null,
+            id === 't1'
+                ? {
+                      id: 't1',
+                      workId: 'w1',
+                      branchRef: 'ever-works/t-1',
+                      title: 'Change: Add dark mode',
+                  }
+                : null,
         ),
     };
     const credentials = {
@@ -35,7 +42,10 @@ function build(w = work()) {
         })),
     };
     const git = {
-        createPullRequest: jest.fn(async () => ({ number: 7, url: 'https://github.com/example-org/helpdesk/pull/7' })),
+        createPullRequest: jest.fn(async () => ({
+            number: 7,
+            url: 'https://github.com/example-org/helpdesk/pull/7',
+        })),
     };
     const service = new UpstreamPullRequestOpenService(
         works as never,
@@ -77,9 +87,15 @@ describe('UpstreamPullRequestOpenService (APW-09)', () => {
 
     it('refuses a private copy (no fork network) and a missing branch', async () => {
         await expect(
-            build(work('app_private_copy')).service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' }),
+            build(work('app_private_copy')).service.open({
+                workId: 'w1',
+                callerUserId: 'u',
+                branch: 'x',
+            }),
         ).resolves.toMatchObject({ status: 'refused', code: 'notAFork' });
-        await expect(build().service.open({ workId: 'w1', callerUserId: 'u' })).resolves.toMatchObject({
+        await expect(
+            build().service.open({ workId: 'w1', callerUserId: 'u' }),
+        ).resolves.toMatchObject({
             status: 'refused',
             code: 'branchRequired',
         });
@@ -95,7 +111,9 @@ describe('UpstreamPullRequestOpenService operator controls (APW-09 FR-41 / FR-46
     it('refuses everything while the kill switch is off', async () => {
         process.env.APP_WORKS_UPSTREAM_PRS_ENABLED = 'false';
         const { service, git } = build();
-        await expect(service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' })).resolves.toMatchObject({
+        await expect(
+            service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' }),
+        ).resolves.toMatchObject({
             code: 'upstreamPaused',
         });
         expect(git.createPullRequest).not.toHaveBeenCalled();
@@ -104,7 +122,9 @@ describe('UpstreamPullRequestOpenService operator controls (APW-09 FR-41 / FR-46
     it('refuses a denied upstream, case-insensitively', async () => {
         process.env.APP_WORKS_UPSTREAM_DENY_LIST = 'other/thing, Example-Org/Helpdesk';
         const { service, git } = build();
-        await expect(service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' })).resolves.toMatchObject({
+        await expect(
+            service.open({ workId: 'w1', callerUserId: 'u', branch: 'x' }),
+        ).resolves.toMatchObject({
             code: 'deniedUpstream',
         });
         expect(git.createPullRequest).not.toHaveBeenCalled();

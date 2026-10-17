@@ -55,7 +55,12 @@ describe('listRecentRuns (run discovery, §7.4a)', () => {
 						head_repository: { full_name: 'stranger/app' },
 						pull_requests: [{ number: 7 }]
 					}),
-					run({ id: 44, event: 'workflow_dispatch', status: 'queued', display_title: 'Ever Works build b-1' }),
+					run({
+						id: 44,
+						event: 'workflow_dispatch',
+						status: 'queued',
+						display_title: 'Ever Works build b-1'
+					}),
 					run({ id: 45, head_sha: null })
 				]
 			})
@@ -79,7 +84,11 @@ describe('listRecentRuns (run discovery, §7.4a)', () => {
 			headRepositoryFullName: 'stranger/app',
 			pullRequestNumber: 7
 		});
-		expect(answer.runs[2]).toMatchObject({ event: 'manual', status: 'queued', displayTitle: 'Ever Works build b-1' });
+		expect(answer.runs[2]).toMatchObject({
+			event: 'manual',
+			status: 'queued',
+			displayTitle: 'Ever Works build b-1'
+		});
 	});
 
 	it('answers notModified on a 304 with no runs', async () => {
@@ -87,7 +96,12 @@ describe('listRecentRuns (run discovery, §7.4a)', () => {
 			listWorkflowRunsConditional: async ({ etag }) => ({ notModified: true, etag, runs: [] })
 		});
 		const answer = await plugin.listRecentRuns(
-			{ repository: { owner: 'acme', name: 'app' }, workflowPath: 'x/ever-works-build.yml', perPage: 5, etag: 'e1' },
+			{
+				repository: { owner: 'acme', name: 'app' },
+				workflowPath: 'x/ever-works-build.yml',
+				perPage: 5,
+				etag: 'e1'
+			},
 			AUTH
 		);
 		expect(answer).toEqual({ notModified: true, etag: 'e1', runs: [] });
@@ -183,9 +197,9 @@ describe('octokitRepositoryWriter (the clone-free writer)', () => {
 				throw httpError(422, 'Protected branch update failed for refs/heads/main.');
 			}
 		});
-		await expect(
-			octokitRepositoryWriter(protectedBranch.octokit, repository).commitFiles(input)
-		).rejects.toSatisfy((error: unknown) => repositoryWriteErrorCode(error) === 'refRejectedByRule');
+		await expect(octokitRepositoryWriter(protectedBranch.octokit, repository).commitFiles(input)).rejects.toSatisfy(
+			(error: unknown) => repositoryWriteErrorCode(error) === 'refRejectedByRule'
+		);
 	});
 
 	it('returns an existing branch rather than recreating it, and creates a missing one from its base head', async () => {
@@ -215,7 +229,10 @@ describe('octokitRepositoryWriter (the clone-free writer)', () => {
 	it('refuses a second pull request for the same head with pullRequestExists', async () => {
 		const { octokit } = fakeOctokit({
 			'POST /repos/{owner}/{repo}/pulls': () => {
-				throw httpError(422, 'Validation Failed: A pull request already exists for acme:ever-works/build-workflow.');
+				throw httpError(
+					422,
+					'Validation Failed: A pull request already exists for acme:ever-works/build-workflow.'
+				);
 			}
 		});
 		await expect(

@@ -229,13 +229,16 @@ export function octokitActionsRunsPort(octokit: OctokitLike): ActionsRunsPort {
 
 		async listWorkflowRunsConditional({ repository, workflowFile, perPage, etag }) {
 			try {
-				const response = (await octokit.request('GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs', {
-					owner: repository.owner,
-					repo: repository.repo,
-					workflow_id: workflowFile,
-					per_page: perPage,
-					...(etag ? { headers: { 'if-none-match': etag } } : {})
-				})) as { data: unknown; headers?: Record<string, unknown> };
+				const response = (await octokit.request(
+					'GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs',
+					{
+						owner: repository.owner,
+						repo: repository.repo,
+						workflow_id: workflowFile,
+						per_page: perPage,
+						...(etag ? { headers: { 'if-none-match': etag } } : {})
+					}
+				)) as { data: unknown; headers?: Record<string, unknown> };
 				const next = response.headers?.etag;
 				return {
 					notModified: false,

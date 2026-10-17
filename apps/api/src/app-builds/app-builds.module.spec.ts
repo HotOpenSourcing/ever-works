@@ -141,7 +141,9 @@ describe('AppBuildsModule (apps/api) — the Builds graph as the API composes it
 
     it('serves the Builds routes and consumes workflow_run deliveries (T23, T24)', () => {
         expect(moduleRef.get(AppBuildsController)).toBeInstanceOf(AppBuildsController);
-        expect(moduleRef.get(AppBuildWorkflowRunConsumer)).toBeInstanceOf(AppBuildWorkflowRunConsumer);
+        expect(moduleRef.get(AppBuildWorkflowRunConsumer)).toBeInstanceOf(
+            AppBuildWorkflowRunConsumer,
+        );
     });
 
     it('binds the edit check and the pull token writer (2026-10-17, A0.4)', async () => {

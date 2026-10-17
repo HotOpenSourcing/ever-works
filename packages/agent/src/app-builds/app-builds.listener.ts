@@ -109,7 +109,8 @@ export class AppBuildsListener implements OnModuleDestroy {
 
         let buildPluginId: string | null = null;
         try {
-            buildPluginId = (await this.preparations.findByWork(event.workId))?.buildPluginId ?? null;
+            buildPluginId =
+                (await this.preparations.findByWork(event.workId))?.buildPluginId ?? null;
         } catch (error) {
             this.logger.warn(
                 `App builds: reading the preparation row of ${event.workId} for a settings change failed (${
