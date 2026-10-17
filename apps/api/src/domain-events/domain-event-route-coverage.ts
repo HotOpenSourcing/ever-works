@@ -538,6 +538,10 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/integrations/v1/organizations': {
         events: ['organization.created', 'organization.member.added'],
     },
+    // Gauzy CR-6 — a Project Work, plus its Teams (`team_resources` type `work`).
+    'POST /api/integrations/v1/works': {
+        events: ['work.created', 'team.resource.added', 'work.updated'],
+    },
     // Integration API v1 Knowledge Base (EW-P3-2): the same services as the app's routes.
     // + `kb.document.moved` when the create files the document into a folder.
     'POST /api/integrations/v1/kb/documents': {

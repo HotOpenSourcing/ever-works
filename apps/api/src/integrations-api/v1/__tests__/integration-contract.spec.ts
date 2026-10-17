@@ -92,6 +92,7 @@ import {
 } from '../teams-write.controller';
 import { IntegrationCreateWebhookDto, IntegrationUpdateWebhookDto } from '../webhooks.controller';
 import { IntegrationWhoamiController } from '../whoami.controller';
+import { IntegrationCreateWorkDto } from '../works-write.controller';
 
 /**
  * EW-P1-8 (T25, T17b) — the API side of the published contract
@@ -353,6 +354,8 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
     },
     // EW-P2-6 — organization create.
     CreateOrganization: { dto: IntegrationCreateOrganizationDto },
+    // EW-P2-4 — Project Works (Gauzy CR-6).
+    CreateWork: { dto: IntegrationCreateWorkDto, nested: { externalRef: EXTERNAL_REF } },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
     Batch: {

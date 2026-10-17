@@ -11,6 +11,7 @@ import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { UserResearchModule } from '@ever-works/agent/user-research';
 import { GoalsModule } from '@ever-works/agent/goals';
 import { MissionsModule } from '@ever-works/agent/missions';
+import { WorkModule } from '@ever-works/agent/services';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationEmailController } from './email.controller';
@@ -29,6 +30,7 @@ import { IntegrationIdeasController } from './ideas.controller';
 import { IntegrationGoalsController } from './goals.controller';
 import { IntegrationMissionsController } from './missions.controller';
 import { IntegrationOrganizationsWriteController } from './organizations-write.controller';
+import { IntegrationWorksWriteController } from './works-write.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { AuthModule } from '../../auth/auth.module';
 import { OrganizationsModule } from '../../organizations/organizations.module';
@@ -68,6 +70,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // and `IntegrationKeyService.addPin` (AuthModule exports it).
         OrganizationsModule,
         AuthModule,
+        // Project Works (Gauzy CR-6, EW-P2-4): `WorkLifecycleService.createProjectWork`.
+        WorkModule,
         // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
         // `InboxService` (steer, resume, decide exactly like the Inbox UI).
         AgentInboxModule,
@@ -97,6 +101,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationGoalsController,
         IntegrationMissionsController,
         IntegrationOrganizationsWriteController,
+        IntegrationWorksWriteController,
         // EW-P3-1 — the Inbox (`inbox:*`).
         IntegrationInboxController,
         // EW-P3-2 — the Knowledge Base (`kb:*`).
