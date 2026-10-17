@@ -214,42 +214,62 @@ export class IntegrationWorksWriteController {
                     reason: 'slug_unavailable',
                 });
             }
-            const work = await this.lifecycle.createProjectWork(owner, {
-                name,
-                slug,
-                description: dto.description?.trim() || undefined,
-                website: dto.website ?? null,
-            });
-
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'work',
-                        entityId: work.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: the Project Work
-                    // we made is a bare row with no repositories; answer the winner's.
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
+            const externalRef = dto.externalRef;
+            let work: Awaited<ReturnType<WorkLifecycleService['createProjectWork']>>;
+            try {
+                work = await this.lifecycle.createProjectWork(
+                    owner,
+                    {
+                        name,
+                        slug,
+                        description: dto.description?.trim() || undefined,
+                        website: dto.website ?? null,
+                    },
+                    // T17a pattern — the Project Work, its `work.created` event and its
+                    // externalRef link commit together (one transaction): a lost race rolls
+                    // the Work back instead of leaving a stray bare Project Work behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'work',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled back with
+                // its link): answer the winner's.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'work',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        const found = await this.resources.get(
                             'work',
-                            dto.externalRef.externalId,
+                            organizationId,
+                            winner.entityId,
+                            source,
                         );
-                        if (winner) {
-                            const found = await this.resources.get(
-                                'work',
-                                organizationId,
-                                winner.entityId,
-                                source,
-                            );
-                            return { status: 200, body: found.dto };
-                        }
+                        return { status: 200, body: found.dto };
                     }
-                    throw error;
                 }
+                throw error;
             }
             for (const teamId of teamIds) {
                 await this.teamResources.attach(user.userId, organizationId, teamId, {
