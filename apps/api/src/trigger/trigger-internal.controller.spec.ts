@@ -1594,17 +1594,23 @@ describe('TriggerInternalController', () => {
             ).rejects.toThrow('Unknown remote target: GitHubAppInstallationRepository');
         });
 
-        it('appends the repository LAST and @Optional()', () => {
+        it('appends the repository in the @Optional() tail', () => {
             const paramTypes: unknown[] =
                 Reflect.getMetadata('design:paramtypes', TriggerInternalController) ?? [];
             const optionalIndices: number[] =
                 Reflect.getMetadata('optional:paramtypes', TriggerInternalController) ?? [];
-            const last = paramTypes.length - 1;
+            // Was "appended LAST". Later appends (A0.7's five App runtime names, APW-04's
+            // provisioner events service, 2026-10-17) follow it, all `@Optional()` per the arity
+            // rule, so the guard is "it and every parameter after it are optional".
+            const at = paramTypes.indexOf(GitHubAppInstallationRepository);
+            expect(at).toBeGreaterThan(0);
 
             // The class itself, not `Object`: an `Object` here is a parameter Nest resolves
             // to nothing, and `@Optional()` would hide that.
-            expect(paramTypes[last]).toBe(GitHubAppInstallationRepository);
-            expect(optionalIndices).toContain(last);
+            expect(paramTypes[at]).toBe(GitHubAppInstallationRepository);
+            for (let index = at; index < paramTypes.length; index += 1) {
+                expect(optionalIndices).toContain(index);
+            }
         });
     });
 });

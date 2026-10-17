@@ -336,20 +336,35 @@ const BOUND: readonly string[] = [
  */
 const WORKER_BOUND: readonly string[] = [
     'APPS_TIER_POLICY',
+    // A0.7 (2026-10-17) — the worker binds these with real implementations
+    // (`trigger-app-runtime.module.ts`, `app-runtime-worker.adapters.ts`).
+    'APP_COMMIT_ANCESTRY',
+    'APP_CUSTOM_DOMAIN_STORE',
     'APP_DEPLOY_BUILD_SOURCE',
+    'APP_DEPLOY_DEPLOYMENT_STORE',
+    'APP_DEPLOY_DISPATCHER',
     'APP_DEPLOY_HOST_SOURCE',
     'APP_DEPLOY_SPEC_SOURCE',
     'APP_DEPLOY_TARGET_RESOLVER',
+    'APP_HOSTS_APPS_DOMAIN',
+    'APP_HOSTS_DEPLOYMENT_STORE',
+    'APP_HOSTS_DEPLOY_REQUESTER',
+    'APP_HOSTS_WORK_STORE',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
+    'APP_IMAGE_REFERENCE_RESOLVER',
     'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_ENV_SOURCE',
+    'APP_RUNTIME_EVENT_SINK',
     'APP_RUNTIME_HEALTH_FACADE',
+    'APP_RUNTIME_NOTIFICATIONS',
     'APP_RUNTIME_TARGET',
     'APP_RUNTIME_VERIFICATION_FACADE',
     'APP_TARGET_UPDATED_PORT',
+    'APP_UPSTREAM_STATE_READER',
     'APP_VERIFICATION_SINK',
     'APP_VERIFICATION_SPEC_SOURCE',
+    'WORK_APP_RUNTIME_STATES',
 ];
 
 /**
@@ -555,13 +570,21 @@ describe('App Works port dormancy register (§5.10)', () => {
         //   the API's own provider (`AppDeployBuildSourceAdapter`,
         //   `AppSpecService`), so both processes read through one implementation.
         //
+        //   A0.7 (2026-10-17): `APP_RUNTIME_ENV_SOURCE` and `WORK_APP_RUNTIME_STATES` are now
+        //   proxies of the API's own providers too (`AppEnvRuntimeSource`,
+        //   `WorkAppRuntimeStateRepository`); `APP_DEPLOY_DEPLOYMENT_STORE` is the same adapter
+        //   class over the proxied repository, and `APP_DEPLOY_DISPATCHER` in the worker dials
+        //   the API's gate (`AppDeployDispatchRelay`) — one dispatcher reached from two processes.
         //   `APP_PROVISION_EVENTS_PORT` (APW-04, 2026-10-17) is the same shape: the
         //   worker binds a `createRemoteProxy` of the API's `AppProvisionEventsService`.
         const BOUND_IN_BOTH: readonly string[] = [
             'APP_DEPLOY_BUILD_SOURCE',
+            'APP_DEPLOY_DEPLOYMENT_STORE',
+            'APP_DEPLOY_DISPATCHER',
             'APP_DEPLOY_SPEC_SOURCE',
             'APP_PROVISION_EVENTS_PORT',
             'APP_RUNTIME_ENV_SOURCE',
+            'WORK_APP_RUNTIME_STATES',
         ];
 
         const overlap = BOUND.filter((name) => WORKER_BOUND.includes(name));
