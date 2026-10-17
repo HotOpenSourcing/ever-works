@@ -17,7 +17,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsOptional, IsString, Length, MaxLength, ValidateNested } from 'class-validator';
 import { TaskChatService } from '@ever-works/agent/tasks-domain';
@@ -54,15 +54,18 @@ import {
 import { IntegrationExternalRefDto } from './tasks-write.controller';
 
 export class IntegrationExternalAuthorDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     name!: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 2048 })
     @IsOptional()
     @IsString()
     @MaxLength(2048)
     avatarUrl?: string | null;
 
+    @ApiProperty({ required: false, maxLength: 100 })
     @IsOptional()
     @IsString()
     @MaxLength(100)
@@ -71,15 +74,18 @@ export class IntegrationExternalAuthorDto {
 
 /** `CreateComment` (contract v1 requests.schema.json). */
 export class IntegrationCreateCommentDto {
+    @ApiProperty({ minLength: 1, maxLength: 16384 })
     @IsString()
     @Length(1, 16_384)
     body!: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalAuthorDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalAuthorDto)
     externalAuthor?: IntegrationExternalAuthorDto;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
@@ -88,6 +94,7 @@ export class IntegrationCreateCommentDto {
 
 /** `UpdateComment` (contract v1 requests.schema.json). */
 export class IntegrationUpdateCommentDto {
+    @ApiProperty({ minLength: 1, maxLength: 16384 })
     @IsString()
     @Length(1, 16_384)
     body!: string;

@@ -65,13 +65,16 @@ into Gauzy. One-click connect waits for Ever ID; when it comes, only how the pri
 | `tenantId`        | the creator's tenant                                                                       |
 | rotation          | `previousHashedKey`, `previousKeyGraceUntil`, `rotatedAt` (§3.6)                           |
 
-- **FR-1 Who may create:** the **tenant owner** only. Ever Works has no per-organization admin role yet
-  (`ORGANIZATION_MEMBER_ROLES = ['member']`); when owner/admin roles land (EW-P2-6) they widen this rule.
+- **FR-1 Who may create (EW-P2-6):** the **tenant owner** (pins: any organization of the tenant), or an
+  **organization admin** (roster role `admin`, promoted by the tenant owner), who may pin only the organizations they
+  administer. The key acts as its creator. Its usable pins are re-read on every request
+  (`ApiKeyService.effectivePins`): a demoted or removed admin's key loses those pins at once. The tenant owner lists and
+  may revoke every key of the tenant; an admin lists their own.
 - **FR-2 Cap:** 20 active, unexpired integration keys per tenant. They do not count against the ten personal keys.
 - **FR-3 Session only:** creating and rotating any API key needs `authMethod = 'session'`. A personal key, a fleet-run
   token, an integration key or a delegated Ever ID token gets `403`.
-- **FR-4 Listing:** `GET /api/auth/api-keys/integration` lists the tenant's active integration keys for the tenant
-  owner (others get an empty list): name, description, prefix, kind, scopes, pins (with slug and display name), creator,
+- **FR-4 Listing:** `GET /api/auth/api-keys/integration` lists the active integration keys: every key of the tenant
+  for the tenant owner, their own for an organization admin (EW-P2-6), an empty list for anyone else. Each row: name, description, prefix, kind, scopes, pins (with slug and display name), creator,
   created/last-used/expiry/rotation timestamps. Never the secret or a digest.
 - **FR-5 Revocation:** `DELETE /api/auth/api-keys/:id` switches an integration key off (`isActive = false`) instead of
   deleting it, so audit rows and webhook subscriptions keep their target. It emits `integration-key.revoked`

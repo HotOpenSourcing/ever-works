@@ -21,7 +21,7 @@
 		"userId": { "$ref": "../common.schema.json#/$defs/Uuid" },
 		"username": { "type": "string", "maxLength": 255 },
 		"displayName": {
-			"description": "Optional: users have no display name today (EW-P2-6 may add one). Consumers fall back to username.",
+			"description": "The optional `users.displayName` (EW-P2-6); null when the person set none. Consumers fall back to username.",
 			"type": ["string", "null"],
 			"maxLength": 200
 		},
@@ -29,7 +29,7 @@
 		"emailVerified": { "type": "boolean" },
 		"avatarUrl": { "type": ["string", "null"], "maxLength": 2048 },
 		"role": {
-			"description": "Today only `member`; `owner`/`admin` arrive with EW-P2-6. Consumers must accept unknown values.",
+			"description": "`owner` (the Tenant owner), `admin` (may create integration keys pinned to this organization, EW-P2-6) or `member`. Consumers must accept unknown values.",
 			"type": "string",
 			"maxLength": 32,
 			"examples": ["member", "admin", "owner"]

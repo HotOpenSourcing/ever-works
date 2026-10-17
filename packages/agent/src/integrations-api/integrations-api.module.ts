@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ExternalRecordLinksService } from './external-record-links.service';
+import { IntegrationEmailService } from './integration-email.service';
 import { IntegrationIdempotencyService } from './integration-idempotency.service';
+import { IntegrationInboxService } from './integration-inbox.service';
+import { IntegrationKbService } from './integration-kb.service';
 import { IntegrationResourcesService } from './integration-resources.service';
 
 /**
@@ -14,11 +17,20 @@ import { IntegrationResourcesService } from './integration-resources.service';
         ExternalRecordLinksService,
         IntegrationIdempotencyService,
         IntegrationResourcesService,
+        // EW-P3-1 — `GET /inbox/items[/:id]`.
+        IntegrationInboxService,
+        // EW-P3-2 — `GET /kb/documents`, `GET /kb/folders`.
+        IntegrationKbService,
+        // EW-P4-2 / EW-P4-1 — `GET /email/messages`, `POST /email/inbound`.
+        IntegrationEmailService,
     ],
     exports: [
         ExternalRecordLinksService,
         IntegrationIdempotencyService,
         IntegrationResourcesService,
+        IntegrationInboxService,
+        IntegrationKbService,
+        IntegrationEmailService,
     ],
 })
 export class IntegrationsApiFoundationModule {}

@@ -102,6 +102,29 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
       never fails the write): agents, works (incl. members), organization roster and organization fields. These writes
       are multi-step or go through repositories that take no `EntityManager` yet. The integration's hourly reconcile
       (`updatedSince`) repairs a missed event. Moving them into the write's transaction is a follow-up.
+    - The same mode records the **Inbox** (P3, EW-P3-1) in `InboxService`: `inbox.item.created` from every producer
+      (`askHuman`, fleet `questionRaised`, `escalationRaised`, `proposalPending`, `notice`); `inbox.item.answered` once
+      per answer, from whichever door won the `markAnswered` claim (`reply`, `escalationResolved`,
+      `proposalDecided`); `inbox.item.state_changed` for a real read / unread or archive / restore flip;
+      `inbox.item.deleted` with a tombstone claimed before the delete. `data` is the inbox-item DTO
+      (`resources/inbox-item.schema.json`; `data.recipientUserId` is always set, fleet `sourceMeta` is never exposed).
+      They are **recipient-scoped** (`visibility: recipient`, one person's messages): the integration feed and webhooks
+      v2 serve them only to an integration key that holds `inbox:read`, never to a user-owned subscription; the gate is
+      by event type (`recipientScopeForEventType` in `@ever-works/contracts`, also `email.*` → `email:read`).
+      Pinned by `inbox-recording.spec.ts` and `webhook-domain-event-fanout.service.spec.ts`.
+    - The same mode records the **Knowledge Base** (P3, EW-P3-2): `kb.document.*` in `KnowledgeBaseService` (create,
+      edit, lock, decision, accept, archive / restore, delete with a tombstone, for Work and organization documents) and
+      `KnowledgeLibraryService` (`moved` when documents are filed, or unfiled by a folder delete); `kb.folder.*` in
+      `MemoryFoldersService` for organization library folders (a rename or a move records `updated` for the whole
+      rewritten subtree; a delete records `deleted` per folder, tombstones claimed before it). A document of a
+      personal Work records none. Background writers that go straight to the repository (Git-mirror reconcile,
+      consolidation markers) record nothing; the integration's reconcile covers them. Pinned by `kb-recording.spec.ts`.
+    - **Agent email** (P4, EW-P4-2) records at the repository: `EmailMessageRepository` is the single writer of
+      `email_messages` and reports every write after it lands (a new row, a status move, a delivery status, the Task
+      link; inside the send-admission lock the reports wait for the commit), and `EmailMessageDomainEventsBridge`
+      records `email.message.received` (new inbound), `email.message.sent` (new outbound already sent, or a move to
+      `sent`) and `email.message.status_changed` (everything else). Recipient-scoped like the Inbox (`email:read`).
+      Pinned by `email-recording.spec.ts`.
 - **Known gaps (follow-ups)**: agent bundle import (`POST /api/agents/import`) records no `agent.created`; a work member
   added by accepting a claim records no `work.member.added`; the recurrence dispatcher, release promotion and the other
   direct `casUpdateStatus` callers outside `TaskTransitionService` record no `task.*` event. The reconcile covers each of
@@ -111,11 +134,32 @@ Relay state `domain_event_relay_state` (one row): the DB lease (`holder`, `lease
   teams and `agent.updated` / `task.updated` / `work.updated` for everything that loses it from `teamIds`.
 - **Tombstone version**: `beforeDelete` bumps the version before snapshotting (the `UPDATE` takes the row lock), and
   `<x>.deleted` carries that version, so a racing edit can never record the same version.
+- **Ideas (EW-P2-1)**: `WorkProposalRepository` is the write path every Idea change takes (generation, `+ Add`, the
+  build lifecycle, dismiss / restore, delete), so it records `idea.created`, `idea.status_changed` (with the previous
+  status; a write that keeps the status, such as BUILDING -> BUILDING on an auto-retry, records nothing),
+  `idea.updated` (title / description, `teamIds`) and the `idea.deleted` tombstone, best-effort after the write.
+  Integration creates (`WorkProposalService.createExternal`) write the row, its Teams and `idea.created` in one
+  transaction. Known gap: the Ideas a Mission clone copies record no `idea.created` until the Missions recording
+  points (EW-P2-5) land; the reconcile covers them.
+- **Goals (EW-P2-2)**: `GoalsService` writes and records in one transaction (`goal.created`, `goal.updated`,
+  `goal.status_changed`, the `goal.deleted` tombstone, and the external-sample `goal.progress_changed`);
+  `GoalEvaluationService` records an auto-outcome (`goal.status_changed`) or a moved value / score
+  (`goal.progress_changed`) best-effort after its save; the orchestrator records Definition-of-Done edits
+  (`goal.updated`), `goal.archived` / `goal.unarchived` and a loop's terminal status. Loop control (start, pause,
+  cancel, limits, spend) is runtime like `task.runtime_updated`'s fields, but records nothing and bumps nothing.
+  `goal.progress_changed` is throttled to one per Goal per 5 minutes; inside the window only the version moves.
+- **Missions (EW-P2-5)**: `MissionsService` writes and records in one transaction (`mission.created`,
+  `mission.updated`, `mission.status_changed`, the `mission.deleted` tombstone); typed Work links (`mission.work.*`)
+  and Goal links (`mission.goal.*`, from `GoalsService`, with the Goal's `goal.updated`) are children of the Mission,
+  recorded best-effort after the write. The clone records `mission.created` and `idea.created` for every Idea it copies
+  in its own transaction, which closes the EW-P2-1 gap; a fatal tick records `mission.status_changed` to `failed`.
 
 ## 4. Aggregate `version` and `updatedAt`
 
-- `version int NOT NULL DEFAULT 1` on the P1 aggregates `tasks`, `teams`, `agents`, `works` and `organizations`
-  (later phases add `goals`, `missions`, `work_proposals`, `inbox_items`, `work_knowledge_documents`).
+- `version int NOT NULL DEFAULT 1` on the P1 aggregates `tasks`, `teams`, `agents`, `works` and `organizations`.
+  Migration `1795100000000-AddP2AggregateSyncColumns` adds it to `work_proposals`, `goals` and `missions` (EW-P2), with
+  nullable `createdByType` / `createdById` (the integration key that created the row; NULL = the owner). P3 added
+  `inbox_items` (`AddInboxItemVersion1795090000000`). Later phases add `work_knowledge_documents`.
 - Incremented on **every** change to the aggregate, **including edge/child changes**: assignees, watchers, approvers,
   reviewers, blocks, relations, attachments and chat on a task; members and resources on a team; members on a work;
   roster rows on an organization.

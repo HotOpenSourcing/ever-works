@@ -13,7 +13,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsOptional, IsString, IsUrl, Length, MaxLength } from 'class-validator';
 import {
     EXTERNAL_LINK_ENTITY_TYPES,
@@ -41,15 +41,18 @@ import {
 
 /** `PutLink` (contract v1 requests.schema.json). */
 export class IntegrationPutLinkDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     externalId!: string;
 
+    @ApiProperty({ required: false, format: 'uri', nullable: true, maxLength: 2048 })
     @IsOptional()
     @IsUrl({ require_tld: false })
     @MaxLength(2048)
     externalUrl?: string | null;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 200 })
     @IsOptional()
     @IsString()
     @MaxLength(200)

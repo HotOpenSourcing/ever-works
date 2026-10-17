@@ -15,17 +15,22 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
     IsArray,
+    IsDateString,
     IsIn,
+    IsInt,
     IsOptional,
     IsString,
     IsUUID,
     Length,
+    Max,
     MaxLength,
+    Min,
+    ValidateIf,
     ValidateNested,
 } from 'class-validator';
 import { RecordVisibilityService } from '@ever-works/agent/record-visibility';
@@ -65,19 +70,29 @@ import {
 const PRIORITIES = ['p0', 'p1', 'p2', 'p3', 'p4'] as const;
 
 export class IntegrationExternalRefDto {
+    @ApiProperty({ minLength: 1, maxLength: 100 })
     @IsString()
     @Length(1, 100)
     source!: string;
 
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        maxLength: 200,
+        description:
+            'The integration installation (for Gauzy: the connection id), as in external_record_links. Optional; when omitted it is taken from X-Sync-Origin (`gauzy:<connectionId>` → `<connectionId>`), else null.',
+    })
     @IsOptional()
     @IsString()
     @MaxLength(200)
     installationId?: string | null;
 
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     externalId!: string;
 
+    @ApiProperty({ required: false, format: 'uri', nullable: true, maxLength: 2048 })
     @IsOptional()
     @IsString()
     @MaxLength(2048)
@@ -85,32 +100,39 @@ export class IntegrationExternalRefDto {
 }
 
 export class IntegrationPrincipalRefDto {
+    @ApiProperty({ enum: ['user', 'agent'] })
     @IsIn(['user', 'agent'])
     type!: 'user' | 'agent';
 
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     id!: string;
 }
 
 /** Contract v1 `requests.schema.json#/$defs/CreateTask`. */
 export class IntegrationCreateTaskDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     title!: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100000 })
     @IsOptional()
     @IsString()
     @MaxLength(100_000)
     description?: string | null;
 
+    @ApiProperty({ required: false, enum: ['backlog', 'todo'] })
     @IsOptional()
     @IsIn(['backlog', 'todo'])
     status?: 'backlog' | 'todo';
 
+    @ApiProperty({ required: false, enum: ['p0', 'p1', 'p2', 'p3', 'p4'] })
     @IsOptional()
     @IsIn(PRIORITIES)
     priority?: (typeof PRIORITIES)[number];
 
+    @ApiProperty({ required: false, type: [String], maxItems: 50 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
@@ -118,32 +140,55 @@ export class IntegrationCreateTaskDto {
     @Length(1, 80, { each: true })
     labels?: string[];
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        description:
+            'teamId plus the team_resources rows, as one set. Writable on POST/PATCH; the first id is stored as teamId where the entity has that column. Non-empty means visibility `team` unless visibilityExplicit (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     workId?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     missionId?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     ideaId?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     parentTaskId?: string | null;
 
+    @ApiProperty({
+        required: false,
+        type: () => IntegrationPrincipalRefDto,
+        isArray: true,
+        maxItems: 50,
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
@@ -151,37 +196,85 @@ export class IntegrationCreateTaskDto {
     @Type(() => IntegrationPrincipalRefDto)
     assignees?: IntegrationPrincipalRefDto[];
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
     externalRef?: IntegrationExternalRefDto;
+
+    /** EW-P2-3 — when the task is due (ISO datetime; planning only). */
+    @ApiProperty({
+        required: false,
+        format: 'date-time',
+        nullable: true,
+        description: 'EW-P2-3 — when the Task is due (planning only).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — planned start (ISO datetime; never after dueAt). */
+    @ApiProperty({
+        required: false,
+        format: 'date-time',
+        nullable: true,
+        description: 'EW-P2-3 — planned start; never after dueAt.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        minimum: 0,
+        maximum: 525600,
+        description: 'EW-P2-3 — estimated effort in whole minutes.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 /** Contract v1 `requests.schema.json#/$defs/TransitionTask`. */
 export class IntegrationTransitionTaskDto {
+    @ApiProperty({
+        enum: ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'],
+    })
     @IsIn(Object.values(TaskStatus))
     to!: TaskStatus;
 
+    @ApiProperty({ enum: ['sync'] })
     @IsIn(['sync'])
     mode!: 'sync';
 }
 
 /** Contract v1 `requests.schema.json#/$defs/UpdateTask` (no `status`: use /transition). */
 export class IntegrationUpdateTaskDto {
+    @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
     @IsOptional()
     @IsString()
     @Length(1, 200)
     title?: string;
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 100000 })
     @IsOptional()
     @IsString()
     @MaxLength(100_000)
     description?: string | null;
 
+    @ApiProperty({ required: false, enum: ['p0', 'p1', 'p2', 'p3', 'p4'] })
     @IsOptional()
     @IsIn(PRIORITIES)
     priority?: (typeof PRIORITIES)[number];
 
+    @ApiProperty({ required: false, type: [String], maxItems: 50 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
@@ -189,23 +282,77 @@ export class IntegrationUpdateTaskDto {
     @Length(1, 80, { each: true })
     labels?: string[];
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        description:
+            'teamId plus the team_resources rows, as one set. Writable on POST/PATCH; the first id is stored as teamId where the entity has that column. Non-empty means visibility `team` unless visibilityExplicit (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     workId?: string | null;
 
+    @ApiProperty({ required: false, format: 'uuid', nullable: true })
     @IsOptional()
     @IsUUID()
     parentTaskId?: string | null;
+
+    /** EW-P2-3 — when the task is due (ISO datetime; planning only). */
+    @ApiProperty({
+        required: false,
+        format: 'date-time',
+        nullable: true,
+        description: 'EW-P2-3 — when the Task is due (planning only).',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    dueAt?: string | null;
+
+    /** EW-P2-3 — planned start (ISO datetime; never after dueAt). */
+    @ApiProperty({
+        required: false,
+        format: 'date-time',
+        nullable: true,
+        description: 'EW-P2-3 — planned start; never after dueAt.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsDateString()
+    startAt?: string | null;
+
+    /** EW-P2-3 — estimated effort in whole minutes (0..525600). */
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        minimum: 0,
+        maximum: 525600,
+        description: 'EW-P2-3 — estimated effort in whole minutes.',
+    })
+    @IsOptional()
+    @ValidateIf((_, value) => value !== null)
+    @IsInt()
+    @Min(0)
+    @Max(525600)
+    estimateMinutes?: number | null;
 }
 
 type Response = IdempotentResponse & { setHeader(name: string, value: string): unknown };
@@ -299,59 +446,80 @@ export class IntegrationTasksWriteController {
 
             const [teamId, ...extraTeams] = dto.teamIds ?? [];
             const createdBy = writeAttribution(user);
-            const task = await this.tasks.create(
-                user.userId,
-                {
-                    title: dto.title,
-                    description: dto.description ?? null,
-                    status: dto.status === 'todo' ? TaskStatus.TODO : TaskStatus.BACKLOG,
-                    priority: dto.priority as TaskPriority | undefined,
-                    labels: dto.labels ?? null,
-                    teamId: teamId ?? null,
-                    workId: dto.workId ?? null,
-                    missionId: dto.missionId ?? null,
-                    ideaId: dto.ideaId ?? null,
-                    parentTaskId: dto.parentTaskId ?? null,
-                    createdByType: createdBy.type,
-                    createdById: createdBy.id,
-                },
-                this.scope.getScope() as never,
-            );
-
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'task',
-                        entityId: task.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.tasks.remove(user.userId, task.id, this.scope.getScope() as never);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'task',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return {
-                                status: 200,
-                                body: (
-                                    await this.resources.get(
-                                        'task',
-                                        organizationId,
-                                        winner.entityId,
-                                        source,
-                                    )
-                                ).dto,
-                            };
-                        }
+            const externalRef = dto.externalRef;
+            let task: Awaited<ReturnType<TasksService['create']>>;
+            try {
+                task = await this.tasks.create(
+                    user.userId,
+                    {
+                        title: dto.title,
+                        description: dto.description ?? null,
+                        status: dto.status === 'todo' ? TaskStatus.TODO : TaskStatus.BACKLOG,
+                        priority: dto.priority as TaskPriority | undefined,
+                        labels: dto.labels ?? null,
+                        teamId: teamId ?? null,
+                        workId: dto.workId ?? null,
+                        missionId: dto.missionId ?? null,
+                        ideaId: dto.ideaId ?? null,
+                        parentTaskId: dto.parentTaskId ?? null,
+                        createdByType: createdBy.type,
+                        createdById: createdBy.id,
+                        // EW-P2-3 — planning dates + estimate (contract v1 B.6).
+                        dueAt: dto.dueAt ? new Date(dto.dueAt) : null,
+                        startAt: dto.startAt ? new Date(dto.startAt) : null,
+                        estimateMinutes: dto.estimateMinutes ?? null,
+                    },
+                    this.scope.getScope() as never,
+                    // T17a — the task and its externalRef link commit together (one
+                    // transaction): a lost race rolls the task back instead of
+                    // leaving it to be undone, and a crash can no longer leave an
+                    // unlinked task behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'task',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled
+                // back with its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'task',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return {
+                            status: 200,
+                            body: (
+                                await this.resources.get(
+                                    'task',
+                                    organizationId,
+                                    winner.entityId,
+                                    source,
+                                )
+                            ).dto,
+                        };
                     }
-                    throw error;
                 }
+                throw error;
             }
             for (const extra of extraTeams) {
                 await this.teamResources.attach(user.userId, organizationId, extra, {
@@ -405,6 +573,12 @@ export class IntegrationTasksWriteController {
         if (dto.workId !== undefined) patch.workId = dto.workId;
         if (dto.parentTaskId !== undefined) patch.parentTaskId = dto.parentTaskId;
         if (dto.teamIds !== undefined) patch.teamId = dto.teamIds[0] ?? null;
+        // EW-P2-3 — absent leaves untouched, null clears.
+        if (dto.dueAt !== undefined) patch.dueAt = dto.dueAt === null ? null : new Date(dto.dueAt);
+        if (dto.startAt !== undefined) {
+            patch.startAt = dto.startAt === null ? null : new Date(dto.startAt);
+        }
+        if (dto.estimateMinutes !== undefined) patch.estimateMinutes = dto.estimateMinutes;
         await withExpectedVersion('task', id, expected, async () => {
             if (Object.keys(patch).length > 0) {
                 await this.tasks.update(user.userId, id, patch, this.scope.getScope() as never);

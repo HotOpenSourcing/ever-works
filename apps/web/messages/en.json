@@ -2401,6 +2401,11 @@
                 "priority": "Priority",
                 "labels": "Labels",
                 "labelsPlaceholder": "comma-separated",
+                "dueDate": "Due date",
+                "startDate": "Start date",
+                "estimateMinutes": "Estimate (minutes)",
+                "errorStartAfterDue": "The start date must not be after the due date.",
+                "errorEstimate": "The estimate must be a whole number of minutes between 0 and 525600.",
                 "labelsHint": "Separate multiple labels with commas.",
                 "labelsAutoHint": "Derived from the title until you edit it. Separate multiple labels with commas.",
                 "organize": "Organize",
@@ -2710,6 +2715,20 @@
                     "typecheck": "Type check",
                     "custom": "Custom"
                 }
+            },
+            "planning": {
+                "section": "Planning",
+                "hint": "When the Task is due and how long it should take. Planning only: nothing runs at these times.",
+                "dueAt": "Due",
+                "startAt": "Start",
+                "estimateMinutes": "Estimate (minutes)",
+                "save": "Save",
+                "saved": "Planning saved",
+                "saveError": "Could not save the planning",
+                "errorStartAfterDue": "The start date must not be after the due date.",
+                "errorEstimate": "The estimate must be a whole number of minutes between 0 and 525600.",
+                "due": "Due {date}",
+                "overdue": "Overdue · {date}"
             },
             "schedule": {
                 "section": "Schedule",
@@ -4959,7 +4978,22 @@
                 "lastUsed": "Last used {date}",
                 "neverUsed": "Never used",
                 "revokeSuccess": "Ever Gauzy key revoked",
-                "revokeError": "Failed to revoke the key"
+                "revokeError": "Failed to revoke the key",
+                "revokeHintWithWebhooks": "Revoking a key disconnects Ever Gauzy immediately and disables the {count, plural, one {webhook subscription} other {# webhook subscriptions}} it owns.",
+                "revokeSuccessWithWebhooks": "Ever Gauzy key revoked; {count, plural, one {its webhook subscription is} other {its # webhook subscriptions are}} disabled",
+                "webhooksTitle": "{count, plural, one {Webhook subscription} other {# webhook subscriptions}}",
+                "manageWebhooks": "Manage webhooks",
+                "noWebhooks": "No webhook subscription yet. Ever Gauzy creates its own once it is connected.",
+                "webhooksUnavailable": "Webhook subscriptions could not be loaded.",
+                "webhookEvents": "{count, plural, one {# event filter} other {# event filters}}",
+                "webhookLastDelivery": "last delivery {date}",
+                "webhookNoDelivery": "no delivery yet",
+                "webhookStatus": {
+                    "active": "Active",
+                    "paused": "Paused",
+                    "failed": "Failing",
+                    "disabled": "Disabled"
+                }
             },
             "fleet": {
                 "title": "Fleet",

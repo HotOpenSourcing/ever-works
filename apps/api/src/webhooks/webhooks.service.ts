@@ -43,6 +43,11 @@ export interface WebhookSubscriptionView {
     version: 1 | 2;
     /** v2 fields (null on v1 rows). */
     ownerType: WebhookSubscriptionOwnerType;
+    /**
+     * The owning user or integration key (`api_keys.id`); null on v1 rows. Lets
+     * Settings → Integrations → Ever Gauzy list each key's subscriptions (EW-P1-7).
+     */
+    ownerId: string | null;
     events: string[] | null;
     organizationIds: string[] | null;
     excludeOriginTags: string[] | null;
@@ -123,6 +128,35 @@ export class WebhooksService {
     async listForAccount(accountId: string): Promise<WebhookSubscriptionView[]> {
         const rows = await this.repo.listForAccount(accountId);
         return rows.map((row) => this.toView(row));
+    }
+
+    /**
+     * Integration API v1 (EW-P1-5): the v2 subscriptions one owner holds in the
+     * account, e.g. those an integration key created. Another owner's
+     * subscriptions in the same account are not listed.
+     */
+    async listForOwner(
+        accountId: string,
+        owner: { type: WebhookSubscriptionOwnerType; id: string },
+    ): Promise<WebhookSubscriptionView[]> {
+        const rows = await this.repo.listForOwner(owner.type, owner.id);
+        return rows.filter((row) => row.accountId === accountId).map((row) => this.toView(row));
+    }
+
+    /**
+     * The subscription, when it is in the account AND held by `owner`; else 404
+     * (an integration key never sees or changes the account's other webhooks).
+     */
+    async findOwnedBy(
+        accountId: string,
+        id: string,
+        owner: { type: WebhookSubscriptionOwnerType; id: string },
+    ): Promise<WebhookSubscriptionView> {
+        const row = await this.findOwn(accountId, id);
+        if ((row.ownerType ?? 'user') !== owner.type || row.ownerId !== owner.id) {
+            throw new NotFoundException('Webhook subscription not found');
+        }
+        return this.toView(row);
     }
 
     /**
@@ -377,6 +411,7 @@ export class WebhooksService {
             updatedAt: row.updatedAt,
             version: Number(row.version) === 2 ? 2 : 1,
             ownerType: row.ownerType ?? 'user',
+            ownerId: row.ownerId ?? null,
             events: row.events ?? null,
             organizationIds: row.organizationIds ?? null,
             excludeOriginTags: row.excludeOriginTags ?? null,

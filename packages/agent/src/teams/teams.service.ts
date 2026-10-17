@@ -93,7 +93,20 @@ export class TeamsService {
         return team;
     }
 
-    async create(userId: string, orgId: string, input: CreateTeamInput): Promise<Team> {
+    /**
+     * `withinCreate` (T17a) runs right after the row is written, in the SAME
+     * transaction as the row and its `team.created` event (when domain events
+     * are wired): the integration API links the team to its `externalRef`
+     * there, so both commit or roll back together. A throw undoes the create.
+     */
+    async create(
+        userId: string,
+        orgId: string,
+        input: CreateTeamInput,
+        options: {
+            readonly withinCreate?: (team: Team, manager?: EntityManager) => Promise<void>;
+        } = {},
+    ): Promise<Team> {
         const org = await this.organizations.findOne({ where: { id: orgId } });
         if (!org) {
             throw new NotFoundException(`Organization ${orgId} not found`);
@@ -125,7 +138,13 @@ export class TeamsService {
 
         try {
             return await this.withTeamEvent(
-                (manager) => (manager ? manager.getRepository(Team) : this.teams).save(team),
+                async (manager) => {
+                    const saved = await (manager ? manager.getRepository(Team) : this.teams).save(
+                        team,
+                    );
+                    if (options.withinCreate) await options.withinCreate(saved, manager);
+                    return saved;
+                },
                 (publisher, manager, saved) =>
                     publisher.created(manager, 'team', saved.id, 'team.created'),
             );
@@ -249,8 +268,14 @@ export class TeamsService {
             const resnapshotted = new Set<string>([
                 ...agentMembers.map((row) => `agent:${row.memberId}`),
                 ...links
-                    .filter((link) => link.resourceType === 'task')
-                    .map((link) => `task:${link.resourceId}`),
+                    .filter(
+                        (link) =>
+                            link.resourceType === 'task' ||
+                            link.resourceType === 'idea' ||
+                            link.resourceType === 'goal' ||
+                            link.resourceType === 'mission',
+                    )
+                    .map((link) => `${link.resourceType}:${link.resourceId}`),
             ]);
             for (const record of affected) {
                 await this.visibility?.recomputeAutomaticIn(em, record.aggregate, record.id, {
@@ -269,7 +294,13 @@ export class TeamsService {
                 });
             }
             for (const link of links) {
-                if (link.resourceType === 'task' || link.resourceType === 'work') {
+                if (
+                    link.resourceType === 'task' ||
+                    link.resourceType === 'work' ||
+                    link.resourceType === 'idea' ||
+                    link.resourceType === 'goal' ||
+                    link.resourceType === 'mission'
+                ) {
                     await publisher.changed(
                         em,
                         link.resourceType,

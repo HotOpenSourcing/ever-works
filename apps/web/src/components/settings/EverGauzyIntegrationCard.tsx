@@ -4,14 +4,27 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
-import { KeyRound, Plug, Trash2 } from 'lucide-react';
+import { KeyRound, Plug, Trash2, Webhook } from 'lucide-react';
 import type { IntegrationKeySummary } from '@ever-works/contracts';
 import { Button } from '@/components/ui/button';
 import { revokeApiKey } from '@/app/actions/api-keys';
+import type { WebhookSubscription } from '@/lib/api/webhooks';
 import { ROUTES } from '@/lib/constants';
+
+const WEBHOOK_STATUS_STYLE: Record<WebhookSubscription['status'], string> = {
+    active: 'text-green-600',
+    paused: 'text-text-muted dark:text-text-muted-dark',
+    failed: 'text-red-600',
+    disabled: 'text-red-600',
+};
 
 interface EverGauzyIntegrationCardProps {
     initialKeys: IntegrationKeySummary[];
+    /**
+     * The webhook subscriptions integration keys own (`ownerId` = the key), or
+     * `null` when they could not be read.
+     */
+    webhooks?: WebhookSubscription[] | null;
     /**
      * The API base Ever Gauzy should call, e.g. `https://api.ever.works/api`;
      * `null` when this install exposes no public API URL (set NEXT_PUBLIC_API_URL).
@@ -30,20 +43,38 @@ export const EVER_GAUZY_NEW_KEY_HREF = `${ROUTES.DASHBOARD_SETTINGS_API_KEYS}?ne
  * links to the preset dialog, and lists the active Ever Gauzy keys; revoking
  * one disconnects Ever Gauzy immediately (the key answers `401 invalid_key`).
  */
-export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyIntegrationCardProps) {
+export function EverGauzyIntegrationCard({
+    initialKeys,
+    apiUrl,
+    webhooks = [],
+}: EverGauzyIntegrationCardProps) {
     const t = useTranslations('dashboard.settings.everGauzy');
     const [keys, setKeys] = useState(initialKeys);
     const [isPending, startTransition] = useTransition();
     const [revoking, setRevoking] = useState<string | null>(null);
 
+    /** The subscriptions a key owns that still deliver (revoking disables them). */
+    const webhooksOf = (keyId: string) =>
+        (webhooks ?? []).filter(
+            (sub) => sub.ownerType === 'integration_key' && sub.ownerId === keyId,
+        );
+    const liveWebhookCount = (keyId: string) =>
+        webhooksOf(keyId).filter((sub) => sub.status !== 'disabled').length;
+
     const revoke = (id: string) => {
-        if (typeof window !== 'undefined' && !window.confirm(t('revokeHint'))) return;
+        // Revoking disconnects Ever Gauzy AND disables the webhook
+        // subscriptions the key owns (the API does both at once).
+        const live = liveWebhookCount(id);
+        const question = live > 0 ? t('revokeHintWithWebhooks', { count: live }) : t('revokeHint');
+        if (typeof window !== 'undefined' && !window.confirm(question)) return;
         setRevoking(id);
         startTransition(async () => {
             const result = await revokeApiKey(id);
             if (result.success) {
                 setKeys((prev) => prev.filter((key) => key.id !== id));
-                toast.success(t('revokeSuccess'));
+                toast.success(
+                    live > 0 ? t('revokeSuccessWithWebhooks', { count: live }) : t('revokeSuccess'),
+                );
             } else {
                 toast.error(result.error || t('revokeError'));
             }
@@ -114,7 +145,7 @@ export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyInteg
                         {keys.map((key) => (
                             <li
                                 key={key.id}
-                                className="flex items-center justify-between gap-3 px-4 py-3"
+                                className="flex items-start justify-between gap-3 px-4 py-3"
                             >
                                 <div className="min-w-0">
                                     <div className="text-sm font-medium text-text dark:text-text-dark truncate">
@@ -133,6 +164,11 @@ export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyInteg
                                               })
                                             : t('neverUsed')}
                                     </div>
+                                    <KeyWebhooks
+                                        keyId={key.id}
+                                        webhooks={webhooks === null ? null : webhooksOf(key.id)}
+                                        t={t}
+                                    />
                                 </div>
                                 <Button
                                     variant="ghost"
@@ -150,6 +186,73 @@ export function EverGauzyIntegrationCard({ initialKeys, apiUrl }: EverGauzyInteg
                     </ul>
                 )}
             </section>
+        </div>
+    );
+}
+
+/**
+ * The webhook subscriptions one Ever Gauzy key owns (Ever Gauzy creates them
+ * through the integration API): where they deliver, their status and their
+ * event filters. Managed in Settings → Webhooks; revoking the key disables them.
+ */
+function KeyWebhooks({
+    keyId,
+    webhooks,
+    t,
+}: {
+    keyId: string;
+    webhooks: WebhookSubscription[] | null;
+    t: ReturnType<typeof useTranslations>;
+}) {
+    if (webhooks === null) {
+        return (
+            <p className="mt-2 text-xs text-text-muted dark:text-text-muted-dark">
+                {t('webhooksUnavailable')}
+            </p>
+        );
+    }
+    if (webhooks.length === 0) {
+        return (
+            <p className="mt-2 text-xs text-text-muted dark:text-text-muted-dark">
+                {t('noWebhooks')}
+            </p>
+        );
+    }
+    return (
+        <div className="mt-2 space-y-1" data-testid={`ever-gauzy-key-webhooks-${keyId}`}>
+            <div className="flex items-center gap-2 text-xs font-medium text-text dark:text-text-dark">
+                <Webhook className="w-3.5 h-3.5" aria-hidden />
+                {t('webhooksTitle', { count: webhooks.length })}
+                <Link
+                    href={ROUTES.DASHBOARD_SETTINGS_INTEGRATIONS_WEBHOOKS}
+                    className="font-normal text-primary hover:underline"
+                >
+                    {t('manageWebhooks')}
+                </Link>
+            </div>
+            <ul className="space-y-0.5">
+                {webhooks.map((sub) => (
+                    <li
+                        key={sub.id}
+                        className="flex flex-wrap items-center gap-x-2 text-xs text-text-muted dark:text-text-muted-dark"
+                    >
+                        <code className="font-mono truncate max-w-[18rem]" title={sub.url}>
+                            {sub.url}
+                        </code>
+                        <span className={WEBHOOK_STATUS_STYLE[sub.status]}>
+                            {t(`webhookStatus.${sub.status}`)}
+                        </span>
+                        <span>{t('webhookEvents', { count: sub.events?.length ?? 0 })}</span>
+                        <span>
+                            {sub.lastDeliveryAt
+                                ? t('webhookLastDelivery', {
+                                      date: new Date(sub.lastDeliveryAt).toLocaleDateString(),
+                                  })
+                                : t('webhookNoDelivery')}
+                        </span>
+                    </li>
+                ))}
+            </ul>
         </div>
     );
 }

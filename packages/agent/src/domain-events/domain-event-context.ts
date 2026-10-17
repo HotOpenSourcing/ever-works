@@ -93,6 +93,40 @@ export function runExpectingAggregateVersion<T>(
     return versionExpectations.run({ ...expectation, checked: false }, fn);
 }
 
+interface ClaimedAggregateVersion {
+    readonly aggregateType: string;
+    readonly id: string;
+    readonly version: number;
+    taken: boolean;
+}
+
+const claimedVersions = new AsyncLocalStorage<ClaimedAggregateVersion>();
+
+/**
+ * Run `fn` after its caller CLAIMED the next version of `aggregateType`/`id`:
+ * a compare-and-set (`UPDATE … SET version = version + 1 WHERE id = ? AND
+ * version = ?`) already moved the row to `version`. The FIRST version step
+ * recorded for that aggregate inside `fn` (`changed`, `beforeDelete`) carries `version` instead of bumping
+ * again, so an `If-Match` write that records its event after the write (its own
+ * transaction) is still one version, taken atomically before the write.
+ */
+export function runWithClaimedAggregateVersion<T>(
+    claim: { aggregateType: string; id: string; version: number },
+    fn: () => Promise<T>,
+): Promise<T> {
+    return claimedVersions.run({ ...claim, taken: false }, fn);
+}
+
+/** The claimed version of this aggregate, once (`null` when there is none). */
+export function takeClaimedAggregateVersion(aggregateType: string, id: string): number | null {
+    const claim = claimedVersions.getStore();
+    if (!claim || claim.taken || claim.aggregateType !== aggregateType || claim.id !== id) {
+        return null;
+    }
+    claim.taken = true;
+    return claim.version;
+}
+
 /**
  * Called by the publisher right after it bumps an aggregate's version: throws
  * {@link AggregateVersionConflictError} when the active expectation names this
@@ -123,4 +157,17 @@ export function assertExpectedAggregateVersion(
             bumpedTo - 1,
         );
     }
+}
+
+/**
+ * Clear a loaded aggregate's `version` before a TypeORM `save()` (EW-P2 review).
+ * `version` is a plain column that only {@link DomainEventRecorder.bumpAggregateVersion}
+ * moves; `save()` writes back whatever the instance holds, so a copy loaded before a
+ * concurrent bump would roll the column back and the next event would reuse a version.
+ * TypeORM skips an `undefined` property on update (and uses the column default on insert).
+ * Returns the same instance.
+ */
+export function withoutAggregateVersion<T extends { version?: number }>(entity: T): T {
+    (entity as { version?: number }).version = undefined;
+    return entity;
 }

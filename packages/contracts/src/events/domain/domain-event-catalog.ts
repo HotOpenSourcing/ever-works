@@ -54,6 +54,8 @@ export const DOMAIN_EVENT_CATALOG_VERSION = 1;
 export const DOMAIN_EVENT_PAYLOAD_VERSION = 1;
 
 export const DOMAIN_EVENT_CATALOG = [
+	// EW-P2-6 — `org:write` (and the app) create Organizations.
+	{ type: 'organization.created', domain: 'organization', aggregateType: 'organization', phase: 'P2' },
 	{ type: 'organization.updated', domain: 'organization', aggregateType: 'organization', phase: 'P1' },
 	{
 		type: 'organization.member.added',
@@ -100,10 +102,10 @@ export const DOMAIN_EVENT_CATALOG = [
 	{ type: 'mission.updated', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
 	{ type: 'mission.status_changed', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
 	{ type: 'mission.deleted', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
-	{ type: 'mission.goal.linked', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
-	{ type: 'mission.goal.unlinked', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
-	{ type: 'mission.work.linked', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
-	{ type: 'mission.work.unlinked', domain: 'missions', aggregateType: 'mission', phase: 'P2' },
+	{ type: 'mission.goal.linked', domain: 'missions', aggregateType: 'mission', phase: 'P2', child: 'goal' },
+	{ type: 'mission.goal.unlinked', domain: 'missions', aggregateType: 'mission', phase: 'P2', child: 'goal' },
+	{ type: 'mission.work.linked', domain: 'missions', aggregateType: 'mission', phase: 'P2', child: 'work' },
+	{ type: 'mission.work.unlinked', domain: 'missions', aggregateType: 'mission', phase: 'P2', child: 'work' },
 	{ type: 'goal.created', domain: 'goals', aggregateType: 'goal', phase: 'P2' },
 	{ type: 'goal.updated', domain: 'goals', aggregateType: 'goal', phase: 'P2' },
 	{ type: 'goal.status_changed', domain: 'goals', aggregateType: 'goal', phase: 'P2' },

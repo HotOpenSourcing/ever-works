@@ -181,6 +181,14 @@ _Then_ it renders as a wikilink — same WikiLinkExtension reused from `KbEditor
   sessions and personal keys may opt into it. If another writer moves the Task between two hops (the hop's
   compare-and-set loses), the walk answers `409` with `code: "conflict"` and `details: { from, to, path[], currentStatus }`
   — no gate refused, so the caller re-reads the Task and retries rather than treating it as `transition_blocked`.
+- **FR-8c** (EW-P2-3, 2026-10-16) Planning fields on every Task, all optional and nullable: `dueAt` (when it is due),
+  `startAt` (when work is planned to start; never after `dueAt`) and `estimateMinutes` (whole minutes, 0..525600). They are
+  planning only — nothing runs at these times (that is `scheduledAt`). Create and `PATCH` accept them (`null` clears), the
+  web task form and the Task detail page (Planning section) edit them, and board cards show the due date (red once past
+  while the Task is open). The per-minute dispatcher tick sends `task_due_soon` once per due date to the owner, the user
+  assignees and the watchers when `dueAt` is inside the next `TASK_DUE_SOON_WINDOW_HOURS` (default 24); moving `dueAt`
+  re-arms it (`dueSoonNotifiedAt`). Done, cancelled and recurring templates are never noticed. The integration task DTO and
+  `task.created` / `task.updated` events carry `dueAt`, `startAt` and `estimateMinutes` (contract v1 B.6, P2 fields).
 - **FR-9** When a Task with active blockers tries to move to `in_progress`, the system MUST reject the transition with `409 Conflict — has unresolved blockers`.
 - **FR-10** When all blockers for a `blocked` Task are `done`, the Task MUST auto-transition back to its prior status (stored in `previousStatus` column on the row).
 - **FR-11** On `done` transition: if any approvers are configured, the system MUST require all approvers' `approved=true` row before allowing `done`. Configurable per-task via `requireAllApprovers`.

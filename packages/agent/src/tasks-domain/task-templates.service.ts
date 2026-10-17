@@ -703,13 +703,16 @@ export class TaskTemplatesService {
     }
 
     private slugify(raw: string): string {
-        const slug = raw
-            .toLowerCase()
-            .trim()
-            .replace(/[^a-z0-9]+/g, '-')
-            .replace(/^-+|-+$/g, '')
-            .slice(0, 80)
-            .replace(/-+$/g, '');
+        // Dash trims by loop, not `/^-+|-+$/`: CodeQL flags that pattern as
+        // polynomial (js/polynomial-redos). Same result, linear by construction.
+        const slug = trimDashes(
+            trimDashes(
+                raw
+                    .toLowerCase()
+                    .trim()
+                    .replace(/[^a-z0-9]+/g, '-'),
+            ).slice(0, 80),
+        );
         if (!slug) throw new BadRequestException('Template slug cannot be empty.');
         return slug;
     }
@@ -748,4 +751,13 @@ export class TaskTemplatesService {
             this.logger.warn(`Failed to log template instantiation: ${err}`);
         }
     }
+}
+
+/** `value` without its leading and trailing `-` runs, in linear time. */
+function trimDashes(value: string): string {
+    let start = 0;
+    let end = value.length;
+    while (start < end && value[start] === '-') start += 1;
+    while (end > start && value[end - 1] === '-') end -= 1;
+    return value.slice(start, end);
 }

@@ -220,6 +220,15 @@ export interface CreateGoalInput {
      * for a metric Goal.
      */
     dodCriteria?: GoalDoDCriterion[] | null;
+    /**
+     * EW-P2-2 — who created it when it is not the owning user (an integration key, or
+     * the person an `X-Act-As-User` write acts as). Omitted = the owner.
+     */
+    createdBy?: { type: 'user' | 'agent' | 'integration'; id: string };
+    /** EW-P2-2 — a hand-picked `team` / `organization` (integration writes). Omitted = D11. */
+    visibility?: 'team' | 'organization';
+    /** EW-P2-2 — Teams (`team_resources` type `goal`) of the Goal's Organization. */
+    teamIds?: string[];
 }
 
 /**

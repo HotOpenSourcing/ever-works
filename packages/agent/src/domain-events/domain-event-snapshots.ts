@@ -1,7 +1,12 @@
 import {
     getWorkCapabilities,
+    RECIPIENT_EVENT_VISIBILITY,
     type IntegrationAgentDto,
+    type IntegrationGoalDto,
+    type IntegrationInboxItemDto,
+    type IntegrationIdeaDto,
     type IntegrationMemberDto,
+    type IntegrationMissionDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
     type IntegrationTaskDto,
@@ -12,6 +17,11 @@ import {
 import type { EntityManager } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { ExternalIdentity } from '../entities/external-identity.entity';
+import { Goal } from '../entities/goal.entity';
+import { InboxItem } from '../entities/inbox-item.entity';
+import { MissionGoal } from '../entities/mission-goal.entity';
+import { Mission } from '../entities/mission.entity';
+import { MissionWork } from '../entities/mission-work.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
@@ -26,6 +36,7 @@ import { Team } from '../entities/team.entity';
 import { TeamMember } from '../entities/team-member.entity';
 import { TeamResource } from '../entities/team-resource.entity';
 import { User } from '../entities/user.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
 import { Work } from '../entities/work.entity';
 import { WorkMember } from '../entities/work-member.entity';
 
@@ -49,6 +60,12 @@ export interface AggregateSnapshot<T> {
     readonly dto: T;
     readonly tenantId: string | null;
     readonly organizationId: string | null;
+    /**
+     * The event's `visibility` when the DTO carries none of its own (absent =
+     * the DTO's `visibility`). `'private'` keeps the event out of the
+     * integration feed and webhooks v2; in-process listeners still get it.
+     */
+    readonly visibility?: string | null;
 }
 
 const iso = (value: Date | string | null | undefined): string | null =>
@@ -177,6 +194,13 @@ export async function buildTaskSnapshot(
         })),
         startedAt: iso(task.startedAt),
         completedAt: iso(task.completedAt),
+        // EW-P2-3 — planning dates + estimate.
+        dueAt: iso(task.dueAt),
+        startAt: iso(task.startAt),
+        estimateMinutes:
+            task.estimateMinutes === null || task.estimateMinutes === undefined
+                ? null
+                : Number(task.estimateMinutes),
         isRecurringTemplate: !!task.isRecurring,
         hiddenFromBoard: !!task.hiddenFromBoard,
         runtime: {
@@ -315,6 +339,201 @@ export async function buildAgentSnapshot(
     return { dto, tenantId: agent.tenantId ?? null, organizationId: agent.organizationId ?? null };
 }
 
+/**
+ * `createdBy` of a P2 aggregate (ideas, goals, missions): the stored author when an
+ * integration or agent created it (`createdByType` / `createdById`, migration
+ * 1795100000000), else the owning user.
+ */
+function p2CreatedBy(row: {
+    userId: string;
+    createdByType?: string | null;
+    createdById?: string | null;
+}): IntegrationIdeaDto['createdBy'] {
+    if ((row.createdByType === 'integration' || row.createdByType === 'agent') && row.createdById) {
+        return { type: row.createdByType, id: row.createdById };
+    }
+    return { type: 'user', id: row.userId };
+}
+
+/** The Idea's (work_proposals) integration DTO, or `null` when the row is gone (EW-P2-1). */
+export async function buildIdeaSnapshot(
+    manager: EntityManager,
+    ideaId: string,
+): Promise<AggregateSnapshot<IntegrationIdeaDto> | null> {
+    const idea = await manager.getRepository(WorkProposal).findOne({ where: { id: ideaId } });
+    if (!idea) return null;
+    const teamIds = unique(await teamResourceIds(manager, 'idea', ideaId));
+    const dto: IntegrationIdeaDto = {
+        id: idea.id,
+        organizationId: idea.organizationId ?? '',
+        version: Number(idea.version) || 1,
+        createdAt: isoRequired(idea.generatedAt),
+        updatedAt: isoRequired(idea.updatedAt ?? idea.generatedAt),
+        ...recordVisibility(idea, teamIds),
+        owner: { type: 'user', id: idea.userId },
+        createdBy: p2CreatedBy(idea),
+        externalLinks: [],
+        teamIds,
+        title: idea.title,
+        description: idea.description,
+        status: idea.status as IntegrationIdeaDto['status'],
+        source: idea.source as IntegrationIdeaDto['source'],
+        missionId: idea.missionId ?? null,
+        targetWorkId: idea.targetWorkId ?? null,
+        acceptedWorkId: idea.acceptedWorkId ?? null,
+        failureMessage: idea.failureMessage ?? null,
+        webUrl: webUrl(`/ideas/${idea.id}`),
+    };
+    return { dto, tenantId: idea.tenantId ?? null, organizationId: idea.organizationId ?? null };
+}
+
+/**
+ * EW's 0..100 progress view of a Goal (plan 01 §6, mapped to the Gauzy Goal's
+ * `progress`): the weighted score when the Goal has criteria and was scored; for a
+ * metric Goal the baseline → current → target ratio; for a delivery Goal the share
+ * of its approved Definition of Done that is closed. `null` when nothing is known.
+ */
+export function goalProgress(goal: Goal): number | null {
+    const clamp = (ratio: number) => Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    if (goal.goalKind === 'delivery') {
+        const approved = (Array.isArray(goal.dodCriteria) ? goal.dodCriteria : []).filter(
+            (criterion) => criterion.proposed !== true,
+        );
+        if (approved.length === 0) return null;
+        const closed = approved.filter(
+            (criterion) => criterion.status === 'done' || criterion.status === 'waived',
+        ).length;
+        return clamp(closed / approved.length);
+    }
+    if (Array.isArray(goal.criteria) && goal.criteria.length > 0 && goal.resolvedScore) {
+        const score = Number(goal.resolvedScore.score);
+        return Number.isFinite(score) ? clamp(score) : null;
+    }
+    const current = goal.currentValue;
+    const target = goal.targetValue;
+    if (typeof current !== 'number' || typeof target !== 'number') return null;
+    const baseline = typeof goal.baselineValue === 'number' ? goal.baselineValue : 0;
+    if (target === baseline)
+        return clamp(
+            goal.comparator === 'lte' ? (current <= target ? 1 : 0) : current >= target ? 1 : 0,
+        );
+    return clamp((current - baseline) / (target - baseline));
+}
+
+/** The Goal's integration DTO (teams and mission links embedded), or `null` when gone (EW-P2-2). */
+export async function buildGoalSnapshot(
+    manager: EntityManager,
+    goalId: string,
+): Promise<AggregateSnapshot<IntegrationGoalDto> | null> {
+    const goal = await manager.getRepository(Goal).findOne({ where: { id: goalId } });
+    if (!goal) return null;
+    const [resourceTeams, missionLinks] = await Promise.all([
+        teamResourceIds(manager, 'goal', goalId),
+        manager.getRepository(MissionGoal).find({ where: { goalId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const primary = missionLinks.find((link) => link.isPrimary) ?? null;
+    const dto: IntegrationGoalDto = {
+        id: goal.id,
+        organizationId: goal.organizationId ?? '',
+        version: Number(goal.version) || 1,
+        createdAt: isoRequired(goal.createdAt),
+        updatedAt: isoRequired(goal.updatedAt ?? goal.createdAt),
+        ...recordVisibility(goal, teamIds),
+        owner: { type: 'user', id: goal.userId },
+        createdBy: p2CreatedBy(goal),
+        externalLinks: [],
+        teamIds,
+        title: goal.title,
+        description: goal.description ?? null,
+        goalKind: goal.goalKind === 'delivery' ? 'delivery' : 'metric',
+        status: goal.status as IntegrationGoalDto['status'],
+        outcome: (goal.outcome ?? null) as IntegrationGoalDto['outcome'],
+        metricSource: goal.metricSource ?? null,
+        comparator: goal.comparator ?? null,
+        targetValue: goal.targetValue ?? null,
+        unit: goal.unit ?? null,
+        window: goal.window,
+        baselineValue: goal.baselineValue ?? null,
+        currentValue: goal.currentValue ?? null,
+        currentValueAt: iso(goal.currentValueAt),
+        deadline: iso(goal.deadline),
+        criteria: goal.criteria ?? null,
+        resolvedScore: goal.resolvedScore ?? null,
+        dodCriteria: (goal.dodCriteria ?? null) as IntegrationGoalDto['dodCriteria'],
+        progress: goalProgress(goal),
+        missionIds: unique(missionLinks.map((link) => link.missionId)),
+        primaryMissionId: primary?.missionId ?? null,
+        assignedAgentId: goal.assignedAgentId ?? null,
+        activeAgentId: goal.activeAgentId ?? null,
+        loop: {
+            status: goal.loopStatus ?? null,
+            iteration: Number(goal.iteration) || 0,
+            spentCents: Number(goal.spentCents) || 0,
+        },
+        archivedAt: iso(goal.archivedAt),
+        webUrl: webUrl(`/goals/${goal.id}`),
+    };
+    return { dto, tenantId: goal.tenantId ?? null, organizationId: goal.organizationId ?? null };
+}
+
+/**
+ * The Mission's integration DTO (plan D3b: a Gauzy Strategic Initiative) with its
+ * Teams, Goal links (primary first) and typed Work links, or `null` when gone (EW-P2-5).
+ */
+export async function buildMissionSnapshot(
+    manager: EntityManager,
+    missionId: string,
+): Promise<AggregateSnapshot<IntegrationMissionDto> | null> {
+    const mission = await manager.getRepository(Mission).findOne({ where: { id: missionId } });
+    if (!mission) return null;
+    const [resourceTeams, goalLinks, workLinks] = await Promise.all([
+        teamResourceIds(manager, 'mission', missionId),
+        manager
+            .getRepository(MissionGoal)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+        manager
+            .getRepository(MissionWork)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const goals = [...goalLinks]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((link) => ({ goalId: link.goalId, isPrimary: link.isPrimary === true }));
+    const dto: IntegrationMissionDto = {
+        id: mission.id,
+        organizationId: mission.organizationId ?? '',
+        version: Number(mission.version) || 1,
+        createdAt: isoRequired(mission.createdAt),
+        updatedAt: isoRequired(mission.updatedAt ?? mission.createdAt),
+        ...recordVisibility(mission, teamIds),
+        owner: { type: 'user', id: mission.userId },
+        createdBy: p2CreatedBy(mission),
+        externalLinks: [],
+        teamIds,
+        title: mission.title,
+        description: mission.description,
+        type: mission.type as IntegrationMissionDto['type'],
+        status: mission.status as IntegrationMissionDto['status'],
+        outcome: (mission.outcome ?? null) as IntegrationMissionDto['outcome'],
+        completedAt: iso(mission.completedAt),
+        schedule: mission.schedule ?? null,
+        autoBuildWorks: mission.autoBuildWorks === true,
+        goals,
+        works: workLinks.map((link) => ({
+            workId: link.workId,
+            relation: link.relation as IntegrationMissionDto['works'][number]['relation'],
+        })),
+        sourceMissionId: mission.sourceMissionId ?? null,
+        webUrl: webUrl(`/missions/${mission.id}`),
+    };
+    return {
+        dto,
+        tenantId: mission.tenantId ?? null,
+        organizationId: mission.organizationId ?? null,
+    };
+}
+
 /** The work's integration DTO (members and repositories embedded), or `null` when gone. */
 export async function buildWorkSnapshot(
     manager: EntityManager,
@@ -416,7 +635,8 @@ export async function buildMemberSnapshot(
         organizationId: member.organizationId,
         userId: member.userId,
         username: user.username,
-        displayName: null,
+        // EW-P2-6 — the optional `users.displayName` (null = the username).
+        displayName: user.displayName ?? null,
         email: user.email ?? null,
         emailVerified: !!user.emailVerified,
         avatarUrl: user.avatar || null,
@@ -425,5 +645,89 @@ export async function buildMemberSnapshot(
         joinedAt: isoRequired(member.joinedAt),
         updatedAt: isoRequired(member.updatedAt ?? member.joinedAt),
         everIdSubjects: identities.map((row) => ({ issuer: row.issuer, subject: row.subject })),
+    };
+}
+
+/**
+ * EW-P3-1 — one inbox row as the integration DTO (`inbox.item.*` event
+ * `data`, `GET /inbox/items[/:id]`). Pure: the GET and the event of the same
+ * version are built by this one mapper, so they are identical. `sourceMeta`
+ * (fleet provenance: node names, branches, mount directories) is not exposed.
+ */
+export function toIntegrationInboxItemDto(row: InboxItem): IntegrationInboxItemDto {
+    const options = Array.isArray(row.options)
+        ? row.options.map((option) => {
+              const out: {
+                  id: string;
+                  label: string;
+                  description?: string;
+                  recommended?: boolean;
+              } = { id: option.id, label: option.label };
+              if (typeof option.description === 'string') out.description = option.description;
+              if (typeof option.recommended === 'boolean') out.recommended = option.recommended;
+              return out;
+          })
+        : null;
+    return {
+        id: row.id,
+        organizationId: row.organizationId ?? null,
+        version: Number(row.version) || 1,
+        createdAt: isoRequired(row.createdAt),
+        updatedAt: isoRequired(row.updatedAt ?? row.createdAt),
+        recipientUserId: row.userId,
+        kind: row.kind,
+        title: row.title,
+        body: row.body,
+        options,
+        sourceType: row.sourceType,
+        status: row.status,
+        unread: !!row.unread,
+        answeredAt: iso(row.answeredAt),
+        answerText: row.answerText ?? null,
+        answerOptionId: row.answerOptionId ?? null,
+        agentId: row.agentId ?? null,
+        agentRunId: row.agentRunId ?? null,
+        taskId: row.taskId ?? null,
+        workId: row.workId ?? null,
+        escalationId: row.escalationId ?? null,
+        proposalId: row.proposalId ?? null,
+        // The Inbox deep link the bell and channel messages use (`/inbox?id=`).
+        webUrl: webUrl(`/inbox?id=${encodeURIComponent(row.id)}`),
+    };
+}
+
+/**
+ * EW-P3-1 — `inbox_item` snapshot. The tenant is the row's own, else its
+ * organization's (inbox rows written before tenancy stamping carry only the
+ * organization), else `null` (a personal-scope message: recorded for
+ * in-process listeners, never served to integrations).
+ *
+ * Recorded `recipient` ({@link RECIPIENT_EVENT_VISIBILITY}): an inbox item is
+ * ONE person's message (the question an agent asked them, their approval, their
+ * answer). An ordinary organization event would reach every key with
+ * `events:read` on the organization and every webhook on it. A `recipient`
+ * event reaches only an integration key that also holds `inbox:read` (the
+ * scope that reads every recipient's messages through `GET /inbox/items`), and
+ * never a user-owned webhook subscription; in-process listeners get them all.
+ * (It was recorded `private` until those routes existed, #2644.)
+ */
+export async function buildInboxItemSnapshot(
+    manager: EntityManager,
+    id: string,
+): Promise<AggregateSnapshot<IntegrationInboxItemDto> | null> {
+    const row = await manager.getRepository(InboxItem).findOne({ where: { id } });
+    if (!row) return null;
+    let tenantId = row.tenantId ?? null;
+    if (!tenantId && row.organizationId) {
+        const org = await manager
+            .getRepository(Organization)
+            .findOne({ where: { id: row.organizationId } });
+        tenantId = org?.tenantId ?? null;
+    }
+    return {
+        dto: toIntegrationInboxItemDto(row),
+        tenantId,
+        organizationId: row.organizationId ?? null,
+        visibility: RECIPIENT_EVENT_VISIBILITY,
     };
 }

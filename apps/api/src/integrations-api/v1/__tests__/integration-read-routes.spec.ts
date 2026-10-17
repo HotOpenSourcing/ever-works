@@ -114,6 +114,7 @@ describe('integration API v1 read routes', () => {
             keyId: 'k-1',
             allowedOrganizationIds: ['org-1', 'org-2'],
             integrationKind: 'ever-gauzy',
+            scopes: ['events:read', 'inbox:read'],
         };
         const user = { userId: 'u-1', authMethod: 'integration', integration: principal } as never;
         const page = { events: [], nextCursor: null, hasMore: false, head: '7' };
@@ -133,6 +134,8 @@ describe('integration API v1 read routes', () => {
                 limit: 100,
                 types: ['task.*'],
                 excludeOrigins: ['gauzy:conn-1'],
+                // The key's scopes gate the recipient-scoped domains (inbox, email).
+                grantedScopes: ['events:read', 'inbox:read'],
             });
             scope.getScope.mockReturnValue({ tenantId: 't', organizationId: 'org-2' });
             await controller.events(user);

@@ -130,6 +130,9 @@ export interface TaskLinkedPullRequest {
 // keeps the claim-filter cheap on both drivers (a partial index would
 // be Postgres-only, and this table is small enough not to need one).
 @Index('idx_tasks_scheduled_due', ['scheduledAt', 'scheduleClaimedAt'])
+// EW-P2-3 — the due-soon scan walks rows with a `dueAt` inside the window that
+// have not been noticed yet. Shipped by 1795110000000-AddTaskDatesAndEstimate.
+@Index('idx_tasks_due_soon', ['dueAt', 'dueSoonNotifiedAt'])
 export class Task {
     @PrimaryGeneratedColumn('uuid')
     id: string;
@@ -552,6 +555,31 @@ export class Task {
      */
     @PortableDateColumn({ nullable: true })
     scheduleClaimedAt?: Date | null;
+
+    // ── Planning dates + estimate (EW-P2-3) ────────────────────────
+    /**
+     * When the Task is due. Planning only: nothing runs at this instant
+     * (that is `scheduledAt`). Drives the `task_due_soon` notice. NULL = no
+     * due date. Maps Ever Gauzy's `dueDate` one to one.
+     */
+    @PortableDateColumn({ nullable: true })
+    dueAt?: Date | null;
+
+    /** When work on the Task is planned to start (planning only). NULL = unset. */
+    @PortableDateColumn({ nullable: true })
+    startAt?: Date | null;
+
+    /** Estimated effort in whole minutes (0..525600, one year). NULL = no estimate. */
+    @Column({ type: 'int', nullable: true })
+    estimateMinutes?: number | null;
+
+    /**
+     * When the `task_due_soon` notice went out for the CURRENT `dueAt`.
+     * The due-soon scan CAS-claims it so two ticks never notify twice;
+     * changing `dueAt` clears it so the new date is noticed again.
+     */
+    @PortableDateColumn({ nullable: true })
+    dueSoonNotifiedAt?: Date | null;
 
     /**
      * Keep this Task off the Kanban board and the default Task lists.

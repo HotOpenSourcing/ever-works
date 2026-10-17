@@ -972,7 +972,13 @@ export class WorkLifecycleService {
      */
     async createProjectWork(
         user: User,
-        params: { name: string; slug: string; description?: string },
+        params: {
+            name: string;
+            slug: string;
+            description?: string;
+            /** Gauzy CR-6 — the project's website (`projectUrl`), optional. */
+            website?: string | null;
+        },
     ): Promise<Work> {
         if (!config.everWorks.projectWorks.enabled()) {
             throw new BadRequestException({
@@ -991,6 +997,7 @@ export class WorkLifecycleService {
             status: 'active',
             deployProvider: null,
         };
+        if (params.website) workData.website = params.website;
 
         try {
             const created = await this.workRepository.create(workData, user);

@@ -320,6 +320,8 @@ export const GOAL_EXECUTION_TARGETS: readonly GoalExecutionTarget[] = ['cloud', 
  */
 @Entity({ name: 'goals' })
 @Index('idx_goals_org_visibility', ['organizationId', 'visibility'])
+// Integration API v1 keyset lists (EW-P2, migration 1795120000000-AddP2IntegrationKeysetIndexes).
+@Index('idx_goals_org_updated', ['organizationId', 'updatedAt', 'id'])
 @Index('idx_goals_user_status', ['userId', 'status'])
 @Index('idx_goals_status_next_check', ['status', 'nextCheckAt'])
 // Autonomy layer — the orchestrator's due-scan predicate. NULL loopStatus
@@ -610,6 +612,25 @@ export class Goal {
      */
     @Column({ type: 'boolean', default: false })
     visibilityExplicit: boolean;
+
+    /**
+     * Aggregate version for event ordering (integration plan EW-P2, `docs/specs/features/domain-events/spec.md`
+     * §4; migration 1795100000000-AddP2AggregateSyncColumns). Starts at 1 and is bumped by `bumpAggregateVersion` at every recorded
+     * change. A plain column on purpose, NOT `@VersionColumn` (see `Task.version`).
+     */
+    @Column({ type: 'int', default: 1 })
+    version: number;
+
+    /**
+     * Who created the record when it was not the owning user (migration 1795100000000-AddP2AggregateSyncColumns):
+     * `integration` + the integration key id for an integration write (EW-P2). NULL =
+     * the owner created it.
+     */
+    @Column({ type: 'varchar', length: 16, nullable: true })
+    createdByType?: 'user' | 'agent' | 'integration' | null;
+
+    @Column({ type: 'varchar', length: 64, nullable: true })
+    createdById?: string | null;
 
     @CreateDateColumn()
     createdAt: Date;
