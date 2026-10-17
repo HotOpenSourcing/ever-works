@@ -29,6 +29,12 @@ export interface PublishOptions {
     readonly previous?: Record<string, unknown>;
     /** Overrides the request context's actor (e.g. a cron's system actor). */
     readonly actor?: DomainEventActor;
+    /**
+     * Child events only: the event's visibility instead of the parent's. `'private'`
+     * keeps it off the integration feed and webhooks v2, e.g. a Team's
+     * `team.resource.*` link to a private record (review 2026-10-17 F4).
+     */
+    readonly visibility?: string | null;
 }
 
 type Builder = (manager: EntityManager, id: string) => Promise<AggregateSnapshot<object> | null>;
@@ -182,9 +188,11 @@ export class DomainEventPublisher {
             previous: options.previous,
             actor: options.actor,
             visibility:
-                snapshot.visibility !== undefined
-                    ? snapshot.visibility
-                    : ((snapshot.dto as { visibility?: string }).visibility ?? null),
+                options.visibility !== undefined
+                    ? options.visibility
+                    : snapshot.visibility !== undefined
+                      ? snapshot.visibility
+                      : ((snapshot.dto as { visibility?: string }).visibility ?? null),
         });
         return version;
     }

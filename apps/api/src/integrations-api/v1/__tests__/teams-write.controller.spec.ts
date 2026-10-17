@@ -204,10 +204,14 @@ describe('IntegrationTeamsWriteController', () => {
             res(),
         );
         expect(teamResources.detach).toHaveBeenCalledWith(ORG, 'team-1', 'work', 'w-1');
-        expect(teamResources.attach).toHaveBeenCalledWith('owner-1', ORG, 'team-1', {
-            resourceType: 'agent',
-            resourceId: 'ag-9',
-        });
+        // Review 2026-10-17 F4: attached as an integration (a private record answers 404).
+        expect(teamResources.attach).toHaveBeenCalledWith(
+            'owner-1',
+            ORG,
+            'team-1',
+            { resourceType: 'agent', resourceId: 'ag-9' },
+            { viewer: { kind: 'integration' } },
+        );
         expect(teamResources.attach).toHaveBeenCalledTimes(1);
         await expect(
             controller.resourcesSet(

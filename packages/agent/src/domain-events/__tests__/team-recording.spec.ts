@@ -1,22 +1,32 @@
 import { randomUUID } from 'node:crypto';
+import { NotFoundException } from '@nestjs/common';
 import type { DataSource } from 'typeorm';
 import { Agent } from '../../entities/agent.entity';
 import { DomainEvent } from '../../entities/domain-event.entity';
 import { Mission } from '../../entities/mission.entity';
 import { Organization } from '../../entities/organization.entity';
+import { OrganizationMember } from '../../entities/organization-member.entity';
 import { Task } from '../../entities/task.entity';
+import { TaskApprover } from '../../entities/task-approver.entity';
+import { TaskAssignee } from '../../entities/task-assignee.entity';
+import { TaskReviewer } from '../../entities/task-reviewer.entity';
+import { TaskWatcher } from '../../entities/task-watcher.entity';
 import { Team } from '../../entities/team.entity';
 import { TeamMember } from '../../entities/team-member.entity';
 import { TeamResource } from '../../entities/team-resource.entity';
+import { Tenant } from '../../entities/tenant.entity';
 import { User } from '../../entities/user.entity';
 import { Work } from '../../entities/work.entity';
+import { WorkMember } from '../../entities/work-member.entity';
 import { WorkProposal } from '../../entities/work-proposal.entity';
 import { TeamResourcesService } from '../../teams/team-resources.service';
 import { TeamsService } from '../../teams/teams.service';
+import { RecordAccessPolicy } from '../../record-visibility/record-access-policy.service';
 import { RecordVisibilityService } from '../../record-visibility/record-visibility.service';
 import { Goal } from '../../entities/goal.entity';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
+import { buildTeamSnapshot } from '../domain-event-snapshots';
 import {
     catalogDataValidator,
     createDomainEventsDataSource,
@@ -220,6 +230,129 @@ describe('team recording points', () => {
         expect(recorded[3].data).toMatchObject({ teamIds: [], visibility: 'organization' });
         for (const event of recorded) expectValid(event);
         expect(await versionOf(Task, TASK)).toBe(3);
+    });
+
+    describe('private records on a Team (review 2026-10-17 F4)', () => {
+        const OTHER = randomUUID();
+        const repo = <T extends object>(entity: new () => T) => dataSource.getRepository(entity);
+        const policy = () =>
+            new RecordAccessPolicy(
+                repo(OrganizationMember),
+                repo(Organization),
+                repo(Tenant),
+                repo(TeamMember),
+                repo(Team),
+                repo(WorkMember),
+                repo(Work),
+                repo(TaskAssignee),
+                repo(TaskApprover),
+                repo(TaskReviewer),
+                repo(TaskWatcher),
+                repo(Task),
+                repo(Goal),
+                repo(Mission),
+                repo(WorkProposal),
+                repo(Agent),
+            );
+        const withPolicy = () =>
+            new TeamResourcesService(
+                repo(TeamResource),
+                repo(Team),
+                repo(Organization),
+                repo(Work),
+                repo(Agent),
+                repo(Mission),
+                repo(WorkProposal),
+                repo(Task),
+                new DomainEventPublisher(new DomainEventRecorder(), dataSource),
+                repo(Goal),
+                new RecordVisibilityService(dataSource, new DomainEventRecorder()),
+                policy(),
+            );
+        const makePrivate = () =>
+            repo(Task).update({ id: TASK }, { visibility: 'private', visibilityExplicit: true });
+        const listed = async (
+            service: TeamResourcesService,
+            teamId: string,
+            viewer?: Parameters<TeamResourcesService['listForTeam']>[2],
+        ) => (await service.listForTeam(ORG_A, teamId, viewer)).task.map((item) => item.resourceId);
+
+        beforeEach(async () => {
+            await dataSource.query('DELETE FROM "organization_members"');
+            await repo(OrganizationMember).insert({
+                organizationId: ORG_A,
+                tenantId: TENANT,
+                userId: OTHER,
+                role: 'member',
+                invitedById: null,
+                invitationId: null,
+                joinedAt: new Date(),
+            } as unknown as OrganizationMember);
+        });
+
+        it('lists a private task to its owner only, never to an integration', async () => {
+            const team = await newTeam();
+            const service = withPolicy();
+            await service.attach(OWNER, ORG_A, team.id, { resourceType: 'task', resourceId: TASK });
+            await makePrivate();
+
+            expect(await listed(service, team.id, { kind: 'user', userId: OWNER })).toEqual([TASK]);
+            expect(await listed(service, team.id, { kind: 'user', userId: OTHER })).toEqual([]);
+            expect(await listed(service, team.id, { kind: 'integration' })).toEqual([]);
+            // No viewer (and no read policy): a private record is still never listed.
+            expect(await listed(resources, team.id)).toEqual([]);
+        });
+
+        it('lists a Team-only task only to a member of a Team that reaches it', async () => {
+            const team = await newTeam();
+            const service = withPolicy();
+            await service.attach(OWNER, ORG_A, team.id, { resourceType: 'task', resourceId: TASK });
+            // Automatic visibility: the task's first Team made it `team`.
+            expect((await repo(Task).findOneByOrFail({ id: TASK })).visibility).toBe('team');
+            expect(await listed(service, team.id, { kind: 'user', userId: OTHER })).toEqual([]);
+            expect(await listed(service, team.id, { kind: 'integration' })).toEqual([TASK]);
+
+            await repo(TeamMember).insert({
+                teamId: team.id,
+                memberType: 'user',
+                memberId: OTHER,
+                tenantId: TENANT,
+                organizationId: ORG_A,
+            } as unknown as TeamMember);
+            expect(await listed(withPolicy(), team.id, { kind: 'user', userId: OTHER })).toEqual([
+                TASK,
+            ]);
+        });
+
+        it("keeps a private record out of the Team DTO and off the feed, and an integration can't attach it", async () => {
+            const team = await newTeam();
+            await makePrivate();
+            await expect(
+                resources.attach(
+                    OWNER,
+                    ORG_A,
+                    team.id,
+                    { resourceType: 'task', resourceId: TASK },
+                    { viewer: { kind: 'integration' } },
+                ),
+            ).rejects.toBeInstanceOf(NotFoundException);
+
+            // The owner may still put their private task on a Team.
+            await resources.attach(OWNER, ORG_A, team.id, {
+                resourceType: 'task',
+                resourceId: TASK,
+            });
+            const added = (await events()).find((event) => event.type === 'team.resource.added');
+            expect(added?.visibility).toBe('private');
+            const snapshot = await buildTeamSnapshot(dataSource.manager, team.id);
+            expect(snapshot?.dto.resources).toEqual([]);
+
+            await resources.detach(ORG_A, team.id, 'task', TASK);
+            const removed = (await events()).find(
+                (event) => event.type === 'team.resource.removed',
+            );
+            expect(removed?.visibility).toBe('private');
+        });
     });
 
     it('delete records a team.deleted tombstone at a version claimed before the delete', async () => {
