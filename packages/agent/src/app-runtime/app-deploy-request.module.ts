@@ -16,6 +16,7 @@ import {
 import { buildAppDeployDispatcherProviders } from './app-deploy-dispatcher.provider';
 import { APP_DEPLOY_DEPLOYMENT_STORE, AppDeployRequestService } from './app-deploy-request.service';
 import { AppLicenseGate } from './app-license-gate';
+import { AppLicenseModule } from '../app-license/app-license.module';
 import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
@@ -169,6 +170,10 @@ import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runti
         // visible HERE (see the docstring's "bound by IMPORT" section).
         AppRuntimeEnvModule,
         AppDependenciesModule,
+        // APW-03 T42 — `APP_LICENSE_SERVICE` for the `AppLicenseGate` declared
+        // below (bound by IMPORT, same rule). Unbound, every your-cluster deploy ran
+        // with `license_eligibility_unavailable` and the managed target was refused.
+        AppLicenseModule,
     ],
     providers: [
         AppDeployPreconditionsService,
