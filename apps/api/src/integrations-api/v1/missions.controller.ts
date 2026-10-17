@@ -17,7 +17,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
     ArrayMaxSize,
@@ -84,36 +84,60 @@ const OUTCOMES = ['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'su
 
 /** Contract v1 `requests.schema.json#/$defs/CreateMission` (always created `paused`). */
 export class IntegrationCreateMissionDto {
+    @ApiProperty({ minLength: 1, maxLength: 200 })
     @IsString()
     @Length(1, 200)
     title!: string;
 
+    @ApiProperty({ minLength: 1, maxLength: 100000 })
     @IsString()
     @Length(1, 100_000)
     description!: string;
 
     /** `one-shot` (default) or `scheduled` (needs `schedule`). Paused either way. */
+    @ApiProperty({
+        required: false,
+        enum: ['one-shot', 'scheduled'],
+        description:
+            'Default one-shot. A scheduled Mission needs `schedule` and ticks only once a person resumes it.',
+    })
     @IsOptional()
     @IsIn(['one-shot', 'scheduled'])
     type?: 'one-shot' | 'scheduled';
 
     /** The cron of a `scheduled` Mission; it ticks only once a person resumes it. */
+    @ApiProperty({ required: false, nullable: true, minLength: 1, maxLength: 64 })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsString()
     @Length(1, 64)
     schedule?: string | null;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 
+    @ApiProperty({ required: false, type: () => IntegrationExternalRefDto })
     @IsOptional()
     @ValidateNested()
     @Type(() => IntegrationExternalRefDto)
@@ -126,40 +150,70 @@ export class IntegrationCreateMissionDto {
  * (D9: only a person resumes a Mission in Ever Works).
  */
 export class IntegrationUpdateMissionDto {
+    @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
     @IsOptional()
     @IsString()
     @Length(1, 200)
     title?: string;
 
+    @ApiProperty({ required: false, minLength: 1, maxLength: 100000 })
     @IsOptional()
     @IsString()
     @Length(1, 100_000)
     description?: string;
 
+    @ApiProperty({
+        required: false,
+        enum: ['paused', 'completed', 'failed'],
+        description:
+            '`active` answers 422 domain_rule: a person resumes a Mission in Ever Works (D9).',
+    })
     @IsOptional()
     @IsString()
     status?: string;
 
+    @ApiProperty({
+        required: false,
+        nullable: true,
+        enum: ['succeeded', 'partially_succeeded', 'failed', 'cancelled', 'superseded'],
+        description: "Only with status 'completed'.",
+    })
     @IsOptional()
     @ValidateIf((_, value) => value !== null)
     @IsIn(OUTCOMES)
     outcome?: (typeof OUTCOMES)[number] | null;
 
+    @ApiProperty({
+        required: false,
+        type: [String],
+        format: 'uuid',
+        maxItems: 50,
+        description:
+            'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
+    })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
     teamIds?: string[];
 
+    @ApiProperty({
+        required: false,
+        enum: ['team', 'organization'],
+        description:
+            'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
+    })
     @IsOptional()
     @IsString()
     visibility?: string;
 }
 
 export class IntegrationMissionGoalLinkDto {
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     goalId!: string;
 
+    @ApiProperty({ required: false, type: Boolean })
     @IsOptional()
     @IsBoolean()
     isPrimary?: boolean;
@@ -167,6 +221,7 @@ export class IntegrationMissionGoalLinkDto {
 
 /** `PUT /missions/:id/goals` — the full set of Goal links (at most one primary). */
 export class IntegrationPutMissionGoalsDto {
+    @ApiProperty({ type: () => [IntegrationMissionGoalLinkDto], maxItems: 100 })
     @IsArray()
     @ArrayMaxSize(100)
     @ValidateNested({ each: true })
@@ -175,15 +230,18 @@ export class IntegrationPutMissionGoalsDto {
 }
 
 export class IntegrationMissionWorkLinkDto {
+    @ApiProperty({ format: 'uuid' })
     @IsUUID()
     workId!: string;
 
+    @ApiProperty({ enum: ['created', 'improves', 'operates', 'markets', 'researches', 'retires'] })
     @IsIn(WORK_RELATIONS)
     relation!: (typeof WORK_RELATIONS)[number];
 }
 
 /** `PUT /missions/:id/works` — the full set of typed Work links. */
 export class IntegrationPutMissionWorksDto {
+    @ApiProperty({ type: () => [IntegrationMissionWorkLinkDto], maxItems: 100 })
     @IsArray()
     @ArrayMaxSize(100)
     @ValidateNested({ each: true })
