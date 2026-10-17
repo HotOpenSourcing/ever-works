@@ -88,7 +88,10 @@ export class WorkAppLicenseController {
     })
     @ApiParam({ name: 'id', description: 'Work ID' })
     @ApiResponse({ status: 200, description: '`WorkAppLicenseView`.' })
-    @ApiResponse({ status: 404, description: '`not_found` — missing, invisible or another account’s.' })
+    @ApiResponse({
+        status: 404,
+        description: '`not_found` — missing, invisible or another account’s.',
+    })
     @ApiResponse({ status: 422, description: '`notAnAppWork`.' })
     async read(
         @CurrentUser() auth: AuthenticatedUser,
@@ -116,7 +119,9 @@ export class WorkAppLicenseController {
             scanIncomplete: state?.licenseScanIncomplete === true,
             obligations: state?.licenseObligations ?? [],
             commitSha: state?.licenseCommitSha ?? null,
-            evaluatedAt: state?.licenseEvaluatedAt ? new Date(state.licenseEvaluatedAt).toISOString() : null,
+            evaluatedAt: state?.licenseEvaluatedAt
+                ? new Date(state.licenseEvaluatedAt).toISOString()
+                : null,
             attestationRequired: effectiveClass !== 'green' && !covered,
             attestation,
             attestationText: text ? { textId: text.textId, text: text.text } : null,
@@ -134,7 +139,11 @@ export class WorkAppLicenseController {
                 const status = error.getStatus();
                 if (status === HttpStatus.NOT_FOUND || status === HttpStatus.FORBIDDEN) {
                     throw new HttpException(
-                        { status: 'error', code: 'not_found', message: `Work ${workId} not found.` },
+                        {
+                            status: 'error',
+                            code: 'not_found',
+                            message: `Work ${workId} not found.`,
+                        },
                         HttpStatus.NOT_FOUND,
                     );
                 }

@@ -31,7 +31,12 @@ export class AddTaskReviewRejectionSourceKey1795162000000 implements MigrationIn
         if (!rejections.findColumnByName('sourceKey')) {
             await queryRunner.addColumn(
                 'task_review_rejections',
-                new TableColumn({ name: 'sourceKey', type: 'varchar', length: '120', isNullable: true }),
+                new TableColumn({
+                    name: 'sourceKey',
+                    type: 'varchar',
+                    length: '120',
+                    isNullable: true,
+                }),
             );
         }
         // Re-read: the sqlite driver rebuilds the table on addColumn.

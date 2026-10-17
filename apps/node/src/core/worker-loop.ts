@@ -782,7 +782,10 @@ export class WorkerLoop {
 	 * `null` / absent (an API older than the field) changes nothing.
 	 */
 	syncModelThrottles(
-		server: ReadonlyArray<{ provider?: unknown; window?: unknown; until?: unknown; reason?: unknown }> | null | undefined,
+		server:
+			| ReadonlyArray<{ provider?: unknown; window?: unknown; until?: unknown; reason?: unknown }>
+			| null
+			| undefined,
 		graceMs = MODEL_THROTTLE_SYNC_GRACE_MS
 	): void {
 		if (!Array.isArray(server)) return;

@@ -9,7 +9,13 @@ import { cn } from '@/lib/utils/cn';
 import { ChatAboutButton } from '@/components/ai/conversations/ConversationEntryButtons';
 
 /** The App spec states the card names; anything else reads "Not checked yet". */
-const APP_SPEC_STATUS_LEAVES = new Set(['valid', 'valid_with_warnings', 'invalid', 'missing', 'unreadable']);
+const APP_SPEC_STATUS_LEAVES = new Set([
+    'valid',
+    'valid_with_warnings',
+    'invalid',
+    'missing',
+    'unreadable',
+]);
 
 export type AppSpecStatusLeaf =
     | 'valid'
@@ -49,7 +55,12 @@ const value = 'font-medium text-text dark:text-text-dark';
  * evolve the app by chatting with the Work's agent (APW-08; the Conversation
  * opens docked, with this Work attached as its context).
  */
-export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }: AppWorkOverviewCardProps) {
+export function AppWorkOverviewCard({
+    workId,
+    workName,
+    upstreamState,
+    appSpec,
+}: AppWorkOverviewCardProps) {
     const t = useTranslations('dashboard.workDetail.appSource.overview');
     const tChat = useTranslations('dashboard.workDetail.appSource.chat');
 
@@ -68,12 +79,19 @@ export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }
             )}
         >
             <div className="flex items-center gap-2">
-                <AppWindow className="h-4 w-4 text-fuchsia-600 dark:text-fuchsia-300" aria-hidden="true" />
-                <h2 className="text-base font-semibold text-text dark:text-text-dark">{t('title')}</h2>
+                <AppWindow
+                    className="h-4 w-4 text-fuchsia-600 dark:text-fuchsia-300"
+                    aria-hidden="true"
+                />
+                <h2 className="text-base font-semibold text-text dark:text-text-dark">
+                    {t('title')}
+                </h2>
             </div>
 
             {!upstreamState && (
-                <p className="text-sm text-text-secondary dark:text-text-secondary-dark">{t('unavailable')}</p>
+                <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
+                    {t('unavailable')}
+                </p>
             )}
 
             <dl className="divide-y divide-border/60 dark:divide-border-dark/60">
@@ -81,7 +99,12 @@ export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }
                     <div className={row}>
                         <dt className={label}>{t('repository')}</dt>
                         <dd className={value}>
-                            <a href={repo.url} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                            <a
+                                href={repo.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="hover:underline"
+                            >
                                 {repo.owner}/{repo.repo}
                             </a>
                         </dd>
@@ -99,7 +122,12 @@ export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }
                     <div className={row}>
                         <dt className={label}>{t('upstream')}</dt>
                         <dd className={value}>
-                            <a href={upstream.url} target="_blank" rel="noreferrer noopener" className="hover:underline">
+                            <a
+                                href={upstream.url}
+                                target="_blank"
+                                rel="noreferrer noopener"
+                                className="hover:underline"
+                            >
                                 {upstream.owner}/{upstream.repo}
                             </a>
                         </dd>
@@ -115,13 +143,20 @@ export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }
                 )}
                 <div className={row}>
                     <dt className={label}>{t('appSpecLabel')}</dt>
-                    <dd className={cn(value, 'flex flex-wrap items-baseline gap-2')} data-testid="app-work-overview-spec">
+                    <dd
+                        className={cn(value, 'flex flex-wrap items-baseline gap-2')}
+                        data-testid="app-work-overview-spec"
+                    >
                         <span>{t(`appSpecStatus.${specLeaf}`)}</span>
-                        {appSpec && (specLeaf === 'invalid' || specLeaf === 'valid_with_warnings') && (
-                            <span className="text-xs font-normal text-text-secondary dark:text-text-secondary-dark">
-                                {t('appSpecIssues', { errors: appSpec.errorCount, warnings: appSpec.warningCount })}
-                            </span>
-                        )}
+                        {appSpec &&
+                            (specLeaf === 'invalid' || specLeaf === 'valid_with_warnings') && (
+                                <span className="text-xs font-normal text-text-secondary dark:text-text-secondary-dark">
+                                    {t('appSpecIssues', {
+                                        errors: appSpec.errorCount,
+                                        warnings: appSpec.warningCount,
+                                    })}
+                                </span>
+                            )}
                         <Link
                             href={ROUTES.DASHBOARD_WORK_SETTINGS_APP_SPEC(workId)}
                             className="text-xs font-medium underline"
@@ -169,9 +204,13 @@ export function AppWorkOverviewCard({ workId, workName, upstreamState, appSpec }
             >
                 <div className="flex items-center gap-2">
                     <MessageSquare className="h-4 w-4 text-text-secondary" aria-hidden="true" />
-                    <h3 className="text-sm font-semibold text-text dark:text-text-dark">{tChat('title')}</h3>
+                    <h3 className="text-sm font-semibold text-text dark:text-text-dark">
+                        {tChat('title')}
+                    </h3>
                 </div>
-                <p className="text-xs text-text-secondary dark:text-text-secondary-dark">{tChat('body')}</p>
+                <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
+                    {tChat('body')}
+                </p>
                 {/* Opens the docked Conversation's participant switcher with this
                     Work attached, so the Work's agent works in its repository.
                     Renders nothing outside the dashboard chat shell. */}

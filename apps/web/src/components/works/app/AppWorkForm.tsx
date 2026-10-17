@@ -58,7 +58,11 @@ interface FormRefusal {
 
 /** The first owner the member can create in — the caller's own account comes first (FR-9). */
 function firstAvailableOwner(preview: AppSourceInspectResponse): string {
-    return preview.targetOwners.find((owner) => owner.available)?.login ?? preview.targetOwners[0]?.login ?? '';
+    return (
+        preview.targetOwners.find((owner) => owner.available)?.login ??
+        preview.targetOwners[0]?.login ??
+        ''
+    );
 }
 
 /** Format an ISO `retryAfter` as a local time for the `rate_limited` copy. */
@@ -88,7 +92,11 @@ function formatRetryAt(value: string | undefined): string | undefined {
  * Submitting is single-flight (ACC-01-08): a second click while the first create
  * is in flight does nothing.
  */
-export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprintId }: AppWorkFormProps) {
+export function AppWorkForm({
+    gitProvider,
+    initialRepositoryUrl,
+    initialBlueprintId,
+}: AppWorkFormProps) {
     const t = useTranslations('dashboard.workCreation.app');
     const tReason = useTranslations('dashboard.workCreation.app.reasons');
     const router = useRouter();
@@ -100,7 +108,9 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
     const inspectTicket = useRef(0);
 
     const seed =
-        initialRepositoryUrl && parseRepositoryUrl(initialRepositoryUrl) ? initialRepositoryUrl.trim() : '';
+        initialRepositoryUrl && parseRepositoryUrl(initialRepositoryUrl)
+            ? initialRepositoryUrl.trim()
+            : '';
 
     const [tab, setTab] = useState<'paste' | 'catalog'>('paste');
     const [repositoryUrl, setRepositoryUrl] = useState(seed);
@@ -125,7 +135,8 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
     const blueprintMatched = preview?.blueprint.status === 'matched';
     // The id the submit carries: the catalog pick, else the preview's match.
     const blueprintId =
-        initialBlueprintId || (blueprintMatched && preview?.blueprint.id ? preview.blueprint.id : undefined);
+        initialBlueprintId ||
+        (blueprintMatched && preview?.blueprint.id ? preview.blueprint.id : undefined);
     const prompts = blueprintMatched ? (preview?.blueprint.prompts ?? []) : [];
     // The provisioning switch is offered only when no Blueprint applies (spec §6.2).
     const showAutoProvision = Boolean(preview) && !blueprintMatched && !initialBlueprintId;
@@ -152,7 +163,9 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
             ...(refusal.details?.owner ? { owner: refusal.details.owner } : {}),
             ...(refusal.details?.fullName ? { fullName: refusal.details.fullName } : {}),
             ...(refusal.details?.workName ? { workName: refusal.details.workName } : {}),
-            ...(refusal.details?.retryAfter ? { time: formatRetryAt(refusal.details.retryAfter) } : {}),
+            ...(refusal.details?.retryAfter
+                ? { time: formatRetryAt(refusal.details.retryAfter) }
+                : {}),
         });
 
     const refusalText = (refusal: FormRefusal | null): string | null => {
@@ -202,7 +215,11 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
             if (ticket !== inspectTicket.current) return;
             if (!result.success) {
                 setPreview(null);
-                setInspectRefusal({ code: result.code, details: result.details, message: result.error });
+                setInspectRefusal({
+                    code: result.code,
+                    details: result.details,
+                    message: result.error,
+                });
                 return;
             }
             const next = result.data;
@@ -230,7 +247,10 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
     const ownerOk = !ownerNeeded || Boolean(selectedOwner?.available);
     const targetOk =
         deployTarget === 'none' ||
-        Boolean(preview?.deployTargets[deployTarget]?.available && preview.deployTargets[deployTarget].providerId);
+        Boolean(
+            preview?.deployTargets[deployTarget]?.available &&
+            preview.deployTargets[deployTarget].providerId,
+        );
     const canSubmit =
         Boolean(preview) &&
         !submitting &&
@@ -248,7 +268,9 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
         setCreateRefusal(null);
         try {
             const providerId =
-                deployTarget === 'none' ? undefined : preview.deployTargets[deployTarget]?.providerId;
+                deployTarget === 'none'
+                    ? undefined
+                    : preview.deployTargets[deployTarget]?.providerId;
             const result = await createWork({
                 name: name.trim(),
                 slug: slug.trim(),
@@ -269,7 +291,11 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
                 router.push(ROUTES.DASHBOARD_WORK(result.work.id));
                 return;
             }
-            const refusal: FormRefusal = { code: result.code, details: result.details, message: result.error };
+            const refusal: FormRefusal = {
+                code: result.code,
+                details: result.details,
+                message: result.error,
+            };
             setCreateRefusal(refusal);
             toast.error(refusalText(refusal) ?? t('createFailed'));
         } catch {
@@ -284,11 +310,14 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
     const setupNote = (() => {
         if (!preview || !mode) return null;
         if (mode === 'private-copy') return t('privateCopyTradeOff');
-        if (mode === 'link') return blueprintMatched ? t('linkSetupNoteBlueprint') : t('linkSetupNote');
+        if (mode === 'link')
+            return blueprintMatched ? t('linkSetupNoteBlueprint') : t('linkSetupNote');
         // A fork that already exists in the chosen account was not created by
         // this Work, so it gets a setup pull request (FR-19).
         if (selectedOwner?.existingFork) {
-            return blueprintMatched ? t('existingForkSetupNoteBlueprint') : t('existingForkSetupNote');
+            return blueprintMatched
+                ? t('existingForkSetupNoteBlueprint')
+                : t('existingForkSetupNote');
         }
         return null;
     })();
@@ -298,11 +327,18 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
     return (
         <div className="space-y-6" data-testid="app-work-form">
             <div>
-                <h1 className="text-3xl font-bold text-text dark:text-text-dark mb-2">{t('formTitle')}</h1>
-                <p className="text-text-secondary dark:text-text-secondary-dark">{t('formSubtitle')}</p>
+                <h1 className="text-3xl font-bold text-text dark:text-text-dark mb-2">
+                    {t('formTitle')}
+                </h1>
+                <p className="text-text-secondary dark:text-text-secondary-dark">
+                    {t('formSubtitle')}
+                </p>
             </div>
 
-            <div role="tablist" className="flex gap-2 border-b border-border dark:border-border-dark">
+            <div
+                role="tablist"
+                className="flex gap-2 border-b border-border dark:border-border-dark"
+            >
                 {(['paste', 'catalog'] as const).map((value) => (
                     <button
                         key={value}
@@ -355,7 +391,9 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
                                 onKeyDown={onUrlKeyDown}
                                 placeholder={t('urlPlaceholder')}
                                 helperText={t('urlHelp')}
-                                error={urlInvalid ? tReason('invalid_url', reasonParams) : undefined}
+                                error={
+                                    urlInvalid ? tReason('invalid_url', reasonParams) : undefined
+                                }
                                 variant="form"
                                 autoFocus
                                 data-testid="app-work-url"
@@ -374,7 +412,11 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
                     </div>
 
                     {inspectRefusal && (
-                        <p role="alert" className="text-sm text-red-600 dark:text-red-400" data-testid="app-work-inspect-error">
+                        <p
+                            role="alert"
+                            className="text-sm text-red-600 dark:text-red-400"
+                            data-testid="app-work-inspect-error"
+                        >
                             {refusalText(inspectRefusal)}
                         </p>
                     )}
@@ -419,10 +461,14 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
 
                             {prompts.length > 0 && (
                                 <AppBlueprintPrompts
-                                    blueprintName={preview.blueprint.name ?? preview.blueprint.id ?? ''}
+                                    blueprintName={
+                                        preview.blueprint.name ?? preview.blueprint.id ?? ''
+                                    }
                                     prompts={prompts}
                                     values={appEnv}
-                                    onChange={(key, value) => setAppEnv((prev) => ({ ...prev, [key]: value }))}
+                                    onChange={(key, value) =>
+                                        setAppEnv((prev) => ({ ...prev, [key]: value }))
+                                    }
                                     disabled={submitting}
                                 />
                             )}
@@ -502,12 +548,19 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
             )}
 
             {createRefusal && (
-                <p role="alert" className="text-sm text-red-600 dark:text-red-400" data-testid="app-work-create-error">
+                <p
+                    role="alert"
+                    className="text-sm text-red-600 dark:text-red-400"
+                    data-testid="app-work-create-error"
+                >
                     {refusalText(createRefusal)}
                 </p>
             )}
             {preview && promptsIncomplete && (
-                <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="app-work-prompts-incomplete">
+                <p
+                    className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                    data-testid="app-work-prompts-incomplete"
+                >
                     {t('promptsIncomplete')}
                 </p>
             )}

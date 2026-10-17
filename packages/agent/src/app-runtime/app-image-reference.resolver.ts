@@ -29,7 +29,10 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 
-import type { AppImageReferenceResolver, AppImageResolutionResult } from './app-deploy.orchestrator';
+import type {
+    AppImageReferenceResolver,
+    AppImageResolutionResult,
+} from './app-deploy.orchestrator';
 
 /** How long one registry request may take before the answer is `image_unresolvable`. */
 export const APP_IMAGE_RESOLVE_TIMEOUT_MS = 15_000;
@@ -97,7 +100,8 @@ export function parseImageReference(reference: string): ParsedImageReference | n
     }
 
     let repository = segments.join('/');
-    if (!repository || repository.length > 255 || !segments.every(isRepositoryComponent)) return null;
+    if (!repository || repository.length > 255 || !segments.every(isRepositoryComponent))
+        return null;
     if (registry === 'docker.io' && !repository.includes('/')) {
         repository = `library/${repository}`;
     }
@@ -142,7 +146,10 @@ export function parseBearerChallenge(
     return { realm: params.realm, service: params.service, scope: params.scope };
 }
 
-type FetchLike = (input: string, init?: Record<string, unknown>) => Promise<{
+type FetchLike = (
+    input: string,
+    init?: Record<string, unknown>,
+) => Promise<{
     status: number;
     ok: boolean;
     headers: { get(name: string): string | null };
@@ -188,7 +195,10 @@ export class RegistryAppImageReferenceResolver implements AppImageReferenceResol
             }
 
             if (answer.status === 404) {
-                return refused('image_not_found', `${parsed.name}:${target} does not exist in ${parsed.registry}.`);
+                return refused(
+                    'image_not_found',
+                    `${parsed.name}:${target} does not exist in ${parsed.registry}.`,
+                );
             }
             if (answer.status === 401 || answer.status === 403) {
                 return refused(
@@ -222,14 +232,14 @@ export class RegistryAppImageReferenceResolver implements AppImageReferenceResol
             this.logger.warn(
                 `Resolving ${parsed.name}:${target} for work ${input?.workId} failed: ${messageOf(error)}`,
             );
-            return refused('image_unresolvable', `The registry could not be reached: ${messageOf(error)}`);
+            return refused(
+                'image_unresolvable',
+                `The registry could not be reached: ${messageOf(error)}`,
+            );
         }
     }
 
-    private async head(
-        url: string,
-        token: string | null,
-    ): Promise<Awaited<ReturnType<FetchLike>>> {
+    private async head(url: string, token: string | null): Promise<Awaited<ReturnType<FetchLike>>> {
         return this.call(url, {
             method: 'HEAD',
             headers: {
@@ -258,7 +268,10 @@ export class RegistryAppImageReferenceResolver implements AppImageReferenceResol
         return typeof token === 'string' && token ? token : null;
     }
 
-    private async call(url: string, init: Record<string, unknown>): Promise<Awaited<ReturnType<FetchLike>>> {
+    private async call(
+        url: string,
+        init: Record<string, unknown>,
+    ): Promise<Awaited<ReturnType<FetchLike>>> {
         const fetchImpl: FetchLike =
             this.fetchImpl ?? ((globalThis as unknown as { fetch: FetchLike }).fetch as FetchLike);
         const controller = new AbortController();

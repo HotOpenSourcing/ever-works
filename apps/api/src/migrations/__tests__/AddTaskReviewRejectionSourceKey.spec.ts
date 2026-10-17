@@ -44,11 +44,15 @@ describe('AddTaskReviewRejectionSourceKey1795162000000', () => {
     it('adds a nullable sourceKey and refuses a second row for the same Task + source', async () => {
         await migration.up(dataSource.createQueryRunner());
 
-        const indexes = (await dataSource.query(`PRAGMA index_list("task_review_rejections")`)) as Array<{
+        const indexes = (await dataSource.query(
+            `PRAGMA index_list("task_review_rejections")`,
+        )) as Array<{
             name: string;
             unique: number;
         }>;
-        expect(indexes.find((index) => index.name === 'uq_task_review_rejection_task_source')?.unique).toBe(1);
+        expect(
+            indexes.find((index) => index.name === 'uq_task_review_rejection_task_source')?.unique,
+        ).toBe(1);
 
         await insert('a', 'issue_comment:42');
         await expect(insert('b', 'issue_comment:42')).rejects.toThrow(/UNIQUE/i);
@@ -56,14 +60,18 @@ describe('AddTaskReviewRejectionSourceKey1795162000000', () => {
         await insert('c', null);
         await insert('d', null);
         await insert('e', 'review:42');
-        expect(await dataSource.query(`SELECT COUNT(*) AS n FROM "task_review_rejections"`)).toEqual([{ n: 5 }]);
+        expect(
+            await dataSource.query(`SELECT COUNT(*) AS n FROM "task_review_rejections"`),
+        ).toEqual([{ n: 5 }]);
     });
 
     it('is idempotent and reversible', async () => {
         await migration.up(dataSource.createQueryRunner());
         await expect(migration.up(dataSource.createQueryRunner())).resolves.toBeUndefined();
         await migration.down(dataSource.createQueryRunner());
-        const columns = (await dataSource.query(`PRAGMA table_info("task_review_rejections")`)) as Array<{
+        const columns = (await dataSource.query(
+            `PRAGMA table_info("task_review_rejections")`,
+        )) as Array<{
             name: string;
         }>;
         expect(columns.some((column) => column.name === 'sourceKey')).toBe(false);

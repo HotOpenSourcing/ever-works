@@ -339,7 +339,9 @@ export class AppBuildSweepService {
                 discoveryBuildsCreated = found.buildsCreated;
             } catch (error) {
                 passesFailed += 1;
-                this.logger.warn(`App builds: the sweep's run discovery failed (${errorText(error)}).`);
+                this.logger.warn(
+                    `App builds: the sweep's run discovery failed (${errorText(error)}).`,
+                );
             }
         }
 
@@ -358,7 +360,9 @@ export class AppBuildSweepService {
             orphans = await this.orphanSecretPass(nowMs);
         } catch (error) {
             passesFailed += 1;
-            this.logger.warn(`App builds: the sweep's orphaned-secret read failed (${errorText(error)}).`);
+            this.logger.warn(
+                `App builds: the sweep's orphaned-secret read failed (${errorText(error)}).`,
+            );
         }
 
         return {
@@ -377,12 +381,16 @@ export class AppBuildSweepService {
     private async orphanSecretPass(
         nowMs: number,
     ): Promise<{ orphanSecretsRemoved: number; orphanSecretsFailed: number }> {
-        const orphans = await this.builds.findWithOrphanedVerifySecrets(nowMs, APP_BUILD_SWEEP_BATCH);
+        const orphans = await this.builds.findWithOrphanedVerifySecrets(
+            nowMs,
+            APP_BUILD_SWEEP_BATCH,
+        );
         let orphanSecretsRemoved = 0;
         let orphanSecretsFailed = 0;
         for (const build of orphans) {
             try {
-                if (await this.service.removeOrphanedVerifySecret(build.id)) orphanSecretsRemoved += 1;
+                if (await this.service.removeOrphanedVerifySecret(build.id))
+                    orphanSecretsRemoved += 1;
             } catch (error) {
                 orphanSecretsFailed += 1;
                 this.logger.warn(
@@ -408,7 +416,9 @@ export class AppBuildSweepService {
      * `dispatchWatch` falls back in process when no job runtime takes it, and the
      * watch runner's lease makes a repeated offer harmless.
      */
-    private async silentPass(nowMs: number): Promise<{ silentDispatched: number; silentFailed: number }> {
+    private async silentPass(
+        nowMs: number,
+    ): Promise<{ silentDispatched: number; silentFailed: number }> {
         const silent = await this.builds.findSilentNonTerminal(
             nowMs,
             APP_BUILD_POLL_AFTER_SILENCE_MS,

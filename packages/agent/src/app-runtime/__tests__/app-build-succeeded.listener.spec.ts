@@ -29,10 +29,7 @@ const payload = (over: Record<string, unknown> = {}) =>
         ...over,
     }) as never;
 
-function harness(
-    state: Record<string, unknown> | null,
-    rows: Array<Record<string, unknown>> = [],
-) {
+function harness(state: Record<string, unknown> | null, rows: Array<Record<string, unknown>> = []) {
     const request = jest.fn(async () => ({
         status: 'accepted' as const,
         httpStatus: 202,
@@ -76,7 +73,12 @@ describe('AppBuildSucceededListener (T35)', () => {
         expect(outcome).toMatchObject({ requested: true, trigger: 'build' });
         expect(request).toHaveBeenCalledTimes(1);
         expect(request).toHaveBeenCalledWith(
-            expect.objectContaining({ workId: 'w-1', trigger: 'build', buildId: 'b-1', userId: null }),
+            expect.objectContaining({
+                workId: 'w-1',
+                trigger: 'build',
+                buildId: 'b-1',
+                userId: null,
+            }),
         );
     });
 

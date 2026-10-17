@@ -545,7 +545,9 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
             ) =>
                 new AppBuildPullCredentialSource(
                     builds,
-                    works as unknown as ConstructorParameters<typeof AppBuildPullCredentialSource>[1],
+                    works as unknown as ConstructorParameters<
+                        typeof AppBuildPullCredentialSource
+                    >[1],
                     git,
                 ),
             inject: [

@@ -28,14 +28,22 @@ export function hasMissingRequiredPrompt(
  * answers travel write-only as `appEnv` on the create request and are never
  * echoed back by any read.
  */
-export function AppBlueprintPrompts({ blueprintName, prompts, values, onChange, disabled }: AppBlueprintPromptsProps) {
+export function AppBlueprintPrompts({
+    blueprintName,
+    prompts,
+    values,
+    onChange,
+    disabled,
+}: AppBlueprintPromptsProps) {
     const t = useTranslations('dashboard.workCreation.app');
     if (prompts.length === 0) return null;
 
     return (
         <section className="space-y-3" data-testid="app-work-prompts">
             <div>
-                <h3 className="text-sm font-semibold text-text dark:text-text-dark">{t('promptsTitle')}</h3>
+                <h3 className="text-sm font-semibold text-text dark:text-text-dark">
+                    {t('promptsTitle')}
+                </h3>
                 <p className="text-xs text-text-secondary dark:text-text-secondary-dark">
                     {t('promptHint', { name: blueprintName })}
                 </p>
@@ -43,7 +51,9 @@ export function AppBlueprintPrompts({ blueprintName, prompts, values, onChange, 
             {prompts.map((prompt) => (
                 <Input
                     key={prompt.name}
-                    label={prompt.required ? `${prompt.name} · ${t('promptRequired')}` : prompt.name}
+                    label={
+                        prompt.required ? `${prompt.name} · ${t('promptRequired')}` : prompt.name
+                    }
                     name={`app-env-${prompt.name}`}
                     value={values[prompt.name] ?? ''}
                     onChange={(event) => onChange(prompt.name, event.target.value)}

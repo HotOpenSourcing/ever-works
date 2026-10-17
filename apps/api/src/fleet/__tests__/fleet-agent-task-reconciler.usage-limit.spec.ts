@@ -67,7 +67,11 @@ describe('FleetAgentTaskReconcilerService — model usage limits', () => {
             undefined,
             undefined,
             inbox as never,
-            { findById: jest.fn().mockResolvedValue({ id: NODE, userId: USER, name: 'everdesk4' }) } as never,
+            {
+                findById: jest
+                    .fn()
+                    .mockResolvedValue({ id: NODE, userId: USER, name: 'everdesk4' }),
+            } as never,
         );
 
     beforeEach(() => {
@@ -98,12 +102,18 @@ describe('FleetAgentTaskReconcilerService — model usage limits', () => {
 
     it('re-queues the run without failing it, and files ONE notice for a new window', async () => {
         const service = build();
-        await service.onParked(new FleetJobParkedEvent(parkedJob(), USER, NODE, 'everdesk4', limit, true));
+        await service.onParked(
+            new FleetJobParkedEvent(parkedJob(), USER, NODE, 'everdesk4', limit, true),
+        );
 
-        expect(runs.parkQueued).toHaveBeenCalledWith(RUN, FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON);
+        expect(runs.parkQueued).toHaveBeenCalledWith(
+            RUN,
+            FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON,
+        );
         expect(runs.markFailed).not.toHaveBeenCalled();
         expect(runs.updateTelemetry).toHaveBeenCalledWith(RUN, {
-            currentActivity: 'Waiting for everdesk4: Claude Code weekly limit until 2026-10-19 01:01 UTC',
+            currentActivity:
+                'Waiting for everdesk4: Claude Code weekly limit until 2026-10-19 01:01 UTC',
         });
         expect(inbox.notice).toHaveBeenCalledTimes(1);
         const [user, notice] = inbox.notice.mock.calls[0];
@@ -122,22 +132,36 @@ describe('FleetAgentTaskReconcilerService — model usage limits', () => {
     });
 
     it('stays quiet for a park inside a window already announced', async () => {
-        await build().onParked(new FleetJobParkedEvent(parkedJob(), USER, NODE, 'everdesk4', limit, false));
+        await build().onParked(
+            new FleetJobParkedEvent(parkedJob(), USER, NODE, 'everdesk4', limit, false),
+        );
         expect(runs.parkQueued).toHaveBeenCalled();
         expect(inbox.notice).not.toHaveBeenCalled();
     });
 
     it('says an unpinned run may go to another node', async () => {
         await build().onParked(
-            new FleetJobParkedEvent(parkedJob({ targetNodeId: null }), USER, NODE, 'everdesk4', limit, true),
+            new FleetJobParkedEvent(
+                parkedJob({ targetNodeId: null }),
+                USER,
+                NODE,
+                'everdesk4',
+                limit,
+                true,
+            ),
         );
         expect(inbox.notice.mock.calls[0][1].body).toContain('Unpinned work runs on another node');
     });
 
     it('clears the park reason when the run is leased again', async () => {
-        await build().onLeased(new FleetJobLeasedEvent(parkedJob({ status: 'leased', nodeId: NODE }), NODE, USER));
+        await build().onLeased(
+            new FleetJobLeasedEvent(parkedJob({ status: 'leased', nodeId: NODE }), NODE, USER),
+        );
         expect(runs.markStarted).toHaveBeenCalledWith(RUN, 'job-13');
-        expect(runs.clearQueuedReason).toHaveBeenCalledWith(RUN, FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON);
+        expect(runs.clearQueuedReason).toHaveBeenCalledWith(
+            RUN,
+            FLEET_JOB_MODEL_USAGE_LIMIT_QUEUED_REASON,
+        );
     });
 
     it('formats the reset for a notice title', () => {

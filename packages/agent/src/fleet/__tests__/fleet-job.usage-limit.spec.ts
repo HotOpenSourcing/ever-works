@@ -108,7 +108,12 @@ describe('FleetJobService — model usage limits', () => {
                 return true;
             }),
             complete: jest.fn(
-                async (id: string, nodeId: string, patch: Record<string, unknown>, generation: number) => {
+                async (
+                    id: string,
+                    nodeId: string,
+                    patch: Record<string, unknown>,
+                    generation: number,
+                ) => {
                     const row = rows.find((r) => active(r, id, nodeId, generation));
                     if (!row) return false;
                     Object.assign(row, patch, { leaseExpiresAt: null });
@@ -116,7 +121,12 @@ describe('FleetJobService — model usage limits', () => {
                 },
             ),
             parkForUsageLimit: jest.fn(
-                async (id: string, nodeId: string, generation: number, patch: Record<string, unknown>) => {
+                async (
+                    id: string,
+                    nodeId: string,
+                    generation: number,
+                    patch: Record<string, unknown>,
+                ) => {
                     const row = rows.find((r) => active(r, id, nodeId, generation));
                     if (!row) return false;
                     Object.assign(row, patch, {
@@ -162,7 +172,12 @@ describe('FleetJobService — model usage limits', () => {
         return row;
     };
     const leaseAs = (nodeId: string, secret: string) => service.lease({ nodeId, secret, max: 1 });
-    const completeAs = (nodeId: string, secret: string, jobId: string, result: Record<string, unknown>) =>
+    const completeAs = (
+        nodeId: string,
+        secret: string,
+        jobId: string,
+        result: Record<string, unknown>,
+    ) =>
         service.completeJob({
             nodeId,
             secret,
@@ -171,7 +186,8 @@ describe('FleetJobService — model usage limits', () => {
             result,
             leaseGeneration: rows.find((r) => r.id === jobId)!.leaseGeneration,
         });
-    const events = (name: string) => emitter.emit.mock.calls.filter(([eventName]) => eventName === name);
+    const events = (name: string) =>
+        emitter.emit.mock.calls.filter(([eventName]) => eventName === name);
 
     it('parks a pinned job, refunds the attempt, and keeps it off its node until the reset', async () => {
         const job = addJob({ targetNodeId: NODE_A });
@@ -192,9 +208,15 @@ describe('FleetJobService — model usage limits', () => {
         expect(job.queuedAt?.toISOString()).toBe(RESET);
         // A park is never a completion: nothing downstream may settle the run.
         expect(events(FleetJobCompletedEvent.EVENT_NAME)).toHaveLength(0);
-        const [[, parked]] = events(FleetJobParkedEvent.EVENT_NAME) as [[string, FleetJobParkedEvent]];
+        const [[, parked]] = events(FleetJobParkedEvent.EVENT_NAME) as [
+            [string, FleetJobParkedEvent],
+        ];
         expect(parked).toMatchObject({ nodeId: NODE_A, nodeName: 'everdesk4', newWindow: true });
-        expect(parked.limit).toMatchObject({ provider: 'claude-code', window: 'weekly', retryAfter: RESET });
+        expect(parked.limit).toMatchObject({
+            provider: 'claude-code',
+            window: 'weekly',
+            retryAfter: RESET,
+        });
         expect(nodeRows[NODE_A].modelThrottles).toEqual([
             expect.objectContaining({ provider: 'claude-code', window: 'weekly', until: RESET }),
         ]);
@@ -205,7 +227,13 @@ describe('FleetJobService — model usage limits', () => {
 
         // After the reset the node takes it again.
         nodeRows[NODE_A].modelThrottles = [
-            { provider: 'claude-code', window: 'weekly', until: new Date(Date.now() - 1).toISOString(), reason: 'x', since: RESET },
+            {
+                provider: 'claude-code',
+                window: 'weekly',
+                until: new Date(Date.now() - 1).toISOString(),
+                reason: 'x',
+                since: RESET,
+            },
         ];
         expect(await leaseAs(NODE_A, secretA)).toHaveLength(1);
     });
@@ -230,7 +258,9 @@ describe('FleetJobService — model usage limits', () => {
             { provider: 'claude-code', window: 'weekly', until: RESET, reason: 'x', since: RESET },
         ];
         await completeAs(NODE_A, secretA, other.id, usageLimitResult());
-        const parks = events(FleetJobParkedEvent.EVENT_NAME).map(([, event]) => (event as FleetJobParkedEvent).newWindow);
+        const parks = events(FleetJobParkedEvent.EVENT_NAME).map(
+            ([, event]) => (event as FleetJobParkedEvent).newWindow,
+        );
         expect(parks).toEqual([true, false]);
     });
 
@@ -241,7 +271,8 @@ describe('FleetJobService — model usage limits', () => {
             status: 'failed',
             taskId: 'task-13',
             runId: 'run-13',
-            failureReason: "claude-code reported an error: You've hit your weekly limit · resets Oct 19, 3am (Europe/Paris)",
+            failureReason:
+                "claude-code reported an error: You've hit your weekly limit · resets Oct 19, 3am (Europe/Paris)",
             model: {
                 provider: 'claude-code',
                 status: 'failed',
@@ -276,18 +307,50 @@ describe('blockedByModelThrottle', () => {
     const throttled = new Set(['claude-code']);
 
     it('blocks a job that needs the throttled CLI, by tag or by its execution block', () => {
-        expect(blockedByModelThrottle({ kind: 'agent-task', requiredCapabilities: ['claude-code'], payload: null }, throttled)).toBe(true);
         expect(
             blockedByModelThrottle(
-                { kind: 'agent-task', requiredCapabilities: [], payload: { execution: { provider: 'claude-code' } } },
+                { kind: 'agent-task', requiredCapabilities: ['claude-code'], payload: null },
+                throttled,
+            ),
+        ).toBe(true);
+        expect(
+            blockedByModelThrottle(
+                {
+                    kind: 'agent-task',
+                    requiredCapabilities: [],
+                    payload: { execution: { provider: 'claude-code' } },
+                },
                 throttled,
             ),
         ).toBe(true);
     });
 
     it('leaves other CLIs, other kinds and an empty throttle set alone', () => {
-        expect(blockedByModelThrottle({ kind: 'agent-task', requiredCapabilities: ['codex'], payload: { execution: { provider: 'codex' } } }, throttled)).toBe(false);
-        expect(blockedByModelThrottle({ kind: 'acceptance-checks', requiredCapabilities: [], payload: { execution: { provider: 'claude-code' } } }, throttled)).toBe(false);
-        expect(blockedByModelThrottle({ kind: 'agent-task', requiredCapabilities: ['claude-code'], payload: null }, new Set())).toBe(false);
+        expect(
+            blockedByModelThrottle(
+                {
+                    kind: 'agent-task',
+                    requiredCapabilities: ['codex'],
+                    payload: { execution: { provider: 'codex' } },
+                },
+                throttled,
+            ),
+        ).toBe(false);
+        expect(
+            blockedByModelThrottle(
+                {
+                    kind: 'acceptance-checks',
+                    requiredCapabilities: [],
+                    payload: { execution: { provider: 'claude-code' } },
+                },
+                throttled,
+            ),
+        ).toBe(false);
+        expect(
+            blockedByModelThrottle(
+                { kind: 'agent-task', requiredCapabilities: ['claude-code'], payload: null },
+                new Set(),
+            ),
+        ).toBe(false);
     });
 });

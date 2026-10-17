@@ -785,9 +785,13 @@ describe('FleetNodeDrawer — model usage limits', () => {
         });
         renderDrawer({ node: throttled, detail: detail({ node: throttled }) });
         const entry = screen.getByTestId('fleet-node-drawer-model-throttle-claude-code');
-        expect(entry.textContent).toContain('modelThrottles.entry:Claude Code,modelThrottles.windows.weekly');
+        expect(entry.textContent).toContain(
+            'modelThrottles.entry:Claude Code,modelThrottles.windows.weekly',
+        );
         expect(entry.getAttribute('title')).toBe("You've hit your weekly limit");
-        expect(screen.getByTestId('fleet-node-drawer-model-throttles').textContent).toContain('modelThrottles.hint');
+        expect(screen.getByTestId('fleet-node-drawer-model-throttles').textContent).toContain(
+            'modelThrottles.hint',
+        );
     });
 
     it('renders nothing for a node with no limit in force', () => {
