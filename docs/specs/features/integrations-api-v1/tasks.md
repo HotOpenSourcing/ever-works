@@ -61,13 +61,13 @@
 
 ## Phase 2b — P2 resources (EW-P2)
 
-- [x] **T31** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
+- [x] **T35** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
       `external` + `pending`, `missionId` in the pinned org), `PATCH /ideas/:id` (title, description, `teamIds`,
       `visibility`; `If-Match` re-checked in the edit's transaction), `POST /ideas/:id/dismiss` / `restore`
       (idempotent; other statuses `422`); `idea` link target; keyset index `idx_work_proposals_org_updated`
       (migration `1795120000000`, also `goals` / `missions`); request schemas `CreateIdea` / `UpdateIdea`; contract
       `v1-draft.5` (CR-5). Recording points: [`domain-events`](../domain-events/tasks.md) T20.
-- [x] **T32** Goals (EW-P2-2): `GET /goals` (`includeArchived`), `GET /goals/:id`, `POST /goals` (draft; external
+- [x] **T36** Goals (EW-P2-2): `GET /goals` (`includeArchived`), `GET /goals/:id`, `POST /goals` (draft; external
       metric source only, default `{pluginId:'external', metricId:'value'}`; Teams + D11 in the create transaction),
       `PATCH /goals/:id` (no status / outcome / source / kind), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`,
       `POST /goals/:id/samples` (`currentValue`, baseline, re-score; throttled `goal.progress_changed`),
@@ -75,7 +75,7 @@
       external sources are never read from a provider on evaluation; schemas `goal.schema.json`, `CreateGoal`,
       `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; contract `v1-draft.11` (CR-9). Recording points:
       [`domain-events`](../domain-events/tasks.md) T21.
-- [x] **T33** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
+- [x] **T37** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
       no schedule / auto-build, title required; Teams + D11 in the create transaction), `PATCH /missions/:id` (content,
       Teams, visibility; `status` paused / completed + `outcome`, never `active`), `PUT /missions/:id/goals`,
       `PUT /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
