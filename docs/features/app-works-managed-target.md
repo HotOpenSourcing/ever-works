@@ -82,7 +82,7 @@ except the kubeconfig, which goes on the **worker only**.
 | `EVER_WORKS_APPS_MANAGED_SERVICE_ACCOUNT`                                                                  | worker                  | `ever-works-apps-system/ever-works-apps-controller` | Subject of each namespace's RoleBinding.                                                                                                                                                                                 |
 | `EVER_WORKS_APPS_MANAGED_NAMESPACE_ROLE`                                                                   | worker                  | `ever-works-apps-namespace-admin`                   | ClusterRole each namespace's RoleBinding grants.                                                                                                                                                                         |
 | `EVER_WORKS_APPS_MANAGED_NAMESPACE_GRANT`                                                                  | worker                  | on                                                  | `false` skips the per-namespace RoleBinding. Only use it if you bound the role some other way.                                                                                                                           |
-| `EVER_WORKS_APPS_MANAGED_QUOTA_{CPU_REQUESTS,CPU_LIMITS,MEMORY_REQUESTS,MEMORY_LIMITS,STORAGE,PODS,PVCS}`  | worker                  | `2` / `8` / `4Gi` / `10Gi` / `50Gi` / `20` / `8`     | Per-namespace ResourceQuota. A malformed value is ignored.                                                                                                                                                               |
+| `EVER_WORKS_APPS_MANAGED_QUOTA_{CPU_REQUESTS,CPU_LIMITS,MEMORY_REQUESTS,MEMORY_LIMITS,STORAGE,PODS,PVCS}`  | worker                  | `2` / `8` / `4Gi` / `10Gi` / `50Gi` / `20` / `8`    | Per-namespace ResourceQuota. A malformed value is ignored.                                                                                                                                                               |
 | `EVER_WORKS_APPS_MANAGED_LIMIT_{REQUEST_CPU,REQUEST_MEMORY,DEFAULT_CPU,DEFAULT_MEMORY,MAX_CPU,MAX_MEMORY}` | worker                  | `100m` / `128Mi` / `1` / `512Mi` / `2` / `4Gi`      | Per-container LimitRange.                                                                                                                                                                                                |
 
 ## Where the variables go
@@ -112,11 +112,11 @@ Outside production, the same task functions can run from a local process instead
 `pnpm --filter @ever-works/trigger-tasks app-runtime:local-worker`. That process reads its own
 shell environment.
 
-| Variable group | Set it on |
-| --- | --- |
-| `EVER_WORKS_APPS_MANAGED_KUBECONFIG` (secret) | The Trigger.dev **staging / prod** env stores of the project above. Nowhere else. |
-| `EVER_WORKS_APPS_MANAGED_ENABLED`, `…_DOMAIN`, `…_SCOPE` | The Trigger.dev env stores **and** the API. The API is `ever-works-app-{dev,stage,prod}`; set them on the inline `env` of its Deployment in `ever-co/k8s-gitops`. They are not secrets, so they do not go in `ever-works-app-secrets`. |
-| `…_RUNTIME_CLASS`, `…_INGRESS_CLASS`, `…_INGRESS_NAMESPACE`, `…_SERVICE_ACCOUNT`, `…_NAMESPACE_ROLE`, `…_QUOTA_*`, `…_LIMIT_*` | The Trigger.dev env stores. Only the worker renders and applies objects. |
+| Variable group                                                                                                                 | Set it on                                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `EVER_WORKS_APPS_MANAGED_KUBECONFIG` (secret)                                                                                  | The Trigger.dev **staging / prod** env stores of the project above. Nowhere else.                                                                                                                                                      |
+| `EVER_WORKS_APPS_MANAGED_ENABLED`, `…_DOMAIN`, `…_SCOPE`                                                                       | The Trigger.dev env stores **and** the API. The API is `ever-works-app-{dev,stage,prod}`; set them on the inline `env` of its Deployment in `ever-co/k8s-gitops`. They are not secrets, so they do not go in `ever-works-app-secrets`. |
+| `…_RUNTIME_CLASS`, `…_INGRESS_CLASS`, `…_INGRESS_NAMESPACE`, `…_SERVICE_ACCOUNT`, `…_NAMESPACE_ROLE`, `…_QUOTA_*`, `…_LIMIT_*` | The Trigger.dev env stores. Only the worker renders and applies objects.                                                                                                                                                               |
 
 ## TLS
 
@@ -134,8 +134,8 @@ issuer or wildcard secret is read.** What you need instead:
 1. A Cloudflare DNS record `*.<EVER_WORKS_APPS_MANAGED_DOMAIN>` → the tunnel, and a tunnel ingress
    rule for that wildcard → `http://ingress-nginx-controller.ingress-nginx.svc`.
 2. An edge certificate that covers the wildcard:
-   - a first-level name such as `*.ever.works` is covered by Cloudflare Universal SSL;
-   - a deeper apex such as `*.apps.ever.works` needs an **Advanced Certificate** (or Total TLS).
+    - a first-level name such as `*.ever.works` is covered by Cloudflare Universal SSL;
+    - a deeper apex such as `*.apps.ever.works` needs an **Advanced Certificate** (or Total TLS).
 
 The cert-manager path (`tls: 'cert-manager'`, annotation `cert-manager.io/cluster-issuer: <issuer>`,
 and one per-Ingress secret named `<first-host-with-dashes>-tls`) exists for **Your cluster** only.

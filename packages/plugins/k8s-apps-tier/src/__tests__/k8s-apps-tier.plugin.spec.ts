@@ -126,14 +126,18 @@ describe('dependencies on the managed tier', () => {
 		// The k8s plugin keeps them for your-cluster only, under the same provider ids.
 		const k8s = new KubernetesPlugin();
 		expect(k8s.dependencyProviders.every((descriptor) => descriptor.targets.join() === 'your-cluster')).toBe(true);
-		expect(plugin.dependencyProviders.map((d) => d.id).sort()).toEqual(k8s.dependencyProviders.map((d) => d.id).sort());
+		expect(plugin.dependencyProviders.map((d) => d.id).sort()).toEqual(
+			k8s.dependencyProviders.map((d) => d.id).sort()
+		);
 	});
 
 	it('answers supports for ever-works-apps through the same providers, and refuses your-cluster', async () => {
 		const plugin = new KubernetesAppsTierPlugin();
 		await expect(plugin.supports('postgres', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
 		await expect(plugin.supports('redis', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
-		await expect(plugin.supports('objectStorage', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
+		await expect(plugin.supports('objectStorage', 'ever-works-apps', ctx)).resolves.toMatchObject({
+			supported: true
+		});
 		await expect(plugin.supports('postgres', 'your-cluster', ctx)).resolves.toMatchObject({ supported: false });
 		await expect(new KubernetesPlugin().supports('postgres', 'ever-works-apps', ctx)).resolves.toMatchObject({
 			supported: false
