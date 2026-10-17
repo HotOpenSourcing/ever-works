@@ -37,9 +37,9 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  *   PATCH /api/webhooks/:id { status:'deleted' } → 400 DTO array message
  *        ['status must be one of the following values: paused, active'].
  *   PATCH /api/webhooks/:id { status:'paused' } → 200 view status:'paused';
- *        the paused row then DISAPPEARS from GET /api/webhooks (the list is
- *        active-only) yet rotate-secret (200) / test-fire (200) / delete (204)
- *        still resolve it — findOwn is NOT status-gated, only the LIST is.
+ *        GET /api/webhooks keeps listing it as 'paused' (the list returns
+ *        every status), and rotate-secret (200) / test-fire (200) / delete
+ *        (204) still resolve it — findOwn is NOT status-gated.
  *
  * NON-DUPLICATION — read FIRST, NOT re-pinned here:
  *   - sec-pin-webhook-ownership.spec.ts owns the WRITE-side ownership matrix
@@ -59,8 +59,8 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  *   - webhook-secret-rotation.spec.ts probes the github-app rotate path (a
  *     DIFFERENT surface) for hash-leak safety — unrelated to /api/webhooks.
  *   This file therefore owns: the delivery-VIEW record contract, the
- *   pause/resume PATCH branch matrix, the active-only-list vs verbs-still-
- *   resolve invariant, and the redeliver event-reuse + 404-message.
+ *   pause/resume PATCH branch matrix, the paused-row-stays-listed and
+ *   verbs-still-resolve invariant, and the redeliver event-reuse + 404-message.
  *
  * ISOLATION: every mutation test registers a FRESH user via
  * registerUserViaAPI; URLs carry a per-test unique suffix (test-title +
@@ -393,7 +393,7 @@ test.describe('Webhook subscription — pause / resume PATCH branch matrix', () 
         );
     });
 
-    test('pause removes the row from the active list, but rotate / test-fire / delete still resolve it', async ({
+    test('pause keeps the row listed as paused, and rotate / test-fire / delete still resolve it', async ({
         request,
     }) => {
         const u = await registerUserViaAPI(request);
@@ -407,12 +407,14 @@ test.describe('Webhook subscription — pause / resume PATCH branch matrix', () 
         expect(paused.status()).toBe(200);
         expect(((await paused.json()) as { status: string }).status).toBe('paused');
 
-        // The list endpoint is ACTIVE-ONLY — the paused row disappears from it.
+        // The list returns every status (webhooks v2), so the paused row
+        // stays listed, now as 'paused', and can be resumed from it.
         const listRes = await request.get(WEBHOOKS, { headers: authedHeaders(u.access_token) });
         expect(listRes.status()).toBe(200);
-        const subs = ((await listRes.json()) as { subscriptions: Array<{ id: string }> })
-            .subscriptions;
-        expect(subs.map((s) => s.id)).not.toContain(sub.id);
+        const subs = (
+            (await listRes.json()) as { subscriptions: Array<{ id: string; status: string }> }
+        ).subscriptions;
+        expect(subs.find((s) => s.id === sub.id)?.status).toBe('paused');
 
         // findOwn is NOT status-gated — every per-subscription verb still
         // resolves the paused row by id.
