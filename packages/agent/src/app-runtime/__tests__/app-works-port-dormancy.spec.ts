@@ -160,15 +160,15 @@ function boundTokenNames(): Set<string> {
  * document. Keep it sorted; it is read by people.
  */
 const BOUND: readonly string[] = [
-    // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
-    // beside the adapter whose apply gate it opens.
-    'APP_BLUEPRINT_APPLY_SERVICE',
     // APW-05 T23 / §4.12 — bound 2026-10-17 by `AppBuildsModule` (outstanding-work
     // A0.4): the Builds controller's edit check over `WorkOwnershipService`, and the
     // pull token's platform-managed write over
     // `PluginSettingsService.writePlatformManagedWorkSettings`. Until then every
     // detail answered `canEdit: false` and every pull-token save `503`.
     'APPS_TIER_POLICY',
+    // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
+    // beside the adapter whose apply gate it opens.
+    'APP_BLUEPRINT_APPLY_SERVICE',
     'APP_BUILD_EDIT_ACCESS',
     // APW-05 T16 — `BuildFacadeService`, provided by `AppBuildsModule` (2026-09-21).
     // Four services in this epic inject it; until it was bound every one of them
@@ -278,9 +278,6 @@ const BOUND: readonly string[] = [
     // and listed nowhere: the register only checked BOUND ⊆ provided until the
     // "names in BOUND every declared …" case (2026-09-26) checked the other half.
     'APP_FORK_READINESS_DISPATCHER',
-    // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
-    // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
-    'APP_LICENSE_SERVICE',
     // APW-04 (lane aw-ai, 2026-10-17) — `AppProvisioningService` and
     // `AppProvisionEventsService`, provided by `AppWorksModule`. Unbound, the ready
     // handler's step 8 logged "no AppProvisioningService is bound" for every App Work
@@ -289,6 +286,9 @@ const BOUND: readonly string[] = [
     'APP_HOSTS_DEPLOYMENT_STORE',
     'APP_HOSTS_DEPLOY_REQUESTER',
     'APP_HOSTS_WORK_STORE',
+    // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
+    // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
+    'APP_LICENSE_SERVICE',
     'APP_PROVISIONING_SERVICE',
     'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_ENV_SOURCE',

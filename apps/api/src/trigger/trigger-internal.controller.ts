@@ -682,6 +682,15 @@ export class TriggerInternalController implements OnModuleInit {
         // target: AppProvisionEventsService` rather than pretending it was told.
         @Optional()
         private readonly appProvisionEventsService?: AppProvisionEventsService,
+        // APW-03 T42 / APW-02 T33 — `AppLicenseService`, which the `app-upstream-sync`
+        // worker binds to `APP_UPSTREAM_LICENSE_SERVICE` by this name: FR-37's
+        // `previewUpstream` (is upstream's head licence worse?) and FR-40's `request`
+        // land here, where the spec state row and the licence registry are. Appended
+        // LAST + `@Optional()` per the arity rule above: with it absent the proxy answers
+        // the loud `Unknown remote target: AppLicenseService`, which the sync reads as
+        // "unknown" and takes the pull-request path (never an unasked fast-forward).
+        @Optional()
+        private readonly appLicenseService?: AppLicenseService,
         // APW-06 T31 (lane aw-deploy-2) — the worker's `APP_CLUSTER_OP_DISPATCHER` re-dispatches
         // through the API's gate. Appended LAST + `@Optional()` per the arity rule above.
         @Optional()
@@ -702,15 +711,6 @@ export class TriggerInternalController implements OnModuleInit {
         // T47/T48 (lane aw-deploy-2) — the worker's `APPS_DOMAIN_DNS_SERVICE` (managed record removal).
         @Optional()
         private readonly appsDomainDnsService?: AppsDomainDnsServiceImpl,
-        // APW-03 T42 / APW-02 T33 — `AppLicenseService`, which the `app-upstream-sync`
-        // worker binds to `APP_UPSTREAM_LICENSE_SERVICE` by this name: FR-37's
-        // `previewUpstream` (is upstream's head licence worse?) and FR-40's `request`
-        // land here, where the spec state row and the licence registry are. Appended
-        // LAST + `@Optional()` per the arity rule above: with it absent the proxy answers
-        // the loud `Unknown remote target: AppLicenseService`, which the sync reads as
-        // "unknown" and takes the pull-request path (never an unasked fast-forward).
-        @Optional()
-        private readonly appLicenseService?: AppLicenseService,
     ) {}
 
     onModuleInit() {
@@ -970,7 +970,15 @@ export class TriggerInternalController implements OnModuleInit {
             AppDependencyConfigCipherRelay: this.appDependencyConfigCipherRelay,
             AppDependencySpecSourceAdapter: this.appDependencySpecSourceAdapter,
             AppDependencyProvisionDispatchRelay: this.appDependencyProvisionDispatchRelay,
-            AppsDomainDnsServiceImpl: this.appsDomainDnsService,
+            // A one-member facade (the `PluginAllowlistReader` precedent): the worker removes a
+            // managed record by Work id and nothing else — the service's `provider()` holds the
+            // apps-DNS token and must never be reachable over this hop.
+            AppsDomainDnsServiceImpl: this.appsDomainDnsService
+                ? {
+                      removeRecord: (workId: string) =>
+                          this.appsDomainDnsService!.removeRecord(String(workId)),
+                  }
+                : undefined,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }

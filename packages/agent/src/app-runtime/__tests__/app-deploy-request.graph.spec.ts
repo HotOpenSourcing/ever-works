@@ -1,4 +1,5 @@
 import { CacheModule } from '@nestjs/cache-manager';
+import { AppSpecAppliedListener } from '../app-spec-applied.listener';
 import { AppDependencySpecSourceAdapter } from '../../app-dependencies/app-dependency-spec.source';
 import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { Test, type TestingModule } from '@nestjs/testing';
@@ -159,6 +160,11 @@ describe('AppDeployRequestModule — the §5.1 collaborators as the API composes
 
         expect(moduleRef.get(AppEnvListener, { strict: false })).toBeInstanceOf(AppEnvListener);
         expect(producer.events).toBeInstanceOf(EventEmitter2);
-        expect(producer.events?.listeners(AppSpecAppliedEvent.EVENT_NAME)).toHaveLength(1);
+        // Two subscribers since lane aw-deploy-2: APW-07's `AppEnvListener` and APW-06 T35's
+        // `AppSpecAppliedListener` (spec-applied redeploys of a published image) — each once.
+        expect(moduleRef.get(AppSpecAppliedListener, { strict: false })).toBeInstanceOf(
+            AppSpecAppliedListener,
+        );
+        expect(producer.events?.listeners(AppSpecAppliedEvent.EVENT_NAME)).toHaveLength(2);
     });
 });
