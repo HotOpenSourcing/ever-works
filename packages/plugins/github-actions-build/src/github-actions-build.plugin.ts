@@ -459,7 +459,11 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 
 		// The result artifact is read only for a finished run: an unfinished one has
 		// not uploaded it, and asking would spend a request per poll to learn that.
-		const artifact = finished ? await readResultArtifact(port, { repository, runId }) : null;
+		// `expectBuildId` (ledger C35): a result naming a DIFFERENT Build is not
+		// this Build's result, whatever else it says.
+		const artifact = finished
+			? await readResultArtifact(port, { repository, runId, expectBuildId: ref.buildId })
+			: null;
 		const result = artifact?.ok ? artifact.result : null;
 
 		// T13 — a failed Build says WHY. Only a FAILED one: a successful Build has
@@ -481,7 +485,10 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 
 		return {
 			...snapshot,
-			...(result
+			// A versioned result with no digest (a failed build, a pull request, a
+			// verify job) still reports its secret check — it just claims no image.
+			...(result?.secretCheck && !result.digest ? { secretCheck: result.secretCheck } : {}),
+			...(result?.digest
 				? {
 						// `confirmed: false` without exception. This plugin reads the digest
 						// the member's own CI claimed; confirming it against the registry is
