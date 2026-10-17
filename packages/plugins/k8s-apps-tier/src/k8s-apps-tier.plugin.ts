@@ -1,4 +1,6 @@
 import type {
+	AppDependencyProviderDescriptor,
+	AppDependencyTarget,
 	AppDeployHooks,
 	AppDeployResult,
 	AppDestroyResult,
@@ -13,6 +15,9 @@ import {
 	K8sPluginError,
 	KubernetesApiService,
 	KubernetesPlugin,
+	OBJECT_STORAGE_PROVIDER_DESCRIPTOR,
+	POSTGRES_PROVIDER_DESCRIPTOR,
+	REDIS_PROVIDER_DESCRIPTOR,
 	assertSupportedKubeconfig,
 	renderNamespace
 } from '@ever-works/k8s-plugin';
@@ -65,6 +70,8 @@ export const MANAGED_NAMESPACE_GRANT_NAME = 'ever-works-apps-controller';
  * 5. **Least privilege, per namespace.** Before the first write into a managed namespace the plugin
  *    applies the Namespace and a RoleBinding granting the controller ServiceAccount the operator's
  *    namespaced-admin ClusterRole IN that namespace only (see {@link managedNamespaceGrant}).
+ * 6. **Dependencies in the App's namespace.** The same in-cluster Postgres / Redis / object-storage providers,
+ *    published for `ever-works-apps` only (see {@link dependencyProviders}).
  */
 export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 	private readonly tierApi: KubernetesApiService;
@@ -79,7 +86,23 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 
 	override readonly id: string = 'k8s-apps-tier';
 	override readonly name: string = 'Ever Works Apps (managed)';
-	override readonly capabilities: readonly string[] = ['deployment', 'apps-tier'];
+	override readonly capabilities: readonly string[] = ['deployment', 'apps-tier', 'app-dependency'];
+
+	/**
+	 * Point 6: the k8s plugin's in-cluster providers (Postgres, Redis, S3-compatible object storage), published
+	 * for `ever-works-apps` ONLY. They provision inside the App's own `ewapp-*` namespace — so every byte
+	 * counts against its ResourceQuota and goes when the namespace goes — dialled with the platform credential
+	 * the dependency job assembles through the runtime facade (`prepareDependencyTarget`).
+	 */
+	override readonly dependencyProviders: readonly AppDependencyProviderDescriptor[] = [
+		POSTGRES_PROVIDER_DESCRIPTOR,
+		REDIS_PROVIDER_DESCRIPTOR,
+		OBJECT_STORAGE_PROVIDER_DESCRIPTOR
+	].map((descriptor) => ({
+		...descriptor,
+		targets: ['ever-works-apps'],
+		label: `On Ever Works · ${descriptor.label.replace(/^In your cluster · /, '')}`
+	}));
 	override readonly providerName: string = 'ever-works-apps-k8s';
 
 	override getManifest(): PluginManifest {
@@ -96,6 +119,11 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 
 	protected override servesAppTarget(target: string | undefined): boolean {
 		return target === 'ever-works-apps';
+	}
+
+	/** The in-cluster providers implement `your-cluster`; on the managed tier they run the same way. */
+	protected override dependencyProviderTarget(target: AppDependencyTarget): AppDependencyTarget {
+		return target === 'ever-works-apps' ? 'your-cluster' : target;
 	}
 
 	/** Shape refusals only — see the class docstring, point 2. */
