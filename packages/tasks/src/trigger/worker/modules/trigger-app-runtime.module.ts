@@ -586,6 +586,10 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
         },
     ],
     exports: [
+        // A0.10 (lane aw-deploy-2) — what `app-dependency-provision`'s module reads from here.
+        APP_RUNTIME_TARGET,
+        APP_RUNTIME_EVENT_SINK,
+        WORK_APP_RUNTIME_STATES,
         AppClusterWorkerContextBootstrap,
         AppRuntimeFacadeService,
         DeployFacadeService,

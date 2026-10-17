@@ -1,4 +1,5 @@
 import { CacheModule } from '@nestjs/cache-manager';
+import { AppDependencySpecSourceAdapter } from '../../app-dependencies/app-dependency-spec.source';
 import { EventEmitter2, EventEmitterModule } from '@nestjs/event-emitter';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TypeOrmModule, getRepositoryToken } from '@nestjs/typeorm';
@@ -114,7 +115,15 @@ describe('AppDeployRequestModule — the §5.1 collaborators as the API composes
         expect(env.readiness).toBe(preconditions().dependencies);
     });
 
-    it('answers the dependency preflight fail-closed, writing and dispatching nothing, while its spec source is unbound', async () => {
+    it('answers the dependency preflight fail-closed, writing and dispatching nothing, for a Work with no readable spec', async () => {
+        // A0.10 (lane aw-deploy-2, 2026-10-17): APW-07 T25's spec source is now BOUND
+        // (`AppDependencySpecSourceAdapter`, `AppDependenciesModule`). For a Work whose App spec
+        // cannot be read it answers `null`, so the preflight below is unchanged — still fail-closed
+        // with `specUnavailable`, no row, no dispatch. A Work whose spec declares a dependency now
+        // gets its row and its provision dispatch from `reconcile`.
+        expect(
+            (preconditions().dependencies as unknown as { spec?: unknown }).spec,
+        ).toBeInstanceOf(AppDependencySpecSourceAdapter);
         // What wiring the service turns on TODAY. `APP_DEPENDENCY_SPEC_SOURCE` is
         // APW-07 T25's to bind and is unwritten, so `reconcile` fails closed before
         // it creates a row or dispatches a provision. §5.1 step 9 refuses on that

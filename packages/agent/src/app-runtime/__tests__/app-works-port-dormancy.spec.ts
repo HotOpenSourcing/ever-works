@@ -246,6 +246,8 @@ const BOUND: readonly string[] = [
     // APW-06 §5.1 — `AppDeployBuildSourceAdapter` over APW-05's Build rows,
     // bound 2026-09-22. Unbound, the preconditions answered `no_green_build`
     // for every App Work whether or not it had one.
+    // A0.10 (lane aw-deploy-2) — `AppDependencySpecSourceAdapter`, bound by `AppDependenciesModule`.
+    'APP_DEPENDENCY_SPEC_SOURCE',
     'APP_DEPLOY_BUILD_SOURCE',
     'APP_DEPLOY_DEPLOYMENT_STORE',
     'APP_DEPLOY_DISPATCHER',
@@ -392,7 +394,6 @@ const UNBOUND: readonly string[] = [
     'APP_BLUEPRINT_APPLY_SERVICE',
     'APP_COMMIT_ANCESTRY',
     'APP_DEPENDENCY_CLUSTER_ACCESS',
-    'APP_DEPENDENCY_SPEC_SOURCE',
     'APP_DEPLOY_TARGET_RESOLVER',
     'APP_ENV_ACTIVITY',
     'APP_ENV_ACTOR_NAMES',
@@ -549,8 +550,8 @@ describe('App Works port dormancy register (§5.10)', () => {
         //
         // 47/27 → 44/30 the same day (lane aw-ai): APW-08 T25's resolver and APW-04's
         // provisioning service and events port are bound by `AppWorksModule`.
-        expect(UNBOUND).toHaveLength(36);
-        expect(BOUND).toHaveLength(38);
+        expect(UNBOUND).toHaveLength(35);
+        expect(BOUND).toHaveLength(39);
     });
 
     it('names where the worker binds what this package does not', () => {

@@ -194,11 +194,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/agent/src/app-dependencies/app-dependencies.service.ts:308-329; packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:22-30',
     },
     {
-        key: 'AppDependenciesModule | AppDependenciesService | APP_DEPENDENCY_SPEC_SOURCE',
-        reason: "APW-07's module owner binds the dependency spec source (T25); unwritten, so `reconcile` fails closed `specUnavailable` and nothing is created or dispatched.",
-        source: 'packages/agent/src/app-dependencies/app-dependencies.service.ts:230-265 (APW-07 T25, tasks.md:380)',
-    },
-    {
         key: 'AppDependenciesModule | AppDependenciesService | APP_RUNTIME_EVENT_SINK',
         reason: "§9.8's ports module binds it (to the API's EventEmitter2) and is unwritten.",
         source: 'packages/agent/src/app-runtime/ports.ts:278-287; APW-06 T73 (APW-06/tasks.md:1271-1276)',
@@ -209,9 +204,9 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:107-125 (APW-06 T73, APW-06/tasks.md:1271-1276)',
     },
     {
-        key: 'AppDeployRequestModule | AppDeployPreconditionsService | APP_DEPLOY_HOST_SOURCE',
-        reason: '`AppHostsService` exists but its eight stores are unbound, so binding it would answer null; the check is advisory.',
-        source: 'packages/agent/src/app-runtime/app-deploy-request.module.ts:69-72; app-deploy-preconditions.service.ts:249 (APW-06 T26)',
+        key: 'AppDeployRequestModule | AppHostsService | APP_HOSTS_REBUILD_REQUESTER',
+        reason: "APW-05's rebuild requester is unwritten (the hosts service is provided in the API since C43, lane aw-deploy-2).",
+        source: 'packages/agent/src/app-runtime/app-hosts.service.ts:142 (owned by APW-05)',
     },
     {
         key: 'AppDeployRequestModule | AppLicenseGate | APP_LICENSE_SERVICE',
@@ -375,51 +370,6 @@ const EXPECTED_REMOTE_MISSES: readonly Expected[] = [];
  * entry — it is in {@link OPEN_WORKER_GAPS}.
  */
 const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
-    {
-        key: "AppDependencyProvisionWorkerModule :: 'WorkAppDependencyRepository'",
-        reason: "The entity's TypeORM repository (row creation): a remote proxy cannot carry it, so the dependency worker composition needs repository methods first.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCY_CLUSTER_ACCESS',
-        reason: "Its swap is `AppRuntimeFacadeService`, which lives in T71's module; this task's lean module is not that one.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCY_CONFIG_CIPHER',
-        reason: '`AppEnvCrypto` and its key inside the isolated worker are part of the open dependency worker composition.',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCY_PROVISION_DISPATCHER',
-        reason: "The runner's re-dispatch; this context imports no job-runtime binding (reported `dispatcherUnavailable`).",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCY_SPEC_SOURCE',
-        reason: "APW-07's module owner binds the dependency spec source (T25); unwritten.",
-        source: 'packages/agent/src/app-dependencies/app-dependencies.service.ts:264 (APW-07 T25, tasks.md:380)',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_RUNTIME_EVENT_SINK',
-        reason: 'The relay (`AppRuntimeEventRelayService`) is APW-06 T28 and is not in this tree.',
-        source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:132-133 (APW-06 T28)',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: APP_RUNTIME_TARGET',
-        reason: 'Only a fail-closed default exists until T73 publishes the port; unbound answers the same refusal.',
-        source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:107-125 (APW-06 T73)',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: AppDependencyFacadeService',
-        reason: 'The provider selection lives in the facades graph this lean context does not import.',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
-    {
-        key: 'AppDependencyProvisionWorkerModule :: WorkAppDependencyRepository',
-        reason: 'Needs a `remoteMap` name and the row-write redesign above; unbound, every run answers `storeUnavailable` and dials nothing.',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:77-88',
-    },
     {
         key: 'TriggerAppRuntimeModule :: APPS_DOMAIN_DNS_SERVICE',
         reason: "APW-06's managed-subdomain task is unwritten.",

@@ -130,8 +130,15 @@ import {
 } from '@ever-works/agent/app-runtime';
 // APW-06 T71 (A0.7) — the runtime-state row and the env source the isolated App runtime worker
 // proxies by name (plan §6.4). Both read or write rows, so neither can be local in the worker.
-import { WorkAppRuntimeStateRepository } from '@ever-works/agent/database';
+import { WorkAppDependencyRepository, WorkAppRuntimeStateRepository } from '@ever-works/agent/database';
 import { AppEnvRuntimeSource } from '@ever-works/agent/app-env';
+// A0.10 (lane aw-deploy-2) — the dependency worker's rows, cipher, spec and re-dispatch.
+import {
+    AppDependencyConfigCipherRelay,
+    AppDependencyProvisionDispatchRelay,
+    AppDependencyRowsRelay,
+    AppDependencySpecSourceAdapter,
+} from '@ever-works/agent/app-dependencies';
 
 /**
  * C-05 RPC half — methods that must never be reachable via `POST
@@ -672,6 +679,19 @@ export class TriggerInternalController implements OnModuleInit {
         // through the API's gate. Appended LAST + `@Optional()` per the arity rule above.
         @Optional()
         private readonly appClusterOpDispatchRelay?: AppClusterOpDispatchRelay,
+        // A0.10 (lane aw-deploy-2) — `app-dependency-provision` runs `AppDependenciesService` in the
+        // isolated worker, which owns no DataSource and no key: its row store, its raw row writes,
+        // its cipher, its spec source and its re-dispatch land here. Appended LAST + `@Optional()`.
+        @Optional()
+        private readonly workAppDependencyRepository?: WorkAppDependencyRepository,
+        @Optional()
+        private readonly appDependencyRowsRelay?: AppDependencyRowsRelay,
+        @Optional()
+        private readonly appDependencyConfigCipherRelay?: AppDependencyConfigCipherRelay,
+        @Optional()
+        private readonly appDependencySpecSourceAdapter?: AppDependencySpecSourceAdapter,
+        @Optional()
+        private readonly appDependencyProvisionDispatchRelay?: AppDependencyProvisionDispatchRelay,
     ) {}
 
     onModuleInit() {
@@ -909,6 +929,11 @@ export class TriggerInternalController implements OnModuleInit {
             AppRuntimeEventRelayService: this.appRuntimeEventRelayService,
             AppDeployDispatchRelay: this.appDeployDispatchRelay,
             AppClusterOpDispatchRelay: this.appClusterOpDispatchRelay,
+            WorkAppDependencyRepository: this.workAppDependencyRepository,
+            AppDependencyRowsRelay: this.appDependencyRowsRelay,
+            AppDependencyConfigCipherRelay: this.appDependencyConfigCipherRelay,
+            AppDependencySpecSourceAdapter: this.appDependencySpecSourceAdapter,
+            AppDependencyProvisionDispatchRelay: this.appDependencyProvisionDispatchRelay,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }
