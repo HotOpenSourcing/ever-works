@@ -43,6 +43,7 @@ import { AppBuildsModule } from '@ever-works/agent/app-builds';
 // publishes for the isolated App runtime worker's `APP_DEPLOY_BUILD_SOURCE` proxy.
 import { AppDeployRequestModule, AppRuntimeStateModule } from '@ever-works/agent/app-runtime';
 import { AppRuntimeEnvModule } from '@ever-works/agent/app-env';
+import { AppDependenciesModule } from '@ever-works/agent/app-dependencies';
 
 @Module({
     imports: [
@@ -182,6 +183,8 @@ import { AppRuntimeEnvModule } from '@ever-works/agent/app-env';
         // controller's two new `remoteMap` names (the isolated worker proxies both by name).
         AppRuntimeStateModule,
         AppRuntimeEnvModule,
+        // A0.10 (lane aw-deploy-2) — the dependency worker's five remote names.
+        AppDependenciesModule,
         // APW-06 T71 — `DistributedTaskLockService` is provided by THIS module (below) for the
         // controller's remote target of the same name, and it needs its repository: `forFeature`
         // here is the wiring `apps/api/src/data-sync/data-sync.module.ts` documents as the

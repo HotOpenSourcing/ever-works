@@ -48,6 +48,8 @@ import { AppSourceController } from './app-source.controller';
 // §4.1. Both are four segments deep under `api/works`, so no `works/:id/...`
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
+// APW-06 T33 (lane aw-deploy-2) — GET/PUT app-target, POST app-target/check, GET app-status.
+import { WorkAppRuntimeController } from './work-app-runtime.controller';
 import { WorkEvolveController } from './work-evolve.controller';
 import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
@@ -55,6 +57,9 @@ import { WorkAppSpecController } from './work-app-spec.controller';
 import { WorkAppLicenseController } from './work-app-license.controller';
 import { AppsCatalogBlueprintsController } from './apps-catalog-blueprints.controller';
 import { AppsCatalogBlueprintsService } from './apps-catalog-blueprints.service';
+// Lane aw-web-3 — the manifest-backed Apps catalog (APW-03).
+import { AppsCatalogController } from './apps-catalog.controller';
+import { AppsCatalogManifestService } from './apps-catalog-manifest.service';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
 import { MembersController } from './members.controller';
@@ -150,6 +155,8 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         CacheEntryRepository,
         // `GET /api/apps-catalog/blueprints` — the create form's catalog tab.
         AppsCatalogBlueprintsService,
+        // `GET /api/apps-catalog` (+ `/:id`) — the manifest-backed Apps catalog.
+        AppsCatalogManifestService,
         WorksTemplateCatalogService,
         ExistingWebsiteLinkService,
         WorkCleanupService,
@@ -202,11 +209,14 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         AppSourceController,
         // APW-03 T15 — the App spec tab's two routes.
         WorkAppDeployController,
+        WorkAppRuntimeController,
         WorkAppSpecController,
         // `GET /api/works/:id/app-license` — the attestation dialog's read.
         WorkAppLicenseController,
         // `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps catalog".
         AppsCatalogBlueprintsController,
+        // AFTER the Blueprint listing: its fixed `blueprints` segment must win over `:id`.
+        AppsCatalogController,
         // APW-08 T25 + APW-04 (lane aw-ai) — `POST/GET /api/works/:id/evolve`,
         // `POST /api/works/:id/provision`, `GET /api/works/:id/provisioning`. Its services
         // come from `AgentAppWorksModule` (imported above).
