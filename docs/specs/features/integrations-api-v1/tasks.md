@@ -61,7 +61,7 @@
 
 ## Phase 2b — P2 resources (EW-P2)
 
-- [x] **T31** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
+- [x] **T35** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
       `external` + `pending`, `missionId` in the pinned org), `PATCH /ideas/:id` (title, description, `teamIds`,
       `visibility`; `If-Match` re-checked in the edit's transaction), `POST /ideas/:id/dismiss` / `restore`
       (idempotent; other statuses `422`); `idea` link target; keyset index `idx_work_proposals_org_updated`

@@ -5,6 +5,7 @@ import {
     Headers,
     HttpCode,
     HttpStatus,
+    Logger,
     Param,
     ParseUUIDPipe,
     Patch,
@@ -196,6 +197,8 @@ type Response = IdempotentResponse & { setHeader(name: string, value: string): u
 @UseGuards(IntegrationOnlyGuard)
 @UseFilters(IntegrationExceptionFilter)
 export class IntegrationIdeasController {
+    private readonly logger = new Logger(IntegrationIdeasController.name);
+
     constructor(
         private readonly ideas: WorkProposalService,
         private readonly visibility: RecordVisibilityService,
@@ -303,10 +306,18 @@ export class IntegrationIdeasController {
                         externalUrl: dto.externalRef.externalUrl ?? null,
                     });
                 } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // (a fresh Idea has no Works or Agents, so the delete guards pass)
-                    // and answer theirs.
-                    await this.ideas.delete(user.userId, idea.id).catch(() => undefined);
+                    // The link failed (a concurrent create with the same externalRef won,
+                    // or a write error): undo ours — a fresh Idea has no Works or Agents, so
+                    // the delete guards pass — and, on a lost race, answer theirs. A failed
+                    // undo is logged: that Idea is an orphan an operator can find.
+                    await this.ideas
+                        .delete(user.userId, idea.id)
+                        .catch((cleanupError: unknown) =>
+                            this.logger.warn(
+                                `Idea ${idea.id}: its externalRef link failed and so did the undo; ` +
+                                    `the Idea stays (${String(cleanupError)})`,
+                            ),
+                        );
                     if (error instanceof DuplicateExternalRefError && error.side === 'external') {
                         const winner = await this.links.findByExternal(
                             linkScope,
