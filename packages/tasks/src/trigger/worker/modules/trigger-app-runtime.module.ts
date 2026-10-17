@@ -594,7 +594,11 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
         { provide: APP_HOSTS_DEPLOYMENT_STORE, useExisting: WorkDeploymentRepository },
         {
             provide: APP_HOSTS_APPS_DOMAIN,
-            useValue: { getDomain: (): string | null => config.everWorks.apps.getDomain() },
+            useValue: {
+                getDomain: (): string | null => config.everWorks.apps.getDomain(),
+                // APW-10 lite — managed-target hosts may live under their own apex.
+                getManagedDomain: (): string | null => config.everWorks.apps.managedTargetDomain(),
+            },
         },
     ],
     exports: [
