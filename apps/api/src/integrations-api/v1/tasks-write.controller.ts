@@ -444,6 +444,12 @@ export class IntegrationTasksWriteController {
                 }
             }
 
+            // Review 2026-10-17 F1: the parent must be a task this integration may
+            // read. A private parent answers 404 (no existence oracle), instead of
+            // creating a child the integration then cannot read either.
+            if (dto.parentTaskId) {
+                await this.resources.get('task', organizationId, dto.parentTaskId, source);
+            }
             const [teamId, ...extraTeams] = dto.teamIds ?? [];
             const createdBy = writeAttribution(user);
             const externalRef = dto.externalRef;
@@ -564,6 +570,10 @@ export class IntegrationTasksWriteController {
         const current = await this.resources.get('task', organizationId, id, source);
         const expected = expectedVersion(ifMatch);
         assertIfMatch(expected, Number(current.dto.version));
+        // Review 2026-10-17 F1: re-parenting only under a task this integration may read.
+        if (dto.parentTaskId) {
+            await this.resources.get('task', organizationId, dto.parentTaskId, source);
+        }
 
         const patch: Record<string, unknown> = {};
         if (dto.title !== undefined) patch.title = dto.title;
