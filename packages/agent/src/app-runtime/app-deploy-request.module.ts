@@ -19,6 +19,8 @@ import { AppLicenseGate } from './app-license-gate';
 import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
+import { AppBuildSucceededListener } from './app-build-succeeded.listener';
+import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runtime-worker.adapters';
 
 /**
  * APW-06 §2.2 — the module that finally REGISTERS the deploy request path.
@@ -189,6 +191,13 @@ import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
         // it would read the repository twice.
         { provide: APP_DEPLOY_SPEC_SOURCE, useExisting: AppSpecService },
         ...buildAppDeployDispatcherProviders(),
+        // APW-06 T35 (A0.6) — a green deployable Build requests one Deployment when `autoDeploy`
+        // is on (or a domain rebuild is pending). API process only: the event fires here.
+        AppBuildSucceededListener,
+        // APW-06 T28 / T31 (A0.7) — the API ends of the isolated worker's `APP_RUNTIME_EVENT_SINK`
+        // and `APP_DEPLOY_DISPATCHER` proxies (`TriggerInternalController.remoteMap`).
+        AppRuntimeEventRelayService,
+        AppDeployDispatchRelay,
     ],
     exports: [
         AppDeployPreconditionsService,
@@ -200,6 +209,8 @@ import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
         // it cannot read `work_builds` itself). Exporting the token instead would bind
         // `APP_DEPLOY_BUILD_SOURCE` in every importer's scope as a side effect.
         AppDeployBuildSourceAdapter,
+        AppRuntimeEventRelayService,
+        AppDeployDispatchRelay,
     ],
 })
 export class AppDeployRequestModule {}
