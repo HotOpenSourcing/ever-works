@@ -55,9 +55,13 @@ export class AppDependencyRowsRelay {
         return this.require().findOne({ where: { id } });
     }
 
-    async update(criteria: { id?: unknown }, patch: Record<string, unknown>): Promise<{ affected: number }> {
+    async update(
+        criteria: { id?: unknown },
+        patch: Record<string, unknown>,
+    ): Promise<{ affected: number }> {
         const id = criteria?.id;
-        if (typeof id !== 'string' || !id) throw new Error('A dependency row update is scoped by id only.');
+        if (typeof id !== 'string' || !id)
+            throw new Error('A dependency row update is scoped by id only.');
         const safe: Record<string, unknown> = { ...(patch ?? {}) };
         for (const column of IDENTITY_COLUMNS) delete safe[column];
         if (Object.keys(safe).length === 0) return { affected: 0 };
@@ -66,7 +70,8 @@ export class AppDependencyRowsRelay {
     }
 
     private require(): Repository<WorkAppDependency> {
-        if (!this.rows) throw new Error('No WorkAppDependency repository is bound in this process.');
+        if (!this.rows)
+            throw new Error('No WorkAppDependency repository is bound in this process.');
         return this.rows;
     }
 }

@@ -149,7 +149,10 @@ export interface AppClusterOpDispatchPayload {
 
 /** `APP_CLUSTER_OP_DISPATCHER`'s view, as every consumer reads it (`dispatch(payload, opts)`). */
 export interface AppClusterOpDispatchGate {
-    dispatch(payload: AppClusterOpDispatchPayload, opts?: { delayMs?: number }): Promise<string | null>;
+    dispatch(
+        payload: AppClusterOpDispatchPayload,
+        opts?: { delayMs?: number },
+    ): Promise<string | null>;
     isEnabled(): boolean;
 }
 
@@ -175,7 +178,8 @@ export function appClusterOpDispatcherGate(
         }
     };
     return {
-        isEnabled: () => appClusterDispatchAttested() && typeof runtime()?.dispatchAppClusterOp === 'function',
+        isEnabled: () =>
+            appClusterDispatchAttested() && typeof runtime()?.dispatchAppClusterOp === 'function',
         dispatch: async (payload, opts) => {
             if (!appClusterDispatchAttested()) return null;
             const dispatchers = runtime();

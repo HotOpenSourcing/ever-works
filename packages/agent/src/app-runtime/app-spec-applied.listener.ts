@@ -76,7 +76,8 @@ export class AppSpecAppliedListener {
     }
 
     private async handle(event: AppSpecAppliedEvent): Promise<AppSpecAppliedTriggerOutcome> {
-        if (!config.everWorks?.apps?.worksEnabled?.()) return { requested: false, reason: 'disabled' };
+        if (!config.everWorks?.apps?.worksEnabled?.())
+            return { requested: false, reason: 'disabled' };
         const workId = text(event?.workId);
         const commitSha = text(event?.commitSha);
         if (!workId || !commitSha) return { requested: false, reason: 'invalid_payload' };
@@ -90,8 +91,10 @@ export class AppSpecAppliedListener {
         }
 
         const state = await this.states.getOrCreate(workId);
-        if (!state?.target || state.target === 'none') return { requested: false, reason: 'target_none' };
-        if (state.targetSettings?.autoDeploy === false) return { requested: false, reason: 'auto_deploy_off' };
+        if (!state?.target || state.target === 'none')
+            return { requested: false, reason: 'target_none' };
+        if (state.targetSettings?.autoDeploy === false)
+            return { requested: false, reason: 'auto_deploy_off' };
 
         const snapshot = (await this.specs.getEffectiveSpec(workId, commitSha)) as unknown as {
             spec?: { build?: { strategy?: unknown } | null } | null;

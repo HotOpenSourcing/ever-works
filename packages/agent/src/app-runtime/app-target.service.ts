@@ -30,7 +30,11 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import type { AppDeployTarget, AppPrecondition, AppRuntimeState } from '@ever-works/contracts';
-import { isAppDeploymentPlugin, PLUGIN_CAPABILITIES, type IDeploymentPlugin } from '@ever-works/plugin';
+import {
+    isAppDeploymentPlugin,
+    PLUGIN_CAPABILITIES,
+    type IDeploymentPlugin,
+} from '@ever-works/plugin';
 
 import { WORK_APP_RUNTIME_STATES } from '../app-launcher/app-launcher.service';
 import { WorkDeploymentRepository } from '../database/repositories/work-deployment.repository';
@@ -183,7 +187,11 @@ export class AppTargetService {
 
         const row = await this.readState(workId);
         if (!row || !this.states?.patchRuntimeState) {
-            return refuse(503, 'app_runtime_state_unavailable', 'The App runtime state is not available.');
+            return refuse(
+                503,
+                'app_runtime_state_unavailable',
+                'The App runtime state is not available.',
+            );
         }
         if (row.deletionRequestedAt) {
             return refuse(409, 'APP_WORK_DELETING', 'This App Work is being deleted.');
@@ -222,13 +230,16 @@ export class AppTargetService {
             try {
                 await this.appsDns.allocate(workId);
             } catch (error) {
-                this.logger.warn(`Allocating the managed subdomain of ${workId} failed: ${messageOf(error)}`);
+                this.logger.warn(
+                    `Allocating the managed subdomain of ${workId} failed: ${messageOf(error)}`,
+                );
             }
         }
 
         const namespaceChanged =
             parsed.settings?.namespaceOverride !== undefined &&
-            parsed.settings.namespaceOverride !== (row.targetSettings?.namespaceOverride ?? undefined);
+            parsed.settings.namespaceOverride !==
+                (row.targetSettings?.namespaceOverride ?? undefined);
         if (target !== 'none' && (target !== previousTarget || namespaceChanged)) {
             // §9.1 — after a committed change: the namespace and its baseline policies first, so a
             // dependency provisioned next lands in a namespace that already exists (GAP-06).
@@ -288,12 +299,19 @@ export class AppTargetService {
         } else if (kubeContext && this.settings?.writePlatformManagedWorkSettings) {
             const pluginId = await this.ensureDeployProvider(workId);
             if (pluginId) {
-                await this.settings.writePlatformManagedWorkSettings(pluginId, workId, { kubeContext });
+                await this.settings.writePlatformManagedWorkSettings(pluginId, workId, {
+                    kubeContext,
+                });
             }
         }
 
         const requestId = randomUUID();
-        const dispatched = await this.dispatchOp({ op: 'cluster-check', workId, userId, requestId });
+        const dispatched = await this.dispatchOp({
+            op: 'cluster-check',
+            workId,
+            userId,
+            requestId,
+        });
         return { ok: true, httpStatus: 202, requestId, dispatched };
     }
 
@@ -303,19 +321,24 @@ export class AppTargetService {
 
     async getStatus(workId: string): Promise<AppStatusBody> {
         const row = await this.readState(workId);
-        const target = (TARGETS.find((choice) => choice === row?.target) ?? 'none') as AppDeployTarget;
+        const target = (TARGETS.find((choice) => choice === row?.target) ??
+            'none') as AppDeployTarget;
 
         const latest = await this.latestDeployment(workId);
         const current = row?.currentDeploymentId
-            ? (await this.deploymentById(row.currentDeploymentId)) ?? latest
+            ? ((await this.deploymentById(row.currentDeploymentId)) ?? latest)
             : latest;
         const render = (current?.appRender ?? {}) as {
             phase?: unknown;
             hosts?: { primary?: unknown; extra?: unknown };
             cancelledBy?: unknown;
         };
-        const live = row?.currentDeploymentId ? await this.deploymentById(row.currentDeploymentId) : null;
-        const liveHosts = ((live?.appRender ?? {}) as { hosts?: { primary?: unknown; extra?: unknown } }).hosts;
+        const live = row?.currentDeploymentId
+            ? await this.deploymentById(row.currentDeploymentId)
+            : null;
+        const liveHosts = (
+            (live?.appRender ?? {}) as { hosts?: { primary?: unknown; extra?: unknown } }
+        ).hosts;
         const primary = text(liveHosts?.primary) || null;
         const extra = Array.isArray(liveHosts?.extra) ? liveHosts.extra.map(String) : [];
 
@@ -330,7 +353,9 @@ export class AppTargetService {
             target,
             stale,
             observedAt,
-            url: (live?.website ? String(live.website) : null) ?? (primary ? `https://${primary}` : null),
+            url:
+                (live?.website ? String(live.website) : null) ??
+                (primary ? `https://${primary}` : null),
             hosts: { primary, extra },
             sourceOffer: null,
             currentDeployment: latest
@@ -340,7 +365,9 @@ export class AppTargetService {
                       ...(text(((latest.appRender ?? {}) as { phase?: unknown }).phase)
                           ? { phase: text(((latest.appRender ?? {}) as { phase?: unknown }).phase) }
                           : {}),
-                      ...(text(render.cancelledBy) ? { cancelReason: text(render.cancelledBy) } : {}),
+                      ...(text(render.cancelledBy)
+                          ? { cancelReason: text(render.cancelledBy) }
+                          : {}),
                   }
                 : null,
             snapshot: row?.statusSnapshot ?? null,
@@ -352,8 +379,12 @@ export class AppTargetService {
      * internals
      * ---------------------------------------------------------------------- */
 
-    private async targetBody(row: AppTargetStateRow | null, userId: string): Promise<AppTargetBody> {
-        const target = (TARGETS.find((choice) => choice === row?.target) ?? 'none') as AppDeployTarget;
+    private async targetBody(
+        row: AppTargetStateRow | null,
+        userId: string,
+    ): Promise<AppTargetBody> {
+        const target = (TARGETS.find((choice) => choice === row?.target) ??
+            'none') as AppDeployTarget;
         let eligibility: AppTargetBody['eligibility'] = null;
         if (this.tier?.eligibility) {
             try {
@@ -433,7 +464,9 @@ export class AppTargetService {
                     try {
                         await this.works?.update(workId, { deployProvider: id });
                     } catch (error) {
-                        this.logger.warn(`Could not set the deploy provider of ${workId}: ${messageOf(error)}`);
+                        this.logger.warn(
+                            `Could not set the deploy provider of ${workId}: ${messageOf(error)}`,
+                        );
                     }
                 }
                 return id;
@@ -457,7 +490,9 @@ export class AppTargetService {
         }
         const capabilities = [
             ...(Array.isArray(plugin?.capabilities) ? plugin.capabilities : []),
-            ...(Array.isArray(registered.manifest?.capabilities) ? registered.manifest.capabilities : []),
+            ...(Array.isArray(registered.manifest?.capabilities)
+                ? registered.manifest.capabilities
+                : []),
         ];
         return (
             capabilities.includes(PLUGIN_CAPABILITIES.DEPLOYMENT) &&
@@ -473,14 +508,21 @@ export class AppTargetService {
         requestId?: string;
     }): Promise<boolean> {
         if (!this.ops?.dispatch) {
-            this.logger.warn(`No App cluster-op dispatcher is bound; ${payload.op} for ${payload.workId} was not queued.`);
+            this.logger.warn(
+                `No App cluster-op dispatcher is bound; ${payload.op} for ${payload.workId} was not queued.`,
+            );
             return false;
         }
         try {
-            const id = await this.ops.dispatch({ ...payload, requestId: payload.requestId ?? randomUUID() });
+            const id = await this.ops.dispatch({
+                ...payload,
+                requestId: payload.requestId ?? randomUUID(),
+            });
             return Boolean(id);
         } catch (error) {
-            this.logger.warn(`Dispatching ${payload.op} for ${payload.workId} failed: ${messageOf(error)}`);
+            this.logger.warn(
+                `Dispatching ${payload.op} for ${payload.workId} failed: ${messageOf(error)}`,
+            );
             return false;
         }
     }
@@ -490,7 +532,9 @@ export class AppTargetService {
         try {
             return (await this.states.getOrCreate(workId)) ?? null;
         } catch (error) {
-            this.logger.warn(`Reading the App runtime state of ${workId} failed: ${messageOf(error)}`);
+            this.logger.warn(
+                `Reading the App runtime state of ${workId} failed: ${messageOf(error)}`,
+            );
             return null;
         }
     }
@@ -539,7 +583,8 @@ export function parseSettings(
     raw: unknown,
 ): { settings: AppRuntimeTargetSettings | null } | { error: string } {
     if (raw === undefined || raw === null) return { settings: null };
-    if (typeof raw !== 'object' || Array.isArray(raw)) return { error: 'settings must be an object.' };
+    if (typeof raw !== 'object' || Array.isArray(raw))
+        return { error: 'settings must be an object.' };
     const input = raw as Record<string, unknown>;
     const out: Record<string, unknown> = {};
 
@@ -550,7 +595,8 @@ export function parseSettings(
             out[key] = null;
             continue;
         }
-        if (typeof value !== 'string' || value.length > 253) return { error: `${key} must be a short string.` };
+        if (typeof value !== 'string' || value.length > 253)
+            return { error: `${key} must be a short string.` };
         out[key] = value.trim();
     }
     for (const key of SETTINGS_BOOLEAN_KEYS) {
@@ -571,7 +617,11 @@ export function parseSettings(
     return { settings: out as AppRuntimeTargetSettings };
 }
 
-function refuse(httpStatus: number, code: string, message: string): { ok: false; refusal: AppTargetRefusal } {
+function refuse(
+    httpStatus: number,
+    code: string,
+    message: string,
+): { ok: false; refusal: AppTargetRefusal } {
     return { ok: false, refusal: { httpStatus, code, message } };
 }
 

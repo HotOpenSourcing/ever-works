@@ -18,12 +18,19 @@
  */
 
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { APP_DEPENDENCY_KINDS, type AppDeployTarget, type AppDependencyKind } from '@ever-works/contracts';
+import {
+    APP_DEPENDENCY_KINDS,
+    type AppDeployTarget,
+    type AppDependencyKind,
+} from '@ever-works/contracts';
 
 import { WORK_APP_RUNTIME_STATES } from '../app-launcher/app-launcher.service';
 import { AppSpecService, isUsableAppSpecStatus } from '../app-spec/app-spec.service';
 import { WorkRepository } from '../database/repositories/work.repository';
-import type { AppDependencySpecSnapshot, AppDependencySpecSource } from './app-dependencies.service';
+import type {
+    AppDependencySpecSnapshot,
+    AppDependencySpecSource,
+} from './app-dependencies.service';
 
 const TARGETS: readonly AppDeployTarget[] = ['none', 'your-cluster', 'ever-works-apps'];
 
@@ -35,7 +42,9 @@ export class AppDependencySpecSourceAdapter implements AppDependencySpecSource {
         @Optional() private readonly specs?: AppSpecService,
         @Optional()
         @Inject(WORK_APP_RUNTIME_STATES)
-        private readonly states?: { getOrCreate(workId: string): Promise<{ target?: string | null } | null> },
+        private readonly states?: {
+            getOrCreate(workId: string): Promise<{ target?: string | null } | null>;
+        },
         @Optional() private readonly works?: WorkRepository,
     ) {}
 
@@ -50,11 +59,15 @@ export class AppDependencySpecSourceAdapter implements AppDependencySpecSource {
             if (!snapshot || !isUsableAppSpecStatus(snapshot.status) || !snapshot.spec) return null;
 
             const state = this.states?.getOrCreate ? await this.states.getOrCreate(workId) : null;
-            const deployTarget = (TARGETS.find((choice) => choice === state?.target) ?? 'none') as AppDeployTarget;
+            const deployTarget = (TARGETS.find((choice) => choice === state?.target) ??
+                'none') as AppDeployTarget;
 
             const work = this.works?.findById ? await this.works.findById(workId) : null;
             const appName =
-                text((snapshot.spec as { name?: unknown }).name) || text(work?.slug) || text(work?.name) || workId;
+                text((snapshot.spec as { name?: unknown }).name) ||
+                text(work?.slug) ||
+                text(work?.name) ||
+                workId;
 
             const declared = (snapshot.spec.dependencies ?? {}) as Record<string, unknown>;
             const dependencies = (APP_DEPENDENCY_KINDS as readonly AppDependencyKind[])

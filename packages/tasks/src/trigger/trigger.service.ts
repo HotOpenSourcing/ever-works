@@ -1298,11 +1298,7 @@ export class TriggerService
             const handle = await appClusterOpTask.trigger(
                 payload,
                 this.stampTenantOptions({
-                    tags: [
-                        'app-cluster-op',
-                        `work:${payload.workId}`,
-                        `op:${payload.op}`,
-                    ],
+                    tags: ['app-cluster-op', `work:${payload.workId}`, `op:${payload.op}`],
                     machine: this.machine() as any,
                     ...(payload.op === 'verification-deploy'
                         ? { maxDuration: APP_CLUSTER_OP_VERIFICATION_MAX_DURATION }

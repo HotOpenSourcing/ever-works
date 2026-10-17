@@ -37,29 +37,44 @@ describe('WorkAppRuntimeController', () => {
         const targets = {
             getTarget: jest.fn(async () => ({ target: 'your-cluster' })),
             putTarget: jest.fn(async () => ({ ok: true, body: { target: 'your-cluster' } })),
-            check: jest.fn(async () => ({ ok: true, httpStatus: 202, requestId: 'req-1', dispatched: true })),
+            check: jest.fn(async () => ({
+                ok: true,
+                httpStatus: 202,
+                requestId: 'req-1',
+                dispatched: true,
+            })),
             getStatus: jest.fn(async () => ({ state: 'live' })),
         };
-        return { controller: new WorkAppRuntimeController(ownership as never, targets as never), ownership, targets };
+        return {
+            controller: new WorkAppRuntimeController(ownership as never, targets as never),
+            ownership,
+            targets,
+        };
     }
 
     it('answers the target, the status and a 202 check with no credential in the body', async () => {
         const { controller, targets } = build();
         const response = { status: jest.fn() };
 
-        await expect(controller.getAppTarget(auth, WORK_ID)).resolves.toEqual({ target: 'your-cluster' });
+        await expect(controller.getAppTarget(auth, WORK_ID)).resolves.toEqual({
+            target: 'your-cluster',
+        });
         await expect(controller.getAppStatus(auth, WORK_ID)).resolves.toEqual({ state: 'live' });
         await expect(
             controller.checkAppTarget(auth, WORK_ID, { kubeconfig: 'apiVersion: v1' }, response),
         ).resolves.toEqual({ status: 'accepted', requestId: 'req-1', dispatched: true });
         expect(response.status).toHaveBeenCalledWith(HttpStatus.ACCEPTED);
-        expect(targets.check).toHaveBeenCalledWith(WORK_ID, 'u-1', { kubeconfig: 'apiVersion: v1' });
+        expect(targets.check).toHaveBeenCalledWith(WORK_ID, 'u-1', {
+            kubeconfig: 'apiVersion: v1',
+        });
     });
 
     it('answers one 404 for a missing or invisible Work, and 404 notAppWork for a website', async () => {
         for (const deny of [new NotFoundException(), new ForbiddenException()]) {
             const { controller, targets } = build('app', deny);
-            await expect(controller.getAppTarget(auth, WORK_ID)).rejects.toMatchObject({ status: 404 });
+            await expect(controller.getAppTarget(auth, WORK_ID)).rejects.toMatchObject({
+                status: 404,
+            });
             expect(targets.getTarget).not.toHaveBeenCalled();
         }
         const website = build('website');

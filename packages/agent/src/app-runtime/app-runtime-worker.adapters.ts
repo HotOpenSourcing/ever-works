@@ -746,7 +746,8 @@ export class AppClusterOpDispatchRelay {
         opts?: { delayMs?: number },
     ): Promise<string | null> {
         if (!this.gate?.dispatch) return null;
-        if (!payload || typeof payload.op !== 'string' || typeof payload.workId !== 'string') return null;
+        if (!payload || typeof payload.op !== 'string' || typeof payload.workId !== 'string')
+            return null;
         return this.gate.dispatch(payload, opts);
     }
 }

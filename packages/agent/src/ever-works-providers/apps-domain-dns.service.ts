@@ -96,7 +96,10 @@ export class AppsDomainDnsServiceImpl {
             removeRecord: async () => undefined,
         };
         try {
-            const result = await new SubdomainAllocator(this.works, null as never).allocate(work, probe);
+            const result = await new SubdomainAllocator(this.works, null as never).allocate(
+                work,
+                probe,
+            );
             return result.subdomain.length >= APPS_DOMAIN_MIN_LABEL_LENGTH ? result.fqdn : null;
         } catch (error) {
             this.logger.warn(
@@ -113,7 +116,10 @@ export class AppsDomainDnsServiceImpl {
         const root = this.rootDomain();
         if (!root || !this.works?.findById) return null;
         const work = await this.works.findById(workId);
-        const label = typeof work?.managedSubdomain === 'string' ? work.managedSubdomain.trim().toLowerCase() : '';
+        const label =
+            typeof work?.managedSubdomain === 'string'
+                ? work.managedSubdomain.trim().toLowerCase()
+                : '';
         return label.length >= APPS_DOMAIN_MIN_LABEL_LENGTH ? `${label}.${root}` : null;
     }
 
@@ -131,11 +137,14 @@ export class AppsDomainDnsServiceImpl {
         const hostname = (address?.hostname ?? '').trim().toLowerCase();
         let record: { type: 'A' | 'CNAME'; target: string } | null = null;
         if (ip && isIP(ip) === 4 && isPublicIPv4(ip)) record = { type: 'A', target: ip };
-        else if (!ip && hostname && isHostname(hostname)) record = { type: 'CNAME', target: hostname };
+        else if (!ip && hostname && isHostname(hostname))
+            record = { type: 'CNAME', target: hostname };
         if (!record) return { status: 'skipped', reason: 'ingress_address_not_public' };
 
         await dns.ensureRecord({ host, type: record.type, target: record.target, proxied: false });
-        this.logger.log(`Managed App host ${host} → ${record.type} ${record.target} (work ${workId}).`);
+        this.logger.log(
+            `Managed App host ${host} → ${record.type} ${record.target} (work ${workId}).`,
+        );
         return { status: 'ensured', host, ...record };
     }
 
@@ -153,7 +162,10 @@ export class AppsDomainDnsServiceImpl {
 /** A routable IPv4 address: not private, loopback, link-local, CGNAT, multicast or reserved. */
 export function isPublicIPv4(ip: string): boolean {
     const parts = ip.split('.').map((part) => Number(part));
-    if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    if (
+        parts.length !== 4 ||
+        parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
+    ) {
         return false;
     }
     const [a, b] = parts;
@@ -169,5 +181,8 @@ export function isPublicIPv4(ip: string): boolean {
 
 function isHostname(value: string): boolean {
     if (value.length > 253 || value.endsWith('.local') || value === 'localhost') return false;
-    return value.split('.').length >= 2 && value.split('.').every((label) => /^[a-z0-9-]{1,63}$/.test(label));
+    return (
+        value.split('.').length >= 2 &&
+        value.split('.').every((label) => /^[a-z0-9-]{1,63}$/.test(label))
+    );
 }

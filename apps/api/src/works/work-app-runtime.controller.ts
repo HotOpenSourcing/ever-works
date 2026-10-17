@@ -59,7 +59,9 @@ export class WorkAppRuntimeController {
     ) {}
 
     @Get(':id/app-target')
-    @ApiOperation({ summary: "An App Work's deploy target, its settings and the last cluster check" })
+    @ApiOperation({
+        summary: "An App Work's deploy target, its settings and the last cluster check",
+    })
     @ApiParam({ name: 'id', description: 'Work ID' })
     async getAppTarget(
         @CurrentUser() auth: AuthenticatedUser,
@@ -104,7 +106,11 @@ export class WorkAppRuntimeController {
         if ('refusal' in result) throw refusalException(result.refusal);
         response.status(HttpStatus.ACCEPTED);
         const accepted = result as { requestId: string; dispatched: boolean };
-        return { status: 'accepted', requestId: accepted.requestId, dispatched: accepted.dispatched };
+        return {
+            status: 'accepted',
+            requestId: accepted.requestId,
+            dispatched: accepted.dispatched,
+        };
     }
 
     @Get(':id/app-status')
@@ -145,7 +151,11 @@ export class WorkAppRuntimeController {
 
         if (access.work.kind !== 'app') {
             throw new HttpException(
-                { status: 'error', code: 'notAppWork', message: `Work ${workId} is not an App Work.` },
+                {
+                    status: 'error',
+                    code: 'notAppWork',
+                    message: `Work ${workId} is not an App Work.`,
+                },
                 HttpStatus.NOT_FOUND,
             );
         }

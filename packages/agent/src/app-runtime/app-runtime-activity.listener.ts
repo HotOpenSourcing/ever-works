@@ -97,7 +97,11 @@ export class AppRuntimeActivityListener {
     }
 
     /** One row for one relayed event. */
-    async write(actionType: ActivityActionType, payload: Record<string, unknown>, name?: string): Promise<boolean> {
+    async write(
+        actionType: ActivityActionType,
+        payload: Record<string, unknown>,
+        name?: string,
+    ): Promise<boolean> {
         if (!this.activityLog?.log) return false;
         const workId = text(payload?.workId);
         if (!workId) return false;
@@ -111,7 +115,9 @@ export class AppRuntimeActivityListener {
             for (const key of METADATA_KEYS) {
                 const value = payload?.[key];
                 if (value === undefined || value === null || value === '') continue;
-                metadata[key] = Array.isArray(value) ? value.map((entry) => String(entry)).slice(0, 20) : String(value);
+                metadata[key] = Array.isArray(value)
+                    ? value.map((entry) => String(entry)).slice(0, 20)
+                    : String(value);
             }
 
             await this.activityLog.log({
@@ -151,13 +157,19 @@ function statusFor(action: string): ActivityStatus {
     return ActivityStatus.COMPLETED;
 }
 
-function summaryFor(actionType: ActivityActionType, action: string, metadata: Record<string, unknown>): string {
+function summaryFor(
+    actionType: ActivityActionType,
+    action: string,
+    metadata: Record<string, unknown>,
+): string {
     const verb = action.split('.').pop() ?? '';
     switch (actionType) {
         case ActivityActionType.APP_DEPLOY:
             return `Deployment ${verb.replace('_', ' ')}${metadata.code ? ` (${String(metadata.code)})` : ''}`;
         case ActivityActionType.APP_JOB:
-            return `Job ${Array.isArray(metadata.names) ? (metadata.names as string[]).join(', ') : ''} ${verb}`.replace(/\s+/g, ' ').trim();
+            return `Job ${Array.isArray(metadata.names) ? (metadata.names as string[]).join(', ') : ''} ${verb}`
+                .replace(/\s+/g, ' ')
+                .trim();
         default:
             return `Smoke checks ${verb}`;
     }

@@ -46,7 +46,8 @@ export class AppManagedDnsListener {
                 return { status: 'skipped', reason: 'unbound' };
             }
             const state = await this.states.getOrCreate(workId);
-            if (state?.target !== 'your-cluster') return { status: 'skipped', reason: 'not_your_cluster' };
+            if (state?.target !== 'your-cluster')
+                return { status: 'skipped', reason: 'not_your_cluster' };
             if (state.targetSettings?.managedSubdomain === false) {
                 return { status: 'skipped', reason: 'managed_subdomain_off' };
             }

@@ -121,9 +121,9 @@ describe('AppDeployRequestModule — the §5.1 collaborators as the API composes
         // cannot be read it answers `null`, so the preflight below is unchanged — still fail-closed
         // with `specUnavailable`, no row, no dispatch. A Work whose spec declares a dependency now
         // gets its row and its provision dispatch from `reconcile`.
-        expect(
-            (preconditions().dependencies as unknown as { spec?: unknown }).spec,
-        ).toBeInstanceOf(AppDependencySpecSourceAdapter);
+        expect((preconditions().dependencies as unknown as { spec?: unknown }).spec).toBeInstanceOf(
+            AppDependencySpecSourceAdapter,
+        );
         // What wiring the service turns on TODAY. `APP_DEPENDENCY_SPEC_SOURCE` is
         // APW-07 T25's to bind and is unwritten, so `reconcile` fails closed before
         // it creates a row or dispatches a provision. §5.1 step 9 refuses on that

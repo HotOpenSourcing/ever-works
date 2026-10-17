@@ -47,7 +47,9 @@ function harness(row: Record<string, unknown> | null = { target: 'none', targetS
     };
     const registry = {
         get: jest.fn((id: string) =>
-            id === 'k8s' ? { state: 'loaded', plugin: k8s, manifest: { capabilities: ['deployment'] } } : undefined,
+            id === 'k8s'
+                ? { state: 'loaded', plugin: k8s, manifest: { capabilities: ['deployment'] } }
+                : undefined,
         ),
     };
     const settings = { writePlatformManagedWorkSettings: jest.fn(async () => undefined) };
@@ -72,7 +74,10 @@ describe('AppTargetService.check (POST app-target/check)', () => {
     it('stores the kubeconfig write-only, points the Work at Your cluster and dispatches cluster-check', async () => {
         const { service, settings, ops, states, works } = harness();
 
-        const result = await service.check('w-1', 'u-1', { kubeconfig: KUBECONFIG, kubeContext: 'prod' });
+        const result = await service.check('w-1', 'u-1', {
+            kubeconfig: KUBECONFIG,
+            kubeContext: 'prod',
+        });
 
         expect(result).toMatchObject({ ok: true, httpStatus: 202, dispatched: true });
         expect(settings.writePlatformManagedWorkSettings).toHaveBeenCalledWith('k8s', 'w-1', {
@@ -99,21 +104,27 @@ describe('AppTargetService.check (POST app-target/check)', () => {
 
     it('refuses an oversized kubeconfig and a deleting Work, and says when no plugin can host it', async () => {
         const big = harness();
-        await expect(big.service.check('w-1', 'u-1', { kubeconfig: 'x'.repeat(64 * 1024 + 1) })).resolves.toMatchObject({
+        await expect(
+            big.service.check('w-1', 'u-1', { kubeconfig: 'x'.repeat(64 * 1024 + 1) }),
+        ).resolves.toMatchObject({
             ok: false,
             refusal: { httpStatus: 413, code: 'kubeconfig_too_large' },
         });
         expect(big.ops.dispatch).not.toHaveBeenCalled();
 
         const deleting = harness({ target: 'your-cluster', deletionRequestedAt: new Date() });
-        await expect(deleting.service.check('w-1', 'u-1', { kubeconfig: KUBECONFIG })).resolves.toMatchObject({
+        await expect(
+            deleting.service.check('w-1', 'u-1', { kubeconfig: KUBECONFIG }),
+        ).resolves.toMatchObject({
             ok: false,
             refusal: { httpStatus: 409, code: 'APP_WORK_DELETING' },
         });
 
         const noPlugin = harness();
         noPlugin.registry.get.mockReturnValue(undefined);
-        await expect(noPlugin.service.check('w-1', 'u-1', { kubeconfig: KUBECONFIG })).resolves.toMatchObject({
+        await expect(
+            noPlugin.service.check('w-1', 'u-1', { kubeconfig: KUBECONFIG }),
+        ).resolves.toMatchObject({
             ok: false,
             refusal: { httpStatus: 422, code: 'your_cluster_plugin_unavailable' },
         });
@@ -123,7 +134,10 @@ describe('AppTargetService.check (POST app-target/check)', () => {
 
 describe('AppTargetService.putTarget / getTarget (PUT/GET app-target)', () => {
     it('saves Your cluster with merged settings and prepares the namespace once', async () => {
-        const { service, states, ops } = harness({ target: 'none', targetSettings: { tls: 'cert-manager' } });
+        const { service, states, ops } = harness({
+            target: 'none',
+            targetSettings: { tls: 'cert-manager' },
+        });
 
         const result = await service.putTarget('w-1', 'u-1', {
             target: 'your-cluster',
@@ -142,7 +156,9 @@ describe('AppTargetService.putTarget / getTarget (PUT/GET app-target)', () => {
             target: 'your-cluster',
             targetSettings: { tls: 'cert-manager', ingressClass: 'nginx', networkIsolation: false },
         });
-        expect(ops.dispatch).toHaveBeenCalledWith(expect.objectContaining({ op: 'prepare-namespace' }));
+        expect(ops.dispatch).toHaveBeenCalledWith(
+            expect.objectContaining({ op: 'prepare-namespace' }),
+        );
     });
 
     it('refuses the managed target while the tier is closed (422 APP_TARGET_REFUSED managed_disabled)', async () => {
@@ -151,7 +167,11 @@ describe('AppTargetService.putTarget / getTarget (PUT/GET app-target)', () => {
 
         expect(result).toMatchObject({
             ok: false,
-            refusal: { httpStatus: 422, code: 'APP_TARGET_REFUSED', unmet: [{ code: 'managed_disabled' }] },
+            refusal: {
+                httpStatus: 422,
+                code: 'APP_TARGET_REFUSED',
+                unmet: [{ code: 'managed_disabled' }],
+            },
         });
         expect(states.patchRuntimeState).not.toHaveBeenCalled();
     });
@@ -216,10 +236,14 @@ describe('AppTargetService.getStatus (GET app-status)', () => {
     it('maps the row to the seven app states', () => {
         expect(runtimeStateOf(null)).toBe('not-deployed');
         expect(runtimeStateOf({ currentDeploymentId: null })).toBe('not-deployed');
-        expect(runtimeStateOf({ currentDeploymentId: 'd', deletionRequestedAt: new Date() })).toBe('deleting');
+        expect(runtimeStateOf({ currentDeploymentId: 'd', deletionRequestedAt: new Date() })).toBe(
+            'deleting',
+        );
         expect(runtimeStateOf({ currentDeploymentId: 'd', paused: true })).toBe('paused');
         expect(runtimeStateOf({ currentDeploymentId: 'd', health: 'down' })).toBe('down');
-        expect(runtimeStateOf({ currentDeploymentId: 'd', health: 'unreachable' })).toBe('unreachable');
+        expect(runtimeStateOf({ currentDeploymentId: 'd', health: 'unreachable' })).toBe(
+            'unreachable',
+        );
         expect(runtimeStateOf({ currentDeploymentId: 'd', health: 'unknown' })).toBe('live');
     });
 });

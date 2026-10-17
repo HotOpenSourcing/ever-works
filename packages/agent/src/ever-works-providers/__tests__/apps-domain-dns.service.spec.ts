@@ -13,7 +13,9 @@ import { AppsDomainDnsServiceImpl, isPublicIPv4 } from '../apps-domain-dns.servi
 const ENV = { EVER_WORKS_APPS_DNS_ZONE_ID: 'zone-1', EVER_WORKS_APPS_DNS_API_TOKEN: 'cf-token' };
 
 function service(env: Record<string, string> = ENV, label: string | null = 'acme') {
-    const works = { findById: jest.fn(async () => ({ id: 'w-1', slug: 'acme', managedSubdomain: label })) };
+    const works = {
+        findById: jest.fn(async () => ({ id: 'w-1', slug: 'acme', managedSubdomain: label })),
+    };
     const dns = new AppsDomainDnsServiceImpl(works as never, env);
     const ensureRecord = jest.fn(async () => ({ id: 'r', host: 'acme.apps.example.com' }));
     const removeRecord = jest.fn(async () => undefined);
@@ -51,7 +53,9 @@ describe('AppsDomainDnsServiceImpl', () => {
 
     it('uses a CNAME for a hostname and refuses a private address', async () => {
         const { dns, ensureRecord } = service();
-        await expect(dns.ensureFor('w-1', { hostname: 'lb-1.elb.amazonaws.com' })).resolves.toMatchObject({
+        await expect(
+            dns.ensureFor('w-1', { hostname: 'lb-1.elb.amazonaws.com' }),
+        ).resolves.toMatchObject({
             type: 'CNAME',
         });
         await expect(dns.ensureFor('w-1', { ip: '10.0.0.5' })).resolves.toEqual({
@@ -66,7 +70,9 @@ describe('AppsDomainDnsServiceImpl', () => {
             status: 'skipped',
             reason: 'apps_dns_unconfigured',
         });
-        await expect(service(ENV, null).dns.ensureFor('w-1', { ip: '203.0.113.10' })).resolves.toEqual({
+        await expect(
+            service(ENV, null).dns.ensureFor('w-1', { ip: '203.0.113.10' }),
+        ).resolves.toEqual({
             status: 'skipped',
             reason: 'no_managed_subdomain',
         });
@@ -77,7 +83,15 @@ describe('AppsDomainDnsServiceImpl', () => {
 
     it('classifies IPv4 addresses', () => {
         expect(isPublicIPv4('203.0.113.10')).toBe(true);
-        for (const ip of ['10.1.2.3', '172.16.0.1', '192.168.1.1', '127.0.0.1', '169.254.1.1', '100.64.0.1', '0.0.0.0']) {
+        for (const ip of [
+            '10.1.2.3',
+            '172.16.0.1',
+            '192.168.1.1',
+            '127.0.0.1',
+            '169.254.1.1',
+            '100.64.0.1',
+            '0.0.0.0',
+        ]) {
             expect(isPublicIPv4(ip)).toBe(false);
         }
     });
@@ -96,7 +110,9 @@ describe('AppManagedDnsListener', () => {
                     : { target: 'ever-works-apps' },
         });
 
-        await expect(listener.onDeploySucceeded({ workId: 'w-1' })).resolves.toEqual({ status: 'ensured' });
+        await expect(listener.onDeploySucceeded({ workId: 'w-1' })).resolves.toEqual({
+            status: 'ensured',
+        });
         expect(dns.ensureFor).toHaveBeenCalledWith('w-1', { ip: '203.0.113.10' });
         await expect(listener.onDeploySucceeded({ workId: 'w-2' })).resolves.toEqual({
             status: 'skipped',
