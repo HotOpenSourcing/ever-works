@@ -5,6 +5,7 @@ import { AppBuildsModule } from '../../app-builds/app-builds.module';
 import { AppDependenciesModule } from '../../app-dependencies/app-dependencies.module';
 import { AppEnvModule } from '../../app-env/app-env.module';
 import { AppLauncherModule } from '../../app-launcher/app-launcher.module';
+import { AppLicenseModule } from '../../app-license/app-license.module';
 import { AppSpecModule } from '../../app-spec/app-spec.module';
 import { AppWorksModule } from '../../app-works/app-works.module';
 import { AppDeployRequestModule } from '../app-deploy-request.module';
@@ -111,6 +112,9 @@ const APP_WORKS_MODULES = {
     AppDependenciesModule,
     AppEnvModule,
     AppLauncherModule,
+    // APW-03 T42 (2026-10-17) — the licence module, imported by `AppWorksModule`
+    // and `AppDeployRequestModule`.
+    AppLicenseModule,
     AppRuntimeEnvModule,
     AppRuntimeStateModule,
     AppSpecModule,
@@ -156,6 +160,9 @@ function boundTokenNames(): Set<string> {
  * document. Keep it sorted; it is read by people.
  */
 const BOUND: readonly string[] = [
+    // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
+    // beside the adapter whose apply gate it opens.
+    'APP_BLUEPRINT_APPLY_SERVICE',
     // APW-05 T16 — `BuildFacadeService`, provided by `AppBuildsModule` (2026-09-21).
     // Four services in this epic inject it; until it was bound every one of them
     // took its `pluginUnavailable` branch and no Build could be requested.
@@ -258,6 +265,9 @@ const BOUND: readonly string[] = [
     // and listed nowhere: the register only checked BOUND ⊆ provided until the
     // "names in BOUND every declared …" case (2026-09-26) checked the other half.
     'APP_FORK_READINESS_DISPATCHER',
+    // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
+    // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
+    'APP_LICENSE_SERVICE',
     'APP_RUNTIME_ENV_SOURCE',
     // APW-03 T26 (explicit + probe halves) — `AppSourceCatalogAdapter`, bound
     // 2026-09-25 by `AppWorksModule`, beside the inspector and the create service
@@ -269,6 +279,12 @@ const BOUND: readonly string[] = [
     // MATCH stays behind the apply gate until `APP_BLUEPRINT_APPLY_SERVICE`
     // (T28) is bound — without it a match would fail the Work's readiness.
     'APP_SOURCE_CATALOG_PORT',
+    // APW-03 T42 (2026-10-17) — the same instance, for APW-02's sync (FR-37).
+    'APP_UPSTREAM_LICENSE_SERVICE',
+    // APW-02 T31 (2026-10-17) — `buildAppUpstreamSyncDispatcherProvider()`, provided by
+    // `AppWorksModule` over the active job runtime's `dispatchAppUpstreamSync`, the
+    // same shape as C10's readiness binding above.
+    'APP_UPSTREAM_SYNC_DISPATCHER',
     // APW-05 T16's two credential/fact ports, provided by `AppBuildsModule`
     // (2026-09-22). Declared by `build-facade.service.ts`, so they belong in this
     // register like any other port — a new token in NEITHER list fails the
@@ -343,7 +359,6 @@ const WORKER_BOUND: readonly string[] = [
 const UNBOUND: readonly string[] = [
     'APPS_DOMAIN_DNS_SERVICE',
     'APPS_TIER_POLICY',
-    'APP_BLUEPRINT_APPLY_SERVICE',
     'APP_BUILD_EDIT_ACCESS',
     'APP_BUILD_PLATFORM_SETTINGS_WRITER',
     'APP_CLUSTER_OP_DISPATCHER',
@@ -369,7 +384,6 @@ const UNBOUND: readonly string[] = [
     'APP_HOSTS_WORK_STORE',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
     'APP_IMAGE_REFERENCE_RESOLVER',
-    'APP_LICENSE_SERVICE',
     // Still unbound ON PURPOSE (2026-09-22): its declared owner is APW-07's env
     // write path, and `AppEnvService.apply` needs an `AppEnvActor` and a spec
     // that declares the name. `storePrompted(workId, values)` carries neither,
@@ -388,12 +402,8 @@ const UNBOUND: readonly string[] = [
     'APP_RUNTIME_VERIFICATION_FACADE',
     'APP_SPEC_DISPLAY_NAMES',
     'APP_TARGET_UPDATED_PORT',
-    'APP_UPSTREAM_LICENSE_SERVICE',
     'APP_UPSTREAM_PRIVATE_COPY_PORT',
     'APP_UPSTREAM_STATE_READER',
-    // APW-02 T31's — `app-works.module.ts` records that its binding is not that
-    // file's to add; nothing provides it anywhere yet.
-    'APP_UPSTREAM_SYNC_DISPATCHER',
     'APP_UPSTREAM_SYNC_SPEC_SOURCE',
     'APP_VERIFICATION_SINK',
     'APP_VERIFICATION_SPEC_SOURCE',
@@ -452,7 +462,7 @@ describe('App Works port dormancy register (§5.10)', () => {
         // Nine modules that between them provide services, repositories and at
         // least one symbol token. If this collapses, the metadata read broke and
         // the assertions underneath would all pass by accident.
-        expect(Object.keys(APP_WORKS_MODULES)).toHaveLength(9);
+        expect(Object.keys(APP_WORKS_MODULES)).toHaveLength(10);
         expect(bound.size).toBeGreaterThan(5);
     });
 
@@ -508,8 +518,13 @@ describe('App Works port dormancy register (§5.10)', () => {
         // `MANAGED_HOST_ROOT_RESOLVER`) and three that no module in this package
         // provides (`APP_FORK_READY_HANDLER`, `APP_UPSTREAM_SYNC_DISPATCHER`,
         // `APP_WORKS_TELEMETRY_SINK`).
-        expect(UNBOUND).toHaveLength(49);
-        expect(BOUND).toHaveLength(24);
+        //
+        // 49/24 → 48/25 on 2026-10-17: APW-02 T31 binds `APP_UPSTREAM_SYNC_DISPATCHER`.
+        //
+        // 48/25 → 45/28 on 2026-10-17: APW-03 T28 binds `APP_BLUEPRINT_APPLY_SERVICE`,
+        // T42 binds `APP_LICENSE_SERVICE` and `APP_UPSTREAM_LICENSE_SERVICE`.
+        expect(UNBOUND).toHaveLength(45);
+        expect(BOUND).toHaveLength(28);
     });
 
     it('names where the worker binds what this package does not', () => {

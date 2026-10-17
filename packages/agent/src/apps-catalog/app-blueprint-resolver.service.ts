@@ -128,6 +128,19 @@ export interface AppBlueprintResolveHit {
     prompts: AppBlueprintPrompt[];
 }
 
+/**
+ * APW-03 T28 — a Blueprint together with its `.works/works.yml` text, for the apply
+ * service only. Kept OUT of {@link AppBlueprintResolveHit} (and its cache) on purpose:
+ * the document carries prompt examples, and FR-55 says no value or example ever
+ * travels with a match.
+ */
+export interface AppBlueprintDocument {
+    readonly hit: AppBlueprintResolveHit;
+    readonly text: string;
+    /** The Blueprint repository's default branch the text was read from. */
+    readonly defaultBranch: string | null;
+}
+
 export interface AppBlueprintResolveMiss {
     status: 'none';
     reason: 'notListed' | 'lookupFailed' | 'blueprintNotFound';
@@ -255,6 +268,52 @@ export class AppBlueprintResolverService {
         return result;
     }
 
+    /**
+     * APW-03 T28 — the explicit path (FR-81) plus the document text, uncached, for the
+     * apply service. The same acceptance rules and the same read budget as `resolve`;
+     * `null` for any miss. Throws {@link AppsCatalogCredentialUnavailableError} when no
+     * platform credential exists.
+     */
+    async readBlueprintDocument(blueprintId: string): Promise<AppBlueprintDocument | null> {
+        if (typeof blueprintId !== 'string' || !BLUEPRINT_ID_PATTERN.test(blueprintId)) {
+            return null;
+        }
+        const facade = this.gitFacade;
+        const token = facade ? await this.resolveToken(facade) : null;
+        if (!facade || !token) {
+            throw new AppsCatalogCredentialUnavailableError();
+        }
+        const budget = new ReadBudget(BLUEPRINT_PROBE_MAX_READS);
+        try {
+            const repository = await this.readRepository(
+                facade,
+                token,
+                `${blueprintId}-template`,
+                budget,
+            );
+            if (!repository) {
+                return null;
+            }
+            const read = await this.readBlueprintSpec(facade, token, repository, budget);
+            if (!read || read.spec.blueprint?.id !== blueprintId) {
+                return null;
+            }
+            return {
+                hit: this.toHit('explicit', repository, read.spec),
+                text: read.text,
+                defaultBranch: repository.defaultBranch || null,
+            };
+        } catch (error) {
+            if (error instanceof ReadBudgetExhausted) {
+                return null;
+            }
+            this.logger.warn(
+                `Reading Blueprint "${blueprintId}" failed (${error instanceof Error ? error.message : String(error)}).`,
+            );
+            return null;
+        }
+    }
+
     /** FR-81: `ever-works/<blueprintId>-template`, and the file must name that id. */
     private async resolveExplicit(
         facade: GitFacadeService,
@@ -271,11 +330,11 @@ export class AppBlueprintResolverService {
         if (!repository) {
             return { status: 'none', reason: 'blueprintNotFound' };
         }
-        const spec = await this.readBlueprintSpec(facade, token, repository, budget);
-        if (!spec || spec.blueprint?.id !== blueprintId) {
+        const read = await this.readBlueprintSpec(facade, token, repository, budget);
+        if (!read || read.spec.blueprint?.id !== blueprintId) {
             return { status: 'none', reason: 'blueprintNotFound' };
         }
-        return this.toHit('explicit', repository, spec);
+        return this.toHit('explicit', repository, read.spec);
     }
 
     /** FR-43: two names at most, the first acceptable repository, then ONE file read. */
@@ -296,9 +355,9 @@ export class AppBlueprintResolverService {
         if (!repository) {
             return { status: 'none', reason: 'notListed' };
         }
-        const spec = await this.readBlueprintSpec(facade, token, repository, budget);
-        return spec
-            ? this.toHit('probe', repository, spec)
+        const read = await this.readBlueprintSpec(facade, token, repository, budget);
+        return read
+            ? this.toHit('probe', repository, read.spec)
             : { status: 'none', reason: 'notListed' };
     }
 
@@ -347,7 +406,7 @@ export class AppBlueprintResolverService {
         token: string,
         repository: GitRepositoryWithPermissions,
         budget: ReadBudget,
-    ): Promise<AppSpec | null> {
+    ): Promise<{ spec: AppSpec; text: string } | null> {
         budget.take();
         const file = await facade.getFileContent(
             APP_BLUEPRINT_OWNER,
@@ -386,7 +445,7 @@ export class AppBlueprintResolverService {
         if (classifyLicenseExpression(spec.license?.spdx) === 'red') {
             return null;
         }
-        return spec;
+        return { spec, text };
     }
 
     private toHit(
