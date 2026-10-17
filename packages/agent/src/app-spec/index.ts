@@ -32,4 +32,3 @@ export * from './app-spec.service';
 export * from './app-spec-hash';
 export * from './app-spec-guarded-blocks';
 export * from './app-spec.module';
-export * from './app-license-attestation-text';

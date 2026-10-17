@@ -1,18 +1,33 @@
 // Barrel stubs, as every controller spec in this app does (see
 // `work-app-deploy.controller.spec.ts`): the services and auth barrels pull ESM-only
 // packages jest cannot parse. The attestation-text helper is stubbed with the
-// registry's real ids; its own behaviour is pinned by
-// `packages/agent/src/app-spec/__tests__/app-license-attestation-text.spec.ts`.
+// registry's real ids; their own behaviour is pinned by
+// `packages/agent/src/app-license/__tests__/app-license.service.spec.ts`.
 jest.mock('@ever-works/agent/services', () => ({
     WorkOwnershipService: class WorkOwnershipService {},
 }));
 jest.mock('@ever-works/agent/app-spec', () => ({
     AppSpecService: class AppSpecService {},
-    appLicenseAttestationTextFor: (spdx: string | null) =>
+}));
+jest.mock('@ever-works/agent/app-license', () => {
+    const textFor = (spdx: string | null) =>
         spdx === 'BUSL-1.1'
             ? { textId: 'busl-1.1-v1', text: 'I confirm the Business Source License terms apply to me.' }
-            : { textId: 'unknown-license-v1', text: 'I could not find a license the registry recognises.' },
-}));
+            : { textId: 'unknown-license-v1', text: 'I could not find a license the registry recognises.' };
+    return {
+        attestationTextFor: textFor,
+        // The same rule as `app-license.service.ts`'s `attestationIsValid`.
+        attestationIsValid: (state: { attestation?: any; licenseSpdx?: string | null; licenseClass?: string | null }) => {
+            const a = state?.attestation;
+            if (!a) return false;
+            return (
+                (a.spdx ?? '') === (state.licenseSpdx ?? '') &&
+                a.class === (state.licenseClass ?? 'unknown') &&
+                a.textId === textFor(state.licenseSpdx ?? null).textId
+            );
+        },
+    };
+});
 jest.mock('../auth', () => ({
     AuthSessionGuard: class AuthSessionGuard {},
     CurrentUser: () => () => undefined,

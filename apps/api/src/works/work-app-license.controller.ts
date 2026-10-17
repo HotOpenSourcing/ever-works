@@ -10,7 +10,10 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiParam, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { LicenseAttestation, LicenseClass } from '@ever-works/contracts';
-import { AppSpecService, appLicenseAttestationTextFor } from '@ever-works/agent/app-spec';
+import { AppSpecService } from '@ever-works/agent/app-spec';
+// The ONE rule for the text and for "is the stored attestation still valid" — the
+// same functions the attest route and the deploy gate use (APW-03 T44).
+import { attestationIsValid, attestationTextFor } from '@ever-works/agent/app-license';
 import { WorkOwnershipService, type WorkAccessResult } from '@ever-works/agent/services';
 import { AuthSessionGuard, CurrentUser } from '../auth';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
@@ -100,9 +103,9 @@ export class WorkAppLicenseController {
         // The attest route treats an unclassified licence as `unknown` (it evaluates
         // first), so the read does the same when deciding whether one is needed.
         const effectiveClass: LicenseClass = licenseClass ?? 'unknown';
-        const text = effectiveClass === 'green' ? null : appLicenseAttestationTextFor(spdx);
+        const text = effectiveClass === 'green' ? null : attestationTextFor(spdx);
         const attestation = (state?.attestation ?? null) as LicenseAttestation | null;
-        const covered = attestationCovers(attestation, spdx, effectiveClass, text?.textId ?? null);
+        const covered = state ? attestationIsValid(state) : false;
 
         return {
             workId: id,
