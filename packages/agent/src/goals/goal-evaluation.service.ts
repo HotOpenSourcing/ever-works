@@ -27,6 +27,16 @@ import {
 import { summarizeDoD } from './goal-dod';
 import { isDeliveryGoal } from './goal-kind';
 import {
+    DomainEventPublisher,
+    recordAfterWrite,
+} from '../domain-events/domain-event-publisher.service';
+import { withoutAggregateVersion } from '../domain-events/domain-event-context';
+import {
+    isExternalMetricSource,
+    latestExternalCriterionValues,
+    recordGoalProgress,
+} from './goal-domain-events';
+import {
     MIN_CHECK_FREQUENCY_MINUTES,
     type GoalEvaluationEntry,
     type GoalEvaluationSummary,
@@ -76,6 +86,9 @@ export class GoalEvaluationService {
         // @Optional() + appended LAST so positional spec constructors and
         // installs without the escalation stack keep compiling.
         @Optional() private readonly escalations?: AgentEscalationService,
+        // EW-P2-2 — `goal.status_changed` for an auto-outcome and the throttled
+        // `goal.progress_changed`, best-effort after the save. TRAILING + @Optional().
+        @Optional() private readonly domainEvents?: DomainEventPublisher,
     ) {}
 
     /**
@@ -165,19 +178,35 @@ export class GoalEvaluationService {
             return this.evaluateDelivery(goal);
         }
         this.assertMetricGoalShape(goal);
+        const before = {
+            status: goal.status,
+            value: goal.currentValue ?? null,
+            score: goal.resolvedScore?.score ?? null,
+        };
 
         const source = goal.metricSource;
-        const sample = await this.metricsFacade.getMetricValue(
-            source.pluginId,
-            {
-                metricId: source.metricId,
-                window: goal.window,
-                ...(source.params ? { params: source.params } : {}),
-            },
-            // Q3 (spec §8): evaluation reads as the Goal's creator so
-            // settings resolution + usage attribution follow the user.
-            { userId: goal.userId },
-        );
+        // EW-P2-2 — an EXTERNAL source is never read from a provider: its values were
+        // pushed as samples (`GoalsService.recordExternalSample`), so the latest one IS
+        // the observation, and no new sample row is written. `null` = nothing pushed yet.
+        const external = isExternalMetricSource(source);
+        const sample = external
+            ? typeof goal.currentValue === 'number'
+                ? {
+                      value: goal.currentValue,
+                      at: (goal.currentValueAt ?? new Date()).toISOString(),
+                  }
+                : null
+            : await this.metricsFacade.getMetricValue(
+                  source.pluginId,
+                  {
+                      metricId: source.metricId,
+                      window: goal.window,
+                      ...(source.params ? { params: source.params } : {}),
+                  },
+                  // Q3 (spec §8): evaluation reads as the Goal's creator so
+                  // settings resolution + usage attribution follow the user.
+                  { userId: goal.userId },
+              );
 
         // Judgment layer G1 — resolve weighted criteria + constraints
         // BEFORE the outcome rules, because both can veto an achievement.
@@ -186,23 +215,25 @@ export class GoalEvaluationService {
         const resolved = await this.resolveJudgment(goal);
 
         const now = new Date();
-        const sampledAtMs = Date.parse(sample.at);
-        const sampledAt = Number.isFinite(sampledAtMs) ? new Date(sampledAtMs) : now;
+        if (sample && !external) {
+            const sampledAtMs = Date.parse(sample.at);
+            const sampledAt = Number.isFinite(sampledAtMs) ? new Date(sampledAtMs) : now;
 
-        // Append-only history row first — if the Goal update below
-        // races a concurrent writer, the observation is still kept.
-        await this.samples.insert({
-            goalId: goal.id,
-            sampledAt,
-            value: sample.value,
-        });
+            // Append-only history row first — if the Goal update below
+            // races a concurrent writer, the observation is still kept.
+            await this.samples.insert({
+                goalId: goal.id,
+                sampledAt,
+                value: sample.value,
+            });
 
-        goal.currentValue = sample.value;
-        goal.currentValueAt = sampledAt;
-        if (goal.baselineValue === null || goal.baselineValue === undefined) {
-            // First observation after activation becomes the baseline
-            // for progress rendering (baseline → current → target).
-            goal.baselineValue = sample.value;
+            goal.currentValue = sample.value;
+            goal.currentValueAt = sampledAt;
+            if (goal.baselineValue === null || goal.baselineValue === undefined) {
+                // First observation after activation becomes the baseline
+                // for progress rendering (baseline → current → target).
+                goal.baselineValue = sample.value;
+            }
         }
 
         let outcome: GoalEvaluationEntry['outcome'] = 'evaluated';
@@ -211,7 +242,7 @@ export class GoalEvaluationService {
         // before. One `if`, no shared branch — the two rules never mix.
         const satisfied = resolved
             ? isWeightedGoalAchieved(resolved)
-            : this.isSatisfied(goal, sample.value);
+            : sample !== null && this.isSatisfied(goal, sample.value);
         if (resolved) {
             goal.resolvedScore = resolved;
         }
@@ -228,8 +259,19 @@ export class GoalEvaluationService {
         }
 
         // Invariant I-4: only the Goal row is written — linked
-        // Missions are NEVER auto-completed from here.
-        await this.goals.save(goal);
+        // Missions are NEVER auto-completed from here. Only the columns this
+        // evaluation decides are written (an external source's observation is
+        // the integration's, never re-written from the scan's copy).
+        await this.saveEvaluation(goal, [
+            'status',
+            'outcome',
+            'nextCheckAt',
+            ...(resolved ? (['resolvedScore'] as const) : []),
+            ...(sample && !external
+                ? (['currentValue', 'currentValueAt', 'baselineValue'] as const)
+                : []),
+        ]);
+        await this.recordEvaluation(goal, before);
 
         // Escalate-on-hard (G1's stated behavior). AFTER the save so the
         // escalation always describes persisted state, and best-effort so
@@ -241,9 +283,40 @@ export class GoalEvaluationService {
         return {
             goalId: goal.id,
             outcome,
-            value: sample.value,
+            ...(sample ? { value: sample.value } : {}),
             ...(resolved ? { score: resolved.score } : {}),
         };
+    }
+
+    /**
+     * EW-P2-2 — the evaluation's domain event, best-effort after the save (an
+     * evaluation is never failed by its event; the integration's reconcile repairs a
+     * missed one): `goal.status_changed` for an auto-outcome, else the throttled
+     * `goal.progress_changed` when the value or the score moved.
+     */
+    private async recordEvaluation(
+        goal: Goal,
+        before: { status: GoalStatus; value: number | null; score: number | null },
+    ): Promise<void> {
+        const statusChanged = goal.status !== before.status;
+        const value = goal.currentValue ?? null;
+        const score = goal.resolvedScore?.score ?? null;
+        if (!statusChanged && value === before.value && score === before.score) return;
+        await recordAfterWrite(
+            this.domainEvents,
+            (publisher, manager) =>
+                statusChanged
+                    ? publisher.changed(manager, 'goal', goal.id, 'goal.status_changed', {
+                          changedFields: ['status', 'outcome', 'currentValue', 'progress'],
+                          previous: { status: before.status, currentValue: before.value },
+                      })
+                    : recordGoalProgress(publisher, manager, goal.id, {
+                          changedFields: ['currentValue', 'resolvedScore', 'progress'],
+                          previous: { currentValue: before.value, score: before.score },
+                      }),
+            (message) => this.logger.warn(message),
+            `goal evaluation event for goal ${goal.id}`,
+        );
     }
 
     /**
@@ -263,6 +336,11 @@ export class GoalEvaluationService {
      */
     private async evaluateDelivery(goal: Goal): Promise<GoalEvaluationEntry> {
         const now = new Date();
+        const before = {
+            status: goal.status,
+            value: goal.currentValue ?? null,
+            score: goal.resolvedScore?.score ?? null,
+        };
         const dod = summarizeDoD(goal.dodCriteria);
         let outcome: GoalEvaluationEntry['outcome'] = 'evaluated';
 
@@ -278,8 +356,37 @@ export class GoalEvaluationService {
             outcome = 'missed';
         }
 
-        await this.goals.save(goal);
+        await this.saveEvaluation(goal, ['status', 'outcome', 'nextCheckAt']);
+        await this.recordEvaluation(goal, before);
         return { goalId: goal.id, outcome };
+    }
+
+    /**
+     * Save only the columns an evaluation decided (EW-P2-2 review). The Goal is the
+     * due scan's copy; a whole-entity `save()` would write back every column a
+     * concurrent write changed meanwhile — an integration's pushed sample
+     * (`currentValue`, `resolvedScore`), a PATCH, a Definition-of-Done edit. Every
+     * other column is cleared for the save (TypeORM skips `undefined`, so `version`
+     * is never rolled back either) and restored on the object after it. Without
+     * entity metadata (a unit-test double) it is the plain save.
+     */
+    private async saveEvaluation(goal: Goal, written: ReadonlyArray<keyof Goal>): Promise<void> {
+        const columns = (this.goals.metadata?.columns ?? []).map(
+            (column) => column.propertyName as keyof Goal,
+        );
+        const keep = new Set<keyof Goal>(['id', ...written]);
+        const target = goal as unknown as Record<string, unknown>;
+        const held = new Map<string, unknown>();
+        for (const column of columns) {
+            if (keep.has(column)) continue;
+            held.set(column, target[column]);
+            target[column] = undefined;
+        }
+        try {
+            await this.goals.save(withoutAggregateVersion(goal));
+        } finally {
+            for (const [column, value] of held) target[column] = value;
+        }
     }
 
     // ─── internals ──────────────────────────────────────────────────
@@ -369,12 +476,27 @@ export class GoalEvaluationService {
         }
 
         const observations: CriterionObservation[] = [];
+        // EW-P2-2 — external criteria read their latest pushed sample, never a provider.
+        const pushed = await latestExternalCriterionValues(this.goals.manager, goal);
         for (const criterion of goal.criteria) {
             const { source, window } = resolveSourceFor(goal, criterion);
             if (!source) {
                 // Neither the criterion nor the Goal names a metric: unknown,
                 // not failed — the same containment as a provider outage.
                 observations.push({ criterion, value: null, error: 'no metric source' });
+                continue;
+            }
+            if (isExternalMetricSource(source)) {
+                const value =
+                    pushed.get(criterion.id) ??
+                    (!criterion.metricSource && typeof goal.currentValue === 'number'
+                        ? goal.currentValue
+                        : null);
+                observations.push(
+                    value === null
+                        ? { criterion, value: null, error: 'no external sample yet' }
+                        : { criterion, value },
+                );
                 continue;
             }
             try {
@@ -404,6 +526,10 @@ export class GoalEvaluationService {
             // platform does not claim to have checked what it cannot read.
             if (!isMeasurableConstraint(constraint)) continue;
             const { source, window } = resolveSourceFor(goal, constraint);
+            if (isExternalMetricSource(source)) {
+                // EW-P2-2 — samples measure criteria, not constraints: unknown, never violated.
+                continue;
+            }
             if (!source) {
                 // No metric to read → UNKNOWN, never violated (see below).
                 this.logger.warn(

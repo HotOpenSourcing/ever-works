@@ -2,6 +2,7 @@ import {
     getWorkCapabilities,
     RECIPIENT_EVENT_VISIBILITY,
     type IntegrationAgentDto,
+    type IntegrationGoalDto,
     type IntegrationInboxItemDto,
     type IntegrationIdeaDto,
     type IntegrationMemberDto,
@@ -15,7 +16,9 @@ import {
 import type { EntityManager } from 'typeorm';
 import { Agent } from '../entities/agent.entity';
 import { ExternalIdentity } from '../entities/external-identity.entity';
+import { Goal } from '../entities/goal.entity';
 import { InboxItem } from '../entities/inbox-item.entity';
+import { MissionGoal } from '../entities/mission-goal.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
@@ -379,6 +382,96 @@ export async function buildIdeaSnapshot(
         webUrl: webUrl(`/ideas/${idea.id}`),
     };
     return { dto, tenantId: idea.tenantId ?? null, organizationId: idea.organizationId ?? null };
+}
+
+/**
+ * EW's 0..100 progress view of a Goal (plan 01 §6, mapped to the Gauzy Goal's
+ * `progress`): the weighted score when the Goal has criteria and was scored; for a
+ * metric Goal the baseline → current → target ratio; for a delivery Goal the share
+ * of its approved Definition of Done that is closed. `null` when nothing is known.
+ */
+export function goalProgress(goal: Goal): number | null {
+    const clamp = (ratio: number) => Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    if (goal.goalKind === 'delivery') {
+        const approved = (Array.isArray(goal.dodCriteria) ? goal.dodCriteria : []).filter(
+            (criterion) => criterion.proposed !== true,
+        );
+        if (approved.length === 0) return null;
+        const closed = approved.filter(
+            (criterion) => criterion.status === 'done' || criterion.status === 'waived',
+        ).length;
+        return clamp(closed / approved.length);
+    }
+    if (Array.isArray(goal.criteria) && goal.criteria.length > 0 && goal.resolvedScore) {
+        const score = Number(goal.resolvedScore.score);
+        return Number.isFinite(score) ? clamp(score) : null;
+    }
+    const current = goal.currentValue;
+    const target = goal.targetValue;
+    if (typeof current !== 'number' || typeof target !== 'number') return null;
+    const baseline = typeof goal.baselineValue === 'number' ? goal.baselineValue : 0;
+    if (target === baseline)
+        return clamp(
+            goal.comparator === 'lte' ? (current <= target ? 1 : 0) : current >= target ? 1 : 0,
+        );
+    return clamp((current - baseline) / (target - baseline));
+}
+
+/** The Goal's integration DTO (teams and mission links embedded), or `null` when gone (EW-P2-2). */
+export async function buildGoalSnapshot(
+    manager: EntityManager,
+    goalId: string,
+): Promise<AggregateSnapshot<IntegrationGoalDto> | null> {
+    const goal = await manager.getRepository(Goal).findOne({ where: { id: goalId } });
+    if (!goal) return null;
+    const [resourceTeams, missionLinks] = await Promise.all([
+        teamResourceIds(manager, 'goal', goalId),
+        manager.getRepository(MissionGoal).find({ where: { goalId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const primary = missionLinks.find((link) => link.isPrimary) ?? null;
+    const dto: IntegrationGoalDto = {
+        id: goal.id,
+        organizationId: goal.organizationId ?? '',
+        version: Number(goal.version) || 1,
+        createdAt: isoRequired(goal.createdAt),
+        updatedAt: isoRequired(goal.updatedAt ?? goal.createdAt),
+        ...recordVisibility(goal, teamIds),
+        owner: { type: 'user', id: goal.userId },
+        createdBy: p2CreatedBy(goal),
+        externalLinks: [],
+        teamIds,
+        title: goal.title,
+        description: goal.description ?? null,
+        goalKind: goal.goalKind === 'delivery' ? 'delivery' : 'metric',
+        status: goal.status as IntegrationGoalDto['status'],
+        outcome: (goal.outcome ?? null) as IntegrationGoalDto['outcome'],
+        metricSource: goal.metricSource ?? null,
+        comparator: goal.comparator ?? null,
+        targetValue: goal.targetValue ?? null,
+        unit: goal.unit ?? null,
+        window: goal.window,
+        baselineValue: goal.baselineValue ?? null,
+        currentValue: goal.currentValue ?? null,
+        currentValueAt: iso(goal.currentValueAt),
+        deadline: iso(goal.deadline),
+        criteria: goal.criteria ?? null,
+        resolvedScore: goal.resolvedScore ?? null,
+        dodCriteria: (goal.dodCriteria ?? null) as IntegrationGoalDto['dodCriteria'],
+        progress: goalProgress(goal),
+        missionIds: unique(missionLinks.map((link) => link.missionId)),
+        primaryMissionId: primary?.missionId ?? null,
+        assignedAgentId: goal.assignedAgentId ?? null,
+        activeAgentId: goal.activeAgentId ?? null,
+        loop: {
+            status: goal.loopStatus ?? null,
+            iteration: Number(goal.iteration) || 0,
+            spentCents: Number(goal.spentCents) || 0,
+        },
+        archivedAt: iso(goal.archivedAt),
+        webUrl: webUrl(`/goals/${goal.id}`),
+    };
+    return { dto, tenantId: goal.tenantId ?? null, organizationId: goal.organizationId ?? null };
 }
 
 /** The work's integration DTO (members and repositories embedded), or `null` when gone. */

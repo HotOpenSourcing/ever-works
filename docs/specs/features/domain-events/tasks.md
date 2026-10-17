@@ -37,7 +37,12 @@
       (`idea-recording.spec.ts`; the coverage gate now scans `work-proposals.controller.ts`). The integration `PATCH`
       records title / description edits in the edit's own transaction, so a stale `If-Match` rolls back; the routes
       are [`integrations-api-v1`](../integrations-api-v1/tasks.md) T35.
-- [ ] **T21** Goals (EW-P2-2).
+- [x] **T21** Goals (EW-P2-2): `goal.*` recorded by `GoalsService` (create, update, delete tombstone, activate,
+      pause, external samples) in the write's transaction, by `GoalEvaluationService` (auto-outcome, progress) and the
+      orchestrator (Definition of Done, archive, a loop's terminal status) best-effort after the save; loop control is
+      runtime (no event, no version). `goal.progress_changed` is throttled to one per Goal per 5 minutes and the
+      version still moves (`goal-domain-events.ts`). Goal Teams record `goal.updated`. `goal-recording.spec.ts`; the
+      coverage gate scans `goals/goals.controller.ts` and `integrations-api/v1/goals.controller.ts`.
 - [ ] **T22** Missions (EW-P2-5), incl. the Ideas a Mission clone copies.
 
 ## P3 — Inbox (EW-P3-1)

@@ -72,6 +72,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'task.updated',
             'work.updated',
             'idea.updated',
+            'goal.updated',
         ],
     },
     'POST /api/organizations/:orgId/teams/:teamId/members': {
@@ -81,10 +82,22 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         events: ['team.member.removed', 'agent.updated'],
     },
     'POST /api/organizations/:orgId/teams/:teamId/resources': {
-        events: ['team.resource.added', 'task.updated', 'work.updated', 'idea.updated'],
+        events: [
+            'team.resource.added',
+            'task.updated',
+            'work.updated',
+            'idea.updated',
+            'goal.updated',
+        ],
     },
     'DELETE /api/organizations/:orgId/teams/:teamId/resources/:resourceType/:resourceId': {
-        events: ['team.resource.removed', 'task.updated', 'work.updated', 'idea.updated'],
+        events: [
+            'team.resource.removed',
+            'task.updated',
+            'work.updated',
+            'idea.updated',
+            'goal.updated',
+        ],
     },
 
     // ── Organization roster (`api/organizations/:orgId`, `api/org-invite`) ──
@@ -257,6 +270,48 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
         exempt: 'Idea attachments are not part of the idea integration DTO.',
     },
 
+    // ── Goals (`api/me/goals`, EW-P2-2) ──────────────────────────────────────
+    'POST /api/me/goals': { events: ['goal.created'] },
+    // An `outcome` override completes the Goal: `goal.status_changed` instead.
+    'PATCH /api/me/goals/:id': { events: ['goal.updated', 'goal.status_changed'] },
+    'DELETE /api/me/goals/:id': { events: ['goal.deleted'] },
+    'POST /api/me/goals/:id/activate': { events: ['goal.status_changed'] },
+    'POST /api/me/goals/:id/pause': { events: ['goal.status_changed'] },
+    // The evaluation's auto-outcome, else the throttled progress event.
+    'POST /api/me/goals/:id/evaluate-now': {
+        events: ['goal.status_changed', 'goal.progress_changed'],
+    },
+    'PATCH /api/me/goals/:id/limits': {
+        exempt: 'Execution-loop limits (spend cap, wall clock, concurrency, model hints): EW-only settings, not in the goal integration DTO.',
+    },
+    'PUT /api/me/goals/:id/dod': { events: ['goal.updated'] },
+    'POST /api/me/goals/:id/dod/propose': { events: ['goal.updated'] },
+    'POST /api/me/goals/:id/dod/approve': { events: ['goal.updated'] },
+    'PATCH /api/me/goals/:id/dod/:criterionId': { events: ['goal.updated'] },
+    'POST /api/me/goals/:id/spend-rollup': {
+        exempt: 'Recomputes the loop spend (EW-only runtime, contract A.4): never bumps the goal version.',
+    },
+    'POST /api/me/goals/:id/loop/start': {
+        exempt: 'An execution-loop control (EW-only runtime, contract A.4): loop state never bumps the goal version.',
+    },
+    'POST /api/me/goals/:id/loop/resume': {
+        exempt: 'An execution-loop control (EW-only runtime, contract A.4): loop state never bumps the goal version.',
+    },
+    'POST /api/me/goals/:id/loop/pause': {
+        exempt: 'An execution-loop control (EW-only runtime, contract A.4): loop state never bumps the goal version.',
+    },
+    'POST /api/me/goals/:id/loop/cancel': {
+        exempt: 'An execution-loop control (EW-only runtime, contract A.4): loop state never bumps the goal version.',
+    },
+    // A restart / advance that ends the loop may complete a delivery Goal.
+    'POST /api/me/goals/:id/loop/restart': { events: ['goal.status_changed'] },
+    'POST /api/me/goals/:id/advance': { events: ['goal.status_changed'] },
+    'POST /api/me/goals/:id/nudge': {
+        exempt: 'A steering message into the live iteration run, not a Goal change.',
+    },
+    'POST /api/me/goals/:id/archive': { events: ['goal.archived'] },
+    'POST /api/me/goals/:id/unarchive': { events: ['goal.unarchived'] },
+
     // ── Works (`api`) ────────────────────────────────────────────────────────
     'POST /api/works': { events: ['work.created'] },
     'POST /api/works/quick-create': { events: ['work.created'] },
@@ -381,6 +436,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'task.updated',
             'work.updated',
             'idea.updated',
+            'goal.updated',
         ],
     },
     'PUT /api/integrations/v1/teams/:id/members': {
@@ -393,6 +449,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
             'task.updated',
             'work.updated',
             'idea.updated',
+            'goal.updated',
         ],
     },
 
@@ -406,6 +463,17 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     },
     'POST /api/integrations/v1/ideas/:id/dismiss': { events: ['idea.status_changed'] },
     'POST /api/integrations/v1/ideas/:id/restore': { events: ['idea.status_changed'] },
+
+    // ── Integration API v1 — Goals (EW-P2-2) ──────────────────────────────────
+    // + `goal.deleted` when a concurrent create won the externalRef (ours is undone).
+    'POST /api/integrations/v1/goals': { events: ['goal.created', 'goal.deleted'] },
+    'PATCH /api/integrations/v1/goals/:id': {
+        events: ['goal.updated', 'goal.visibility_changed'],
+    },
+    'PUT /api/integrations/v1/goals/:id/criteria': { events: ['goal.updated'] },
+    'PUT /api/integrations/v1/goals/:id/dod': { events: ['goal.updated'] },
+    'POST /api/integrations/v1/goals/:id/samples': { events: ['goal.progress_changed'] },
+    'DELETE /api/integrations/v1/goals/:id': { events: ['goal.deleted'] },
     // Integration API v1 Knowledge Base (EW-P3-2): the same services as the app's routes.
     // + `kb.document.moved` when the create files the document into a folder.
     'POST /api/integrations/v1/kb/documents': {

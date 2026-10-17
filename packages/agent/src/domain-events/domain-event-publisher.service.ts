@@ -10,6 +10,7 @@ import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
 import {
     type AggregateSnapshot,
     buildAgentSnapshot,
+    buildGoalSnapshot,
     buildInboxItemSnapshot,
     buildIdeaSnapshot,
     buildOrganizationSnapshot,
@@ -36,6 +37,7 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     organization: buildOrganizationSnapshot,
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
+    goal: buildGoalSnapshot,
     // EW-P3-2 — Knowledge Base documents and organization library folders.
     kb_document: buildKbDocumentSnapshot,
     kb_folder: buildKbFolderSnapshot,

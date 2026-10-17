@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.10`; P1 resources live, P2 Ideas served (EW-P2-1), P3 inbox, P4 email; Goals and Missions next
+**Status**: `Draft` — contract `v1-draft.11`; P1 resources live, P2 Ideas (EW-P2-1) and Goals (EW-P2-2), P3 inbox, P4 email; Missions next
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -198,7 +198,7 @@ visibility is derived (`team` when it sits on a team).
 | Links         | `GET /links?entityType=&externalId=`, `PUT /links/:entityType/:entityId {externalId, externalUrl}`, `DELETE /links/:entityType/:entityId`                                                                                                                                                                              | `links:write`  | [link](./contract/schemas/resources/link.schema.json)                                                                   |
 | Batch         | `POST /batch {operations:[{method, path, headers?, body?}]}` — ≤100 operations, in order, not atomic; per-operation `{status, body}`; each counts against limits                                                                                                                                                       | per operation  | [requests](./contract/schemas/requests.schema.json) `Batch`                                                             |
 | Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works`                                                                                                                                         | `missions:*`   | P2                                                                                                                      |
-| Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}`                                                                                   | `goals:*`      | P2                                                                                                                      |
+| Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}` (§6.4)                                                                            | `goals:*`      | [goal](./contract/schemas/resources/goal.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateGoal` |
 | Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea` |
 | Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
 | KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                    |
@@ -246,6 +246,50 @@ An Ever Works Idea (`work_proposals`) is a Gauzy task of issue type "Idea" (plan
   someone else answers `404 not_found`.
 - **Never:** accept, queue, build, retry or delete (D9). Building stays a user action in Ever Works.
 - **Links:** `PUT /links/idea/:id` is served (the Idea must be visible in the pinned organization).
+
+### 6.4 Goals (EW-P2-2)
+
+An Ever Works Goal is a Gauzy Goal plus key results (plan 01 §6): weighted **criteria** are numeric key results, the
+**Definition of Done** is True/False key results. The routes call the same `GoalsService` (and the orchestrator for the
+Definition of Done) as the app, and record the same `goal.*` events.
+
+- **Reads:** every `team` / `organization` Goal of the pinned organization; archived ones (`archivedAt` set) only with
+  `includeArchived=true`. The DTO ([goal](./contract/schemas/resources/goal.schema.json)) carries `progress` (0..100:
+  the weighted score, else baseline → current → target, else the closed share of the approved Definition of Done),
+  `missionIds` / `primaryMissionId`, and `loop {status, iteration, spentCents}`: the EW-only execution loop, read-only
+  and runtime (loop changes never bump the version).
+- **External metric source.** A metric Goal an integration writes reads `metricSource: {pluginId: 'external',
+metricId}` (the default when omitted is `{pluginId: 'external', metricId: 'value'}`), and so does each criterion
+  (its own source or the Goal's). Any other `pluginId` answers `422 domain_rule`: a provider read can be metered spend
+  (D9), and the integration knows the values anyway. Values arrive through `POST /goals/:id/samples`.
+- **`POST /goals`** ([`CreateGoal`](./contract/schemas/requests.schema.json)): `Idempotency-Key` required, `externalRef`
+  de-duplicates. Always `status='draft'`. A metric Goal needs `comparator`, `targetValue` and `unit` (`window` defaults
+  to `point`); a delivery Goal needs at least one Definition-of-Done item. `teamIds` (`team_resources` type `goal`) decide
+  the scope (D11) unless `visibility` is set by hand; the row, its Teams and `goal.created` commit together.
+- **`PATCH /goals/:id`** ([`UpdateGoal`](./contract/schemas/requests.schema.json)): title, description, comparator,
+  target, unit, window, baseline, deadline, `teamIds`, `visibility`. **No** `status`, `outcome`, `metricSource` or
+  `goalKind`: an integration never activates, resumes or completes a Goal (D9). `If-Match` optional, re-checked at the
+  version bump inside the write's transaction (`412`).
+- **`PUT /goals/:id/criteria`** (`{criteria}`, metric Goals; `[]` clears the weighted path) and
+  **`PUT /goals/:id/dod`** (`{dodCriteria}`, written as approved operator items) replace the whole set and answer the
+  Goal DTO (`goal.updated`). `PUT /goals/:id/dod` keeps every planner proposal (`proposed: true`) the body does not
+  name, so editing one key result never drops proposals awaiting a person (Gauzy CR-12).
+- **`POST /goals/:id/samples`** ([`GoalSample`](./contract/schemas/requests.schema.json) `{criterionId?, value,
+sampledAt}`, `Idempotency-Key` required): appends a `goal_metric_samples` row. Without `criterionId` the newest sample
+  becomes `currentValue` (and the baseline when there is none); with `criterionId` it measures that criterion. A Goal
+  with criteria is re-scored from the latest pushed values (`resolvedScore`). The Goal / criterion must read the
+  external source (`422` otherwise; a delivery Goal takes no samples). Answers `200` with the Goal DTO. It never
+  activates, completes or schedules the Goal: an ACTIVE Goal's own evaluation applies the outcome rules to the pushed
+  values (it never reads a provider for an external source).
+- **`DELETE /goals/:id`** (`If-Match` optional) records the `goal.deleted` tombstone; a Goal whose execution loop is
+  `running` answers `422 domain_rule`.
+- **Events:** `goal.created`, `goal.updated` (fields, Teams, Definition of Done), `goal.status_changed` (activate,
+  pause, an auto-outcome, an `outcome` override, a loop that completes a delivery Goal; `previous.status`),
+  `goal.progress_changed` (a sample or an evaluation moved the value or the score; **at most one per Goal per 5
+  minutes** — inside the window only the version moves, so a GET or the reconcile still sees it), `goal.archived` /
+  `goal.unarchived`, `goal.deleted`, `goal.visibility_changed`.
+- **Writes act as the Goal's owner** like the task writes (the key's owner, or `X-Act-As-User`): someone else's Goal
+  answers `404 not_found`. `PUT /links/goal/:id` is served.
 
 ## 7. Acceptance criteria
 
@@ -456,3 +500,13 @@ Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3
 served link entity type; dismiss / restore are idempotent and answer `422 domain_rule` from any other status; writes act
 as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
 are recorded on the same board.
+
+## 13. Changes in `v1-draft.11` (CR-9, EW-P2-2 Goals)
+
+Additive. Recorded as CR-9 on the plan's STATUS board: the Goals routes of §6.4 are served; the
+[goal DTO](./contract/schemas/resources/goal.schema.json) is the `data` of every `goal.*` event (catalog rows filled);
+request bodies `CreateGoal`, `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; integrations write only the
+external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.progress_changed` is throttled to one
+per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
+read-only runtime. Also answers the Gauzy request CR-12: `PUT /goals/:id/dod` keeps the planner proposals it does not
+name.

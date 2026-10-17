@@ -105,6 +105,11 @@ export class TeamResourcesService {
             await publisher.changed(manager, 'idea', resourceId, 'idea.updated', {
                 changedFields: ['teamIds'],
             });
+        } else if (resourceType === 'goal') {
+            // EW-P2-2: a Goal's Teams are its `team_resources` rows (EW-P1-3 type `goal`).
+            await publisher.changed(manager, 'goal', resourceId, 'goal.updated', {
+                changedFields: ['teamIds'],
+            });
         }
     }
 

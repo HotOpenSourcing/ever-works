@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, type ObjectLiteral } from 'typeorm';
 import {
     buildAgentSnapshot,
+    buildGoalSnapshot,
     buildIdeaSnapshot,
     buildMemberSnapshot,
     buildOrganizationSnapshot,
@@ -13,6 +14,7 @@ import {
     type AggregateSnapshot,
 } from '../domain-events/domain-event-snapshots';
 import { Agent } from '../entities/agent.entity';
+import { Goal } from '../entities/goal.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
 import { TaskChatMessage } from '../entities/task-chat-message.entity';
@@ -27,29 +29,49 @@ import { type KeysetPage, type KeysetQuery, readKeysetPage } from './keyset-curs
 
 /**
  * The versioned resources the integration API reads (contract v1 B.6): the P1
- * ones, then the P2 ones as they are served (ideas: EW-P2-1).
+ * ones, then the P2 ones as they are served (ideas: EW-P2-1, goals: EW-P2-2).
  */
-export type IntegrationResourceKind = 'task' | 'team' | 'agent' | 'work' | 'idea';
+export type IntegrationResourceKind = 'task' | 'team' | 'agent' | 'work' | 'idea' | 'goal';
 
 type Row = ObjectLiteral & { id: string; updatedAt: Date; organizationId?: string | null };
 type Builder = (manager: EntityManager, id: string) => Promise<AggregateSnapshot<object> | null>;
 
+/**
+ * How a kind hides its archived rows unless `includeArchived` (B.1): by
+ * `status = 'archived'` (agents, works), by a set `archivedAt` (goals), or not
+ * at all.
+ */
+type ArchiveRule = 'status' | 'archivedAt' | false;
+
 const RESOURCES: Readonly<
-    Record<IntegrationResourceKind, { entity: new () => Row; build: Builder; archivable: boolean }>
+    Record<
+        IntegrationResourceKind,
+        { entity: new () => Row; build: Builder; archivable: ArchiveRule }
+    >
 > = {
     task: { entity: Task as unknown as new () => Row, build: buildTaskSnapshot, archivable: false },
     team: { entity: Team as unknown as new () => Row, build: buildTeamSnapshot, archivable: false },
     agent: {
         entity: Agent as unknown as new () => Row,
         build: buildAgentSnapshot,
-        archivable: true,
+        archivable: 'status',
     },
-    work: { entity: Work as unknown as new () => Row, build: buildWorkSnapshot, archivable: true },
+    work: {
+        entity: Work as unknown as new () => Row,
+        build: buildWorkSnapshot,
+        archivable: 'status',
+    },
     // Ideas (`work_proposals`, EW-P2-1): a dismissed Idea is a status, not an archive.
     idea: {
         entity: WorkProposal as unknown as new () => Row,
         build: buildIdeaSnapshot,
         archivable: false,
+    },
+    // Goals (EW-P2-2): archived = `archivedAt` set (a view, never a deletion).
+    goal: {
+        entity: Goal as unknown as new () => Row,
+        build: buildGoalSnapshot,
+        archivable: 'archivedAt',
     },
 };
 
@@ -57,7 +79,12 @@ const RESOURCES: Readonly<
  * Kinds whose rows STORE their visibility (EW-P1-3 columns). The snapshot DTO
  * may still report a derived value, so `private` is checked on the row.
  */
-const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set(['task', 'agent', 'idea']);
+const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set([
+    'task',
+    'agent',
+    'idea',
+    'goal',
+]);
 
 /** Chunk size for `IN (...)` lookups. */
 const ID_CHUNK = 500;
@@ -102,8 +129,10 @@ export class IntegrationResourcesService {
             .getRepository(entity)
             .createQueryBuilder('row')
             .where('row.organizationId = :organizationId', { organizationId });
-        if (archivable && !query.includeArchived) {
+        if (archivable === 'status' && !query.includeArchived) {
             qb.andWhere('row.status != :archived', { archived: 'archived' });
+        } else if (archivable === 'archivedAt' && !query.includeArchived) {
+            qb.andWhere('row.archivedAt IS NULL');
         }
         if (STORED_VISIBILITY.has(kind)) {
             qb.andWhere('row.visibility != :private', { private: 'private' });
@@ -226,7 +255,7 @@ export class IntegrationResourcesService {
     /**
      * `PUT /links/:entityType/:entityId` — the record must be one the caller
      * sees in the organization (`404 not_found` otherwise). Answers `false` for
-     * an entity type v1 does not serve yet (missions, goals, inbox, KB: P2/P3),
+     * an entity type v1 does not serve yet (missions, inbox, KB: P2/P3),
      * which the route refuses as `validation_failed`.
      */
     async assertLinkTarget(
@@ -241,6 +270,7 @@ export class IntegrationResourcesService {
             case 'agent':
             case 'work':
             case 'idea':
+            case 'goal':
                 await this.get(entityType, organizationId, entityId, source);
                 return true;
             case 'member': {

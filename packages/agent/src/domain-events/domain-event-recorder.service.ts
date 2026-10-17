@@ -17,6 +17,7 @@ import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
 import { WorkKnowledgeDocument } from '../entities/work-knowledge-document.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
+import { Goal } from '../entities/goal.entity';
 import { getDomainEventContext, normalizeSyncOrigin } from './domain-event-context';
 import { newDomainEventId } from './domain-event-id';
 import { DOMAIN_EVENTS_NOTIFY_CHANNEL } from './domain-events.config';
@@ -62,6 +63,7 @@ const VERSIONED_AGGREGATES: Partial<Record<DomainEventAggregateType, EntityTarge
         organization: Organization,
         inbox_item: InboxItem,
         idea: WorkProposal,
+        goal: Goal,
         kb_document: WorkKnowledgeDocument,
         kb_folder: MemoryFolder,
         email_message: EmailMessage,
