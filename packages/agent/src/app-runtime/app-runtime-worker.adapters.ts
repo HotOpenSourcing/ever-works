@@ -28,6 +28,7 @@ import type { AppLimitRangeInput, AppQuotaInput, AppTargetRef } from '@ever-work
 import { NotificationCategory, NotificationType } from '../entities/notification.types';
 import type { AppDeployBuildSource } from './app-deploy-preconditions.service';
 import { APP_DEPLOY_DISPATCHER } from './app-deploy-request.service';
+import { APP_CLUSTER_OP_DISPATCHER } from './app-runtime-deletion.service';
 import type {
     AppCommitAncestry,
     AppDeployOrchestratorDispatcher,
@@ -719,4 +720,34 @@ export function workerAppDeployDispatcher(relay: {
 function messageOf(error: unknown): string {
     if (error instanceof Error) return error.message.slice(0, 300);
     return typeof error === 'string' ? error.slice(0, 300) : 'unknown error';
+}
+
+/**
+ * APW-06 T31 (lane aw-deploy-2) — the API end of the worker's `APP_CLUSTER_OP_DISPATCHER`
+ * (`remoteMap.AppClusterOpDispatchRelay`). The worker re-dispatches ops (T58's deletion retries,
+ * T26's `ingress-reconcile`, `resume`'s wait) through the API's own gate, exactly as
+ * {@link AppDeployDispatchRelay} does for the dequeue, so the worker needs no job-runtime binding.
+ */
+@Injectable()
+export class AppClusterOpDispatchRelay {
+    constructor(
+        @Optional()
+        @Inject(APP_CLUSTER_OP_DISPATCHER)
+        private readonly gate?: {
+            dispatch(
+                payload: { op: string; workId: string; [key: string]: unknown },
+                opts?: { delayMs?: number },
+            ): Promise<string | null>;
+        },
+    ) {}
+
+    async dispatch(
+        payload: { op: string; workId: string; [key: string]: unknown },
+        opts?: { delayMs?: number },
+    ): Promise<string | null> {
+        if (!this.gate?.dispatch) return null;
+        if (!payload || typeof payload.op !== 'string' || typeof payload.workId !== 'string')
+            return null;
+        return this.gate.dispatch(payload, opts);
+    }
 }
