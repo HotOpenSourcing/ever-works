@@ -41,6 +41,9 @@ import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
 import { AppBuildSucceededListener } from './app-build-succeeded.listener';
+import { AppSpecAppliedListener } from './app-spec-applied.listener';
+import { AppRuntimeActivityListener } from './app-runtime-activity.listener';
+import { ActivityLogModule } from '../activity-log/activity-log.module';
 import {
     AppClusterOpDispatchRelay,
     AppDeployDispatchRelay,
@@ -194,6 +197,8 @@ import {
         // visible HERE (see the docstring's "bound by IMPORT" section).
         AppRuntimeEnvModule,
         AppDependenciesModule,
+        // T28 (lane aw-deploy-2) — `ActivityLogService` for `AppRuntimeActivityListener`.
+        ActivityLogModule,
     ],
     providers: [
         AppDeployPreconditionsService,
@@ -219,6 +224,10 @@ import {
         // APW-06 T35 (A0.6) — a green deployable Build requests one Deployment when `autoDeploy`
         // is on (or a domain rebuild is pending). API process only: the event fires here.
         AppBuildSucceededListener,
+        // T35's other half (spec-applied redeploys of a published image) and T28's Activity half
+        // (one row per relayed runtime event) — lane aw-deploy-2.
+        AppSpecAppliedListener,
+        AppRuntimeActivityListener,
         // APW-06 T28 / T31 (A0.7) — the API ends of the isolated worker's `APP_RUNTIME_EVENT_SINK`
         // and `APP_DEPLOY_DISPATCHER` proxies (`TriggerInternalController.remoteMap`).
         AppRuntimeEventRelayService,

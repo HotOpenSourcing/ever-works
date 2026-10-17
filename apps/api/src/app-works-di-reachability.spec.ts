@@ -371,6 +371,41 @@ const EXPECTED_REMOTE_MISSES: readonly Expected[] = [];
  */
 const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
     {
+        key: 'AppDependencyProvisionWorkerModule :: APPS_DOMAIN_DNS_SERVICE',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APPS_DOMAIN_DNS_SERVICE` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCIES_SERVICE',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_HEALTH_EGRESS_SOURCE',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_HEALTH_EGRESS_SOURCE` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_HOSTS_REBUILD_REQUESTER',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_HOSTS_REBUILD_REQUESTER` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_LICENSE_SERVICE',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_LICENSE_SERVICE` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
+        key: 'AppDependencyProvisionWorkerModule :: APP_WORK_DELETION_COMPLETION',
+        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_WORK_DELETION_COMPLETION` row for the reason.",
+        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts (A0.10); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts',
+    },
+    {
         key: 'TriggerAppRuntimeModule :: APPS_DOMAIN_DNS_SERVICE',
         reason: "APW-06's managed-subdomain task is unwritten.",
         source: 'packages/agent/src/app-runtime/app-runtime-deletion.service.ts:525',

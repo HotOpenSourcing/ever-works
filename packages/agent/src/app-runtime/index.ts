@@ -131,6 +131,8 @@ export * from './app-runtime-worker.adapters';
 export * from './app-build-succeeded.listener';
 // APW-06 T33 / T31 (lane aw-deploy-2) — the app-target/app-status service and the cluster-op gate.
 export * from './app-target.service';
+export * from './app-spec-applied.listener';
+export * from './app-runtime-activity.listener';
 export {
     appClusterOpDispatcherGate,
     buildAppClusterOpDispatcherProviders,
