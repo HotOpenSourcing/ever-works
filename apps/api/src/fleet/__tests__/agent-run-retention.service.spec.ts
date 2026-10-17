@@ -66,7 +66,9 @@ describe('AgentRunRetentionService', () => {
         const summary = await service().purge(NOW, 2);
 
         const [cutoff, batch] = runs.findLogRetentionCandidates.mock.calls[0];
-        expect((cutoff as Date).toISOString()).toBe(new Date(NOW.getTime() - 90 * DAY).toISOString());
+        expect((cutoff as Date).toISOString()).toBe(
+            new Date(NOW.getTime() - 90 * DAY).toISOString(),
+        );
         expect(batch).toBe(2);
         expect(order).toEqual(['delete-logs', 'mark']);
         expect(runs.markLogsPurged).toHaveBeenCalledWith(['r1', 'r2'], NOW);
@@ -92,7 +94,9 @@ describe('AgentRunRetentionService', () => {
         const summary = await service().purge(NOW, 2);
 
         const [cutoff] = runs.deleteRetainedRuns.mock.calls[0];
-        expect((cutoff as Date).toISOString()).toBe(new Date(NOW.getTime() - 30 * DAY).toISOString());
+        expect((cutoff as Date).toISOString()).toBe(
+            new Date(NOW.getTime() - 30 * DAY).toISOString(),
+        );
         expect(summary.runsDeleted).toBe(3);
     });
 
@@ -100,7 +104,9 @@ describe('AgentRunRetentionService', () => {
         process.env.AGENT_RUN_LOG_RETENTION_DAYS = '1';
         await service().purge(NOW);
         const [cutoff] = runs.findLogRetentionCandidates.mock.calls[0];
-        expect((cutoff as Date).toISOString()).toBe(new Date(NOW.getTime() - 7 * DAY).toISOString());
+        expect((cutoff as Date).toISOString()).toBe(
+            new Date(NOW.getTime() - 7 * DAY).toISOString(),
+        );
     });
 
     it('runs under the distributed lock, is switched off by AGENT_RUN_RETENTION_ENABLED=false, and swallows failures', async () => {

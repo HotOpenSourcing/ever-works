@@ -17,7 +17,9 @@ vi.mock('@/lib/api/browser-api', () => ({ browserApiFetch: fetchMock }));
 vi.mock('@/app/actions/dashboard/works', () => ({ retryUpstreamReadinessAction: retryMock }));
 vi.mock('@/i18n/navigation', () => ({
     useRouter: () => ({ push: vi.fn(), back: vi.fn(), refresh: refreshMock }),
-    Link: ({ children, href }: { children: ReactNode; href: string }) => <a href={href}>{children}</a>,
+    Link: ({ children, href }: { children: ReactNode; href: string }) => (
+        <a href={href}>{children}</a>
+    ),
 }));
 
 import {
@@ -52,7 +54,12 @@ function state(
                       defaultBranch: 'main',
                       status: 'available',
                   },
-        readiness: { state: 'preparing', startedAt: '2026-10-17T10:00:00.000Z', manualRetriesLeft: 3, ...readiness },
+        readiness: {
+            state: 'preparing',
+            startedAt: '2026-10-17T10:00:00.000Z',
+            manualRetriesLeft: 3,
+            ...readiness,
+        },
         divergence: null,
         sync: null,
         actions: null,
@@ -82,8 +89,12 @@ afterEach(() => {
 
 describe('appSourceFailureCopy', () => {
     it('never shows a raw code', () => {
-        expect(appSourceFailureCopy({ state: 'failed', reason: 'access_revoked' } as never)).toEqual({ kind: 'access' });
-        expect(appSourceFailureCopy({ state: 'failed', reason: 'setup_pull_request_closed' } as never)).toEqual({
+        expect(
+            appSourceFailureCopy({ state: 'failed', reason: 'access_revoked' } as never),
+        ).toEqual({ kind: 'access' });
+        expect(
+            appSourceFailureCopy({ state: 'failed', reason: 'setup_pull_request_closed' } as never),
+        ).toEqual({
             kind: 'setupPrClosed',
         });
         expect(appSourceFailureCopy({ state: 'failed', reason: 'too_large' } as never)).toEqual({
@@ -97,7 +108,9 @@ describe('appSourceFailureCopy', () => {
                 handlerReason: { code: 'handler_failed:works_yml_unparseable' },
             } as never),
         ).toEqual({ kind: 'other', leaf: 'works_yml_unparseable' });
-        expect(appSourceFailureCopy({ state: 'failed', reason: 'dispatch_unavailable' } as never)).toEqual({
+        expect(
+            appSourceFailureCopy({ state: 'failed', reason: 'dispatch_unavailable' } as never),
+        ).toEqual({
             kind: 'other',
             leaf: 'other',
         });
@@ -116,7 +129,9 @@ describe('AppSourceStatusCard', () => {
         cleanup();
         renderCard(state({ state: 'preparing' }, 'link'));
         expect(screen.getByText('Finishing setup')).toBeTruthy();
-        expect(screen.getByText('Opening a pull request that adds .works/works.yml to me/tasks-app.')).toBeTruthy();
+        expect(
+            screen.getByText('Opening a pull request that adds .works/works.yml to me/tasks-app.'),
+        ).toBeTruthy();
     });
 
     it('polls every 5 s while preparing, stops at the cap, and refreshes on ready', async () => {
@@ -127,7 +142,9 @@ describe('AppSourceStatusCard', () => {
         });
         expect(fetchMock).toHaveBeenCalledTimes(3);
         await act(async () => {
-            await vi.advanceTimersByTimeAsync(APP_SOURCE_PREPARING_POLL_MS * (APP_SOURCE_PREPARING_POLL_MAX + 10));
+            await vi.advanceTimersByTimeAsync(
+                APP_SOURCE_PREPARING_POLL_MS * (APP_SOURCE_PREPARING_POLL_MAX + 10),
+            );
         });
         expect(fetchMock).toHaveBeenCalledTimes(APP_SOURCE_PREPARING_POLL_MAX);
     });
@@ -145,11 +162,22 @@ describe('AppSourceStatusCard', () => {
     it('polls every 30 s while waiting for the setup PR and offers Open pull request', async () => {
         fetchMock.mockResolvedValue({
             ok: true,
-            json: async () => state({ state: 'waiting_for_setup_pr', setupPullRequestUrl: 'https://github.com/x/pull/1' }),
+            json: async () =>
+                state({
+                    state: 'waiting_for_setup_pr',
+                    setupPullRequestUrl: 'https://github.com/x/pull/1',
+                }),
         });
-        renderCard(state({ state: 'waiting_for_setup_pr', setupPullRequestUrl: 'https://github.com/x/pull/1' }));
+        renderCard(
+            state({
+                state: 'waiting_for_setup_pr',
+                setupPullRequestUrl: 'https://github.com/x/pull/1',
+            }),
+        );
         expect(screen.getByText('Merge the setup pull request to finish.')).toBeTruthy();
-        expect(screen.getByTestId('app-source-open-pr').getAttribute('href')).toBe('https://github.com/x/pull/1');
+        expect(screen.getByTestId('app-source-open-pr').getAttribute('href')).toBe(
+            'https://github.com/x/pull/1',
+        );
         await act(async () => {
             await vi.advanceTimersByTimeAsync(APP_SOURCE_WAITING_POLL_MS * 2);
         });
@@ -167,7 +195,9 @@ describe('AppSourceStatusCard', () => {
     });
 
     it('closed setup PR offers Try again; no retries left disables it with the limit copy', () => {
-        renderCard(state({ state: 'failed', reason: 'setup_pull_request_closed', manualRetriesLeft: 0 }));
+        renderCard(
+            state({ state: 'failed', reason: 'setup_pull_request_closed', manualRetriesLeft: 0 }),
+        );
         expect(screen.getByText('The setup pull request was closed without merging.')).toBeTruthy();
         expect((screen.getByTestId('app-source-retry') as HTMLButtonElement).disabled).toBe(true);
         expect(screen.getByTestId('app-source-retry-limit').textContent).toBe(

@@ -561,9 +561,15 @@ export function FleetSettings({
                                                 data-testid={`fleet-node-throttle-${node.id}-${throttle.provider}`}
                                             >
                                                 {t('modelThrottles.entry', {
-                                                    cli: describeFleetModelProvider(throttle.provider),
-                                                    window: t(`modelThrottles.windows.${throttle.window}` as never),
-                                                    until: new Date(throttle.until).toLocaleString(),
+                                                    cli: describeFleetModelProvider(
+                                                        throttle.provider,
+                                                    ),
+                                                    window: t(
+                                                        `modelThrottles.windows.${throttle.window}` as never,
+                                                    ),
+                                                    until: new Date(
+                                                        throttle.until,
+                                                    ).toLocaleString(),
                                                 })}
                                             </span>
                                         ))}

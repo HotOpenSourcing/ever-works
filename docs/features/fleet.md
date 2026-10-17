@@ -122,7 +122,7 @@ Every heartbeat now carries what the node's **worker** is doing, alongside the r
 | `paused`      | drained on purpose — an operator pause, or draining the last in-flight jobs before a stop |
 | `quarantined` | the fail-closed stop the node imposed on ITSELF; only clearable at that machine           |
 | `throttled`   | over a resource ceiling (CPU / memory, disk floor): keeps its jobs, leases no more        |
-|               | — or idle while a model CLI is out of quota (see "Model usage limits" below)             |
+|               | — or idle while a model CLI is out of quota (see "Model usage limits" below)              |
 
 `workerStateReason` carries the sentence that explains it — the quarantine's own message, the ceiling that was crossed — and `workerStateChangedAt` moves only on a TRANSITION, so "quarantined since 03:14" survives the hundreds of beats that follow. A node that has never reported one shows **unknown**, never `idle`: a fabricated readiness for a machine nobody has heard from is the thing these signals exist to end.
 
@@ -158,11 +158,11 @@ To resume sooner, sign that CLI on that machine in to a seat with quota left, th
 
 Three notices, each filed **exactly once per event** and re-armed when the node recovers:
 
-| Notice                     | Fired by                                                             | Re-armed by                            |
-| -------------------------- | -------------------------------------------------------------------- | -------------------------------------- |
-| `Fleet node offline`       | the heartbeat-expiry sweep, on the flip to offline                   | the next accepted heartbeat            |
-| `Fleet node still offline` | the sweep, once the node has been gone longer than the notice window | the next accepted heartbeat            |
-| `Fleet node quarantined`   | the first heartbeat reporting `quarantined`                          | the first beat reporting anything else |
+| Notice                               | Fired by                                                                    | Re-armed by                                                      |
+| ------------------------------------ | --------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `Fleet node offline`                 | the heartbeat-expiry sweep, on the flip to offline                          | the next accepted heartbeat                                      |
+| `Fleet node still offline`           | the sweep, once the node has been gone longer than the notice window        | the next accepted heartbeat                                      |
+| `Fleet node quarantined`             | the first heartbeat reporting `quarantined`                                 | the first beat reporting anything else                           |
 | `<node>: <CLI> <window> until <UTC>` | the first park that opens a NEW model usage-limit window on that node + CLI | the window ending (the next limit after the reset is news again) |
 
 Each names the node, its kind, the reason where there is one, and when it was last seen. The dedup markers live on the `fleet_nodes` row (`offlineNoticedAt`, `offlineLongNoticedAt`, `quarantineNoticedAt`) and are claimed by a conditional UPDATE, so two API replicas sweeping the same owner produce one notice rather than two.

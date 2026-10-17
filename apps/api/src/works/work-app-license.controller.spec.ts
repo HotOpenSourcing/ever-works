@@ -12,12 +12,22 @@ jest.mock('@ever-works/agent/app-spec', () => ({
 jest.mock('@ever-works/agent/app-license', () => {
     const textFor = (spdx: string | null) =>
         spdx === 'BUSL-1.1'
-            ? { textId: 'busl-1.1-v1', text: 'I confirm the Business Source License terms apply to me.' }
-            : { textId: 'unknown-license-v1', text: 'I could not find a license the registry recognises.' };
+            ? {
+                  textId: 'busl-1.1-v1',
+                  text: 'I confirm the Business Source License terms apply to me.',
+              }
+            : {
+                  textId: 'unknown-license-v1',
+                  text: 'I could not find a license the registry recognises.',
+              };
     return {
         attestationTextFor: textFor,
         // The same rule as `app-license.service.ts`'s `attestationIsValid`.
-        attestationIsValid: (state: { attestation?: any; licenseSpdx?: string | null; licenseClass?: string | null }) => {
+        attestationIsValid: (state: {
+            attestation?: any;
+            licenseSpdx?: string | null;
+            licenseClass?: string | null;
+        }) => {
             const a = state?.attestation;
             if (!a) return false;
             return (
@@ -45,7 +55,9 @@ function controllerWith(state: Record<string, unknown> | null, work: Record<stri
             isCreator: true,
         }),
     };
-    const appSpec = { getState: jest.fn().mockResolvedValue({ workId: 'w1', status: 'ok', state }) };
+    const appSpec = {
+        getState: jest.fn().mockResolvedValue({ workId: 'w1', status: 'ok', state }),
+    };
     return {
         controller: new WorkAppLicenseController(ownership as never, appSpec as never),
         ownership,
@@ -89,14 +101,23 @@ describe('WorkAppLicenseController — GET /api/works/:id/app-license', () => {
             textSha256: 'x',
             commitSha: 'abc123',
         };
-        const covered = controllerWith({ licenseSpdx: 'BUSL-1.1', licenseClass: 'amber', attestation });
-        expect((await covered.controller.read({ userId: 'owner-1' } as never, WORK_ID)).attestationRequired).toBe(
-            false,
-        );
+        const covered = controllerWith({
+            licenseSpdx: 'BUSL-1.1',
+            licenseClass: 'amber',
+            attestation,
+        });
+        expect(
+            (await covered.controller.read({ userId: 'owner-1' } as never, WORK_ID))
+                .attestationRequired,
+        ).toBe(false);
 
         const green = controllerWith({ licenseSpdx: 'MIT', licenseClass: 'green' });
         const view = await green.controller.read({ userId: 'member-2' } as never, WORK_ID);
-        expect(view).toMatchObject({ attestationRequired: false, attestationText: null, isOwner: false });
+        expect(view).toMatchObject({
+            attestationRequired: false,
+            attestationText: null,
+            isOwner: false,
+        });
     });
 
     it('an unclassified licence is treated as unknown, like the attest route', async () => {
@@ -109,12 +130,16 @@ describe('WorkAppLicenseController — GET /api/works/:id/app-license', () => {
     it('answers one 404 for an unreachable Work and 422 for another kind', async () => {
         const hidden = controllerWith(null);
         hidden.ownership.ensureCanView.mockRejectedValueOnce(new NotFoundException());
-        await expect(hidden.controller.read({ userId: 'x' } as never, WORK_ID)).rejects.toMatchObject({
+        await expect(
+            hidden.controller.read({ userId: 'x' } as never, WORK_ID),
+        ).rejects.toMatchObject({
             status: 404,
         });
 
         const website = controllerWith(null, { kind: 'website' });
-        const refusal = await website.controller.read({ userId: 'owner-1' } as never, WORK_ID).catch((e) => e);
+        const refusal = await website.controller
+            .read({ userId: 'owner-1' } as never, WORK_ID)
+            .catch((e) => e);
         expect(refusal).toBeInstanceOf(HttpException);
         expect((refusal as HttpException).getStatus()).toBe(422);
         expect(website.appSpec.getState).not.toHaveBeenCalled();
@@ -122,7 +147,15 @@ describe('WorkAppLicenseController — GET /api/works/:id/app-license', () => {
 });
 
 describe('attestationCovers', () => {
-    const base = { userId: 'u', attestedAt: '', spdx: 'BUSL-1.1', class: 'amber', textId: 't1', textSha256: '', commitSha: '' } as const;
+    const base = {
+        userId: 'u',
+        attestedAt: '',
+        spdx: 'BUSL-1.1',
+        class: 'amber',
+        textId: 't1',
+        textSha256: '',
+        commitSha: '',
+    } as const;
     it('needs the same SPDX, class and text', () => {
         expect(attestationCovers(base as never, 'BUSL-1.1', 'amber', 't1')).toBe(true);
         expect(attestationCovers(base as never, 'BUSL-1.1', 'red', 't1')).toBe(false);

@@ -65,7 +65,9 @@ export function AppSourcePreviewCard({ preview }: { preview: AppSourceInspectRes
                 )}
             </div>
             {repository.description && (
-                <p className="text-sm text-text-secondary dark:text-text-secondary-dark">{repository.description}</p>
+                <p className="text-sm text-text-secondary dark:text-text-secondary-dark">
+                    {repository.description}
+                </p>
             )}
             <div className="flex flex-wrap gap-2">
                 <span
@@ -79,7 +81,9 @@ export function AppSourcePreviewCard({ preview }: { preview: AppSourceInspectRes
                     )}
                     data-testid="app-work-license"
                 >
-                    {license.spdx ? t('licenseChip', { spdx: license.spdx }) : t('licenseNotDetected')}
+                    {license.spdx
+                        ? t('licenseChip', { spdx: license.spdx })
+                        : t('licenseNotDetected')}
                     {' · '}
                     {t(`licenseClass.${license.class}`)}
                 </span>
@@ -97,7 +101,9 @@ export function AppSourcePreviewCard({ preview }: { preview: AppSourceInspectRes
                 </span>
             </div>
             {blueprint.status === 'matched' && blueprint.notice && (
-                <p className="text-xs text-text-muted dark:text-text-muted-dark">{blueprint.notice}</p>
+                <p className="text-xs text-text-muted dark:text-text-muted-dark">
+                    {blueprint.notice}
+                </p>
             )}
             <ul className="space-y-1 text-xs text-text-secondary dark:text-text-secondary-dark">
                 {repository.movedFrom && <li>{t('moved', { fullName: repository.fullName })}</li>}
@@ -110,7 +116,10 @@ export function AppSourcePreviewCard({ preview }: { preview: AppSourceInspectRes
                 {preview.scanIncomplete && <li>{t('scanIncomplete')}</li>}
             </ul>
             {preview.existingAppWork && (
-                <p className="text-sm text-text dark:text-text-dark" data-testid="app-work-existing">
+                <p
+                    className="text-sm text-text dark:text-text-dark"
+                    data-testid="app-work-existing"
+                >
                     {t('existingAppWork', { name: preview.existingAppWork.name })}{' '}
                     <Link
                         href={ROUTES.DASHBOARD_WORK(preview.existingAppWork.id)}

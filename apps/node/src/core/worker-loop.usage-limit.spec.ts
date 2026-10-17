@@ -121,7 +121,11 @@ describe('WorkerLoop — model usage limits', () => {
 	});
 
 	it('keeps leasing when another CLI is still available, and refuses the throttled CLI’s job without starting it', async () => {
-		const client = recordingClient([[], [agentJob('job-claude', 'claude-code'), agentJob('job-codex', 'codex')], []]);
+		const client = recordingClient([
+			[],
+			[agentJob('job-claude', 'claude-code'), agentJob('job-codex', 'codex')],
+			[]
+		]);
 		const loop = new WorkerLoop({
 			client,
 			scheduler: manualScheduler(),
@@ -164,9 +168,21 @@ describe('WorkerLoop — model usage limits', () => {
 	it('never lets an earlier reset shorten a later one, and ignores a reset already past', () => {
 		const loop = new WorkerLoop({ client: recordingClient([[]]), scheduler: manualScheduler(), now: () => NOW });
 		loop.noteModelUsageLimit({ provider: 'codex', window: 'usage', retryAfter: RESET, message: 'a' });
-		loop.noteModelUsageLimit({ provider: 'codex', window: 'session', retryAfter: '2026-10-17T18:00:00.000Z', message: 'b' });
-		loop.noteModelUsageLimit({ provider: 'claude-code', window: 'rate', retryAfter: '2026-10-17T15:00:00.000Z', message: 'c' });
-		expect(loop.activeModelThrottles()).toEqual([{ provider: 'codex', window: 'usage', until: RESET, reason: 'a' }]);
+		loop.noteModelUsageLimit({
+			provider: 'codex',
+			window: 'session',
+			retryAfter: '2026-10-17T18:00:00.000Z',
+			message: 'b'
+		});
+		loop.noteModelUsageLimit({
+			provider: 'claude-code',
+			window: 'rate',
+			retryAfter: '2026-10-17T15:00:00.000Z',
+			message: 'c'
+		});
+		expect(loop.activeModelThrottles()).toEqual([
+			{ provider: 'codex', window: 'usage', until: RESET, reason: 'a' }
+		]);
 	});
 
 	it('adopts the platform throttles after a restart and lifts one the owner cleared', () => {

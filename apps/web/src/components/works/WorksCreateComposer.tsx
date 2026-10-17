@@ -168,11 +168,13 @@ export function WorksCreateComposer({
 
     const chips: ReadonlyArray<PromptChip<InitialWorkKind>> = useMemo(
         () =>
-            WORK_KIND_ORDER.filter((k) => !(isHiddenWhenDisabled(k) && disabledSet.has(k))).map((k) => ({
-                value: k,
-                label: t(`kinds.${k}`),
-                Icon: WORK_KIND_ICONS[k],
-            })),
+            WORK_KIND_ORDER.filter((k) => !(isHiddenWhenDisabled(k) && disabledSet.has(k))).map(
+                (k) => ({
+                    value: k,
+                    label: t(`kinds.${k}`),
+                    Icon: WORK_KIND_ICONS[k],
+                }),
+            ),
         [t, disabledSet],
     );
 

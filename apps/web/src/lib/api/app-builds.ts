@@ -160,20 +160,26 @@ export const appBuildsWebAPI = {
     },
 
     /** One Build's detail — the drawer. */
-    get: (workId: string, buildId: string): Promise<AppBuildDetail> => appBuildsAPI.get(workId, buildId),
+    get: (workId: string, buildId: string): Promise<AppBuildDetail> =>
+        appBuildsAPI.get(workId, buildId),
 
     /** **Start build** — a manual Build of the tracked branch head, or of `commitSha`. */
     start: async (
         workId: string,
         body: { commitSha?: string } = {},
     ): Promise<{ build: AppBuildSummary | null; buildId: string | null; deduped: boolean }> => {
-        const raw = await appBuildsAPI.request(workId, body.commitSha ? { commitSha: body.commitSha } : {});
+        const raw = await appBuildsAPI.request(
+            workId,
+            body.commitSha ? { commitSha: body.commitSha } : {},
+        );
         return normalizeStartBuildAnswer(raw);
     },
 
     /** **Cancel** a queued or running Build. */
     cancel: async (workId: string, buildId: string): Promise<{ build: AppBuildSummary | null }> => {
-        return { build: normalizeStartBuildAnswer(await appBuildsAPI.cancel(workId, buildId)).build };
+        return {
+            build: normalizeStartBuildAnswer(await appBuildsAPI.cancel(workId, buildId)).build,
+        };
     },
 
     /** Save the image pull token. Write-only: the answer never carries the token. */
@@ -181,7 +187,10 @@ export const appBuildsWebAPI = {
         workId: string,
         token: string,
     ): Promise<{ pullAccess: AppBuildsPullAccess | null }> => {
-        return { pullAccess: normalizeAppBuildsList(await appBuildsAPI.savePullToken(workId, token)).pullAccess };
+        return {
+            pullAccess: normalizeAppBuildsList(await appBuildsAPI.savePullToken(workId, token))
+                .pullAccess,
+        };
     },
 };
 

@@ -4,7 +4,8 @@ import { useTranslations } from 'next-intl';
 import { GitFork, Link2, Lock } from 'lucide-react';
 import type { AppSourceRelationSummary } from '@/lib/works/app-source-relation';
 
-const meta = 'flex items-center gap-1 text-[11px] text-text-secondary dark:text-text-secondary-dark';
+const meta =
+    'flex items-center gap-1 text-[11px] text-text-secondary dark:text-text-secondary-dark';
 
 function RepoLink({ label, href }: { label: string; href?: string }) {
     if (!href) return <span>{label}</span>;
@@ -35,7 +36,10 @@ export function AppSourceRelation({ summary }: { summary: AppSourceRelationSumma
             </span>
             {summary.upstream && (
                 <span className={meta} data-testid="app-source-relation-upstream">
-                    <RepoLink label={t('upstream', { fullName: summary.upstream })} href={summary.upstreamUrl} />
+                    <RepoLink
+                        label={t('upstream', { fullName: summary.upstream })}
+                        href={summary.upstreamUrl}
+                    />
                 </span>
             )}
         </div>

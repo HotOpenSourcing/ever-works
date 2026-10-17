@@ -114,7 +114,11 @@ export async function startAppBuildAction(
     workId: string,
     input: { commitSha?: string } = {},
 ): Promise<
-    AppBuildActionResult<{ build: AppBuildSummary | null; buildId: string | null; deduped: boolean }>
+    AppBuildActionResult<{
+        build: AppBuildSummary | null;
+        buildId: string | null;
+        deduped: boolean;
+    }>
 > {
     await requireUser();
     const sha = commitShaSchema.safeParse(input.commitSha || undefined);

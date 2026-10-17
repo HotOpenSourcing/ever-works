@@ -64,14 +64,16 @@ export const APP_WORKS_OPERATIONS: OperationSpec[] = [
         kind: 'action',
         params: [workIdParam],
         body: true,
-        bodyHint: 'note (optional, ≤ 500 chars), agentId (optional), restart (optional), dryRun (optional boolean).',
+        bodyHint:
+            'note (optional, ≤ 500 chars), agentId (optional), restart (optional), dryRun (optional boolean).',
         requiresConfirmation: true,
     },
     {
         toolName: 'get_app_provisioning',
         method: 'GET',
         path: '/api/works/{id}/provisioning',
-        summary: 'The open and recent provisioning Tasks of an App Work (status, pull request link).',
+        summary:
+            'The open and recent provisioning Tasks of an App Work (status, pull request link).',
         kind: 'read',
         params: [workIdParam],
     },

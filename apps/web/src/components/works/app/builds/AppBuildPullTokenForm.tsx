@@ -101,7 +101,9 @@ export function AppBuildPullTokenForm({
             )}
         >
             <div>
-                <h3 className="text-sm font-semibold text-text dark:text-text-dark">{t('title')}</h3>
+                <h3 className="text-sm font-semibold text-text dark:text-text-dark">
+                    {t('title')}
+                </h3>
                 <p className="mt-1 text-sm text-text-secondary dark:text-text-secondary-dark">
                     {t('body')}
                 </p>
@@ -147,7 +149,9 @@ export function AppBuildPullTokenForm({
             </form>
 
             {!canEdit && (
-                <p className="text-xs text-text-muted dark:text-text-muted-dark">{t('viewerDisabled')}</p>
+                <p className="text-xs text-text-muted dark:text-text-muted-dark">
+                    {t('viewerDisabled')}
+                </p>
             )}
 
             {message && (

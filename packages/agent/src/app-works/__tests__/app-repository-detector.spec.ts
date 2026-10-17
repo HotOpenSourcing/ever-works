@@ -24,7 +24,14 @@ const SOURCE_FILE = [
 describe('detectAppRepository + draftAppSpecDocument (APW-04)', () => {
     it('detects a Dockerfile app with Postgres and Redis from compose, and drafts a valid spec', () => {
         const detection = detectAppRepository({
-            rootEntries: ['Dockerfile', 'docker-compose.yml', 'package.json', 'pnpm-lock.yaml', '.env.example', '.works'],
+            rootEntries: [
+                'Dockerfile',
+                'docker-compose.yml',
+                'package.json',
+                'pnpm-lock.yaml',
+                '.env.example',
+                '.works',
+            ],
             files: {
                 '.works/works.yml': SOURCE_FILE,
                 Dockerfile: [
@@ -73,7 +80,10 @@ describe('detectAppRepository + draftAppSpecDocument (APW-04)', () => {
         });
         expect(detection.dependencies).toEqual(['postgres', 'redis']);
 
-        const draft = draftAppSpecDocument(detection, { name: 'Helpdesk', existingText: SOURCE_FILE });
+        const draft = draftAppSpecDocument(detection, {
+            name: 'Helpdesk',
+            existingText: SOURCE_FILE,
+        });
         const result = validateAppSpecDocument(draft, { mode: 'data-repository' });
         expect(result.issues.filter((issue) => issue.severity === 'error')).toEqual([]);
         expect(result.spec).not.toBeNull();
@@ -91,7 +101,9 @@ describe('detectAppRepository + draftAppSpecDocument (APW-04)', () => {
     it('falls back to build.strategy auto for a manifest-only Python app', () => {
         const detection = detectAppRepository({
             rootEntries: ['pyproject.toml', 'manage.py'],
-            files: { 'pyproject.toml': '[project]\ndependencies = ["django>=5", "psycopg[binary]"]\n' },
+            files: {
+                'pyproject.toml': '[project]\ndependencies = ["django>=5", "psycopg[binary]"]\n',
+            },
         });
         expect(detection).toMatchObject({
             language: 'python',
@@ -115,11 +127,18 @@ describe('detectAppRepository + draftAppSpecDocument (APW-04)', () => {
     });
 
     it('parses Dockerfile EXPOSE / stages and env names', () => {
-        expect(parseDockerfile('FROM a AS build\nFROM b AS production\nFROM c AS debug\nEXPOSE 8080/tcp 9000')).toEqual({
+        expect(
+            parseDockerfile(
+                'FROM a AS build\nFROM b AS production\nFROM c AS debug\nEXPOSE 8080/tcp 9000',
+            ),
+        ).toEqual({
             ports: [8080, 9000],
             target: 'production',
             healthPath: null,
         });
-        expect(parseEnvNames('# c\nexport A=1\nB = 2\nlower=3\nEVER_WORKS_X=1\nA=dup')).toEqual(['A', 'B']);
+        expect(parseEnvNames('# c\nexport A=1\nB = 2\nlower=3\nEVER_WORKS_X=1\nA=dup')).toEqual([
+            'A',
+            'B',
+        ]);
     });
 });

@@ -39,7 +39,9 @@ describe('apps catalog blueprints', () => {
             url: 'https://github.com/ever-works/umami-template',
             spdx: 'MIT',
         });
-        expect(toBlueprintItem(repo('directory-web-template', { topics: ['website-template'] }))).toBeNull();
+        expect(
+            toBlueprintItem(repo('directory-web-template', { topics: ['website-template'] })),
+        ).toBeNull();
         expect(toBlueprintItem(repo('x-template', { topics: undefined }))).toBeNull();
         expect(toBlueprintItem(repo('x-template', { isPrivate: true }))).toBeNull();
         expect(toBlueprintItem(repo('x-template', { archived: true }))).toBeNull();
@@ -52,7 +54,10 @@ describe('apps catalog blueprints', () => {
     });
 
     it('searches only from two characters', () => {
-        const items = [toBlueprintItem(repo('umami-template'))!, toBlueprintItem(repo('cal-template'))!];
+        const items = [
+            toBlueprintItem(repo('umami-template'))!,
+            toBlueprintItem(repo('cal-template'))!,
+        ];
         expect(filterBlueprints(items, 'u')).toHaveLength(2);
         expect(filterBlueprints(items, 'um').map((item) => item.id)).toEqual(['umami']);
     });
@@ -63,10 +68,16 @@ describe('apps catalog blueprints', () => {
         let now = 1_000;
         const clock = () => now;
 
-        git.listPublicRepositories.mockResolvedValueOnce([repo('umami-template'), repo('plain', { topics: [] })]);
+        git.listPublicRepositories.mockResolvedValueOnce([
+            repo('umami-template'),
+            repo('plain', { topics: [] }),
+        ]);
         const first = await service.list(undefined, clock);
         expect(first).toMatchObject({ available: true, total: 1, source: 'github-topic' });
-        expect(git.listPublicRepositories).toHaveBeenCalledWith('github', 1, 100, { owner: 'ever-works', type: 'org' });
+        expect(git.listPublicRepositories).toHaveBeenCalledWith('github', 1, 100, {
+            owner: 'ever-works',
+            type: 'org',
+        });
 
         await service.list('umami', clock);
         expect(git.listPublicRepositories).toHaveBeenCalledTimes(1);
@@ -78,6 +89,8 @@ describe('apps catalog blueprints', () => {
 
         now += APPS_CATALOG_BLUEPRINTS_FAILURE_TTL_MS + 1;
         git.listPublicRepositories.mockResolvedValueOnce([repo('cal-template')]);
-        expect((await service.list(undefined, clock)).items.map((item) => item.id)).toEqual(['cal']);
+        expect((await service.list(undefined, clock)).items.map((item) => item.id)).toEqual([
+            'cal',
+        ]);
     });
 });

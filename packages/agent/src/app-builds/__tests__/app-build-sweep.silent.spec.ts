@@ -72,7 +72,10 @@ describe('AppBuildSweepService — discovery and the silent pass', () => {
     it('removes orphaned verification secrets (§7.4, 2026-10-17)', async () => {
         const h = harness();
         const summary = await h.sweeps.sweep(NOW);
-        expect(h.builds.findWithOrphanedVerifySecrets).toHaveBeenCalledWith(NOW, APP_BUILD_SWEEP_BATCH);
+        expect(h.builds.findWithOrphanedVerifySecrets).toHaveBeenCalledWith(
+            NOW,
+            APP_BUILD_SWEEP_BATCH,
+        );
         expect(h.service.removeOrphanedVerifySecret).toHaveBeenCalledWith('v1');
         expect(summary).toMatchObject({ orphanSecretsRemoved: 1, orphanSecretsFailed: 0 });
     });

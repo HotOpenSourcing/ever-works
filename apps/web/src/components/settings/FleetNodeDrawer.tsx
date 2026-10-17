@@ -362,8 +362,12 @@ export function FleetNodeDrawer({
                                         >
                                             <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-warning/10 text-warning">
                                                 {t('modelThrottles.entry', {
-                                                    cli: describeFleetModelProvider(throttle.provider),
-                                                    window: t(`modelThrottles.windows.${throttle.window}` as never),
+                                                    cli: describeFleetModelProvider(
+                                                        throttle.provider,
+                                                    ),
+                                                    window: t(
+                                                        `modelThrottles.windows.${throttle.window}` as never,
+                                                    ),
                                                     until: formatMoment(throttle.until),
                                                 })}
                                             </span>
@@ -374,7 +378,9 @@ export function FleetNodeDrawer({
                                                     size="sm"
                                                     className="ml-2"
                                                     disabled={isPending}
-                                                    onClick={() => onClearModelThrottle(throttle.provider)}
+                                                    onClick={() =>
+                                                        onClearModelThrottle(throttle.provider)
+                                                    }
                                                     data-testid={`fleet-node-drawer-clear-throttle-${throttle.provider}`}
                                                 >
                                                     {t('modelThrottles.clear')}
