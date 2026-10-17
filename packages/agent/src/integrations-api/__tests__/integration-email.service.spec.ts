@@ -92,6 +92,7 @@ describe('IntegrationEmailService', () => {
                 address: `${randomUUID().slice(0, 8)}@acme.test`,
                 direction,
                 pluginId: 'postmark',
+                providerSettings: {},
                 verified: true,
                 disabledAt,
                 organizationId: ORG_A,

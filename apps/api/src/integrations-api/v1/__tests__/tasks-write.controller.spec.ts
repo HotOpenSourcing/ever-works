@@ -273,6 +273,7 @@ describe('IntegrationTasksWriteController', () => {
                 estimateMinutes: 90,
             }),
             expect.anything(),
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
         );
 
         await controller.update(
