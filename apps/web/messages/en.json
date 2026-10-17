@@ -9000,7 +9000,8 @@
                     "unavailable": "The App details couldn't be loaded right now.",
                     "builds": "Builds",
                     "deploy": "Deploy",
-                    "upstreamTab": "Upstream"
+                    "upstreamTab": "Upstream",
+                    "blueprintLabel": "Blueprint"
                 },
                 "chat": {
                     "title": "Evolve it with its agent",
