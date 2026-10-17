@@ -2610,6 +2610,12 @@ importers:
       '@ever-works/k8s-plugin':
         specifier: workspace:*
         version: link:../k8s
+      '@kubernetes/client-node':
+        specifier: ^1.4.0
+        version: 1.4.0(encoding@0.1.13)
+      js-yaml:
+        specifier: ^5.5.0
+        version: 5.5.0
     devDependencies:
       '@ever-works/plugin':
         specifier: workspace:*

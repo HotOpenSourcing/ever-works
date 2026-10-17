@@ -94,7 +94,7 @@ describe('ConfigAppsTierPolicy (APPS_TIER_POLICY, minimal APW-10)', () => {
         await expect(policy.resolveClusterCredential('w-1')).resolves.toBe(yaml.trim());
         expect(policy.managedScope()).toBe('any');
         const pod = policy.podPolicy();
-        expect(pod.quota).toMatchObject({ 'limits.cpu': '8', pods: 40, 'limits.memory': '6Gi' });
+        expect(pod.quota).toMatchObject({ 'limits.cpu': '8', pods: 40, 'limits.memory': '10Gi' });
         expect(pod.limitRange.max).toMatchObject({ memory: '8Gi', cpu: '2' });
         expect(
             new ConfigAppsTierPolicy({
