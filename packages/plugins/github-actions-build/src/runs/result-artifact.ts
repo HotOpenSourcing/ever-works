@@ -139,6 +139,10 @@ export type ReadResultArtifactOutcome =
  * `imageRepository`. Everything up to the LAST `@` is dropped; what remains must
  * still match {@link RESULT_DIGEST_PATTERN} exactly, so normalising never turns
  * a malformed claim into an accepted one.
+ *
+ * A non-string (absent, `null`, a number) normalises to `''` ON PURPOSE: the
+ * caller reads `''` as "no digest claimed", which the versioned shape allows and
+ * T12's first shape refuses as `badDigest` — one code path for both shapes.
  */
 export function normaliseResultDigest(raw: unknown): string {
 	if (typeof raw !== 'string') return '';
