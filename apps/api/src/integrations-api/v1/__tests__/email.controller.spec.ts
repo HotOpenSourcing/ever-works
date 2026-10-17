@@ -137,6 +137,8 @@ describe('IntegrationEmailController', () => {
             expect.objectContaining({
                 pluginId: 'postmark',
                 recipient: { emailAddressId: 'addr-1', userId: 'agent-owner' },
+                // Review 2026-10-17 F15: the agent the key was authorized for.
+                agentId: AGENT,
                 from: 'ada@example.com',
                 subject: 'Refund',
                 bodyText: 'Can I get a refund?',

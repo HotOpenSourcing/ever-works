@@ -347,6 +347,9 @@ export class IntegrationEmailController {
             const outcome = await dispatcher.dispatch({
                 pluginId: address.pluginId,
                 recipient: { emailAddressId: address.id, userId: address.userId },
+                // Review 2026-10-17 F15: the agent this key was authorized for above,
+                // not whichever agent holds the address's first inbound assignment.
+                agentId: dto.agentId,
                 providerMessageId,
                 from: message.from,
                 to: [...message.to],
