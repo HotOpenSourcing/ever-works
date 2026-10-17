@@ -179,6 +179,31 @@ describe('IntegrationEmailController', () => {
         expect(email.findPushed).toHaveBeenCalledWith(ORG, 'postmark', expect.any(String));
     });
 
+    // Review 2026-10-17 F54 (raised again by CodeRabbit on #2709): de-duplication is
+    // per agent, so one Message-ID pushed to two agents reaches both.
+    it('delivers the same Message-ID to a second agent, and still dedupes a legacy push of the same agent', async () => {
+        const other = setup();
+        // The per-agent id finds nothing; the legacy id finds the OTHER agent's copy.
+        other.email.findPushed
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: 'msg-a', agentId: 'agent-a' } as never);
+        await other.controller.inbound(user, body(), req(), res());
+        expect(other.dispatcher.dispatch).toHaveBeenCalledTimes(1);
+        const [perAgentId, legacyId] = other.email.findPushed.mock.calls.map(
+            (call: unknown[]) => call[2],
+        );
+        expect(perAgentId).not.toBe(legacyId);
+
+        const same = setup();
+        same.email.findPushed
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ id: 'msg-old', agentId: AGENT } as never);
+        const response = res();
+        await same.controller.inbound(user, body(), req(), response);
+        expect(same.dispatcher.dispatch).not.toHaveBeenCalled();
+        expect(response.status).toHaveBeenCalledWith(200);
+    });
+
     it('refuses an inbound address of another organization, or of none (422): its mail would be unreadable', async () => {
         for (const addressOrganizationId of ['00000000-0000-4000-8000-0000000000ff', null]) {
             const { controller, dispatcher } = setup({ addressOrganizationId });
