@@ -95,6 +95,8 @@ export type MissionGuardrailsOverride = Partial<WorkAgentGuardrails>;
  */
 @Entity({ name: 'missions' })
 @Index('idx_missions_org_visibility', ['organizationId', 'visibility'])
+// Integration API v1 keyset lists (EW-P2, migration 1795120000000-AddP2IntegrationKeysetIndexes).
+@Index('idx_missions_org_updated', ['organizationId', 'updatedAt', 'id'])
 @Index('idx_missions_user_status', ['userId', 'status'])
 export class Mission {
     @PrimaryGeneratedColumn('uuid')

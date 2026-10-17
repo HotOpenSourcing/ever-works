@@ -374,14 +374,38 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PATCH /api/integrations/v1/teams/:id': { events: ['team.updated'] },
     // As the app's DELETE: the cascade re-records children, members and resources.
     'DELETE /api/integrations/v1/teams/:id': {
-        events: ['team.deleted', 'team.updated', 'agent.updated', 'task.updated', 'work.updated'],
+        events: [
+            'team.deleted',
+            'team.updated',
+            'agent.updated',
+            'task.updated',
+            'work.updated',
+            'idea.updated',
+        ],
     },
     'PUT /api/integrations/v1/teams/:id/members': {
         events: ['team.member.added', 'team.member.removed', 'agent.updated'],
     },
     'PUT /api/integrations/v1/teams/:id/resources': {
-        events: ['team.resource.added', 'team.resource.removed', 'task.updated', 'work.updated'],
+        events: [
+            'team.resource.added',
+            'team.resource.removed',
+            'task.updated',
+            'work.updated',
+            'idea.updated',
+        ],
     },
+
+    // ── Integration API v1 — Ideas (EW-P2-1) ──────────────────────────────────
+    // + `idea.deleted` when a concurrent create won the externalRef (ours is undone).
+    'POST /api/integrations/v1/ideas': { events: ['idea.created', 'idea.deleted'] },
+    // Title / description `idea.updated`; `teamIds` an `idea.updated` or, when the
+    // scope moves (D11), `idea.visibility_changed`; a hand-picked visibility too.
+    'PATCH /api/integrations/v1/ideas/:id': {
+        events: ['idea.updated', 'idea.visibility_changed'],
+    },
+    'POST /api/integrations/v1/ideas/:id/dismiss': { events: ['idea.status_changed'] },
+    'POST /api/integrations/v1/ideas/:id/restore': { events: ['idea.status_changed'] },
     // Integration API v1 Knowledge Base (EW-P3-2): the same services as the app's routes.
     // + `kb.document.moved` when the create files the document into a folder.
     'POST /api/integrations/v1/kb/documents': {

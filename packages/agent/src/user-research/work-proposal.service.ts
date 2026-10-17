@@ -23,6 +23,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Not, Repository } from 'typeorm';
 import { UserUpload } from '../entities/user-upload.entity';
 import { Agent, AgentStatus } from '../entities/agent.entity';
+import { Mission } from '../entities/mission.entity';
 import { VisionContextService } from '../services/vision-context.service';
 
 // Upload IDs are SHA-256 hex strings (the `id` field returned by
@@ -973,7 +974,8 @@ export class WorkProposalService {
      * Spend safety (D9): nothing here queues or builds the Idea. Building stays a user
      * action in Ever Works (`POST /me/work-proposals/:id/build`).
      *
-     * The row, its Teams and `idea.created` commit together.
+     * `missionId` must name the caller's own non-`private` Mission of the same
+     * Organization (404 otherwise). The row, its Teams and `idea.created` commit together.
      */
     async createExternal(
         input: Omit<CreateExternalIdeaInput, 'slugSuggestion'> & {
@@ -994,6 +996,23 @@ export class WorkProposalService {
         }
         const teamIds = [...new Set(input.teamIds ?? [])];
         const id = await publisher.transaction(async (manager) => {
+            if (input.missionId) {
+                // The Mission must be the caller's own (writes are owner-scoped: an Idea on
+                // someone else's Mission would count against its outstanding-Ideas cap) in
+                // the pinned Organization; a foreign, missing or `private` Mission reads the
+                // same (404).
+                const mission = await manager.getRepository(Mission).findOne({
+                    where: {
+                        id: input.missionId,
+                        organizationId: input.organizationId,
+                        userId: input.userId,
+                    },
+                    select: { id: true, visibility: true },
+                });
+                if (!mission || mission.visibility === 'private') {
+                    throw new NotFoundException('Mission not found');
+                }
+            }
             const row = await this.repo.insertExternal(manager, {
                 ...input,
                 title,

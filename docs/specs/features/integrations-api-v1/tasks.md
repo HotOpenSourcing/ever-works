@@ -59,6 +59,18 @@
       `RecordVisibilityService.setVisibility` (EW-P1-3, #2621); `private` → `422`. Reads hide a row whose STORED
       visibility is `private`.
 
+## Phase 2b — P2 resources (EW-P2)
+
+- [x] **T35** Ideas (EW-P2-1): `GET /ideas`, `GET /ideas/:id`, `POST /ideas` (Idempotency-Key, `externalRef`, always
+      `external` + `pending`, `missionId` in the pinned org), `PATCH /ideas/:id` (title, description, `teamIds`,
+      `visibility`; `If-Match` re-checked in the edit's transaction), `POST /ideas/:id/dismiss` / `restore`
+      (idempotent; other statuses `422`); `idea` link target; keyset index `idx_work_proposals_org_updated`
+      (migration `1795120000000`, also `goals` / `missions`); request schemas `CreateIdea` / `UpdateIdea`; contract
+      `v1-draft.5` (CR-5). Recording points: [`domain-events`](../domain-events/tasks.md) T20.
+- [ ] **T32** Goals (EW-P2-2).
+- [ ] **T33** Missions (EW-P2-5).
+- [ ] **T34** Organization create + member roles (EW-P2-6).
+
 ## Phase 3 — Webhooks v2 (EW-P1-5)
 
 - [x] **T18** Subscription columns + migration (3 dialects) — `1795080100000-AddWebhookSubscriptionsV2`.

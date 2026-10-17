@@ -8,6 +8,7 @@ import { RecordVisibilityModule } from '@ever-works/agent/record-visibility';
 import { KnowledgeBaseModule, KnowledgeLibraryModule } from '@ever-works/agent/services';
 import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
+import { UserResearchModule } from '@ever-works/agent/user-research';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationEmailController } from './email.controller';
@@ -22,6 +23,7 @@ import { IntegrationTaskCommentsController } from './task-comments.controller';
 import { IntegrationBatchController } from './batch.controller';
 import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
+import { IntegrationIdeasController } from './ideas.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { OrganizationsModule } from '../../organizations/organizations.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
@@ -34,7 +36,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
  *
  * EW-P1-2 ships the first route, `GET /whoami`, because it is about the key
  * itself. The resources (members, agents, teams, works, tasks, events,
- * links, batch) are EW-P1-4 and land in this module.
+ * links, batch) are EW-P1-4 and land in this module; the P2 resources
+ * (ideas, then goals and missions) follow.
  */
 @Module({
     imports: [
@@ -49,6 +52,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         RecordVisibilityModule,
         // Key-owned webhook subscriptions (EW-P1-5).
         WebhooksModule,
+        // Ideas (EW-P2-1): `WorkProposalService` (createExternal, dismiss, restore).
+        UserResearchModule,
         // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
         // `InboxService` (steer, resume, decide exactly like the Inbox UI).
         AgentInboxModule,
@@ -73,6 +78,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationTeamsWriteController,
         IntegrationBatchController,
         IntegrationWebhooksController,
+        // P2 resources.
+        IntegrationIdeasController,
         // EW-P3-1 — the Inbox (`inbox:*`).
         IntegrationInboxController,
         // EW-P3-2 — the Knowledge Base (`kb:*`).

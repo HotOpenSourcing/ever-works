@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource, type EntityManager, type ObjectLiteral } from 'typeorm';
 import {
     buildAgentSnapshot,
+    buildIdeaSnapshot,
     buildMemberSnapshot,
     buildOrganizationSnapshot,
     buildTaskSnapshot,
@@ -17,14 +18,18 @@ import { Task } from '../entities/task.entity';
 import { TaskChatMessage } from '../entities/task-chat-message.entity';
 import { Team } from '../entities/team.entity';
 import { Work } from '../entities/work.entity';
+import { WorkProposal } from '../entities/work-proposal.entity';
 import type { ExternalLinkEntityType } from '../entities/external-record-link.entity';
 import { ExternalRecordLinksService, type ExternalLinkDto } from './external-record-links.service';
 import { etagFor } from './if-match';
 import { ResourceNotFoundError } from './integration-api.errors';
 import { type KeysetPage, type KeysetQuery, readKeysetPage } from './keyset-cursor';
 
-/** The versioned P1 resources the integration API reads (contract v1 B.6). */
-export type IntegrationResourceKind = 'task' | 'team' | 'agent' | 'work';
+/**
+ * The versioned resources the integration API reads (contract v1 B.6): the P1
+ * ones, then the P2 ones as they are served (ideas: EW-P2-1).
+ */
+export type IntegrationResourceKind = 'task' | 'team' | 'agent' | 'work' | 'idea';
 
 type Row = ObjectLiteral & { id: string; updatedAt: Date; organizationId?: string | null };
 type Builder = (manager: EntityManager, id: string) => Promise<AggregateSnapshot<object> | null>;
@@ -40,13 +45,19 @@ const RESOURCES: Readonly<
         archivable: true,
     },
     work: { entity: Work as unknown as new () => Row, build: buildWorkSnapshot, archivable: true },
+    // Ideas (`work_proposals`, EW-P2-1): a dismissed Idea is a status, not an archive.
+    idea: {
+        entity: WorkProposal as unknown as new () => Row,
+        build: buildIdeaSnapshot,
+        archivable: false,
+    },
 };
 
 /**
  * Kinds whose rows STORE their visibility (EW-P1-3 columns). The snapshot DTO
  * may still report a derived value, so `private` is checked on the row.
  */
-const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set(['task', 'agent']);
+const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set(['task', 'agent', 'idea']);
 
 /** Chunk size for `IN (...)` lookups. */
 const ID_CHUNK = 500;
@@ -215,8 +226,8 @@ export class IntegrationResourcesService {
     /**
      * `PUT /links/:entityType/:entityId` — the record must be one the caller
      * sees in the organization (`404 not_found` otherwise). Answers `false` for
-     * an entity type v1 does not serve yet (missions, goals, ideas, inbox, KB:
-     * P2/P3), which the route refuses as `validation_failed`.
+     * an entity type v1 does not serve yet (missions, goals, inbox, KB: P2/P3),
+     * which the route refuses as `validation_failed`.
      */
     async assertLinkTarget(
         entityType: ExternalLinkEntityType,
@@ -229,6 +240,7 @@ export class IntegrationResourcesService {
             case 'team':
             case 'agent':
             case 'work':
+            case 'idea':
                 await this.get(entityType, organizationId, entityId, source);
                 return true;
             case 'member': {

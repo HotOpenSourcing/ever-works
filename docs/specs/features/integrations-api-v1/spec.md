@@ -1,9 +1,9 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract published (`v1-draft.1`), implementation not started
+**Status**: `Draft` — contract `v1-draft.10`; P1 resources live, P2 Ideas served (EW-P2-1), P3 inbox, P4 email; Goals and Missions next
 **Created**: 2026-10-15
-**Last updated**: 2026-10-15
+**Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
 **Plan items**: EW-P1-4, EW-P1-5, EW-P1-6 (P1); EW-P2-1/2/5, EW-P3-1/2, EW-P4-1/2 (later resources)
 **Source of truth**: integration plan doc 03 Part B (private `ever-co/homelab`,
@@ -199,7 +199,7 @@ visibility is derived (`team` when it sits on a team).
 | Batch         | `POST /batch {operations:[{method, path, headers?, body?}]}` — ≤100 operations, in order, not atomic; per-operation `{status, body}`; each counts against limits                                                                                                                                                       | per operation  | [requests](./contract/schemas/requests.schema.json) `Batch`                                                             |
 | Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works`                                                                                                                                         | `missions:*`   | P2                                                                                                                      |
 | Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}`                                                                                   | `goals:*`      | P2                                                                                                                      |
-| Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id`, `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore`                                                                                                                                                              | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json)                                                                   |
+| Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea` |
 | Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
 | KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                    |
 | Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                           |
@@ -221,6 +221,31 @@ be `backlog` (default) or `todo`.
 
 Integration writes never start Ever Works autonomous spend: goals are created as `draft`, missions as `paused`, ideas
 are never accepted or built through this API, and PATCH can neither activate a goal or mission nor resume one.
+
+### 6.3 Ideas (EW-P2-1)
+
+An Ever Works Idea (`work_proposals`) is a Gauzy task of issue type "Idea" (plan D4). The routes call the same
+`WorkProposalService` as the app, and record the same `idea.*` events.
+
+- **Reads:** every `team` / `organization` Idea of the pinned organization, in every status (`pending`, `queued`,
+  `building`, `accepted`, `failed`, `dismissed`); a `private` Idea is never served (404 by id).
+- **`POST /ideas`** ([`CreateIdea`](./contract/schemas/requests.schema.json)): `Idempotency-Key` required, `externalRef`
+  de-duplicates (200 with the existing Idea). The Idea is always `source='external'` and `status='pending'` (a `source`
+  or `status` in the body answers `400`), owned by the act-as user or else the key's owner, `createdBy` = the
+  integration key (or the act-as person). `missionId` must name a non-private Mission of the pinned organization (404
+  otherwise); `teamIds` become `team_resources` rows of the same organization (404 for a foreign Team) and decide the
+  scope (D11) unless `visibility` is set by hand. The row, its Teams and `idea.created` commit together.
+- **`PATCH /ideas/:id`** ([`UpdateIdea`](./contract/schemas/requests.schema.json)): `title` (at most 120 characters),
+  `description`, `teamIds`, `visibility`; `If-Match` optional, re-checked inside the edit's transaction (`412` when
+  stale). Records `idea.updated` (`changedFields`, `previous`), or `idea.visibility_changed` when the scope moves.
+- **`POST /ideas/:id/dismiss`** (`pending` → `dismissed`) and **`POST /ideas/:id/restore`** (`dismissed` → `pending`)
+  answer the Idea and record `idea.status_changed` with `previous.status`. Both are idempotent: an Idea already in the
+  target status answers `200` unchanged. Any other status answers `422 domain_rule` (`details.status`): an Idea that is
+  queued, building, accepted or failed has its own Ever Works paths.
+- **Writes act as the Idea's owner**, like the task writes: the key's owner, or `X-Act-As-User`. An Idea owned by
+  someone else answers `404 not_found`.
+- **Never:** accept, queue, build, retry or delete (D9). Building stays a user action in Ever Works.
+- **Links:** `PUT /links/idea/:id` is served (the Idea must be visible in the pinned organization).
 
 ## 7. Acceptance criteria
 
@@ -422,3 +447,12 @@ that changes nothing the DTO shows (Bcc, provider bookkeeping, metadata) records
 
 An event whose text + HTML exceed 262144 UTF-8 bytes carries `text: null, html: null, bodyOmitted: true`. A message
 outside any organization records none.
+
+## 12. Changes in `v1-draft.5` (CR-5, EW-P2-1 Ideas)
+
+Additive. Recorded as CR-5 on the plan's STATUS board: the Ideas routes of §6.3 are served; the
+[idea DTO](./contract/schemas/resources/idea.schema.json) is the `data` of `idea.created`, `idea.updated`,
+`idea.status_changed` and `idea.deleted` (catalog rows filled); request bodies `CreateIdea` / `UpdateIdea`; `idea` is a
+served link entity type; dismiss / restore are idempotent and answer `422 domain_rule` from any other status; writes act
+as the Idea's owner (404 for someone else's Idea). `v1-draft.2` (CR-2), `v1-draft.3` (CR-3, task dates and estimate) and `v1-draft.4` (CR-4, Inbox)
+are recorded on the same board.

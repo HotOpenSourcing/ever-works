@@ -41,6 +41,7 @@ import {
     IntegrationUpdateKbDocumentDto,
     IntegrationUpdateKbFolderDto,
 } from '../kb.controller';
+import { IntegrationCreateIdeaDto, IntegrationUpdateIdeaDto } from '../ideas.controller';
 import { IntegrationExceptionFilter } from '../integration-exception.filter';
 import { IntegrationPutLinkDto } from '../links.controller';
 import {
@@ -296,6 +297,9 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
     CreateKbFolder: { dto: IntegrationCreateKbFolderDto, nested: { externalRef: EXTERNAL_REF } },
     UpdateKbFolder: { dto: IntegrationUpdateKbFolderDto },
     PutLink: { dto: IntegrationPutLinkDto },
+    // EW-P2-1 — Ideas.
+    CreateIdea: { dto: IntegrationCreateIdeaDto, nested: { externalRef: EXTERNAL_REF } },
+    UpdateIdea: { dto: IntegrationUpdateIdeaDto },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
     Batch: {

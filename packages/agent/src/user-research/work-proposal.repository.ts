@@ -64,8 +64,13 @@ export interface CreateExternalIdeaInput {
     description: string;
     slugSuggestion: string;
     missionId?: string | null;
-    /** The integration key that wrote it (`createdBy`). */
+    /** The integration key that wrote it (`createdBy` unless {@link createdBy} says otherwise). */
     integrationKeyId: string;
+    /**
+     * Who created it (`writeAttribution`): the integration key, or the person an
+     * `X-Act-As-User` write acts as. Omitted = the integration key.
+     */
+    createdBy?: { type: 'user' | 'agent' | 'integration'; id: string };
     /** `team` / `organization` by hand; omitted = automatic (D11). */
     visibility?: 'team' | 'organization';
 }
@@ -147,7 +152,7 @@ export class WorkProposalRepository {
     /**
      * Insert an integration-created Idea (EW-P2-1): always `source = external` and
      * `status = pending` whatever the caller sent, scope stamped from the pinned
-     * Organization, `createdBy` = the integration key. No event: the caller sets the
+     * Organization, `createdBy` = the integration key (or the act-as person). No event: the caller sets the
      * Teams and records `idea.created` once they are in place (see
      * `WorkProposalService.createExternal`). Takes the caller's transaction.
      */
@@ -174,8 +179,8 @@ export class WorkProposalRepository {
                 reasoning: 'Created by an integration (EW-P2-1).',
                 source: WorkProposalSource.EXTERNAL,
                 status: WorkProposalStatus.PENDING,
-                createdByType: 'integration',
-                createdById: input.integrationKeyId,
+                createdByType: input.createdBy?.type ?? 'integration',
+                createdById: input.createdBy?.id ?? input.integrationKeyId,
                 ...(input.visibility
                     ? { visibility: input.visibility, visibilityExplicit: true }
                     : {}),
@@ -332,8 +337,22 @@ export class WorkProposalRepository {
         }
         const changedFields = Object.keys(set);
         if (changedFields.length === 0) return row;
-        await this.repository.update({ id, userId }, set);
-        await this.recordIdeaEvent(id, 'idea.updated', { changedFields, previous });
+        const publisher = this.domainEvents;
+        if (!publisher) {
+            await this.repository.update({ id, userId }, set);
+            return this.repository.findOne({ where: { id, userId } });
+        }
+        // The edit and its `idea.updated` commit together (unlike the build lifecycle's
+        // best-effort recording): an integration `PATCH /ideas/:id` runs under its
+        // `If-Match` version, which the publisher re-checks at the version bump, so a
+        // stale write must roll back rather than land without its event.
+        await publisher.transaction(async (manager) => {
+            await manager.getRepository(WorkProposal).update({ id, userId }, set);
+            await publisher.changed(manager, 'idea', id, 'idea.updated', {
+                changedFields,
+                previous,
+            });
+        });
         return this.repository.findOne({ where: { id, userId } });
     }
 
