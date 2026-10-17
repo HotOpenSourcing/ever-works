@@ -163,6 +163,32 @@ describe('idea recording points', () => {
         expect(await dataSource.getRepository(WorkProposal).count()).toBe(1);
     });
 
+    it('createExternal runs withinCreate in its transaction: a throw rolls the Idea and its event back', async () => {
+        let seen: unknown;
+        await expect(
+            service.createExternal(
+                {
+                    userId: OWNER,
+                    tenantId: TENANT,
+                    organizationId: ORG_A,
+                    title: 'Linked',
+                    description: 'The externalRef link loses its race.',
+                    integrationKeyId: KEY,
+                },
+                {
+                    withinCreate: async (idea, manager) => {
+                        seen = await manager.getRepository(WorkProposal).findOneBy({ id: idea.id });
+                        throw new Error('the link lost its race');
+                    },
+                },
+            ),
+        ).rejects.toThrow('the link lost its race');
+        // The row existed inside the transaction, and is gone after it.
+        expect(seen).toBeTruthy();
+        expect(await dataSource.getRepository(WorkProposal).count()).toBe(0);
+        expect(await events()).toEqual([]);
+    });
+
     it('createExternal refuses a Team outside the pinned Organization and writes nothing', async () => {
         await expect(external({ teamIds: [randomUUID()] })).rejects.toThrow('Team not found');
         expect(await dataSource.getRepository(WorkProposal).count()).toBe(0);

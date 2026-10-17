@@ -359,45 +359,60 @@ export class IntegrationMissionsController {
                     return { status: 200, body: await this.dto(existing.entityId, source) };
                 }
             }
-            const mission = await this.missions.createExternal(
-                user.userId,
-                {
-                    title: dto.title,
-                    description: dto.description,
-                    type: dto.type,
-                    schedule: dto.schedule ?? null,
-                    teamIds: dto.teamIds,
-                    visibility: dto.visibility as 'team' | 'organization' | undefined,
-                    createdBy: writeAttribution(user),
-                },
-                this.ownership(),
-            );
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'mission',
-                        entityId: mission.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.missions
-                        .delete(user.userId, mission.id, this.ownership())
-                        .catch(() => undefined);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'mission',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return { status: 200, body: await this.dto(winner.entityId, source) };
-                        }
+            const externalRef = dto.externalRef;
+            let mission: Awaited<ReturnType<MissionsService['createExternal']>>;
+            try {
+                mission = await this.missions.createExternal(
+                    user.userId,
+                    {
+                        title: dto.title,
+                        description: dto.description,
+                        type: dto.type,
+                        schedule: dto.schedule ?? null,
+                        teamIds: dto.teamIds,
+                        visibility: dto.visibility as 'team' | 'organization' | undefined,
+                        createdBy: writeAttribution(user),
+                    },
+                    this.ownership(),
+                    // T17a pattern — the Mission and its externalRef link commit together (one
+                    // transaction): a lost race rolls the Mission back instead of leaving it to
+                    // be undone, and a crash can no longer leave an unlinked Mission behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'mission',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled back with
+                // its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'mission',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return { status: 200, body: await this.dto(winner.entityId, source) };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const created = await this.resources.get('mission', organizationId, mission.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);

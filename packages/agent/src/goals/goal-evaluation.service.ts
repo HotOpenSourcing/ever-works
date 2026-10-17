@@ -30,7 +30,7 @@ import {
     DomainEventPublisher,
     recordAfterWrite,
 } from '../domain-events/domain-event-publisher.service';
-import { withoutAggregateVersion } from '../domain-events/domain-event-context';
+import { saveGoalColumns } from './goal-column-save';
 import {
     isExternalMetricSource,
     latestExternalCriterionValues,
@@ -130,7 +130,22 @@ export class GoalEvaluationService {
             }
 
             try {
-                const entry = await this.evaluateOne(goal);
+                // EW-P2-2 follow-up — decide on a fresh read, not on the due scan's copy.
+                // One tick reads up to `limit` providers in turn, so by the time a Goal's
+                // turn comes an integration may have pushed a newer sample, a person may
+                // have ticked a Definition-of-Done item, moved the target or deadline, or
+                // paused / completed the Goal. Only a still-ACTIVE Goal is evaluated.
+                const fresh = await this.goals.findOne({ where: { id: goal.id } });
+                if (!fresh || fresh.status !== GoalStatus.ACTIVE) {
+                    summary.skipped += 1;
+                    summary.entries.push({
+                        goalId: goal.id,
+                        outcome: 'skipped',
+                        message: 'Goal is no longer active',
+                    });
+                    continue;
+                }
+                const entry = await this.evaluateOne(fresh);
                 summary.evaluated += 1;
                 summary.entries.push(entry);
             } catch (error) {
@@ -365,28 +380,11 @@ export class GoalEvaluationService {
      * Save only the columns an evaluation decided (EW-P2-2 review). The Goal is the
      * due scan's copy; a whole-entity `save()` would write back every column a
      * concurrent write changed meanwhile — an integration's pushed sample
-     * (`currentValue`, `resolvedScore`), a PATCH, a Definition-of-Done edit. Every
-     * other column is cleared for the save (TypeORM skips `undefined`, so `version`
-     * is never rolled back either) and restored on the object after it. Without
-     * entity metadata (a unit-test double) it is the plain save.
+     * (`currentValue`, `resolvedScore`), a PATCH, a Definition-of-Done edit. See
+     * {@link saveGoalColumns}, which the orchestrator's writes share.
      */
     private async saveEvaluation(goal: Goal, written: ReadonlyArray<keyof Goal>): Promise<void> {
-        const columns = (this.goals.metadata?.columns ?? []).map(
-            (column) => column.propertyName as keyof Goal,
-        );
-        const keep = new Set<keyof Goal>(['id', ...written]);
-        const target = goal as unknown as Record<string, unknown>;
-        const held = new Map<string, unknown>();
-        for (const column of columns) {
-            if (keep.has(column)) continue;
-            held.set(column, target[column]);
-            target[column] = undefined;
-        }
-        try {
-            await this.goals.save(withoutAggregateVersion(goal));
-        } finally {
-            for (const [column, value] of held) target[column] = value;
-        }
+        await saveGoalColumns(this.goals, goal, written);
     }
 
     // ─── internals ──────────────────────────────────────────────────
