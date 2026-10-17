@@ -675,14 +675,16 @@ export class TasksService {
      * assignees, approvers and reviewers — the participants the work is waiting on.
      * Watchers and other readers may read and comment, not transition. The transition
      * itself runs with the owner's context (`task.userId`), so no gate changes.
+     * Answers whether the caller is the owner: a participant may not `force` past the
+     * gates and never starts agent work (review 2026-10-17 F5, see {@link transition}).
      */
     private async getForTransition(
         userId: string,
         id: string,
         scope?: OwnershipScope,
-    ): Promise<Task> {
+    ): Promise<{ task: Task; isOwner: boolean }> {
         try {
-            return await this.getOne(userId, id, scope);
+            return { task: await this.getOne(userId, id, scope), isOwner: true };
         } catch (error) {
             if (!(error instanceof NotFoundException) || !this.accessPolicy) throw error;
             const shared = await this.findVisibleNotOwned(userId, id, scope);
@@ -697,7 +699,7 @@ export class TasksService {
                     'Only the owner and the assignees, approvers and reviewers of a Task can move it.',
                 );
             }
-            return shared;
+            return { task: shared, isOwner: false };
         }
     }
 
@@ -1899,9 +1901,20 @@ export class TasksService {
         opts: TransitionOptions = {},
         ownershipScope?: OwnershipScope,
     ): Promise<Task> {
-        const task = await this.getForTransition(userId, id, ownershipScope);
+        const { task, isOwner } = await this.getForTransition(userId, id, ownershipScope);
+        // Review 2026-10-17 F5: a participant (user assignee, approver, reviewer) moves
+        // the Task through every gate (`force` skips the approver gate, which exists to
+        // check exactly these people), and never starts a run on somebody else's Task:
+        // no `→ in_progress` agent fan-out, no `→ in_review` reviewer runs, so no spend
+        // of the owner's credits. The same no-spend rule as a non-owner's @agent mention.
+        if (!isOwner && opts.force === true) {
+            throw new ForbiddenException('Only the owner of a Task can force a transition.');
+        }
+        const effective: TransitionOptions = isOwner
+            ? opts
+            : { ...opts, force: false, suppressAgentDispatch: true };
         const from = task.status;
-        const result = await this.transitions.transition(task, to, opts);
+        const result = await this.transitions.transition(task, to, effective);
         await this.logActivity({
             userId,
             taskId: id,
