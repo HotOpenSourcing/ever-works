@@ -21,8 +21,8 @@ export interface LicenseHeaderFinding {
 
 // Linear patterns: the rest of the line is captured whole and cut by `cutExpression`
 // (a lazy group followed by `\s*` and an alternation backtracks polynomially).
-const SPDX_TAG = /SPDX-License-Identifier:[ \t]*([^\r\n]*)/gi;
-const LICENSE_TAG = /@license[ \t]+([^\r\n]*)/gi;
+const SPDX_TAG = /SPDX-License-Identifier:([^\r\n]*)/gi;
+const LICENSE_TAG = /@license[ \t]([^\r\n]*)/gi;
 
 /** The expression part of a tag's line: up to a comment close (`*`, `-->`, `#}`), trimmed. */
 function cutExpression(rest: string): string {

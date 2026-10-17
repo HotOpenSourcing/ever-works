@@ -1,6 +1,7 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { AppLicenseService } from '@ever-works/agent/app-license';
+import { DistributedTaskLockService } from '@ever-works/agent/cache';
 import { config } from '@ever-works/agent/config';
 import { APPS_CATALOG_REFRESH_CRON } from '@ever-works/contracts';
 
@@ -15,11 +16,19 @@ import { APPS_CATALOG_REFRESH_CRON } from '@ever-works/contracts';
  * the same Work write the same answer once each and never regress it. App Works off ⇒
  * no database read at all. The log line is counters only.
  */
+/** The lease one tick holds, so only one API replica fans out at a time. */
+export const APP_LICENSE_REGISTRY_FANOUT_LOCK_KEY = 'app-license:registry-fanout';
+
 @Injectable()
 export class AppLicenseRegistryCronService {
     private readonly logger = new Logger(AppLicenseRegistryCronService.name);
 
-    constructor(@Optional() private readonly licenses?: AppLicenseService) {}
+    constructor(
+        @Optional() private readonly licenses?: AppLicenseService,
+        // One replica per tick: the fan-out makes provider reads before the guarded write,
+        // so overlapping replicas would multiply them. Absent (a bare spec), it runs unlocked.
+        @Optional() private readonly locks?: DistributedTaskLockService,
+    ) {}
 
     @Cron(APPS_CATALOG_REFRESH_CRON)
     async runRegistryFanOut(): Promise<{ scanned: number; evaluated: number } | null> {
@@ -27,7 +36,21 @@ export class AppLicenseRegistryCronService {
             return null;
         }
         try {
-            const summary = await this.licenses.refreshStaleRegistry();
+            const licenses = this.licenses;
+            let summary: { scanned: number; evaluated: number };
+            if (this.locks) {
+                const run = await this.locks.runExclusive(
+                    APP_LICENSE_REGISTRY_FANOUT_LOCK_KEY,
+                    () => licenses.refreshStaleRegistry(),
+                    { ttlMs: 10 * 60_000 },
+                );
+                if (!run.acquired || !run.result) {
+                    return null;
+                }
+                summary = run.result;
+            } else {
+                summary = await licenses.refreshStaleRegistry();
+            }
             if (summary.scanned > 0) {
                 this.logger.log(
                     `app-license registry fan-out: ${summary.evaluated}/${summary.scanned} work(s) re-classified`,

@@ -35,7 +35,52 @@ import type { GitFacadeOptions, GitFacadeService } from '../facades/git.facade';
 import { detectedLicenseSpdx, SPDX_NOASSERTION } from './license-classify';
 import { licenseHeadOf, scanLicenseHeaderText } from './license-headers';
 import { LICENSE_REGISTRY_SNAPSHOT } from './license-registry.snapshot';
-import { parseSpdxExpression } from './spdx-expression';
+import { parseSpdxExpression, type SpdxExpressionNode } from './spdx-expression';
+
+/** Registry aliases (`The MIT License` → `mit`), lower-cased, for comparing licence ids. */
+const ALIAS_TO_SPDX = new Map(
+    LICENSE_REGISTRY_SNAPSHOT.aliases.map((alias) => [
+        alias.match.toLowerCase(),
+        alias.spdx.toLowerCase(),
+    ]),
+);
+
+function normalizeLicenseId(id: string): string {
+    return ALIAS_TO_SPDX.get(id.toLowerCase()) ?? id.toLowerCase();
+}
+
+/**
+ * The licence ids an expression names — parsed, so an exception after `WITH` is not
+ * counted as a licence, and aliases are normalised to their SPDX id.
+ */
+export function licenseIdSet(expression: string): Set<string> {
+    const exactAlias = ALIAS_TO_SPDX.get(expression.trim().toLowerCase());
+    if (exactAlias) {
+        return new Set([exactAlias]);
+    }
+    const tree = parseSpdxExpression(expression);
+    if (!tree) {
+        return new Set([normalizeLicenseId(expression.trim())]);
+    }
+    const ids = new Set<string>();
+    const visit = (node: SpdxExpressionNode): void => {
+        if (node.type === 'license') {
+            ids.add(normalizeLicenseId(node.id));
+            return;
+        }
+        visit(node.left);
+        visit(node.right);
+    };
+    visit(tree);
+    return ids;
+}
+
+function isSubsetOf(inner: Set<string>, outer: Set<string>): boolean {
+    for (const id of inner) {
+        if (!outer.has(id)) return false;
+    }
+    return true;
+}
 
 /** The facade reads detection may make — and nothing that writes. */
 export type LicenseDetectGit = Pick<
@@ -300,8 +345,13 @@ export async function detectRepositoryLicense(
         if (fileReads >= LICENSE_MAX_FILE_READS) break;
         nestedRead += 1;
         const text = await read(path);
-        const identified = text ? identifyLicenseText(text) : null;
-        if (identified && spdx && identified.toLowerCase() !== spdx.toLowerCase()) {
+        if (text === null) {
+            // A listed nested licence we could not read is not evidence of "same licence".
+            scanIncomplete = true;
+            continue;
+        }
+        const identified = identifyLicenseText(text);
+        if (identified && spdx && !isSubsetOf(licenseIdSet(identified), licenseIdSet(spdx))) {
             differing.push(path);
         }
     }

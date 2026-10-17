@@ -83,6 +83,20 @@ describe('private first-party Blueprints (decision 2026-10-17)', () => {
         expect(allowsPrivateBlueprint('stranger')).toBe(false);
     });
 
+    it('allowsPrivateBlueprint: `*` works on a test install and is ignored in production', () => {
+        const nodeEnv = process.env.NODE_ENV;
+        try {
+            process.env.EVER_WORKS_APPS_PRIVATE_BLUEPRINT_OWNERS = '*';
+            process.env.NODE_ENV = 'test';
+            expect(allowsPrivateBlueprint('anyone')).toBe(true);
+            process.env.NODE_ENV = 'production';
+            expect(allowsPrivateBlueprint('anyone')).toBe(false);
+            expect(allowsPrivateBlueprint('ever-works')).toBe(true);
+        } finally {
+            process.env.NODE_ENV = nodeEnv;
+        }
+    });
+
     it('resolves the private fixture for an ever-works source (probe), reading only .works/works.yml', async () => {
         const double = facade(FILES);
         const resolver = new AppBlueprintResolverService(double as never);

@@ -111,7 +111,10 @@ export function allowsPrivateBlueprint(sourceOwner: string | null | undefined): 
         .split(',')
         .map((entry) => entry.trim().toLowerCase())
         .filter((entry) => entry !== '');
-    return listed.includes('*') || listed.includes(owner);
+    // `*` is a test-installation convenience and is ignored in production, so a stray
+    // wildcard can never offer first-party private Blueprints to every source.
+    const wildcard = listed.includes('*') && process.env.NODE_ENV !== 'production';
+    return wildcard || listed.includes(owner);
 }
 
 /** How many resolutions the in-process cache holds before evicting the oldest. */

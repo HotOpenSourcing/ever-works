@@ -15,6 +15,7 @@ import {
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { AppUpstreamController } from './app-upstream.controller';
 import { AppLicenseRegistryCronService } from '../app-license/app-license-registry-cron.service';
+import { DistributedTaskLockService } from '@ever-works/agent/cache';
 
 /**
  * APW-02 T27 — the API-side App Works module: the three upstream routes of plan §4.1
@@ -173,6 +174,9 @@ import { AppLicenseRegistryCronService } from '../app-license/app-license-regist
         // collaborator, `AppLicenseService`, arrives through `AgentAppWorksModule`'s
         // re-export of `AppLicenseModule`.
         AppLicenseRegistryCronService,
+        // Its per-tick lease (the cache module is not global; provided locally, as the agent
+        // `AppWorksModule` and `AppSpecModule` do).
+        DistributedTaskLockService,
     ],
     exports: [
         AgentAppWorksModule,

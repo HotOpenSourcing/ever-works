@@ -226,7 +226,7 @@ describe('AppLicenseService (APW-03 T42)', () => {
                 tree: [
                     { path: 'LICENSE', type: 'blob' },
                     { path: 'ee', type: 'tree' },
-                    { path: 'ee/LICENSE', type: 'blob' },
+                    { path: 'ee/feature.ts', type: 'blob' },
                     { path: 'src/index.ts', type: 'blob' },
                 ],
             });

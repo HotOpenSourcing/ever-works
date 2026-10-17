@@ -3,6 +3,7 @@ import {
     applyMixed,
     detectRepositoryLicense,
     identifyLicenseText,
+    licenseIdSet,
     manifestLicense,
     mixedDirectories,
 } from '../license-detect';
@@ -115,6 +116,33 @@ describe('license detection (APW-03 T41)', () => {
 
         expect(detection.mixed).toBe(true);
         expect(detection.evidence.mixedPaths).toEqual(['packages/b/LICENSE']);
+    });
+
+    it('an unreadable nested licence file marks the scan incomplete, not "same licence"', async () => {
+        const { git } = gitDouble({
+            licenseSpdx: 'MIT',
+            tree: { entries: [{ path: 'packages/a/LICENSE', type: 'blob' }], truncated: false },
+            files: {},
+        });
+
+        const detection = await detectRepositoryLicense({ ...base, git: git as never });
+
+        expect(detection.scanIncomplete).toBe(true);
+        expect(detection.mixed).toBe(false);
+    });
+
+    it('compares licence ids, so a root expression covering the nested licence is not mixed', async () => {
+        expect([...licenseIdSet('Apache-2.0 WITH LLVM-exception')]).toEqual(['apache-2.0']);
+        expect([...licenseIdSet('MIT OR Apache-2.0')].sort()).toEqual(['apache-2.0', 'mit']);
+        const { git } = gitDouble({
+            licenseSpdx: 'MIT OR Apache-2.0',
+            tree: { entries: [{ path: 'packages/a/LICENSE', type: 'blob' }], truncated: false },
+            files: { 'packages/a/LICENSE': 'MIT License\n\nCopyright (c) someone' },
+        });
+
+        const detection = await detectRepositoryLicense({ ...base, git: git as never });
+
+        expect(detection.mixed).toBe(false);
     });
 
     it('fills a missing provider licence from the root text, then the manifests', async () => {

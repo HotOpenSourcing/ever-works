@@ -1,7 +1,10 @@
 import { APPS_CATALOG_REFRESH_CRON } from '@ever-works/contracts';
 import { config } from '@ever-works/agent/config';
 import { SCHEDULE_CRON_OPTIONS } from '@nestjs/schedule/dist/schedule.constants';
-import { AppLicenseRegistryCronService } from './app-license-registry-cron.service';
+import {
+    APP_LICENSE_REGISTRY_FANOUT_LOCK_KEY,
+    AppLicenseRegistryCronService,
+} from './app-license-registry-cron.service';
 
 describe('AppLicenseRegistryCronService (APW-03 T43)', () => {
     afterEach(() => jest.restoreAllMocks());
@@ -22,6 +25,34 @@ describe('AppLicenseRegistryCronService (APW-03 T43)', () => {
         const cron = new AppLicenseRegistryCronService(licenses as never);
         await expect(cron.runRegistryFanOut()).resolves.toEqual({ scanned: 3, evaluated: 3 });
         expect(licenses.refreshStaleRegistry).toHaveBeenCalledTimes(1);
+    });
+
+    it('runs under the per-tick lease, and a replica that loses it does nothing', async () => {
+        jest.spyOn(config.everWorks.apps, 'worksEnabled').mockReturnValue(true);
+        const licenses = {
+            refreshStaleRegistry: jest.fn(async () => ({ scanned: 1, evaluated: 1 })),
+        };
+        const held = {
+            runExclusive: jest.fn(async (_k: string, fn: () => Promise<unknown>) => ({
+                acquired: true,
+                result: await fn(),
+            })),
+        };
+        await expect(
+            new AppLicenseRegistryCronService(licenses as never, held as never).runRegistryFanOut(),
+        ).resolves.toEqual({ scanned: 1, evaluated: 1 });
+        expect(held.runExclusive).toHaveBeenCalledWith(
+            APP_LICENSE_REGISTRY_FANOUT_LOCK_KEY,
+            expect.any(Function),
+            expect.any(Object),
+        );
+
+        const lost = { runExclusive: jest.fn(async () => ({ acquired: false })) };
+        licenses.refreshStaleRegistry.mockClear();
+        await expect(
+            new AppLicenseRegistryCronService(licenses as never, lost as never).runRegistryFanOut(),
+        ).resolves.toBeNull();
+        expect(licenses.refreshStaleRegistry).not.toHaveBeenCalled();
     });
 
     it('reads nothing when App Works is off, and never throws', async () => {
