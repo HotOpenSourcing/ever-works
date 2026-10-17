@@ -26,6 +26,8 @@ import {
     isAppClusterWorkerContext,
 } from '@ever-works/agent/app-runtime';
 import { WORK_APP_RUNTIME_STATES } from '@ever-works/agent/app-launcher';
+import { APP_DEPENDENCIES_SERVICE } from '@ever-works/agent/app-runtime';
+import { AppDependenciesService } from '@ever-works/agent/app-dependencies';
 import { WorkRepository } from '@ever-works/agent/database';
 import { TriggerAppRuntimeModule } from '../trigger-app-runtime.module';
 
@@ -160,6 +162,8 @@ describe('TriggerAppRuntimeModule — a Deployment end to end (A0.7)', () => {
         expect(get(APP_IMAGE_PULL_CREDENTIAL_SOURCE)).toBeInstanceOf(AppBuildPullCredentialSource);
         expect(get(APP_RUNTIME_TARGET)).toBeInstanceOf(AppRuntimeTargetAdapter);
         expect(get(APP_IMAGE_REFERENCE_RESOLVER)).toBeInstanceOf(RegistryAppImageReferenceResolver);
+        // Lane aw-deploy-3: APW-07's service is composed here, so readiness is enforced, not warned.
+        expect(get(APP_DEPENDENCIES_SERVICE)).toBeInstanceOf(AppDependenciesService);
         for (const token of [
             WORK_APP_RUNTIME_STATES,
             APP_RUNTIME_ENV_SOURCE,

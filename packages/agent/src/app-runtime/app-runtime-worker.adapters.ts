@@ -209,7 +209,18 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
             | undefined,
         private readonly git: AppPullCredentialGitTokens | undefined,
         private readonly fetchImpl?: FetchLike,
+        // Lane aw-deploy-3 — APW-05 T17's stored, read-only registry pull token (preferred).
+        private readonly storedTokens?: {
+            read(workId: string): Promise<{ token: string; username?: string | null } | null>;
+        },
     ) {}
+
+    /**
+     * Which credential the last `resolve` used for a Work: `public` (none), `pull-token` (APW-05's
+     * stored token) or `owner-token` (the fallback). The render-input builder reads it and records
+     * the warning `pull_credential_owner_token` on the Deployment when the fallback was used.
+     */
+    readonly lastSource = new Map<string, 'public' | 'pull-token' | 'owner-token'>();
 
     async resolve(
         workId: string,
@@ -233,7 +244,30 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
                 parsed.tag ?? parsed.digest ?? 'latest',
             )
         ) {
+            this.lastSource.set(workId, 'public');
             return null;
+        }
+
+        // Lane aw-deploy-3 — the owner's stored read-only pull token wins (APW-05 T17, §4.12): it
+        // is scoped to the image, where the GitHub token is the member's whole account.
+        const stored = this.storedTokens?.read
+            ? await this.storedTokens.read(workId).catch(() => null)
+            : null;
+        if (stored?.token) {
+            const owner = this.works ? await this.works.findById(workId).catch(() => null) : null;
+            this.lastSource.set(workId, 'pull-token');
+            this.logger.log(
+                `App Work ${workId}: pulling the private Build image with the stored pull token.`,
+            );
+            return {
+                server: parsed.registry,
+                username:
+                    (stored.username && String(stored.username)) ||
+                    (owner?.owner && String(owner.owner)) ||
+                    parsed.repository.split('/')[0] ||
+                    'x-access-token',
+                password: stored.token,
+            };
         }
 
         if (parsed.registry !== 'ghcr.io') {
@@ -263,8 +297,9 @@ export class AppBuildPullCredentialSource implements AppImagePullCredentialSourc
             );
         }
 
-        this.logger.log(
-            `App Work ${workId}: pulling the private Build image with the owner's GitHub token (name only).`,
+        this.lastSource.set(workId, 'owner-token');
+        this.logger.warn(
+            `App Work ${workId}: no pull token is stored, so the private Build image is pulled with the owner's GitHub token (name only).`,
         );
         return {
             server: 'ghcr.io',

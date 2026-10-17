@@ -136,6 +136,45 @@ describe('AppBuildPullCredentialSource (APP_IMAGE_PULL_CREDENTIAL_SOURCE)', () =
         });
     });
 
+    it('prefers the stored pull token over the owner token, and records which was used', async () => {
+        const git = { getAccessToken: jest.fn(async () => 'gh-token') };
+        const fetchImpl = jest.fn(async () => ({
+            status: 403,
+            ok: false,
+            headers: { get: () => null },
+        }));
+        const stored = {
+            read: jest.fn(async () => ({ token: 'ghp_pull_ro', username: 'acme-bot' })),
+        };
+        const source = new AppBuildPullCredentialSource(
+            builds('ghcr.io/acme/app/ever-works-app:main'),
+            works,
+            git,
+            fetchImpl,
+            stored,
+        );
+
+        await expect(source.resolve('w-1', 'b-1')).resolves.toEqual({
+            server: 'ghcr.io',
+            username: 'acme-bot',
+            password: 'ghp_pull_ro',
+        });
+        expect(git.getAccessToken).not.toHaveBeenCalled();
+        expect(source.lastSource.get('w-1')).toBe('pull-token');
+
+        const fallback = new AppBuildPullCredentialSource(
+            builds('ghcr.io/acme/app/ever-works-app:main'),
+            works,
+            git,
+            fetchImpl,
+            { read: async () => null },
+        );
+        await expect(fallback.resolve('w-1', 'b-1')).resolves.toMatchObject({
+            password: 'gh-token',
+        });
+        expect(fallback.lastSource.get('w-1')).toBe('owner-token');
+    });
+
     it('refuses with pull_credential_unavailable when nothing can pull it', async () => {
         const fetchImpl = jest.fn(async () => ({
             status: 403,

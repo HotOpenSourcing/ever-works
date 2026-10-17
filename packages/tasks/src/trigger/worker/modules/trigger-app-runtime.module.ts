@@ -54,14 +54,26 @@ import {
     workerAppDeployDispatcher,
 } from '@ever-works/agent/app-runtime';
 import { APP_DEPLOY_HOST_SOURCE } from '@ever-works/agent/app-runtime';
+import { APP_DEPENDENCIES_SERVICE } from '@ever-works/agent/app-runtime';
+// Lane aw-deploy-3 (2026-10-17) — APW-07's service, composed HERE so the worker's preconditions
+// enforce dependency readiness and the orchestrator's `remove` can order the dependency deletion.
+import {
+    APP_DEPENDENCY_CLUSTER_ACCESS,
+    APP_DEPENDENCY_CONFIG_CIPHER,
+    APP_DEPENDENCY_PROVISION_DISPATCHER,
+    APP_DEPENDENCY_SPEC_SOURCE,
+    AppDependenciesService,
+} from '@ever-works/agent/app-dependencies';
 import { WORK_APP_RUNTIME_STATES } from '@ever-works/agent/app-launcher';
 import {
+    AppDependencyFacadeService,
     AppRuntimeFacadeService,
     DeployFacadeService,
     GitFacadeService,
 } from '@ever-works/agent/facades';
 import { APP_PROVISION_EVENTS_PORT } from '@ever-works/agent/app-works';
 import {
+    WorkAppDependencyRepository,
     WorkCustomDomainRepository,
     WorkDeploymentRepository,
     WorkRepository,
@@ -271,6 +283,13 @@ export const APP_RUNTIME_REMOTE_PROXIES = [
     'AppDeployDispatchRelay',
     'AppClusterOpDispatchRelay',
     'AppsDomainDnsServiceImpl',
+    'AppBuildPullTokenReader',
+    // Lane aw-deploy-3 — APW-07's rows, cipher, spec and re-dispatch (as `app-dependency-provision`).
+    'WorkAppDependencyRepository',
+    'AppDependencyRowsRelay',
+    'AppDependencyConfigCipherRelay',
+    'AppDependencySpecSourceAdapter',
+    'AppDependencyProvisionDispatchRelay',
     'AppDeployRequestService',
     'WorkUpstreamStateRepository',
 ] as const;
@@ -454,6 +473,46 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
                 createRemoteProxy(apiClient, 'AppsDomainDnsServiceImpl'),
             inject: [TriggerInternalApiClient],
         },
+        // ---- APW-07 in the isolated worker (lane aw-deploy-3, 2026-10-17) --------------------
+        // `APP_DEPENDENCIES_SERVICE` was unbound here, so the worker's §5.1 re-check only WARNED
+        // `dependencies_unavailable` and `remove` answered `dependencies_unavailable`. The service
+        // is composed locally (its provider calls dial the cluster) over the same proxies
+        // `app-dependency-provision` uses: rows, raw id-scoped row writes, cipher, spec, dispatch.
+        AppDependenciesService,
+        AppDependencyFacadeService,
+        { provide: APP_DEPENDENCIES_SERVICE, useExisting: AppDependenciesService },
+        { provide: APP_DEPENDENCY_CLUSTER_ACCESS, useExisting: AppRuntimeFacadeService },
+        {
+            provide: WorkAppDependencyRepository,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'WorkAppDependencyRepository'),
+            inject: [TriggerInternalApiClient],
+        },
+        {
+            // `@InjectRepository(WorkAppDependency)`'s token (`getRepositoryToken` → the string).
+            provide: 'WorkAppDependencyRepository',
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppDependencyRowsRelay'),
+            inject: [TriggerInternalApiClient],
+        },
+        {
+            provide: APP_DEPENDENCY_CONFIG_CIPHER,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppDependencyConfigCipherRelay'),
+            inject: [TriggerInternalApiClient],
+        },
+        {
+            provide: APP_DEPENDENCY_SPEC_SOURCE,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppDependencySpecSourceAdapter'),
+            inject: [TriggerInternalApiClient],
+        },
+        {
+            provide: APP_DEPENDENCY_PROVISION_DISPATCHER,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppDependencyProvisionDispatchRelay'),
+            inject: [TriggerInternalApiClient],
+        },
         // T26: a primary-domain change asks for a Deployment; the request (and every §5.1 check
         // it re-runs) happens in the API, so the worker may ask over the internal channel.
         {
@@ -541,6 +600,7 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
             useFactory: (
                 builds: ConstructorParameters<typeof AppBuildPullCredentialSource>[0],
                 works: WorkRepository,
+                apiClient: TriggerInternalApiClient,
                 git?: GitFacadeService,
             ) =>
                 new AppBuildPullCredentialSource(
@@ -549,10 +609,14 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
                         typeof AppBuildPullCredentialSource
                     >[1],
                     git,
+                    undefined,
+                    // Lane aw-deploy-3 — APW-05's stored pull token first (read in the API).
+                    createRemoteProxy(apiClient, 'AppBuildPullTokenReader'),
                 ),
             inject: [
                 APP_DEPLOY_BUILD_SOURCE,
                 WorkRepository,
+                TriggerInternalApiClient,
                 { token: GitFacadeService, optional: true },
             ],
         },

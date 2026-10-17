@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AppBuildPullTokenReader } from './app-build-pull-token.reader';
 import { ModuleRef } from '@nestjs/core';
 import { getOptionalProvider } from '../utils/optional-provider.util';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -222,6 +223,8 @@ import { GitFacadeService } from '../facades/git.facade';
         DistributedTaskLockService,
         AppBuildsService,
         AppBuildPullTokenService,
+        // Lane aw-deploy-3 — the stored pull token, read by Work id for the worker's pull credential.
+        AppBuildPullTokenReader,
         AppBuildPrepareRunner,
         // APW-05 T21 (first slice) — the sweep's re-drive and never-adopted `lost`
         // passes; see the class docstring's T21 section.
@@ -500,6 +503,7 @@ import { GitFacadeService } from '../facades/git.facade';
         },
     ],
     exports: [
+        AppBuildPullTokenReader,
         AppBuildRepository,
         AppBuildPreparationRepository,
         AppBuildsService,

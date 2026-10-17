@@ -139,3 +139,8 @@ export {
     type AppBuildWatchRunResult,
     type AppBuildWatchSkipReason,
 } from './app-build-watch.runner';
+// Lane aw-deploy-3 — the stored pull token reader (the worker's pull credential).
+export {
+    AppBuildPullTokenReader,
+    type AppBuildStoredPullToken,
+} from './app-build-pull-token.reader';
