@@ -1934,7 +1934,8 @@ export class AppBuildsService {
                     .map((entry) => entry.name);
 
                 const binding = await this.resolvePlugin(workId);
-                let dispatched: { providerRunId: string | null; dispatchedAt: string } | null = null;
+                let dispatched: { providerRunId: string | null; dispatchedAt: string } | null =
+                    null;
                 try {
                     dispatched =
                         (await binding?.startBuild?.({
@@ -1956,8 +1957,12 @@ export class AppBuildsService {
                 }
 
                 return this.persist(build, {
-                    ...(dispatched?.providerRunId ? { providerRunId: dispatched.providerRunId } : {}),
-                    dispatchedAt: dispatched?.dispatchedAt ? new Date(dispatched.dispatchedAt) : new Date(),
+                    ...(dispatched?.providerRunId
+                        ? { providerRunId: dispatched.providerRunId }
+                        : {}),
+                    dispatchedAt: dispatched?.dispatchedAt
+                        ? new Date(dispatched.dispatchedAt)
+                        : new Date(),
                     ...(promptedNames.length > 0
                         ? { verifySecretNames: [APP_BUILD_VERIFY_PROMPTED_SECRET] }
                         : {}),
@@ -2337,7 +2342,10 @@ export class AppBuildsService {
      */
     private async claimReconfirmation(
         buildId: string,
-        verdict: { readonly deployable: boolean; readonly notDeployableReason: AppBuildNotDeployableReason | null },
+        verdict: {
+            readonly deployable: boolean;
+            readonly notDeployableReason: AppBuildNotDeployableReason | null;
+        },
     ): Promise<boolean> {
         if (!this.rows || typeof this.rows.createQueryBuilder !== 'function') return true;
         const result = await this.rows
@@ -2657,9 +2665,7 @@ export class AppBuildsService {
      * deploy) and sequential, because each is a registry round trip. A failure is
      * counted, never thrown.
      */
-    async reconfirmUnconfirmedDigests(
-        workId: string,
-    ): Promise<{
+    async reconfirmUnconfirmedDigests(workId: string): Promise<{
         readonly checked: number;
         readonly reconfirmed: number;
         readonly failed: number;
@@ -2698,7 +2704,11 @@ export class AppBuildsService {
      */
     async removeOrphanedVerifySecret(buildId: string): Promise<boolean> {
         const first = await this.rowById(buildId);
-        if (!first || first.trigger !== 'verification' || (first.verifySecretNames ?? []).length === 0) {
+        if (
+            !first ||
+            first.trigger !== 'verification' ||
+            (first.verifySecretNames ?? []).length === 0
+        ) {
             return false;
         }
 

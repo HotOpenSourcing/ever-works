@@ -65,7 +65,9 @@ function service(options: {
     };
     const rows = {
         findOne: jest.fn(async () => (options.row ? { ...options.row } : null)),
-        merge: jest.fn((row: Record<string, unknown>, patch: Record<string, unknown>) => Object.assign(row, patch)),
+        merge: jest.fn((row: Record<string, unknown>, patch: Record<string, unknown>) =>
+            Object.assign(row, patch),
+        ),
         save: jest.fn(async (row: unknown) => row),
         createQueryBuilder: jest.fn(() => queryBuilder),
     };
@@ -85,9 +87,22 @@ function service(options: {
             repositoryVisibility: 'private' as const,
         })),
     };
-    const specs = { read: jest.fn(async () => ({ spec: { build: { strategy: 'dockerfile' } }, commitSha: SHA, valid: true })) };
+    const specs = {
+        read: jest.fn(async () => ({
+            spec: { build: { strategy: 'dockerfile' } },
+            commitSha: SHA,
+            valid: true,
+        })),
+    };
     const plugins = {
-        resolve: jest.fn(async () => options.binding ?? { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE }),
+        resolve: jest.fn(
+            async () =>
+                options.binding ?? {
+                    pluginId: 'p',
+                    buildKind: 'github-actions',
+                    imageRepository: IMAGE,
+                },
+        ),
     };
     const svc = new AppBuildsService(
         builds as never,
@@ -122,7 +137,9 @@ const VERIFY_ROW: Partial<WorkBuild> = {
 
 describe('the per-Work verification-secret lock', () => {
     it('keys on the Work', () => {
-        expect(appBuildVerifySecretLockKey(WORK_ID)).toBe(`${APP_BUILD_VERIFY_SECRET_LOCK_PREFIX}${WORK_ID}`);
+        expect(appBuildVerifySecretLockKey(WORK_ID)).toBe(
+            `${APP_BUILD_VERIFY_SECRET_LOCK_PREFIX}${WORK_ID}`,
+        );
     });
 
     it('the orphan pass deletes under the lock', async () => {
@@ -131,7 +148,12 @@ describe('the per-Work verification-secret lock', () => {
         const h = service({
             row: VERIFY_ROW,
             lock,
-            binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+            binding: {
+                pluginId: 'p',
+                buildKind: 'github-actions',
+                imageRepository: IMAGE,
+                deleteVerifyPromptedSecret,
+            },
         });
         await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(true);
         expect(lock.keys).toEqual([appBuildVerifySecretLockKey(WORK_ID)]);
@@ -144,7 +166,12 @@ describe('the per-Work verification-secret lock', () => {
         const h = service({
             row: VERIFY_ROW,
             lock,
-            binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+            binding: {
+                pluginId: 'p',
+                buildKind: 'github-actions',
+                imageRepository: IMAGE,
+                deleteVerifyPromptedSecret,
+            },
         });
         await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
         expect(deleteVerifyPromptedSecret).not.toHaveBeenCalled();
@@ -160,11 +187,18 @@ describe('the per-Work verification-secret lock', () => {
             row: VERIFY_ROW,
             lock: fakeLock(),
             openVerifications: [{ id: 'v2', trigger: 'verification', status: 'running' }],
-            binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+            binding: {
+                pluginId: 'p',
+                buildKind: 'github-actions',
+                imageRepository: IMAGE,
+                deleteVerifyPromptedSecret,
+            },
         });
         await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
         expect(deleteVerifyPromptedSecret).not.toHaveBeenCalled();
-        expect(h.rows.save).toHaveBeenCalledWith(expect.objectContaining({ verifySecretNames: [] }));
+        expect(h.rows.save).toHaveBeenCalledWith(
+            expect.objectContaining({ verifySecretNames: [] }),
+        );
     });
 
     it('withVerifySecretLock waits for a short holder when asked to, and runs unlocked with no lock service', async () => {
@@ -209,31 +243,46 @@ describe('a late digest confirmation publishes app.build.succeeded exactly once'
             pluginId: 'p',
             buildKind: 'github-actions',
             imageRepository: IMAGE,
-            checkImageAccess: jest.fn(async () => ({ visibility: 'private', readable: true, digest: DIGEST })),
+            checkImageAccess: jest.fn(async () => ({
+                visibility: 'private',
+                readable: true,
+                digest: DIGEST,
+            })),
         };
     }
 
     it('the call that moves the row out of digestUnconfirmed publishes, with deployable true, and writes no second Activity row', async () => {
         const h = service({ row: UNCONFIRMED, binding: confirmingBinding(), claimAffected: 1 });
-        const spy = jest.spyOn(h.svc as unknown as { verdictFor: () => unknown }, 'verdictFor').mockResolvedValue({
-            verdict: { deployable: true, notDeployableReason: null },
-            context: null,
-        } as never);
+        const spy = jest
+            .spyOn(h.svc as unknown as { verdictFor: () => unknown }, 'verdictFor')
+            .mockResolvedValue({
+                verdict: { deployable: true, notDeployableReason: null },
+                context: null,
+            } as never);
 
         const result = await h.svc.reconfirmDigest('b1');
 
         expect(spy).toHaveBeenCalled();
         expect(result).toMatchObject({ reconfirmed: true, deployable: true });
-        expect(h.queryBuilder.andWhere).toHaveBeenCalledWith('notDeployableReason = :was', { was: 'digestUnconfirmed' });
+        expect(h.queryBuilder.andWhere).toHaveBeenCalledWith('notDeployableReason = :was', {
+            was: 'digestUnconfirmed',
+        });
         const succeeded = h.emitted.filter((entry) => entry.name === 'app.build.succeeded');
         expect(succeeded).toHaveLength(1);
-        expect(succeeded[0].payload).toMatchObject({ buildId: 'b1', deployable: true, notDeployableReason: null });
+        expect(succeeded[0].payload).toMatchObject({
+            buildId: 'b1',
+            deployable: true,
+            notDeployableReason: null,
+        });
         expect(h.activityLog.log).not.toHaveBeenCalled();
     });
 
     it('a racing second re-check (claim lost) publishes nothing', async () => {
         const h = service({ row: UNCONFIRMED, binding: confirmingBinding(), claimAffected: 0 });
-        jest.spyOn(h.svc as unknown as { verdictFor: () => unknown }, 'verdictFor').mockResolvedValue({
+        jest.spyOn(
+            h.svc as unknown as { verdictFor: () => unknown },
+            'verdictFor',
+        ).mockResolvedValue({
             verdict: { deployable: true, notDeployableReason: null },
             context: null,
         } as never);
@@ -246,14 +295,21 @@ describe('a late digest confirmation publishes app.build.succeeded exactly once'
 
     it('a confirmation that is still not deployable for another reason publishes nothing', async () => {
         const h = service({ row: UNCONFIRMED, binding: confirmingBinding(), claimAffected: 1 });
-        jest.spyOn(h.svc as unknown as { verdictFor: () => unknown }, 'verdictFor').mockResolvedValue({
+        jest.spyOn(
+            h.svc as unknown as { verdictFor: () => unknown },
+            'verdictFor',
+        ).mockResolvedValue({
             verdict: { deployable: false, notDeployableReason: 'staleInputs' },
             context: null,
         } as never);
 
         const result = await h.svc.reconfirmDigest('b1');
 
-        expect(result).toMatchObject({ reconfirmed: true, deployable: false, notDeployableReason: 'staleInputs' });
+        expect(result).toMatchObject({
+            reconfirmed: true,
+            deployable: false,
+            notDeployableReason: 'staleInputs',
+        });
         expect(h.emitted).toHaveLength(0);
     });
 });

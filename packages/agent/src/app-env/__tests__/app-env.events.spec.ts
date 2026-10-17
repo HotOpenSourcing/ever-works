@@ -106,9 +106,18 @@ describe('AppEnvService — the env events on the bus', () => {
         expect(name).toBe('app.env.changed');
         expect(event).toBeInstanceOf(AppEnvChangedEvent);
         expect(event.payload.workId).toBe(WORK);
-        expect([...event.payload.names].sort()).toEqual(['BOTH', 'BUILD_ONLY', 'RUNTIME_ONLY', 'UNDECLARED']);
+        expect([...event.payload.names].sort()).toEqual([
+            'BOTH',
+            'BUILD_ONLY',
+            'RUNTIME_ONLY',
+            'UNDECLARED',
+        ]);
         expect([...event.payload.buildPhaseNames].sort()).toEqual(['BOTH', 'BUILD_ONLY']);
-        expect([...event.payload.runtimePhaseNames].sort()).toEqual(['BOTH', 'RUNTIME_ONLY', 'UNDECLARED']);
+        expect([...event.payload.runtimePhaseNames].sort()).toEqual([
+            'BOTH',
+            'RUNTIME_ONLY',
+            'UNDECLARED',
+        ]);
         // FR-8: never a value.
         expect(JSON.stringify(event)).not.toMatch(/secret-/);
     });
@@ -119,12 +128,19 @@ describe('AppEnvService — the env events on the bus', () => {
         expect(emitter.emit).not.toHaveBeenCalled();
 
         await expect(
-            service(SPEC, undefined).apply(WORK, actor, { set: [{ name: 'BUILD_ONLY', value: 'v1' }] }),
+            service(SPEC, undefined).apply(WORK, actor, {
+                set: [{ name: 'BUILD_ONLY', value: 'v1' }],
+            }),
         ).resolves.toMatchObject({ changed: ['BUILD_ONLY'] });
     });
 
     it('emits app.env.rotated with the rotated name', async () => {
-        const spec = specOf({ name: 'SIGNING_KEY', phase: 'both', secret: true, generate: { kind: 'base64' } });
+        const spec = specOf({
+            name: 'SIGNING_KEY',
+            phase: 'both',
+            secret: true,
+            generate: { kind: 'base64' },
+        });
         const emitter = { emit: jest.fn() };
         const svc = service(spec, emitter);
         await svc.ensureGenerated(WORK);
@@ -149,7 +165,9 @@ describe('AppEnvService — the env events on the bus', () => {
             }),
         };
         await expect(
-            service(SPEC, emitter).apply(WORK, actor, { set: [{ name: 'BUILD_ONLY', value: 'v1' }] }),
+            service(SPEC, emitter).apply(WORK, actor, {
+                set: [{ name: 'BUILD_ONLY', value: 'v1' }],
+            }),
         ).resolves.toMatchObject({ changed: ['BUILD_ONLY'] });
     });
 });

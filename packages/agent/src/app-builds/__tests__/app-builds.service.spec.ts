@@ -350,12 +350,13 @@ function makeHarness(options: HarnessOptions = {}): Harness {
                             if (!inTerminal || clockArm) continue;
                             return { affected: 0 };
                         }
-// `… AND notDeployableReason = :was` — the late digest confirmation's
-// exactly-once claim (2026-10-17): read from the SQL like the arms above.
-if (sql === 'notDeployableReason = :was') {
-    if ((row.notDeployableReason ?? null) !== params.was) return { affected: 0 };
-    continue;
-}
+                        // `… AND notDeployableReason = :was` — the late digest confirmation's
+                        // exactly-once claim (2026-10-17): read from the SQL like the arms above.
+                        if (sql === 'notDeployableReason = :was') {
+                            if ((row.notDeployableReason ?? null) !== params.was)
+                                return { affected: 0 };
+                            continue;
+                        }
                         throw new Error(`rowsRepository: unrecognised claim predicate: ${sql}`);
                     }
 
