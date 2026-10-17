@@ -215,13 +215,11 @@ describe('AppsCatalogManifestService', () => {
         const service = new AppsCatalogManifestService(git as never);
         let now = 1_000;
         service.now = () => now;
-        const fetchImpl = jest
-            .fn()
-            .mockResolvedValue({
-                ok: true,
-                status: 200,
-                text: async () => JSON.stringify(LISTING),
-            });
+        const fetchImpl = jest.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            text: async () => JSON.stringify(LISTING),
+        });
         service.fetchImpl = fetchImpl;
 
         const first = await service.list();
