@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { APP_SPEC_EVALUATE_COALESCE_MS } from '@ever-works/contracts';
 import type {
     AppLicenseEvidence,
@@ -180,6 +180,27 @@ export class WorkAppSpecStateRepository {
     /** The state row of one App Work, or `null` when it has none yet. */
     async findByWorkId(workId: string): Promise<WorkAppSpecState | null> {
         return this.repository.findOne({ where: { workId } });
+    }
+
+    /**
+     * APW-11 FR-57 — the App spec display names of several App Works in ONE query
+     * (the App Launcher's `APP_SPEC_DISPLAY_NAMES`). A Work with no row, or a row
+     * with no display name, maps to `null`, so the launcher falls back to the
+     * Work's own name.
+     */
+    async findDisplayNamesByWorkIds(workIds: readonly string[]): Promise<Map<string, string | null>> {
+        const ids = [...new Set(workIds.filter((id) => typeof id === 'string' && id.length > 0))];
+        const names = new Map<string, string | null>(ids.map((id) => [id, null]));
+        if (ids.length === 0) return names;
+        const rows = await this.repository.find({
+            where: { workId: In(ids) },
+            select: { workId: true, displayName: true },
+        });
+        for (const row of rows) {
+            const name = typeof row.displayName === 'string' ? row.displayName.trim() : '';
+            names.set(row.workId, name.length > 0 ? name : null);
+        }
+        return names;
     }
 
     /**
