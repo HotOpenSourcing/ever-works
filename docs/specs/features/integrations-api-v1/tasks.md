@@ -49,7 +49,9 @@
   extra teams. **Done for create + link of tasks and teams**: `TasksService.create` / `TeamsService.create` take a
   `withinCreate` hook that runs in the row's own transaction (with its `*.created` event), and the integration
   routes write the `externalRef` link there, so a lost race rolls the create back instead of undoing it and a crash
-  can no longer leave an unlinked task or team. Still step by step: a `PUT` set, and a create's extra teams /
+  can no longer leave an unlinked task or team. **Also done for Ideas, Goals and Missions** (follow-up of T35–T37):
+  `WorkProposalService` / `GoalsService` / `MissionsService.createExternal` take the same hook, run after the row and
+  its `*.created` event. Still step by step: a `PUT` set, and a create's extra teams /
   assignees / visibility after the row (each step commits on its own; the reconcile covers a half-applied set).
 - [x] **T17b** OpenAPI request bodies: every property of every request DTO carries `@ApiProperty`, written from its
       contract schema (required, enum, format, limits, description), so `/api/integrations/v1/openapi.json` shows whole
