@@ -37,6 +37,7 @@ function statesDouble(initial: Record<string, unknown>) {
             row.licenseEvaluatedSeq = seq;
             return true;
         }),
+        findStaleRegistry: jest.fn(async () => [{ workId: WORK_ID }]),
         writeAttestation: jest.fn(async (_w: string, attestation: unknown) => {
             row.attestation = attestation;
             return true;
@@ -44,7 +45,12 @@ function statesDouble(initial: Record<string, unknown>) {
     };
 }
 
-function build(input: { row: Record<string, unknown>; detected?: string | null; type?: string }) {
+function build(input: {
+    row: Record<string, unknown>;
+    detected?: string | null;
+    type?: string;
+    tree?: Array<{ path: string; type: 'blob' | 'tree' }>;
+}) {
     const states = statesDouble(input.row);
     const works = {
         findById: jest.fn(async () => ({
@@ -66,6 +72,15 @@ function build(input: { row: Record<string, unknown>; detected?: string | null; 
             visibility: 'public',
             licenseSpdx: input.detected ?? null,
         })),
+        ...(input.tree
+            ? {
+                  getRepositoryTree: jest.fn(async () => ({
+                      entries: input.tree,
+                      truncated: false,
+                  })),
+                  getFileContent: jest.fn(async () => null),
+              }
+            : {}),
     };
     const activity = { log: jest.fn(async (_entry: unknown) => ({ id: 'a' })) };
     const moduleRef = {
@@ -200,6 +215,55 @@ describe('AppLicenseService (APW-03 T42)', () => {
                 (call) => (call[0] as { action: string }).action,
             );
             expect(actions).toEqual(['app.license.changed', 'app.license.attestation_required']);
+        });
+    });
+
+    describe('T41 detection and T43 triggers', () => {
+        it('a declared MIT over an ee/ directory is mixed and at least amber (ACC-03-32)', async () => {
+            const h = build({
+                row: { effectiveSpec: { license: { spdx: 'MIT' } }, trackedBranch: 'main' },
+                detected: 'MIT',
+                tree: [
+                    { path: 'LICENSE', type: 'blob' },
+                    { path: 'ee', type: 'tree' },
+                    { path: 'ee/LICENSE', type: 'blob' },
+                    { path: 'src/index.ts', type: 'blob' },
+                ],
+            });
+
+            const verdict = await h.service.evaluate(WORK_ID);
+
+            expect(verdict).toMatchObject({ spdx: 'MIT', licenseClass: 'amber' });
+            expect(h.states.row.licenseMixed).toBe(true);
+            expect(h.states.row.licenseScanIncomplete).toBe(false);
+            expect(
+                (h.states.row.licenseEvidence as { mixedPaths: string[] }).mixedPaths.join(','),
+            ).toContain('ee');
+        });
+
+        it('without a tree capability the scan is recorded as incomplete', async () => {
+            const h = build({ row: {}, detected: 'MIT' });
+            await h.service.evaluate(WORK_ID);
+            expect(h.states.row.licenseScanIncomplete).toBe(true);
+            expect(h.states.row.licenseClass).toBe('green');
+        });
+
+        it('re-classifies on app.spec.applied', async () => {
+            const h = build({ row: {}, detected: 'MIT' });
+            const request = jest.spyOn(h.service, 'request');
+            await h.service.onSpecApplied({ workId: WORK_ID });
+            await h.service.onSpecApplied({});
+            expect(request).toHaveBeenCalledTimes(1);
+            expect(request).toHaveBeenCalledWith(WORK_ID, 'spec_changed');
+        });
+
+        it('the registry fan-out re-classifies the stale rows, capped at 500', async () => {
+            const h = build({ row: {}, detected: 'MIT' });
+            await expect(h.service.refreshStaleRegistry(10_000)).resolves.toEqual({
+                scanned: 1,
+                evaluated: 1,
+            });
+            expect(h.states.findStaleRegistry).toHaveBeenCalledWith(expect.any(String), 500);
         });
     });
 

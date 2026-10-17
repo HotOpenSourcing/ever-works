@@ -56,6 +56,7 @@ import {
     UnprocessableEntityException,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
     LICENSE_CLASS_RANK,
     type AppSourceRecord,
@@ -74,6 +75,13 @@ import { WorkUpstreamStateRepository } from '../database/repositories/work-upstr
 import { GitFacadeService } from '../facades/git.facade';
 import { getOptionalProvider } from '../utils/optional-provider.util';
 import { relationOf } from '../app-works/app-source-initializer.service';
+import { AppSpecAppliedEvent } from '../events/app-spec-applied.event';
+import {
+    applyMixed,
+    detectRepositoryLicense,
+    type LicenseDetectGit,
+    type LicenseDetection,
+} from './license-detect';
 import { classifyLicenseExpression, detectedLicenseSpdx } from './license-classify';
 import {
     LICENSE_REGISTRY_SNAPSHOT,
@@ -91,6 +99,9 @@ export const APP_LICENSE_ACTIVITY_EVENTS = {
     attestationRequired: 'app.license.attestation_required',
     attested: 'app.license.attested',
 } as const;
+
+/** How many Works one registry-change fan-out re-classifies at most (T43, ACC-03-22). */
+export const LICENSE_REGISTRY_FANOUT_MAX = 500;
 
 /** The obligation that makes a source offer required (FR-61). */
 export const NETWORK_SOURCE_OFFER = 'network-source-offer';
@@ -281,15 +292,22 @@ export class AppLicenseService {
             (state.effectiveSpec as { license?: { spdx?: string } } | null | undefined)?.license
                 ?.spdx,
         );
+        const commitSha = firstNonEmpty(state.effectiveCommitSha, state.headCommitSha);
+        // T41 — the repository scan (tree, root manifests, mixed directories). It runs
+        // even when the spec declares a licence: a declared MIT over an `ee/` directory is
+        // still a mixed repository, and mixed is at least amber (ACC-03-32).
+        const detection = await this.scanRepository(
+            coordinates,
+            commitSha ?? firstNonEmpty(state.trackedBranch) ?? 'main',
+        );
         let spdx: string | null = declared;
         let source: 'detected' | 'blueprint' = 'blueprint';
         if (!spdx) {
             source = 'detected';
-            spdx = await this.detectSpdx(coordinates);
+            spdx = detection ? detection.spdx : await this.detectSpdx(coordinates);
         }
-        const licenseClass = classifyLicenseExpression(spdx);
+        const licenseClass = applyMixed(classifyLicenseExpression(spdx), detection?.mixed === true);
         const obligations = obligationsFor(spdx);
-        const commitSha = firstNonEmpty(state.effectiveCommitSha, state.headCommitSha);
 
         const changed =
             (state.licenseSpdx ?? null) !== (spdx ?? null) ||
@@ -307,6 +325,16 @@ export class AppLicenseService {
             licenseSource: source,
             licenseObligations: obligations,
             licenseCommitSha: commitSha,
+            ...(detection
+                ? {
+                      licenseMixed: detection.mixed,
+                      licenseScanIncomplete: detection.scanIncomplete,
+                      licenseEvidence: {
+                          files: detection.evidence.files,
+                          mixedPaths: detection.evidence.mixedPaths,
+                      },
+                  }
+                : { licenseScanIncomplete: true }),
             licenseRegistryHash: LICENSE_REGISTRY_SNAPSHOT_SOURCE.commitSha,
             licenseRegistrySource: 'snapshot',
             ...(attestationCleared ? { attestation: null } : {}),
@@ -574,6 +602,79 @@ export class AppLicenseService {
             relation,
             providerId: firstNonEmpty(work.gitProvider) ?? 'github',
         };
+    }
+
+    /** T41's scan of the Work Repository at `ref`; `null` when it cannot run (no facade). */
+    private async scanRepository(
+        coordinates: WorkCoordinates | null,
+        ref: string,
+    ): Promise<LicenseDetection | null> {
+        if (!this.git || !coordinates?.owner || !coordinates.repo) return null;
+        if (typeof (this.git as Partial<LicenseDetectGit>).getRepositoryTree !== 'function') {
+            return null;
+        }
+        try {
+            return await detectRepositoryLicense({
+                git: this.git,
+                owner: coordinates.owner,
+                repo: coordinates.repo,
+                ref,
+                options: {
+                    userId: coordinates.userId,
+                    providerId: coordinates.providerId,
+                    workId: coordinates.workId,
+                },
+            });
+        } catch (error) {
+            this.logger.warn(
+                `Licence scan of ${coordinates.owner}/${coordinates.repo}@${ref} failed (${errorText(error)}); root-only.`,
+            );
+            return null;
+        }
+    }
+
+    // ── T43 — the triggers ────────────────────────────────────────────────────
+
+    /**
+     * T43 (first half) — re-classify after the App spec's effective commit changes, so
+     * a licence the spec declares (or a repository change under it) reaches the row
+     * without waiting for the next deploy's freshness check. Listens for APW-03's own
+     * `app.spec.applied` event; never throws.
+     */
+    @OnEvent(AppSpecAppliedEvent.EVENT_NAME, { async: true, suppressErrors: true })
+    async onSpecApplied(event: { workId?: string } | null | undefined): Promise<void> {
+        const workId = firstNonEmpty(event?.workId);
+        if (workId) {
+            await this.request(workId, 'spec_changed');
+        }
+    }
+
+    /**
+     * T43 (second half) — the registry-change fan-out: re-classify at most `limit` (≤ 500)
+     * App Works classified against a different registry than the one in force, oldest
+     * first; the next run continues where this one stopped (ACC-03-22).
+     */
+    async refreshStaleRegistry(limit = LICENSE_REGISTRY_FANOUT_MAX): Promise<{
+        scanned: number;
+        evaluated: number;
+    }> {
+        const states = this.states();
+        if (!states) return { scanned: 0, evaluated: 0 };
+        const stale = await states.findStaleRegistry(
+            LICENSE_REGISTRY_SNAPSHOT_SOURCE.commitSha,
+            Math.min(Math.max(0, Math.floor(limit)), LICENSE_REGISTRY_FANOUT_MAX),
+        );
+        let evaluated = 0;
+        for (const row of stale) {
+            try {
+                if (await this.evaluate(row.workId, 'registry_changed')) evaluated += 1;
+            } catch (error) {
+                this.logger.warn(
+                    `Registry fan-out: re-classifying work ${row.workId} failed (${errorText(error)}).`,
+                );
+            }
+        }
+        return { scanned: stale.length, evaluated };
     }
 
     private async detectSpdx(coordinates: WorkCoordinates | null): Promise<string | null> {
