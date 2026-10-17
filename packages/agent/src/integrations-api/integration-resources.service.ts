@@ -6,6 +6,7 @@ import {
     buildGoalSnapshot,
     buildIdeaSnapshot,
     buildMemberSnapshot,
+    buildMissionSnapshot,
     buildOrganizationSnapshot,
     buildTaskSnapshot,
     buildTeamSnapshot,
@@ -15,6 +16,7 @@ import {
 } from '../domain-events/domain-event-snapshots';
 import { Agent } from '../entities/agent.entity';
 import { Goal } from '../entities/goal.entity';
+import { Mission } from '../entities/mission.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
 import { TaskChatMessage } from '../entities/task-chat-message.entity';
@@ -29,9 +31,17 @@ import { type KeysetPage, type KeysetQuery, readKeysetPage } from './keyset-curs
 
 /**
  * The versioned resources the integration API reads (contract v1 B.6): the P1
- * ones, then the P2 ones as they are served (ideas: EW-P2-1, goals: EW-P2-2).
+ * ones, then the P2 ones as they are served (ideas: EW-P2-1, goals: EW-P2-2,
+ * missions: EW-P2-5).
  */
-export type IntegrationResourceKind = 'task' | 'team' | 'agent' | 'work' | 'idea' | 'goal';
+export type IntegrationResourceKind =
+    | 'task'
+    | 'team'
+    | 'agent'
+    | 'work'
+    | 'idea'
+    | 'goal'
+    | 'mission';
 
 type Row = ObjectLiteral & { id: string; updatedAt: Date; organizationId?: string | null };
 type Builder = (manager: EntityManager, id: string) => Promise<AggregateSnapshot<object> | null>;
@@ -73,6 +83,12 @@ const RESOURCES: Readonly<
         build: buildGoalSnapshot,
         archivable: 'archivedAt',
     },
+    // Missions (EW-P2-5, plan D3b): completed / failed are statuses, not an archive.
+    mission: {
+        entity: Mission as unknown as new () => Row,
+        build: buildMissionSnapshot,
+        archivable: false,
+    },
 };
 
 /**
@@ -84,6 +100,7 @@ const STORED_VISIBILITY: ReadonlySet<IntegrationResourceKind> = new Set([
     'agent',
     'idea',
     'goal',
+    'mission',
 ]);
 
 /** Chunk size for `IN (...)` lookups. */
@@ -255,7 +272,7 @@ export class IntegrationResourcesService {
     /**
      * `PUT /links/:entityType/:entityId` — the record must be one the caller
      * sees in the organization (`404 not_found` otherwise). Answers `false` for
-     * an entity type v1 does not serve yet (missions, inbox, KB: P2/P3),
+     * an entity type v1 does not serve yet (inbox, KB: P3),
      * which the route refuses as `validation_failed`.
      */
     async assertLinkTarget(
@@ -271,6 +288,7 @@ export class IntegrationResourcesService {
             case 'work':
             case 'idea':
             case 'goal':
+            case 'mission':
                 await this.get(entityType, organizationId, entityId, source);
                 return true;
             case 'member': {

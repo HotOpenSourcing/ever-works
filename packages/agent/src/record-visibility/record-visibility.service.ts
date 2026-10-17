@@ -29,6 +29,7 @@ import {
     buildAgentSnapshot,
     buildGoalSnapshot,
     buildIdeaSnapshot,
+    buildMissionSnapshot,
     buildTaskSnapshot,
 } from '../domain-events/domain-event-snapshots';
 import { VISIBILITY_AGGREGATE_SHAPES } from './record-access.types';
@@ -86,7 +87,7 @@ const ENTITY_OF: Record<VisibilityAggregate, EntityTarget<ObjectLiteral>> = {
  * Aggregates whose `visibility_changed` (and Teams `<aggregate>.updated`) is recorded
  * today, with their integration snapshot: the P1 aggregates that carry a `version`
  * column (EW-P1-1), then the P2 ones as their recording points land (ideas: EW-P2-1,
- * goals: EW-P2-2). Missions join with theirs (see {@link RecordVisibilityService.recordChange}).
+ * goals: EW-P2-2, missions: EW-P2-5). Every visibility aggregate records now (see {@link RecordVisibilityService.recordChange}).
  */
 const SNAPSHOT_OF: Partial<
     Record<
@@ -98,6 +99,7 @@ const SNAPSHOT_OF: Partial<
     agent: buildAgentSnapshot,
     idea: buildIdeaSnapshot,
     goal: buildGoalSnapshot,
+    mission: buildMissionSnapshot,
 };
 
 /** Thrown for an integration write of `private` (contract: `422 domain_rule`). */

@@ -13,6 +13,7 @@ import {
     buildGoalSnapshot,
     buildInboxItemSnapshot,
     buildIdeaSnapshot,
+    buildMissionSnapshot,
     buildOrganizationSnapshot,
     buildTaskSnapshot,
     buildTeamSnapshot,
@@ -38,6 +39,7 @@ const BUILDERS: Partial<Record<DomainEventAggregateType, Builder>> = {
     inbox_item: buildInboxItemSnapshot,
     idea: buildIdeaSnapshot,
     goal: buildGoalSnapshot,
+    mission: buildMissionSnapshot,
     // EW-P3-2 — Knowledge Base documents and organization library folders.
     kb_document: buildKbDocumentSnapshot,
     kb_folder: buildKbFolderSnapshot,

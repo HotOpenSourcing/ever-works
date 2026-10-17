@@ -272,7 +272,8 @@ export class TeamsService {
                         (link) =>
                             link.resourceType === 'task' ||
                             link.resourceType === 'idea' ||
-                            link.resourceType === 'goal',
+                            link.resourceType === 'goal' ||
+                            link.resourceType === 'mission',
                     )
                     .map((link) => `${link.resourceType}:${link.resourceId}`),
             ]);
@@ -297,7 +298,8 @@ export class TeamsService {
                     link.resourceType === 'task' ||
                     link.resourceType === 'work' ||
                     link.resourceType === 'idea' ||
-                    link.resourceType === 'goal'
+                    link.resourceType === 'goal' ||
+                    link.resourceType === 'mission'
                 ) {
                     await publisher.changed(
                         em,

@@ -6,6 +6,7 @@ import {
     type IntegrationInboxItemDto,
     type IntegrationIdeaDto,
     type IntegrationMemberDto,
+    type IntegrationMissionDto,
     type IntegrationOrganizationDto,
     type IntegrationTaskCommentDto,
     type IntegrationTaskDto,
@@ -19,6 +20,8 @@ import { ExternalIdentity } from '../entities/external-identity.entity';
 import { Goal } from '../entities/goal.entity';
 import { InboxItem } from '../entities/inbox-item.entity';
 import { MissionGoal } from '../entities/mission-goal.entity';
+import { Mission } from '../entities/mission.entity';
+import { MissionWork } from '../entities/mission-work.entity';
 import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
@@ -472,6 +475,63 @@ export async function buildGoalSnapshot(
         webUrl: webUrl(`/goals/${goal.id}`),
     };
     return { dto, tenantId: goal.tenantId ?? null, organizationId: goal.organizationId ?? null };
+}
+
+/**
+ * The Mission's integration DTO (plan D3b: a Gauzy Strategic Initiative) with its
+ * Teams, Goal links (primary first) and typed Work links, or `null` when gone (EW-P2-5).
+ */
+export async function buildMissionSnapshot(
+    manager: EntityManager,
+    missionId: string,
+): Promise<AggregateSnapshot<IntegrationMissionDto> | null> {
+    const mission = await manager.getRepository(Mission).findOne({ where: { id: missionId } });
+    if (!mission) return null;
+    const [resourceTeams, goalLinks, workLinks] = await Promise.all([
+        teamResourceIds(manager, 'mission', missionId),
+        manager
+            .getRepository(MissionGoal)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+        manager
+            .getRepository(MissionWork)
+            .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
+    ]);
+    const teamIds = unique(resourceTeams);
+    const goals = [...goalLinks]
+        .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
+        .map((link) => ({ goalId: link.goalId, isPrimary: link.isPrimary === true }));
+    const dto: IntegrationMissionDto = {
+        id: mission.id,
+        organizationId: mission.organizationId ?? '',
+        version: Number(mission.version) || 1,
+        createdAt: isoRequired(mission.createdAt),
+        updatedAt: isoRequired(mission.updatedAt ?? mission.createdAt),
+        ...recordVisibility(mission, teamIds),
+        owner: { type: 'user', id: mission.userId },
+        createdBy: p2CreatedBy(mission),
+        externalLinks: [],
+        teamIds,
+        title: mission.title,
+        description: mission.description,
+        type: mission.type as IntegrationMissionDto['type'],
+        status: mission.status as IntegrationMissionDto['status'],
+        outcome: (mission.outcome ?? null) as IntegrationMissionDto['outcome'],
+        completedAt: iso(mission.completedAt),
+        schedule: mission.schedule ?? null,
+        autoBuildWorks: mission.autoBuildWorks === true,
+        goals,
+        works: workLinks.map((link) => ({
+            workId: link.workId,
+            relation: link.relation as IntegrationMissionDto['works'][number]['relation'],
+        })),
+        sourceMissionId: mission.sourceMissionId ?? null,
+        webUrl: webUrl(`/missions/${mission.id}`),
+    };
+    return {
+        dto,
+        tenantId: mission.tenantId ?? null,
+        organizationId: mission.organizationId ?? null,
+    };
 }
 
 /** The work's integration DTO (members and repositories embedded), or `null` when gone. */

@@ -10,6 +10,7 @@ import { TasksDomainModule } from '@ever-works/agent/tasks-domain';
 import { AgentTeamsModule } from '@ever-works/agent/teams';
 import { UserResearchModule } from '@ever-works/agent/user-research';
 import { GoalsModule } from '@ever-works/agent/goals';
+import { MissionsModule } from '@ever-works/agent/missions';
 import { IntegrationWhoamiController } from './whoami.controller';
 import { IntegrationEventsController } from './events.controller';
 import { IntegrationEmailController } from './email.controller';
@@ -26,6 +27,7 @@ import { IntegrationTeamsWriteController } from './teams-write.controller';
 import { IntegrationWebhooksController } from './webhooks.controller';
 import { IntegrationIdeasController } from './ideas.controller';
 import { IntegrationGoalsController } from './goals.controller';
+import { IntegrationMissionsController } from './missions.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
 import { OrganizationsModule } from '../../organizations/organizations.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
@@ -58,6 +60,8 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         UserResearchModule,
         // Goals (EW-P2-2): `GoalsService` + the orchestrator's Definition of Done.
         GoalsModule,
+        // Missions (EW-P2-5): `MissionsService` (createExternal, transitions, Work links).
+        MissionsModule,
         // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
         // `InboxService` (steer, resume, decide exactly like the Inbox UI).
         AgentInboxModule,
@@ -85,6 +89,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         // P2 resources.
         IntegrationIdeasController,
         IntegrationGoalsController,
+        IntegrationMissionsController,
         // EW-P3-1 — the Inbox (`inbox:*`).
         IntegrationInboxController,
         // EW-P3-2 — the Knowledge Base (`kb:*`).

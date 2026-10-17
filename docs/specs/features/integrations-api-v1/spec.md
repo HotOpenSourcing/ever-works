@@ -1,7 +1,7 @@
 # Feature Specification: Integration API v1
 
 **Feature ID**: `integrations-api-v1`
-**Status**: `Draft` — contract `v1-draft.11`; P1 resources live, P2 Ideas (EW-P2-1) and Goals (EW-P2-2), P3 inbox, P4 email; Missions next
+**Status**: `Draft` — contract `v1-draft.12`; P1 resources live, P2 Ideas (EW-P2-1), Goals (EW-P2-2) and Missions (EW-P2-5), P3 inbox, P4 email
 **Created**: 2026-10-15
 **Last updated**: 2026-10-16
 **Owner**: Product (Ruslan); contract owner: the Ever Works integration lane
@@ -187,22 +187,22 @@ rows (for agents: team memberships), as one set; writable on POST/PATCH where th
 stored as `teamId` where the entity has that column. Teams are org-wide (`visibility` always `organization`); a Work's
 visibility is derived (`team` when it sits on a team).
 
-| Resource      | Routes                                                                                                                                                                                                                                                                                                                 | Scope          | Schema                                                                                                                  |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| Organization  | `GET /organization` (the `X-Scope-Slug` org)                                                                                                                                                                                                                                                                           | `org:read`     | [organization](./contract/schemas/resources/organization.schema.json)                                                   |
-| Members       | `GET /members` — `userId, username, displayName?, email, emailVerified, avatarUrl, role, joinedAt, everIdSubjects[]`                                                                                                                                                                                                   | `members:read` | [member](./contract/schemas/resources/member.schema.json)                                                               |
-| Agents        | `GET /agents`, `GET /agents/:id` — `id, name, slug, title, capabilities, status, scope, scopeTargetId, reportsToAgentId, avatar{mode,url}, modelId, lastRunAt, webUrl`                                                                                                                                                 | `agents:read`  | [agent](./contract/schemas/resources/agent.schema.json)                                                                 |
-| Teams         | `GET`/`POST /teams`, `GET`/`PATCH`/`DELETE /teams/:id`, `PUT /teams/:id/members` (full set), `PUT /teams/:id/resources`                                                                                                                                                                                                | `teams:*`      | [team](./contract/schemas/resources/team.schema.json)                                                                   |
-| Works         | `GET /works`, `GET /works/:id` (members, `repoUrls[]`, `website`, `kind`, `status`, `webUrl`). P2: `POST /works` with `kind:'project'`                                                                                                                                                                                 | `works:*`      | [work](./contract/schemas/resources/work.schema.json)                                                                   |
-| Tasks         | `GET`/`POST /tasks`, `GET`/`PATCH`/`DELETE /tasks/:id`; `POST /tasks/:id/transition {to, mode:'sync'}` (shortest legal path; gates → `409 transition_blocked`); `PUT /tasks/:id/assignees`, `/watchers`, `/blocks`, `/relations`; comments `GET`/`POST /tasks/:id/comments`, `PATCH`/`DELETE /tasks/:id/comments/:cid` | `tasks:*`      | [task](./contract/schemas/resources/task.schema.json), [comment](./contract/schemas/resources/task-comment.schema.json) |
-| Links         | `GET /links?entityType=&externalId=`, `PUT /links/:entityType/:entityId {externalId, externalUrl}`, `DELETE /links/:entityType/:entityId`                                                                                                                                                                              | `links:write`  | [link](./contract/schemas/resources/link.schema.json)                                                                   |
-| Batch         | `POST /batch {operations:[{method, path, headers?, body?}]}` — ≤100 operations, in order, not atomic; per-operation `{status, body}`; each counts against limits                                                                                                                                                       | per operation  | [requests](./contract/schemas/requests.schema.json) `Batch`                                                             |
-| Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works`                                                                                                                                         | `missions:*`   | P2                                                                                                                      |
-| Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}` (§6.4)                                                                            | `goals:*`      | [goal](./contract/schemas/resources/goal.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateGoal` |
-| Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea` |
-| Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                    |
-| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                    |
-| Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                           |
+| Resource      | Routes                                                                                                                                                                                                                                                                                                                 | Scope          | Schema                                                                                                                           |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Organization  | `GET /organization` (the `X-Scope-Slug` org)                                                                                                                                                                                                                                                                           | `org:read`     | [organization](./contract/schemas/resources/organization.schema.json)                                                            |
+| Members       | `GET /members` — `userId, username, displayName?, email, emailVerified, avatarUrl, role, joinedAt, everIdSubjects[]`                                                                                                                                                                                                   | `members:read` | [member](./contract/schemas/resources/member.schema.json)                                                                        |
+| Agents        | `GET /agents`, `GET /agents/:id` — `id, name, slug, title, capabilities, status, scope, scopeTargetId, reportsToAgentId, avatar{mode,url}, modelId, lastRunAt, webUrl`                                                                                                                                                 | `agents:read`  | [agent](./contract/schemas/resources/agent.schema.json)                                                                          |
+| Teams         | `GET`/`POST /teams`, `GET`/`PATCH`/`DELETE /teams/:id`, `PUT /teams/:id/members` (full set), `PUT /teams/:id/resources`                                                                                                                                                                                                | `teams:*`      | [team](./contract/schemas/resources/team.schema.json)                                                                            |
+| Works         | `GET /works`, `GET /works/:id` (members, `repoUrls[]`, `website`, `kind`, `status`, `webUrl`). P2: `POST /works` with `kind:'project'`                                                                                                                                                                                 | `works:*`      | [work](./contract/schemas/resources/work.schema.json)                                                                            |
+| Tasks         | `GET`/`POST /tasks`, `GET`/`PATCH`/`DELETE /tasks/:id`; `POST /tasks/:id/transition {to, mode:'sync'}` (shortest legal path; gates → `409 transition_blocked`); `PUT /tasks/:id/assignees`, `/watchers`, `/blocks`, `/relations`; comments `GET`/`POST /tasks/:id/comments`, `PATCH`/`DELETE /tasks/:id/comments/:cid` | `tasks:*`      | [task](./contract/schemas/resources/task.schema.json), [comment](./contract/schemas/resources/task-comment.schema.json)          |
+| Links         | `GET /links?entityType=&externalId=`, `PUT /links/:entityType/:entityId {externalId, externalUrl}`, `DELETE /links/:entityType/:entityId`                                                                                                                                                                              | `links:write`  | [link](./contract/schemas/resources/link.schema.json)                                                                            |
+| Batch         | `POST /batch {operations:[{method, path, headers?, body?}]}` — ≤100 operations, in order, not atomic; per-operation `{status, body}`; each counts against limits                                                                                                                                                       | per operation  | [requests](./contract/schemas/requests.schema.json) `Batch`                                                                      |
+| Missions (P2) | `GET`/`POST /missions` (POST forces `status='paused'`), `GET`/`PATCH`/`DELETE /missions/:id` (PATCH cannot set `active`), `PUT /missions/:id/goals`, `PUT /missions/:id/works` (§6.5)                                                                                                                                  | `missions:*`   | [mission](./contract/schemas/resources/mission.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateMission` |
+| Goals (P2)    | `GET`/`POST /goals` (POST forces `status='draft'`), `GET`/`PATCH`/`DELETE /goals/:id` (PATCH cannot activate or resume), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST /goals/:id/samples {criterionId?, value, sampledAt}` (§6.4)                                                                            | `goals:*`      | [goal](./contract/schemas/resources/goal.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateGoal`          |
+| Ideas (P2)    | `GET`/`POST /ideas` (POST forces `source='external'`, `status='pending'`), `GET`/`PATCH /ideas/:id` (title, description, `teamIds`, `visibility`), `POST /ideas/:id/dismiss`, `POST /ideas/:id/restore` (§6.3)                                                                                                         | `ideas:*`      | [idea](./contract/schemas/resources/idea.schema.json), [requests](./contract/schemas/requests.schema.json) `CreateIdea`          |
+| Inbox (P3)    | `GET /inbox/items` (every recipient in the pinned org; `?recipientUserId=&status=&kind=&includeArchived=`), `GET /inbox/items/:id`, `POST /inbox/items/:id/reply {text?, optionId?}` → `{item, routed, restart, runId?}`, `PATCH /inbox/items/:id/state {unread?, archived?}`; writes act as the recipient only (§9)   | `inbox:*`      | [inbox-item](./contract/schemas/resources/inbox-item.schema.json), reply result (§9)                                             |
+| KB (P3)       | `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `POST /kb/documents/:id/{accept,archive,unarchive,move}`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (§10)                                                                                                                 | `kb:*`         | [kb-document](./contract/schemas/resources/kb-document.schema.json), kb-folder (§10)                                             |
+| Email (P4)    | `GET /email/messages` (`?agentId=&direction=&status=&updatedSince=`), `GET /email/messages/:id`, `POST /email/inbound` (§11)                                                                                                                                                                                           | `email:*`      | [email-message](./contract/schemas/resources/email-message.schema.json), inbound result (§11)                                    |
 
 Request bodies for the P1 writes: [`contract/schemas/requests.schema.json`](./contract/schemas/requests.schema.json).
 PUT-set routes take an object (`{members:[…]}`, `{resources:[…]}`, `{assignees:[…]}`, `{userIds:[…]}`,
@@ -290,6 +290,40 @@ sampledAt}`, `Idempotency-Key` required): appends a `goal_metric_samples` row. W
   `goal.unarchived`, `goal.deleted`, `goal.visibility_changed`.
 - **Writes act as the Goal's owner** like the task writes (the key's owner, or `X-Act-As-User`): someone else's Goal
   answers `404 not_found`. `PUT /links/goal/:id` is served.
+
+### 6.5 Missions (EW-P2-5, plan D3b)
+
+An Ever Works Mission is a Gauzy Strategic Initiative: Goals 1:N (one primary), Works M:N (typed), owner = steward. The
+routes call the same `MissionsService` (and `GoalsService` for the Goal links) as the app, and record the same events.
+
+- **Reads:** every `team` / `organization` Mission of the pinned organization, in every status. The
+  [mission DTO](./contract/schemas/resources/mission.schema.json) embeds `goals [{goalId, isPrimary}]` (the primary
+  first), `works [{workId, relation}]`, and the EW-only `type`, `schedule`, `autoBuildWorks` (read-only).
+- **`POST /missions`** ([`CreateMission`](./contract/schemas/requests.schema.json) `{title, description, type?,
+schedule?, teamIds?, visibility?, externalRef?}`): `Idempotency-Key` required, `externalRef` de-duplicates. Always
+  `status='paused'` with no auto-build (D9: only a person resumes a Mission in Ever Works, which is what starts its
+  ticks); `type` defaults to `one-shot`, a `scheduled` one needs `schedule`. A title is required (no generated title).
+  `teamIds` + D11 apply in the create's transaction.
+- **`PATCH /missions/:id`** ([`UpdateMission`](./contract/schemas/requests.schema.json)): title, description,
+  `teamIds`, `visibility`, and `status`: `paused` pauses an active Mission, `completed` (+ `outcome`) completes an
+  active or paused one, `failed` fails an active or paused one (its ticks stop; a person can resume it). `status:
+active` answers `422 domain_rule`; the status already reached is a no-op; any other move is `422`. `If-Match`
+  optional, re-checked at the version bump.
+- **`PUT /missions/:id/goals`** (`{goals:[{goalId, isPrimary?}]}`, at most one primary — else `422 domain_rule` —,
+  no repeats) and **`PUT /missions/:id/works`** (`{works:[{workId, relation}]}`) replace the sets; each link change
+  records `mission.goal.linked` / `unlinked` (plus the Goal's `goal.updated`: `missionIds`, `primaryMissionId`) or
+  `mission.work.linked` / `unlinked`. Every newly linked Goal or Work must be the caller's (404, checked before the
+  first change); a link to a Goal outside the caller's scope is neither shown nor touched. Both answer the Mission DTO;
+  `If-Match` is a pre-check (the sets are not one transaction, T17a).
+- **`DELETE /missions/:id`**: the `mission.deleted` tombstone; its Ideas and clones are kept (their back-links are
+  cleared), and in the same transaction each linked Goal records `goal.updated`, each Idea `idea.updated` and each
+  clone `mission.updated`.
+- **Never here:** resume, run-now, clone (D9).
+- **Events:** `mission.created` (also for a clone, with `idea.created` for each Idea it copies), `mission.updated`
+  (fields, Teams), `mission.status_changed` (`previous.status`; also a fatal tick's `failed`), `mission.deleted`,
+  `mission.goal.*` / `mission.work.*` (children of the Mission: `data` = the link, `aggregate` = the Mission at its new
+  version), `mission.visibility_changed`.
+- **Writes act as the Mission's owner** (the key's owner, or `X-Act-As-User`); `PUT /links/mission/:id` is served.
 
 ## 7. Acceptance criteria
 
@@ -510,3 +544,16 @@ external metric source (`pluginId: 'external'`, else `422 domain_rule`); `goal.p
 per Goal per 5 minutes with the version still moving; `goal` is a served link entity type; the `loop` block is
 read-only runtime. Also answers the Gauzy request CR-12: `PUT /goals/:id/dod` keeps the planner proposals it does not
 name.
+
+## 14. Changes in `v1-draft.12` (CR-8, EW-P2-5 Missions)
+
+Additive. Answers the Gauzy request CR-8 on the plan's STATUS board: the Missions routes of §6.5 are served; the
+[mission DTO](./contract/schemas/resources/mission.schema.json) is the `data` of `mission.created` / `updated` /
+`status_changed` / `deleted`, and `MissionGoalLinkEvent` / `MissionWorkLinkEvent` of the link events, which the catalog
+now marks `child: goal` / `child: work`; the Goal DTO's `missionIds` / `primaryMissionId` change records `goal.updated`;
+request bodies `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; `mission` is a served link
+entity type. A cloned Mission's Ideas now record `idea.created` (the EW-P2-1 known gap). As the request asked:
+`CreateMission` takes `type` / `schedule` (still created `paused`, so a `scheduled` Mission ticks only once a person
+resumes it), `PATCH {status: 'failed'}` fails an active or paused Mission, and a second primary Goal is
+`422 domain_rule`. A Mission delete also records what its cascade changes (`goal.updated`, `idea.updated`,
+`mission.updated`).
