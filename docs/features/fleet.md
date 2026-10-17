@@ -1004,11 +1004,11 @@ Every run's step timeline — the fleet step records above, the cloud tool loop,
 
 A run waiting on a human (`awaitingInput`) or parked for a resume (`terminalEndedReason = 'parked'`) is never touched, whatever its age — its history is what the resume continues from.
 
-| Env                            | Default  | Meaning                                                                                                   |
-| ------------------------------ | -------- | --------------------------------------------------------------------------------------------------------- |
-| `AGENT_RUN_LOG_RETENTION_DAYS` | `90`     | days a terminal run keeps its `agent_run_logs` timeline; clamped to 7–3650 (the export already trims run logs to 90 days) |
-| `AGENT_RUN_RETENTION_DAYS`     | _(off)_  | days a terminal run ROW is kept; unset or `0` keeps rows forever; when set, clamped to 30–3650            |
-| `AGENT_RUN_RETENTION_ENABLED`  | `true`   | `false` switches the whole pass off (an audit hold)                                                       |
+| Env                            | Default | Meaning                                                                                                                   |
+| ------------------------------ | ------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `AGENT_RUN_LOG_RETENTION_DAYS` | `90`    | days a terminal run keeps its `agent_run_logs` timeline; clamped to 7–3650 (the export already trims run logs to 90 days) |
+| `AGENT_RUN_RETENTION_DAYS`     | _(off)_ | days a terminal run ROW is kept; unset or `0` keeps rows forever; when set, clamped to 30–3650                            |
+| `AGENT_RUN_RETENTION_ENABLED`  | `true`  | `false` switches the whole pass off (an audit hold)                                                                       |
 
 ### Backups and restore (slice AT)
 
@@ -1016,11 +1016,11 @@ Retention is the half of data durability the application owns; the other half �
 
 - **Postgres runs under CloudNativePG** with a **nightly base backup** (`ScheduledBackup`) and **continuous WAL archiving** to object storage, so the `ever_works` database can be restored to any point in time inside the retention window (PITR), not only to last night. The Helm/GitOps values that declare the `Cluster` and the `ScheduledBackup` are the source of truth; change them there, never by hand-editing the live spec.
 - **"Configured" is not "working."** Before ANY change to the database, its engine, its storage or a node hosting it — a CNPG switchover or upgrade, a production migration, a resize, draining the node — prove a recent restorable backup exists:
-  1. the `ScheduledBackup` is not suspended and its `lastScheduleTime` is recent;
-  2. the newest `Backup` objects are `phase: completed`, with no `.status.error` and a real `backupId`;
-  3. on the primary, `SELECT last_archived_time, last_failed_time FROM pg_stat_archiver;` shows `last_archived_time` newer than `last_failed_time` (WAL is flowing);
-  4. the base backup and recent WAL are actually present at the destination bucket.
-  With the barman-cloud **plugin**, `Cluster.status.lastSuccessfulBackup` / `firstRecoverabilityPoint` can read stale while nightlies are fine — never judge backup health from them. Record the restore point you rely on in the change log; if you cannot prove one, take an on-demand `Backup` first.
+    1. the `ScheduledBackup` is not suspended and its `lastScheduleTime` is recent;
+    2. the newest `Backup` objects are `phase: completed`, with no `.status.error` and a real `backupId`;
+    3. on the primary, `SELECT last_archived_time, last_failed_time FROM pg_stat_archiver;` shows `last_archived_time` newer than `last_failed_time` (WAL is flowing);
+    4. the base backup and recent WAL are actually present at the destination bucket.
+       With the barman-cloud **plugin**, `Cluster.status.lastSuccessfulBackup` / `firstRecoverabilityPoint` can read stale while nightlies are fine — never judge backup health from them. Record the restore point you rely on in the change log; if you cannot prove one, take an on-demand `Backup` first.
 - **Restore = a NEW cluster**, never an in-place overwrite: create a CNPG `Cluster` that bootstraps with `recovery` from the backup object store (with `recoveryTarget.targetTime` for PITR), let it replay WAL to the target, verify it (row counts on `agent_runs`, `tasks`, `fleet_jobs`; the newest `createdAt`), then point the API at it (or promote it) and keep the old cluster until the new one is proven. Migrations are forward-only with per-step guards, so a restored database at an older schema converges on the next boot.
 - **What a restore does NOT bring back:** files outside Postgres (object-storage uploads have their own versioning), anything a retention pass purged before the restore point, and in-flight fleet work — leased jobs on a restored database lapse and are re-offered by the reclaim sweep; nodes keep their credentials (the hashes are in the restored rows).
 - **Self-hosting without CNPG:** a scheduled `pg_dump` is the minimum (see `docs/guides/self-host-docker-kubernetes.md` → Backups); test the restore, not just the dump. Disaster-recovery procedures for the managed-cloud deployment are in `docs/devops/disaster-recovery.md`.
