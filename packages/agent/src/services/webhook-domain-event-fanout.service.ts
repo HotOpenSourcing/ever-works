@@ -84,10 +84,13 @@ const UNSENT_BATCH = 100;
  *  - of a recipient-scoped domain (`inbox.*`, `email.*`: one person's messages)
  *    only when its owner is an integration key holding that domain's read scope;
  *  - that occurred after the subscription was created;
- *  - while its owner still has access: a user owner must still belong to the
- *    event's tenant; an integration-key owner must be active, unexpired and
- *    still pinned to the event's organization. A subscription whose owner is
- *    gone or revoked is marked `disabled`.
+ *  - while its owner still has access: a user owner must still be a member of
+ *    the event's organization and able to read the event's record in the app
+ *    (`WebhookOwnerAccessService.userMayRead`: `visibleTo` for tasks, goals,
+ *    missions, ideas and agents, Work access for works); an integration-key
+ *    owner must be active, unexpired and still pinned to the event's
+ *    organization. A subscription whose owner is gone or revoked is marked
+ *    `disabled`.
  */
 @Injectable()
 export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, OnModuleDestroy {
@@ -174,6 +177,7 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         ];
         const patterns = [...new Set(subscriptions.flatMap((sub) => sub.events ?? []))];
         const owners = new Map<string, WebhookOwnerAccess>();
+        const reads = new Map<string, Promise<boolean>>();
         let after = cursor.lastSeq;
         let created = 0;
 
@@ -214,6 +218,12 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
                     // user-owned subscription (another member's inbox).
                     const recipientScope = recipientScopeForEventType(event.type);
                     if (recipientScope && !owner.scopes?.has(recipientScope)) continue;
+                    // A user owner (Settings → Webhooks) receives only what it could
+                    // read in the app: no Team-only records of Teams it is not on, no
+                    // Works it cannot open (review 2026-10-17 F2 / F3).
+                    if (owner.userId && !(await this.userMayRead(owner.userId, event, reads))) {
+                        continue;
+                    }
                     if (await this.deliver(sub, event)) created += 1;
                 }
             }
@@ -248,6 +258,21 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
         }
         const createdAt = sub.createdAt instanceof Date ? sub.createdAt.getTime() : 0;
         return Date.parse(event.occurredAt) >= createdAt;
+    }
+
+    /** Whether a user owner may read the event's record (cached per pass: one user, many subscriptions). */
+    private userMayRead(
+        userId: string,
+        event: DomainEventEnvelope,
+        cache: Map<string, Promise<boolean>>,
+    ): Promise<boolean> {
+        const key = `${userId}:${event.id}`;
+        let verdict = cache.get(key);
+        if (!verdict) {
+            verdict = this.ownerAccess.userMayRead(userId, event);
+            cache.set(key, verdict);
+        }
+        return verdict;
     }
 
     /** Whether the owner may still receive the subscription's events (cached per pass). */
