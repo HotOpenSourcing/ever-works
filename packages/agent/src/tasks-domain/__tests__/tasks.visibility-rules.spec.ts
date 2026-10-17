@@ -153,7 +153,31 @@ describe('Task visibility rules (EW-P1-3)', () => {
                 'approver',
                 'reviewer',
             ]);
-            expect(transitions.transition).toHaveBeenCalledWith(shared, TaskStatus.IN_PROGRESS, {});
+            // Review 2026-10-17 F5: a participant never starts the owner's agent runs.
+            expect(transitions.transition).toHaveBeenCalledWith(shared, TaskStatus.IN_PROGRESS, {
+                force: false,
+                suppressAgentDispatch: true,
+            });
+        });
+
+        // Review 2026-10-17 F5 (P1): `force` skips the approver gate, so the people the
+        // gate checks could complete the Task on their own.
+        it('a participant may not force a move past the gates (403)', async () => {
+            const { service, transitions } = build({ participant: true });
+            await expect(
+                service.transition('reader-1', 'task-1', TaskStatus.DONE, { force: true }, scope),
+            ).rejects.toBeInstanceOf(ForbiddenException);
+            expect(transitions.transition).not.toHaveBeenCalled();
+        });
+
+        it('the owner keeps force and starts their own agent runs, exactly as before', async () => {
+            const { service, tasks, transitions } = build();
+            const own = { ...shared, userId: 'owner-1' };
+            tasks.findByIdAndUser.mockResolvedValueOnce(own);
+            await service.transition('owner-1', 'task-1', TaskStatus.DONE, { force: true }, scope);
+            expect(transitions.transition).toHaveBeenCalledWith(own, TaskStatus.DONE, {
+                force: true,
+            });
         });
 
         it('another reader (e.g. an org member or a watcher) gets 403', async () => {

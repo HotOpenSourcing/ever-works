@@ -141,6 +141,17 @@ export interface CreateTaskInput {
      * file work that is invisible to the humans who own the board.
      */
     hiddenFromBoard?: boolean;
+    /**
+     * The Task is derived from a private record (a private Goal's loop
+     * iteration carries its title and brief): create it `private` with
+     * `visibilityExplicit`, instead of the insert-time `team` /
+     * `organization` default (review 2026-10-17 F1).
+     *
+     * SERVER-WRITTEN ONLY, like `delegationDepth`: deliberately absent from
+     * `CreateTaskDto`. A sub-task of a private parent gets the same stamp
+     * without it (the parent is loaded for the scope check anyway).
+     */
+    derivedFromPrivate?: boolean;
 }
 
 export interface UpdateTaskInput {
@@ -664,14 +675,16 @@ export class TasksService {
      * assignees, approvers and reviewers — the participants the work is waiting on.
      * Watchers and other readers may read and comment, not transition. The transition
      * itself runs with the owner's context (`task.userId`), so no gate changes.
+     * Answers whether the caller is the owner: a participant may not `force` past the
+     * gates and never starts agent work (review 2026-10-17 F5, see {@link transition}).
      */
     private async getForTransition(
         userId: string,
         id: string,
         scope?: OwnershipScope,
-    ): Promise<Task> {
+    ): Promise<{ task: Task; isOwner: boolean }> {
         try {
-            return await this.getOne(userId, id, scope);
+            return { task: await this.getOne(userId, id, scope), isOwner: true };
         } catch (error) {
             if (!(error instanceof NotFoundException) || !this.accessPolicy) throw error;
             const shared = await this.findVisibleNotOwned(userId, id, scope);
@@ -686,7 +699,7 @@ export class TasksService {
                     'Only the owner and the assignees, approvers and reviewers of a Task can move it.',
                 );
             }
-            return shared;
+            return { task: shared, isOwner: false };
         }
     }
 
@@ -844,6 +857,11 @@ export class TasksService {
         // detect existing-cyclic data before insertion. Self-cycle is
         // impossible for a brand-new id, but a malformed parent chain
         // pointing into existing-cyclic data would propagate downstream.
+        // Record visibility (review 2026-10-17 F1): a Task derived from a private
+        // record, or a sub-task of a private Task (an agent breaking it down, a
+        // delegation), is private too. The insert default would make it `team` /
+        // `organization`, and with it the private parent's content and id.
+        let privateSource = input.derivedFromPrivate === true;
         if (input.parentTaskId) {
             const parent = await this.tasks.findByIdAndUser(
                 input.parentTaskId,
@@ -853,6 +871,7 @@ export class TasksService {
             if (!parent) {
                 throw new BadRequestException(`Parent Task ${input.parentTaskId} not found.`);
             }
+            if (parent.visibility === 'private') privateSource = true;
             this.assertParentScopeMatches(
                 {
                     missionId: input.missionId ?? null,
@@ -938,6 +957,9 @@ export class TasksService {
                         estimateMinutes: input.estimateMinutes ?? null,
                         dueSoonNotifiedAt: null,
                         hiddenFromBoard: input.hiddenFromBoard ?? false,
+                        ...(privateSource
+                            ? { visibility: 'private' as const, visibilityExplicit: true }
+                            : {}),
                     },
                     ...managerArg(manager),
                 );
@@ -1879,9 +1901,20 @@ export class TasksService {
         opts: TransitionOptions = {},
         ownershipScope?: OwnershipScope,
     ): Promise<Task> {
-        const task = await this.getForTransition(userId, id, ownershipScope);
+        const { task, isOwner } = await this.getForTransition(userId, id, ownershipScope);
+        // Review 2026-10-17 F5: a participant (user assignee, approver, reviewer) moves
+        // the Task through every gate (`force` skips the approver gate, which exists to
+        // check exactly these people), and never starts a run on somebody else's Task:
+        // no `→ in_progress` agent fan-out, no `→ in_review` reviewer runs, so no spend
+        // of the owner's credits. The same no-spend rule as a non-owner's @agent mention.
+        if (!isOwner && opts.force === true) {
+            throw new ForbiddenException('Only the owner of a Task can force a transition.');
+        }
+        const effective: TransitionOptions = isOwner
+            ? opts
+            : { ...opts, force: false, suppressAgentDispatch: true };
         const from = task.status;
-        const result = await this.transitions.transition(task, to, opts);
+        const result = await this.transitions.transition(task, to, effective);
         await this.logActivity({
             userId,
             taskId: id,

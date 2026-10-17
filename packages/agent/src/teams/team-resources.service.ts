@@ -6,9 +6,11 @@ import {
     Optional,
 } from '@nestjs/common';
 import type { VisibilityAggregate } from '@ever-works/contracts';
+import { RecordAccessPolicy } from '../record-visibility/record-access-policy.service';
+import type { VisibilityPrincipal } from '../record-visibility/record-access.types';
 import { RecordVisibilityService } from '../record-visibility/record-visibility.service';
 import { InjectRepository } from '@nestjs/typeorm';
-import { type EntityManager, In, Repository } from 'typeorm';
+import { type EntityManager, In, type ObjectLiteral, Repository } from 'typeorm';
 import { DomainEventPublisher } from '../domain-events/domain-event-publisher.service';
 import { Agent } from '../entities/agent.entity';
 import { Goal } from '../entities/goal.entity';
@@ -35,7 +37,16 @@ interface ScopedResourceRow {
     id: string;
     tenantId?: string | null;
     organizationId?: string | null;
+    /** Record visibility (EW-P1-3) — tasks, goals, missions, ideas, agents. */
+    visibility?: string | null;
 }
+
+/**
+ * Who reads a Team's resources (review 2026-10-17 F4): a person (the app's Team
+ * page) or an integration key (the integration API). Each sees only the records
+ * it may read; a `private` record never reaches an integration.
+ */
+export type TeamResourcesViewer = { kind: 'user'; userId: string } | { kind: 'integration' };
 
 /**
  * Teams & Prebuilt Companies — Team ↔ resource association service
@@ -83,6 +94,9 @@ export class TeamResourcesService {
         // `team`, detaching its last widens it to `organization` (while not chosen
         // by hand). @Optional(): absent means no automatic change.
         @Optional() private readonly visibility?: RecordVisibilityService,
+        // Review 2026-10-17 F4 — the read policy the Team's resource list is filtered
+        // through. @Optional(): absent, a `private` record is still never listed.
+        @Optional() private readonly accessPolicy?: RecordAccessPolicy,
     ) {}
 
     /** The resource-side event of a team resource change (its DTO's `teamIds` moved). */
@@ -129,6 +143,7 @@ export class TeamResourcesService {
         orgId: string,
         teamId: string,
         input: AttachTeamResourceInput,
+        options: { viewer?: TeamResourcesViewer } = {},
     ): Promise<TeamResourceItem> {
         const resourceType = this.normalizeResourceType(input.resourceType);
         const team = await this.getTeamOrThrow(orgId, teamId);
@@ -138,6 +153,12 @@ export class TeamResourcesService {
         }
 
         const resource = await this.assertResourceInOrg(org, resourceType, input.resourceId);
+        const isPrivate = resource.visibility === 'private';
+        // Review 2026-10-17 F4: an integration never sees a private record, so it may
+        // not attach one either, and the 404 tells it nothing about whether it exists.
+        if (isPrivate && options.viewer?.kind === 'integration') {
+            throw new NotFoundException(`Resource ${input.resourceId} not found`);
+        }
 
         const row = this.resources.create({
             teamId: team.id,
@@ -162,7 +183,11 @@ export class TeamResourcesService {
                           team.id,
                           'team.resource.added',
                           { teamId: team.id, resourceType, resourceId: input.resourceId },
-                          { changedFields: ['resources'] },
+                          // A private record's link stays off the feed (F4).
+                          {
+                              changedFields: ['resources'],
+                              ...(isPrivate ? { visibility: 'private' } : {}),
+                          },
                       );
                       await this.recomputeVisibilityIn(manager, resourceType, input.resourceId);
                       await this.recordResourceSide(
@@ -194,6 +219,7 @@ export class TeamResourcesService {
         const type = this.normalizeResourceType(resourceType);
         await this.getTeamOrThrow(orgId, teamId);
         const publisher = this.domainEvents;
+        const isPrivate = publisher ? await this.isPrivateRecord(type, resourceId) : false;
         const result = publisher
             ? await publisher.transaction(async (manager) => {
                   const deleted = await manager
@@ -206,7 +232,11 @@ export class TeamResourcesService {
                           teamId,
                           'team.resource.removed',
                           { teamId, resourceType: type, resourceId, deleted: true },
-                          { changedFields: ['resources'] },
+                          // A private record's link stays off the feed (F4).
+                          {
+                              changedFields: ['resources'],
+                              ...(isPrivate ? { visibility: 'private' } : {}),
+                          },
                       );
                       await this.recomputeVisibilityIn(manager, type, resourceId);
                       await this.recordResourceSide(publisher, manager, type, resourceId);
@@ -263,13 +293,25 @@ export class TeamResourcesService {
         }
     }
 
-    /** List a Team's attached resources, resolved + grouped by type. */
-    async listForTeam(orgId: string, teamId: string): Promise<TeamResourcesGrouped> {
-        await this.getTeamOrThrow(orgId, teamId);
-        const rows = await this.resources.find({
+    /**
+     * List a Team's attached resources, resolved + grouped by type: only those the
+     * viewer may read (review 2026-10-17 F4). A task, goal, mission, idea or agent
+     * goes through `visibleTo(viewer)`, so a record made private by hand (its
+     * `team_resources` row stays) or a Team-only record of a Team the viewer is not
+     * on is not listed. Without a viewer, a `private` record is never listed.
+     */
+    async listForTeam(
+        orgId: string,
+        teamId: string,
+        viewer?: TeamResourcesViewer,
+    ): Promise<TeamResourcesGrouped> {
+        const team = await this.getTeamOrThrow(orgId, teamId);
+        const all = await this.resources.find({
             where: { teamId },
             order: { createdAt: 'ASC' },
         });
+        const hidden = await this.unreadableResources(all, team, viewer);
+        const rows = all.filter((row) => !hidden.has(`${row.resourceType}:${row.resourceId}`));
 
         const grouped: TeamResourcesGrouped = {
             work: [],
@@ -318,6 +360,70 @@ export class TeamResourcesService {
             order: { name: 'ASC' },
         });
         return teamRows.map((t) => ({ teamId: t.id, name: t.name, slug: t.slug }));
+    }
+
+    // ── Read filtering (review 2026-10-17 F4) ──
+
+    /** `type:id` of the rows whose record the viewer may not read. */
+    private async unreadableResources(
+        rows: TeamResource[],
+        team: Team,
+        viewer: TeamResourcesViewer | undefined,
+    ): Promise<Set<string>> {
+        const hidden = new Set<string>();
+        const idsByType = new Map<VisibilityAggregate, string[]>();
+        for (const row of rows) {
+            const aggregate = this.isKnownType(row.resourceType)
+                ? this.visibilityAggregateOf(row.resourceType)
+                : null;
+            if (!aggregate) continue;
+            if (aggregate === 'goal' && !this.goals) continue;
+            idsByType.set(aggregate, [...(idsByType.get(aggregate) ?? []), row.resourceId]);
+        }
+        for (const [aggregate, ids] of idsByType) {
+            const visible = await this.readableIds(aggregate, ids, team, viewer);
+            for (const id of ids) if (!visible.has(id)) hidden.add(`${aggregate}:${id}`);
+        }
+        return hidden;
+    }
+
+    private async readableIds(
+        aggregate: VisibilityAggregate,
+        ids: string[],
+        team: Team,
+        viewer: TeamResourcesViewer | undefined,
+    ): Promise<Set<string>> {
+        const repo = this.repoFor(aggregate) as unknown as Repository<ObjectLiteral>;
+        const organizationId = team.organizationId ?? null;
+        if (viewer && this.accessPolicy && organizationId) {
+            const principal: VisibilityPrincipal =
+                viewer.kind === 'user'
+                    ? { kind: 'user', userId: viewer.userId }
+                    : { kind: 'integration', organizationIds: [organizationId] };
+            const context = await this.accessPolicy.contextFor(principal, {
+                tenantId: team.tenantId ?? null,
+                organizationId,
+            });
+            const qb = repo
+                .createQueryBuilder('rec')
+                .select('rec.id', 'id')
+                .where('rec.id IN (:...teamResourceIds)', { teamResourceIds: ids });
+            this.accessPolicy.applyVisibleTo(qb, 'rec', aggregate, context, 'organization', 'trv');
+            const found = await qb.getRawMany<{ id: string }>();
+            return new Set(found.map((row) => row.id));
+        }
+        const found = (await repo.find({ where: { id: In(ids) } })) as ScopedResourceRow[];
+        return new Set(found.filter((row) => row.visibility !== 'private').map((row) => row.id));
+    }
+
+    /** Whether the record behind a team resource is `private` (tasks, goals, missions, ideas, agents). */
+    private async isPrivateRecord(type: TeamResourceType, id: string): Promise<boolean> {
+        if (!this.visibilityAggregateOf(type)) return false;
+        if (type === 'goal' && !this.goals) return false;
+        const row = (await this.repoFor(type).findOne({
+            where: { id },
+        })) as ScopedResourceRow | null;
+        return row?.visibility === 'private';
     }
 
     // ── Validation helpers ──

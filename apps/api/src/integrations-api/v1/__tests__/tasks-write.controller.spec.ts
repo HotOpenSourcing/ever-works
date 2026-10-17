@@ -1,5 +1,6 @@
 import {
     DuplicateExternalRefError,
+    ResourceNotFoundError,
     VersionMismatchError,
 } from '@ever-works/agent/integrations-api';
 import { IntegrationHttpException } from '../../../auth/integration/integration-http.exception';
@@ -192,6 +193,46 @@ describe('IntegrationTasksWriteController', () => {
         expect(visibility.setVisibility).toHaveBeenLastCalledWith('task', 'task-1', 'organization');
     });
 
+    // Review 2026-10-17 F1: a child of a private task is private, so an integration
+    // that cannot read the parent gets 404 before anything is written.
+    it('refuses a parentTaskId the integration cannot read, on create and PATCH', async () => {
+        const { controller, tasks, resources } = setup();
+        const privateParent = (kind: string, _org: string, id: string) => {
+            if (id === 'private-parent') throw new ResourceNotFoundError('task', id);
+            return Promise.resolve({ dto: { id, version: 3, teamIds: [] }, etag: '"3"' });
+        };
+        resources.get.mockImplementation(privateParent as never);
+        await expect(
+            controller.create(
+                user,
+                { title: 'Child', parentTaskId: 'private-parent' },
+                undefined,
+                req(),
+                res(),
+            ),
+        ).rejects.toBeInstanceOf(ResourceNotFoundError);
+        expect(tasks.create).not.toHaveBeenCalled();
+
+        await expect(
+            controller.update(user, 'task-1', { parentTaskId: 'private-parent' }, undefined, res()),
+        ).rejects.toBeInstanceOf(ResourceNotFoundError);
+        expect(tasks.update).not.toHaveBeenCalled();
+
+        await controller.create(
+            user,
+            { title: 'Child', parentTaskId: 'shared-parent' },
+            undefined,
+            req(),
+            res(),
+        );
+        expect(tasks.create).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({ parentTaskId: 'shared-parent' }),
+            expect.anything(),
+            expect.anything(),
+        );
+    });
+
     it("refuses an externalRef of another integration's source", async () => {
         const { controller, tasks } = setup();
         await expect(
@@ -239,10 +280,13 @@ describe('IntegrationTasksWriteController', () => {
             { title: 'New', teamId: 'team-a' },
             expect.anything(),
         );
-        expect(teamResources.attach).toHaveBeenCalledWith('owner-1', ORG, 'team-c', {
-            resourceType: 'task',
-            resourceId: 'task-1',
-        });
+        expect(teamResources.attach).toHaveBeenCalledWith(
+            'owner-1',
+            ORG,
+            'team-c',
+            { resourceType: 'task', resourceId: 'task-1' },
+            { viewer: { kind: 'integration' } },
+        );
         expect(teamResources.detach).toHaveBeenCalledWith(ORG, 'team-b', 'task', 'task-1');
         expect(response.setHeader).toHaveBeenCalledWith('ETag', '"3"');
         await expect(
