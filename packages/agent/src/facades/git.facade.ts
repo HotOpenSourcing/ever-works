@@ -25,6 +25,8 @@ import type {
     GitRepositoryWithPermissions,
     ListRepositoriesOptions,
     ListPullRequestsOptions,
+    GitCommitFilesInput,
+    GitCommitFilesResult,
     GitCommitter,
     GitFileChange,
     IGitFacade,
@@ -1590,6 +1592,27 @@ export class GitFacadeService implements IGitFacade {
             throw new GitOperationNotSupportedError('createBranchFromSha', plugin.id);
         }
         return impl.call(plugin, owner, repo, name, sha, token);
+    }
+
+    /**
+     * APW-03 T22 — land files on a branch in ONE provider-API commit, no clone
+     * (plan §7:717-719). Fast-forward only: a branch that is not at
+     * `input.baseSha` rejects with code `nonFastForward`. A provider without the
+     * capability raises `GitOperationNotSupportedError` (→ 409), which App Works
+     * reads as `provider_unsupported`.
+     */
+    async commitFiles(
+        owner: string,
+        repo: string,
+        input: GitCommitFilesInput,
+        options: GitFacadeOptions,
+    ): Promise<GitCommitFilesResult> {
+        const { plugin, token } = await this.resolvePluginAndToken(options);
+        const impl = plugin.commitFiles;
+        if (typeof impl !== 'function') {
+            throw new GitOperationNotSupportedError('commitFiles', plugin.id);
+        }
+        return impl.call(plugin, owner, repo, input, token);
     }
 
     /**

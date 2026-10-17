@@ -9,6 +9,8 @@ import type {
 	GitPullRequest,
 	GitPullRequestAuthor,
 	GitPullRequestFile,
+	GitCommitFilesInput,
+	GitCommitFilesResult,
 	CreateRepoOptions,
 	UpdateRepoOptions,
 	CreatePROptions,
@@ -1716,6 +1718,104 @@ export class GitHubApiService {
 				isProtected: false
 			};
 		} catch (err) {
+			throw toGitProviderError(err, 'contents');
+		}
+	}
+
+	/**
+	 * APW-03 T22 — land files on a branch in ONE commit through the Git Data API
+	 * (blobs → tree with `base_tree` → commit → `updateRef` without force). No
+	 * clone, no force.
+	 *
+	 * Fast-forward only: the branch head is read first and must equal
+	 * `input.baseSha`; a mismatch (or a 422 "not a fast forward" from the ref
+	 * update, i.e. a race between the read and the write) rejects with a
+	 * `GitProviderRequestError('conflict', 409)` whose `code` is `nonFastForward`
+	 * — the spelling plan §7:719 fixes — and the orphan commit is never
+	 * referenced by any branch.
+	 */
+	async commitFiles(
+		owner: string,
+		repo: string,
+		input: GitCommitFilesInput,
+		token: string,
+		baseUrl?: string
+	): Promise<GitCommitFilesResult> {
+		const octokit = this.createOctokit(token, baseUrl);
+		const nonFastForward = (): GitProviderRequestError => {
+			const error = new GitProviderRequestError('conflict', 409);
+			(error as GitProviderRequestError & { code: string }).code = 'nonFastForward';
+			return error;
+		};
+
+		if (!Array.isArray(input?.files) || input.files.length === 0) {
+			throw refusalError('noFiles');
+		}
+		for (const file of input.files) {
+			const path = typeof file?.path === 'string' ? file.path : '';
+			if (path === '' || path.startsWith('/') || path.split('/').some((part) => part === '..' || part === '')) {
+				throw refusalError('invalidPath');
+			}
+		}
+
+		try {
+			const { data: ref } = await octokit.rest.git.getRef({ owner, repo, ref: `heads/${input.branch}` });
+			if (ref.object.sha !== input.baseSha) {
+				throw nonFastForward();
+			}
+
+			const { data: baseCommit } = await octokit.rest.git.getCommit({
+				owner,
+				repo,
+				commit_sha: input.baseSha
+			});
+
+			const tree: Array<{ path: string; mode: '100644'; type: 'blob'; sha: string }> = [];
+			for (const file of input.files) {
+				const { data: blob } = await octokit.rest.git.createBlob({
+					owner,
+					repo,
+					content: file.content,
+					encoding: file.encoding === 'base64' ? 'base64' : 'utf-8'
+				});
+				tree.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.sha });
+			}
+
+			const { data: newTree } = await octokit.rest.git.createTree({
+				owner,
+				repo,
+				base_tree: baseCommit.tree.sha,
+				tree
+			});
+
+			const { data: commit } = await octokit.rest.git.createCommit({
+				owner,
+				repo,
+				message: input.message,
+				tree: newTree.sha,
+				parents: [input.baseSha]
+			});
+
+			try {
+				await octokit.rest.git.updateRef({
+					owner,
+					repo,
+					ref: `heads/${input.branch}`,
+					sha: commit.sha,
+					force: false
+				});
+			} catch (err) {
+				if (err instanceof RequestError && err.status === 422) {
+					throw nonFastForward();
+				}
+				throw err;
+			}
+
+			return { commitSha: commit.sha };
+		} catch (err) {
+			if (err instanceof GitProviderRequestError) {
+				throw err;
+			}
 			throw toGitProviderError(err, 'contents');
 		}
 	}
