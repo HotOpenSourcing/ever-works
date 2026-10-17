@@ -41,7 +41,9 @@ describe('AddAgentRunLogsPurgedAt1795162100000', () => {
         ).find((candidate) => candidate.name === 'logsPurgedAt');
         expect(column?.notnull).toBe(0);
         expect(column?.dflt_value).toBeNull();
-        const indexes = (await dataSource.query(`PRAGMA index_list("agent_runs")`)) as Array<{ name: string }>;
+        const indexes = (await dataSource.query(`PRAGMA index_list("agent_runs")`)) as Array<{
+            name: string;
+        }>;
         expect(indexes.map((index) => index.name)).toContain('idx_agent_runs_logs_purge');
         expect(await dataSource.query(`SELECT "logsPurgedAt" FROM "agent_runs"`)).toEqual([
             { logsPurgedAt: null },

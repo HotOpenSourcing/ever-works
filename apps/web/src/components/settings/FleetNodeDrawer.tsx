@@ -378,7 +378,9 @@ export function FleetNodeDrawer({
                                                     size="sm"
                                                     className="ml-2"
                                                     disabled={isPending}
-                                                    onClick={() => onClearModelThrottle(throttle.provider)}
+                                                    onClick={() =>
+                                                        onClearModelThrottle(throttle.provider)
+                                                    }
                                                     data-testid={`fleet-node-drawer-clear-throttle-${throttle.provider}`}
                                                 >
                                                     {t('modelThrottles.clear')}
