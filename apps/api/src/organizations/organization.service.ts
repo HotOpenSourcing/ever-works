@@ -624,20 +624,6 @@ export class OrganizationService {
     }
 
     /**
-     * Allocate a slug, run `create`, and re-allocate if the UNIQUE index says
-     * somebody else took it first.
-     *
-     * The allocator is a read-then-return loop with no reservation, so its
-     * answer is only ever "free a moment ago". The DB index is the actual
-     * arbiter. Losing that race is normal under concurrency, not exceptional —
-     * so it is retried, and only a run of consecutive losses is an error.
-     *
-     * The whole transaction is retried, not just the INSERT: it rolls back as a
-     * unit, so a failed attempt leaves nothing behind and the next attempt
-     * starts clean. `allocateUsername` is called fresh each time, so attempt 2
-     * sees the winner's row and picks the next free suffix.
-     */
-    /**
      * `dataSource.transaction`, queued on single-connection drivers (better-sqlite3:
      * local/self-hosted installs, CI and e2e). Every caller shares ONE query runner
      * there, so an unqueued transaction overlapping a queued one (domain events, record
@@ -651,6 +637,20 @@ export class OrganizationService {
         );
     }
 
+    /**
+     * Allocate a slug, run `create`, and re-allocate if the UNIQUE index says
+     * somebody else took it first.
+     *
+     * The allocator is a read-then-return loop with no reservation, so its
+     * answer is only ever "free a moment ago". The DB index is the actual
+     * arbiter. Losing that race is normal under concurrency, not exceptional —
+     * so it is retried, and only a run of consecutive losses is an error.
+     *
+     * The whole transaction is retried, not just the INSERT: it rolls back as a
+     * unit, so a failed attempt leaves nothing behind and the next attempt
+     * starts clean. `allocateUsername` is called fresh each time, so attempt 2
+     * sees the winner's row and picks the next free suffix.
+     */
     private async withSlugCollisionRetry<T>(
         slugBase: string,
         create: (slug: string) => Promise<T>,
