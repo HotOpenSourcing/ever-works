@@ -1,5 +1,6 @@
 import { KubernetesPlugin } from '@ever-works/k8s-plugin';
 import { KubernetesAppsTierPlugin } from '../index.js';
+import { managedNamespaceGrant } from '../k8s-apps-tier.plugin.js';
 
 /** APW-10 lite — the managed target's plugin, and the two-way target split with `k8s`. */
 
@@ -57,5 +58,46 @@ describe('KubernetesAppsTierPlugin', () => {
 
 	it('refuses website deploys', async () => {
 		await expect(new KubernetesAppsTierPlugin().deploy({} as never, KUBECONFIG)).rejects.toThrow(/App Works only/);
+	});
+});
+
+describe('the per-namespace grant (least privilege)', () => {
+	it('applies the Namespace and the RoleBinding before deploying, and only into ewapp-*', async () => {
+		const applied: Array<Record<string, unknown>> = [];
+		const api = { applyObject: vi.fn(async (_c: string, manifest: Record<string, unknown>) => void applied.push(manifest)) };
+		const plugin = new KubernetesAppsTierPlugin({ api: api as never, env: {} });
+		const deployer = vi
+			.spyOn(KubernetesPlugin.prototype, 'deployApp')
+			.mockResolvedValue({ outcome: 'succeeded' } as never);
+		await plugin.deployApp(
+			{ ref: managedRef, workSlug: 'helpdesk', policy: { podSecurity: 'restricted' } } as never,
+			KUBECONFIG,
+			{} as never
+		);
+		expect(applied.map((o) => o.kind)).toEqual(['Namespace', 'RoleBinding']);
+		expect((applied[0].metadata as { name: string }).name).toBe('ewapp-0123abcd');
+		expect(applied[1]).toMatchObject({
+			metadata: { name: 'ever-works-apps-controller', namespace: 'ewapp-0123abcd' },
+			roleRef: { kind: 'ClusterRole', name: 'ever-works-apps-namespace-admin' },
+			subjects: [{ kind: 'ServiceAccount', name: 'ever-works-apps-controller', namespace: 'ever-works-apps-system' }]
+		});
+		expect(deployer).toHaveBeenCalled();
+
+		await expect(
+			plugin.deployApp({ ref: { ...managedRef, namespace: 'kube-system' } } as never, KUBECONFIG, {} as never)
+		).rejects.toThrow(/must start with 'ewapp-'/);
+		deployer.mockRestore();
+	});
+
+	it('honours the service-account and role overrides', () => {
+		expect(
+			managedNamespaceGrant('ewapp-1', {
+				EVER_WORKS_APPS_MANAGED_SERVICE_ACCOUNT: 'ops/apps-bot',
+				EVER_WORKS_APPS_MANAGED_NAMESPACE_ROLE: 'tenant-admin'
+			})
+		).toMatchObject({
+			roleRef: { name: 'tenant-admin' },
+			subjects: [{ name: 'apps-bot', namespace: 'ops' }]
+		});
 	});
 });

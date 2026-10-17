@@ -9276,8 +9276,8 @@
                         "description": "Runs on a Kubernetes cluster you control."
                     },
                     "everWorksApps": {
-                        "label": "Ever Works Apps",
-                        "description": "We run it for you.",
+                        "label": "Ever Works (managed)",
+                        "description": "We run it for you on our cluster.",
                         "unavailable": "Coming soon — managed hosting for apps isn't open yet.",
                         "ineligible": "Not available yet for this app."
                     },

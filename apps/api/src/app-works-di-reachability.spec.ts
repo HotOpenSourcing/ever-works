@@ -209,11 +209,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:107-125 (APW-06 T73, APW-06/tasks.md:1271-1276)',
     },
     {
-        key: 'AppDeployRequestModule | AppDeployPreconditionsService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten in this tree.",
-        source: 'packages/agent/src/app-runtime/app-deploy-request.module.ts:73; APW-10 T27 (tasks.md:466,475)',
-    },
-    {
         key: 'AppDeployRequestModule | AppDeployPreconditionsService | APP_DEPLOY_HOST_SOURCE',
         reason: '`AppHostsService` exists but its eight stores are unbound, so binding it would answer null; the check is advisory.',
         source: 'packages/agent/src/app-runtime/app-deploy-request.module.ts:69-72; app-deploy-preconditions.service.ts:249 (APW-06 T26)',
@@ -237,11 +232,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         key: 'AppEnvModule | AppEnvService | APP_ENV_DEPLOY_FINGERPRINTS',
         reason: 'Provisional: the swap is `AppRuntimeFacadeService`, which is worker-only by design.',
         source: 'packages/agent/src/app-env/app-env.service.ts:299-311 (APW-06); app-works-port-dormancy.spec.ts:59-60',
-    },
-    {
-        key: 'AppLauncherModule[agent] | AppLauncherService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten in this tree.",
-        source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
     },
     {
         key: 'AppLauncherModule[agent] | AppLauncherService | APP_PUBLISHED_HOSTS',
@@ -274,24 +264,9 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'apps/api/src/app-works/app-works.module.ts:133-144 (APW-01 T15)',
     },
     {
-        key: 'AppWorksModule[agent] | AppSourceInspectorService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten in this tree.",
-        source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
-    },
-    {
-        key: 'AppWorksModule[agent] | AppWorkCreateService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten in this tree.",
-        source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
-    },
-    {
         key: 'AppWorksModule[agent] | AppWorkCreateService | APP_PROMPTED_VALUES_PORT',
         reason: 'Unbound on purpose: binding it means inventing the actor and ordering APW-07 T24/T25 own.',
         source: 'packages/agent/src/app-runtime/__tests__/app-works-port-dormancy.spec.ts:373-379; app-works/app-prompted-values.port.ts:46-53',
-    },
-    {
-        key: 'FacadesModule | AppRuntimeFacadeService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten; absent, the facade answers `tier_closed`, the fail-closed default. In the API every method refuses (`APP_CLUSTER_IO_IN_API`) before this is read anyway.",
-        source: 'packages/agent/src/facades/app-runtime.facade.ts:50-56,85; docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466 (APW-10 T27)',
     },
     {
         key: 'FacadesModule | AppRuntimeFacadeService | WORK_APP_RUNTIME_STATES',

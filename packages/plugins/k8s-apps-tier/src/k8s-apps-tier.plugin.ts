@@ -1,11 +1,38 @@
 import type {
+	AppDeployHooks,
+	AppDeployResult,
 	AppDestroyResult,
+	AppLimitRangeInput,
+	AppRenderInput,
 	AppTargetRef,
 	DeploymentConfig,
 	DeploymentResult,
 	PluginManifest
 } from '@ever-works/plugin';
-import { K8sPluginError, KubernetesPlugin, assertSupportedKubeconfig } from '@ever-works/k8s-plugin';
+import {
+	K8sPluginError,
+	KubernetesApiService,
+	KubernetesPlugin,
+	assertSupportedKubeconfig,
+	renderNamespace
+} from '@ever-works/k8s-plugin';
+
+/** The prefix every managed namespace carries — what the operator's admission policy enforces. */
+export const MANAGED_NAMESPACE_PREFIX = 'ewapp-';
+
+/** `<namespace>/<name>` of the controller ServiceAccount the managed kubeconfig authenticates as. */
+export const MANAGED_SERVICE_ACCOUNT_ENV = 'EVER_WORKS_APPS_MANAGED_SERVICE_ACCOUNT';
+export const DEFAULT_MANAGED_SERVICE_ACCOUNT = 'ever-works-apps-system/ever-works-apps-controller';
+
+/** The namespaced-admin ClusterRole each managed namespace's RoleBinding grants. */
+export const MANAGED_NAMESPACE_ROLE_ENV = 'EVER_WORKS_APPS_MANAGED_NAMESPACE_ROLE';
+export const DEFAULT_MANAGED_NAMESPACE_ROLE = 'ever-works-apps-namespace-admin';
+
+/** `false` turns the per-namespace grant off (an operator who bound the role cluster-wide). */
+export const MANAGED_NAMESPACE_GRANT_ENV = 'EVER_WORKS_APPS_MANAGED_NAMESPACE_GRANT';
+
+/** The RoleBinding's own name inside each managed namespace. */
+export const MANAGED_NAMESPACE_GRANT_NAME = 'ever-works-apps-controller';
 
 /**
  * **APW-10 lite — Ever Works Apps (managed).** The `apps-tier` deployment plugin that runs App
@@ -35,8 +62,23 @@ import { K8sPluginError, KubernetesPlugin, assertSupportedKubeconfig } from '@ev
  *    included) rather than keeping volumes in the platform's cluster indefinitely.
  * 4. **No website deploys.** It is hidden from the deploy-provider lists and refuses the legacy
  *    website `deploy()` path outright.
+ * 5. **Least privilege, per namespace.** Before the first write into a managed namespace the plugin
+ *    applies the Namespace and a RoleBinding granting the controller ServiceAccount the operator's
+ *    namespaced-admin ClusterRole IN that namespace only (see {@link managedNamespaceGrant}).
  */
 export class KubernetesAppsTierPlugin extends KubernetesPlugin {
+	private readonly tierApi: KubernetesApiService;
+	private readonly env: NodeJS.ProcessEnv;
+
+	constructor(
+		opts: ConstructorParameters<typeof KubernetesPlugin>[0] & { env?: NodeJS.ProcessEnv } = {}
+	) {
+		const api = opts?.api ?? new KubernetesApiService();
+		super({ ...opts, api });
+		this.tierApi = api;
+		this.env = opts?.env ?? process.env;
+	}
+
 	override readonly id: string = 'k8s-apps-tier';
 	override readonly name: string = 'Ever Works Apps (managed)';
 	override readonly capabilities: readonly string[] = ['deployment', 'apps-tier'];
@@ -64,6 +106,56 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 		return credential;
 	}
 
+	/**
+	 * Point 5: the per-namespace grant comes first. The managed credential holds only cluster-wide
+	 * namespace + RoleBinding rights (the operator's admission policy narrows both to `ewapp-*`);
+	 * everything inside a namespace — Secrets included — is granted by a RoleBinding IN that
+	 * namespace, so the credential can never read another tenant's or the platform's objects.
+	 */
+	override async deployApp(input: AppRenderInput, credential: string, hooks: AppDeployHooks): Promise<AppDeployResult> {
+		this.assertThisPluginServes(input?.ref);
+		const guarded = await this.guardedAppCredential(credential, input?.ref?.kubeContext);
+		await this.ensureNamespaceGrant(input, guarded);
+		return super.deployApp(input, credential, hooks);
+	}
+
+	override async prepareAppNamespace(
+		ref: AppTargetRef,
+		credential: string,
+		opts: { isolation: boolean; limitRange: AppLimitRangeInput }
+	): Promise<{ warnings: Array<{ code: string; message: string }> }> {
+		this.assertThisPluginServes(ref);
+		const guarded = await this.guardedAppCredential(credential, ref?.kubeContext);
+		await this.ensureNamespaceGrant(
+			{ ref, workSlug: '', policy: { podSecurity: 'restricted' } } as unknown as AppRenderInput,
+			guarded
+		);
+		return super.prepareAppNamespace(ref, credential, opts);
+	}
+
+	/**
+	 * The Namespace (rendered by the same renderer the deployer uses, so its server-side apply is the
+	 * same body) and the RoleBinding that makes it workable — both idempotent.
+	 */
+	private async ensureNamespaceGrant(input: AppRenderInput, credential: string): Promise<void> {
+		const namespace = String(input?.ref?.namespace ?? '');
+		if (!namespace.startsWith(MANAGED_NAMESPACE_PREFIX)) {
+			throw new K8sPluginError(
+				'NOT_CONFIGURED',
+				`Managed App namespaces must start with '${MANAGED_NAMESPACE_PREFIX}' (got '${namespace}').`
+			);
+		}
+		if ((this.env[MANAGED_NAMESPACE_GRANT_ENV] ?? '').trim() === 'false') return;
+
+		const context = input?.ref?.kubeContext ?? undefined;
+		await this.tierApi.applyObject(
+			credential,
+			renderNamespace(input) as unknown as Record<string, unknown>,
+			context
+		);
+		await this.tierApi.applyObject(credential, managedNamespaceGrant(namespace, this.env), context);
+	}
+
 	/** Point 3: the managed namespace goes, data included. */
 	override async destroyApp(
 		ref: AppTargetRef,
@@ -80,4 +172,21 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 			'Ever Works Apps (managed) runs App Works only; it is not a website deployment provider.'
 		);
 	}
+}
+
+/** The RoleBinding that grants the controller its namespaced-admin role inside ONE managed namespace. */
+export function managedNamespaceGrant(namespace: string, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
+	const [saNamespace, saName] = ((env[MANAGED_SERVICE_ACCOUNT_ENV] ?? '').trim() || DEFAULT_MANAGED_SERVICE_ACCOUNT).split('/');
+	const role = (env[MANAGED_NAMESPACE_ROLE_ENV] ?? '').trim() || DEFAULT_MANAGED_NAMESPACE_ROLE;
+	return {
+		apiVersion: 'rbac.authorization.k8s.io/v1',
+		kind: 'RoleBinding',
+		metadata: {
+			name: MANAGED_NAMESPACE_GRANT_NAME,
+			namespace,
+			labels: { 'app.kubernetes.io/managed-by': 'ever-works', 'app.kubernetes.io/part-of': 'ever-works-apps' }
+		},
+		roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'ClusterRole', name: role },
+		subjects: [{ kind: 'ServiceAccount', name: saName || 'ever-works-apps-controller', namespace: saNamespace || 'ever-works-apps-system' }]
+	};
 }
