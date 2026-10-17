@@ -277,7 +277,8 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'POST /api/me/goals': { events: ['goal.created'] },
     // An `outcome` override completes the Goal: `goal.status_changed` instead.
     'PATCH /api/me/goals/:id': { events: ['goal.updated', 'goal.status_changed'] },
-    'DELETE /api/me/goals/:id': { events: ['goal.deleted'] },
+    // + `mission.goal.unlinked` for each Mission the Goal was linked to (the cascade).
+    'DELETE /api/me/goals/:id': { events: ['goal.deleted', 'mission.goal.unlinked'] },
     'POST /api/me/goals/:id/activate': { events: ['goal.status_changed'] },
     'POST /api/me/goals/:id/pause': { events: ['goal.status_changed'] },
     // The evaluation's auto-outcome, else the throttled progress event.
@@ -509,7 +510,7 @@ export const DOMAIN_EVENT_ROUTE_COVERAGE: Readonly<Record<string, RouteCoverage>
     'PUT /api/integrations/v1/goals/:id/criteria': { events: ['goal.updated'] },
     'PUT /api/integrations/v1/goals/:id/dod': { events: ['goal.updated'] },
     'POST /api/integrations/v1/goals/:id/samples': { events: ['goal.progress_changed'] },
-    'DELETE /api/integrations/v1/goals/:id': { events: ['goal.deleted'] },
+    'DELETE /api/integrations/v1/goals/:id': { events: ['goal.deleted', 'mission.goal.unlinked'] },
 
     // ── Integration API v1 — Missions (EW-P2-5) ───────────────────────────────
     // + `mission.deleted` when a concurrent create won the externalRef (ours is undone).

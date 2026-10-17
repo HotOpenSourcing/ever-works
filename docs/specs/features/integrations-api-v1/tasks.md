@@ -75,7 +75,7 @@
       external sources are never read from a provider on evaluation; schemas `goal.schema.json`, `CreateGoal`,
       `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; contract `v1-draft.11` (CR-9). Recording points:
       [`domain-events`](../domain-events/tasks.md) T21.
-- [x] **T33** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
+- [x] **T37** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
       no schedule / auto-build, title required; Teams + D11 in the create transaction), `PATCH /missions/:id` (content,
       Teams, visibility; `status` paused / completed + `outcome`, never `active`), `PUT /missions/:id/goals`,
       `PUT /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
