@@ -38,6 +38,10 @@ export type {
 	ListRepositoriesOptions,
 	GitPullRequestFile,
 	ListPullRequestsOptions,
+	// APW-03 T22 — the clone-free commit.
+	GitCommitFile,
+	GitCommitFilesInput,
+	GitCommitFilesResult,
 	// PR insights (kanban run cockpit M5/M6).
 	GitCheckStatus,
 	GitCheckConclusion,

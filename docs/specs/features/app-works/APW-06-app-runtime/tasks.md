@@ -1329,3 +1329,25 @@ code comments and specs cite.
   `APP_HOSTS_DEPLOYMENT_STORE`, `APP_HOSTS_DEPLOY_REQUESTER`, `APP_HOSTS_WORK_STORE`. The DI reachability spec moved
   them from `OPEN_WORKER_GAPS` to `EXPECTED_WORKER_UNBOUND`, each citing this note; the list stays exact both ways, so
   the slice that binds one also deletes its entry. Unbound, each keeps its documented fail-closed answer.
+- **T71 / T73 / T44 / T72 / T28 / T29 / T35 (2026-10-17, lane aw-deploy, PR #2681) — decision B1 and the worker
+  composition.** **Decision B1** (owner-delegated, 2026-10-17): inside the isolated App runtime worker,
+  `AppDeployPreconditionsService.evaluate` skips §5.1 step 1's dispatcher gate when it runs in the worker context
+  (`isAppClusterWorkerContext()`) for the Deployment that **holds the deploy lock** (the run already passed §6.2's
+  attestation in `appClusterWorkerRefusal()`); a Deployment that lost the lock (cancelled, superseded, timed out) meets
+  the ordinary gate and answers `worker_not_isolated` with a lock message. The API never carries the worker-context flag,
+  so its request-time answer is unchanged. `APP_DEPLOY_DISPATCHER_AVAILABILITY` therefore stays **deliberately** unbound
+  in the worker; `APP_DEPLOY_DISPATCHER` is bound for §5.6 step 7's dequeue only, through the API's own gate
+  (`remoteMap.AppDeployDispatchRelay`). T71 status items (a)–(c) are closed: `WORK_APP_RUNTIME_STATES` →
+  `remoteMap.WorkAppRuntimeStateRepository`; `APP_RUNTIME_ENV_SOURCE` → `remoteMap.AppEnvRuntimeSource`;
+  `APP_IMAGE_PULL_CREDENTIAL_SOURCE` (public image ⇒ none, private GHCR ⇒ the owner's GitHub token),
+  `APP_RUNTIME_TARGET` (T20's facade + `prepareAppNamespace`) and `APPS_TIER_POLICY` (minimal APW-10: the managed target
+  opens only with `EVER_WORKS_APPS_MANAGED_ENABLED=true`, else the existing `managed_disabled` / `tier_closed`) are real
+  (`packages/agent/src/app-runtime/app-runtime-worker.adapters.ts`). Also bound: T72's
+  `RegistryAppImageReferenceResolver`, T28's `AppRuntimeEventRelayService` (catalogue + forbidden keys, re-emitted via
+  `EventEmitter2`; the Activity listener half of T28 is still open), T29's two producers, `APP_UPSTREAM_STATE_READER`,
+  `APP_COMMIT_ANCESTRY`, `APP_DEPLOY_DEPLOYMENT_STORE` (with the orchestrator's `update`) and T26's host stores. The
+  worker's `WorkRepository` now answers real `Work` instances (on SuperJSON plain objects `getRepoOwner` threw and every
+  Your-cluster access was refused). T35's Build-succeeded half: `AppBuildSucceededListener` (the spec-applied listener
+  is still open). Proof: `packages/tasks/src/trigger/worker/modules/__tests__/trigger-app-runtime.deploy.spec.ts` boots
+  the module against a stub API and drives a dequeued published-image Deployment to `READY`. `EXPECTED_WORKER_UNBOUND`
+  lost 13 `TriggerAppRuntimeModule` rows; `OPEN_WORKER_GAPS` stays empty.
