@@ -53,14 +53,18 @@ import { isAppClusterWorkerContext } from './worker-context';
 /** The env switch that opens the managed **Ever Works Apps** target (default off). */
 export const APPS_MANAGED_ENABLED_ENV = 'EVER_WORKS_APPS_MANAGED_ENABLED';
 
+// APW-10 lite (2026-10-17, lane aw-managed-deps): sized for the App AND its in-namespace
+// dependencies — Postgres (10Gi), Redis (1Gi) and object storage (20Gi) by default, each with
+// the LimitRange's 1-CPU default limit when it declares none — so a typical App with all three
+// fits. Every number is an operator override (`managedQuotaFromEnv`).
 const MANAGED_QUOTA: AppQuotaInput = {
     'requests.cpu': '2',
-    'limits.cpu': '4',
+    'limits.cpu': '8',
     'requests.memory': '4Gi',
-    'limits.memory': '6Gi',
+    'limits.memory': '10Gi',
     pods: 20,
-    persistentvolumeclaims: 5,
-    'requests.storage': '20Gi',
+    persistentvolumeclaims: 8,
+    'requests.storage': '50Gi',
     'services.loadbalancers': 0,
     'services.nodeports': 0,
     'count/jobs.batch': 20,

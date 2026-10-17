@@ -45,6 +45,26 @@ the managed target does, what the operator has to set, and the RBAC its credenti
 - **Web.** The Deploy tab's target card enables **Ever Works (managed)** when `GET
 /api/works/:id/app-target` reports `eligibility.managed.eligible: true`.
 
+## Dependencies (Postgres, Redis, object storage)
+
+An App spec's `dependencies` are provisioned **inside the App's own `ewapp-*` namespace** by the
+same in-cluster providers the Kubernetes plugin uses on Your cluster:
+
+- the inline Postgres, or a CloudNativePG `Cluster` when the operator's CRD is served;
+- Redis;
+- an S3-compatible object store.
+
+The `k8s-apps-tier` plugin publishes these providers for the `ever-works-apps` target only (labelled
+**On Ever Works**). The dependency job runs in the isolated worker and dials them with the platform
+credential, through the same runtime facade as deploys. As a result:
+
+- their pods, memory and volumes count against the namespace's **ResourceQuota**;
+- the namespace's NetworkPolicies make them reachable from the App's own pods only;
+- they are **deleted with the namespace** when the App is removed.
+
+The quota defaults below are sized for an App plus all three dependencies at their default sizes:
+Postgres 10Gi, Redis 1Gi, object storage 20Gi.
+
 ## Environment
 
 All of the following are read per call. Set them on **both** the API and the App runtime worker,
@@ -62,8 +82,63 @@ except the kubeconfig, which goes on the **worker only**.
 | `EVER_WORKS_APPS_MANAGED_SERVICE_ACCOUNT`                                                                  | worker                  | `ever-works-apps-system/ever-works-apps-controller` | Subject of each namespace's RoleBinding.                                                                                                                                                                                 |
 | `EVER_WORKS_APPS_MANAGED_NAMESPACE_ROLE`                                                                   | worker                  | `ever-works-apps-namespace-admin`                   | ClusterRole each namespace's RoleBinding grants.                                                                                                                                                                         |
 | `EVER_WORKS_APPS_MANAGED_NAMESPACE_GRANT`                                                                  | worker                  | on                                                  | `false` skips the per-namespace RoleBinding. Only use it if you bound the role some other way.                                                                                                                           |
-| `EVER_WORKS_APPS_MANAGED_QUOTA_{CPU_REQUESTS,CPU_LIMITS,MEMORY_REQUESTS,MEMORY_LIMITS,STORAGE,PODS,PVCS}`  | worker                  | `2` / `4` / `4Gi` / `6Gi` / `20Gi` / `20` / `5`     | Per-namespace ResourceQuota. A malformed value is ignored.                                                                                                                                                               |
+| `EVER_WORKS_APPS_MANAGED_QUOTA_{CPU_REQUESTS,CPU_LIMITS,MEMORY_REQUESTS,MEMORY_LIMITS,STORAGE,PODS,PVCS}`  | worker                  | `2` / `8` / `4Gi` / `10Gi` / `50Gi` / `20` / `8`     | Per-namespace ResourceQuota. A malformed value is ignored.                                                                                                                                                               |
 | `EVER_WORKS_APPS_MANAGED_LIMIT_{REQUEST_CPU,REQUEST_MEMORY,DEFAULT_CPU,DEFAULT_MEMORY,MAX_CPU,MAX_MEMORY}` | worker                  | `100m` / `128Mi` / `1` / `512Mi` / `2` / `4Gi`      | Per-container LimitRange.                                                                                                                                                                                                |
+
+## Where the variables go
+
+**The App runtime worker is not a Kubernetes Deployment of ours.** It is the set of Trigger.dev
+tasks `packages/tasks` deploys:
+
+- `app-deploy`, `app-cluster-op`, `app-dependency-provision`, `app-smoke` and `app-health-poll`,
+  whose `TriggerAppRuntimeModule` arms the isolated-worker flag.
+
+They run on the self-hosted Trigger.dev at `https://trigger.ever.co`:
+
+- project `proj_ixrpwdtsfolfxlbkgkle`, deployed by `.github/workflows/release-trigger-selfhosted.yml`
+  while `vars.TRIGGER_SELFHOSTED == 'true'`;
+- `main` deploys to the **`prod`** environment and `stage` to **`staging`**;
+- the supervisor creates one pod per run in namespace `trigger`, on the `nodetype=v4-worker` nodes.
+
+The task pods take their environment from **that Trigger.dev project's environment variables**, one
+store per environment. There is no `syncEnvVars` build extension, so values are set in the dashboard
+(Project → Environment Variables → Production / Staging) or through the Trigger.dev env-var API.
+
+**There is no `dev` worker.** `release-trigger-dev.yml` is gated off while self-hosted is on, so
+`develop` has no deployed App runtime worker, and the managed target is testable on staging and prod
+only.
+Outside production, the same task functions can run from a local process instead:
+`EVER_WORKS_APPS_LOCAL_WORKER=true` and
+`pnpm --filter @ever-works/trigger-tasks app-runtime:local-worker`. That process reads its own
+shell environment.
+
+| Variable group | Set it on |
+| --- | --- |
+| `EVER_WORKS_APPS_MANAGED_KUBECONFIG` (secret) | The Trigger.dev **staging / prod** env stores of the project above. Nowhere else. |
+| `EVER_WORKS_APPS_MANAGED_ENABLED`, `…_DOMAIN`, `…_SCOPE` | The Trigger.dev env stores **and** the API. The API is `ever-works-app-{dev,stage,prod}`; set them on the inline `env` of its Deployment in `ever-co/k8s-gitops`. They are not secrets, so they do not go in `ever-works-app-secrets`. |
+| `…_RUNTIME_CLASS`, `…_INGRESS_CLASS`, `…_INGRESS_NAMESPACE`, `…_SERVICE_ACCOUNT`, `…_NAMESPACE_ROLE`, `…_QUOTA_*`, `…_LIMIT_*` | The Trigger.dev env stores. Only the worker renders and applies objects. |
+
+## TLS
+
+The managed target renders its Ingress in **edge** TLS mode: `tls: 'edge'`, from the render-input
+builder's managed branch and `AppsTierPolicy.ingress().edgeTlsMode`. That means:
+
+- **no** `tls:` block;
+- **no** `cert-manager.io/cluster-issuer` annotation;
+- `nginx.ingress.kubernetes.io/ssl-redirect: "false"`.
+
+TLS is expected to terminate **in front of** the ingress controller; in our setup that is the
+Cloudflare tunnel → ingress-nginx, the same path as `trigger.ever.co`. **No in-cluster certificate,
+issuer or wildcard secret is read.** What you need instead:
+
+1. A Cloudflare DNS record `*.<EVER_WORKS_APPS_MANAGED_DOMAIN>` → the tunnel, and a tunnel ingress
+   rule for that wildcard → `http://ingress-nginx-controller.ingress-nginx.svc`.
+2. An edge certificate that covers the wildcard:
+   - a first-level name such as `*.ever.works` is covered by Cloudflare Universal SSL;
+   - a deeper apex such as `*.apps.ever.works` needs an **Advanced Certificate** (or Total TLS).
+
+The cert-manager path (`tls: 'cert-manager'`, annotation `cert-manager.io/cluster-issuer: <issuer>`,
+and one per-Ingress secret named `<first-host-with-dashes>-tls`) exists for **Your cluster** only.
 
 ## RBAC — the controller's credential
 
@@ -132,6 +207,11 @@ rules:
     - apiGroups: ['storage.k8s.io']
       resources: ['storageclasses']
       verbs: ['get', 'list']
+    # The Postgres provider asks whether CloudNativePG's CRD is served before choosing its path.
+    - apiGroups: ['apiextensions.k8s.io']
+      resources: ['customresourcedefinitions']
+      verbs: ['get']
+      resourceNames: ['clusters.postgresql.cnpg.io']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -182,6 +262,10 @@ rules:
     - apiGroups: ['rbac.authorization.k8s.io']
       resources: ['rolebindings']
       verbs: ['get', 'list', 'watch']
+    # Managed Postgres through CloudNativePG, when the cluster runs the operator (harmless otherwise).
+    - apiGroups: ['postgresql.cnpg.io']
+      resources: ['clusters', 'backups', 'scheduledbackups']
+      verbs: ['get', 'list', 'watch', 'create', 'update', 'patch', 'delete']
 ---
 # The sandbox every managed pod runs in. `runc` is the containerd default; switch the handler to
 # `runsc` (gVisor) or `kata` when the nodes have it.
@@ -267,10 +351,6 @@ base64 -w0 ewapps.kubeconfig   # → EVER_WORKS_APPS_MANAGED_KUBECONFIG (worker 
 
 ## Limits of the lite version
 
-- **Dependencies are not provisioned yet.** Managed apps that declare `postgres`, `redis` or
-  `objectStorage` are not supported: APW-07's provider dispatch is not wired to the managed
-  credential. Apps with no managed dependencies, or that use external services through prompted
-  environment values, work.
 - **One cluster.** There is no zone selection or in-zone controller; that is the full APW-10.
 - **Shared node pool.** There are no per-tenant nodes. Isolation comes from the namespace, the
   NetworkPolicies, Pod Security `restricted`, the quota and the RuntimeClass. Switch the RuntimeClass

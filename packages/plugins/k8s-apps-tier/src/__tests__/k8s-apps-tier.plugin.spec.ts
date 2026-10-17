@@ -26,13 +26,13 @@ const managedRef = { workId: 'w1', namespace: 'ewapp-0123abcd', target: 'ever-wo
 const clusterRef = { workId: 'w1', namespace: 'ew-app-0123abcd', target: 'your-cluster' as const, kubeContext: null };
 
 describe('KubernetesAppsTierPlugin', () => {
-	it('declares deployment + apps-tier under its own id, hidden', () => {
+	it('declares deployment + apps-tier + app-dependency under its own id, hidden', () => {
 		const plugin = new KubernetesAppsTierPlugin();
 		expect(plugin.id).toBe('k8s-apps-tier');
-		expect([...plugin.capabilities]).toEqual(['deployment', 'apps-tier']);
+		expect([...plugin.capabilities]).toEqual(['deployment', 'apps-tier', 'app-dependency']);
 		const manifest = plugin.getManifest();
 		expect(manifest.id).toBe('k8s-apps-tier');
-		expect(manifest.capabilities).toEqual(['deployment', 'apps-tier']);
+		expect(manifest.capabilities).toEqual(['deployment', 'apps-tier', 'app-dependency']);
 		expect(manifest.visibility).toBe('hidden');
 		expect(plugin.supportsApps).toBe(true);
 	});
@@ -106,6 +106,37 @@ describe('the per-namespace grant (least privilege)', () => {
 		).toMatchObject({
 			roleRef: { name: 'tenant-admin' },
 			subjects: [{ name: 'apps-bot', namespace: 'ops' }]
+		});
+	});
+});
+
+describe('dependencies on the managed tier', () => {
+	const ctx = { workId: 'w1', appName: 'app', target: 'ever-works-apps', declared: {}, settings: {} } as never;
+
+	it('publishes the in-cluster providers for ever-works-apps only', () => {
+		const plugin = new KubernetesAppsTierPlugin();
+		expect(plugin.capabilities).toContain('app-dependency');
+		expect(plugin.getManifest().capabilities).toContain('app-dependency');
+		const kinds = plugin.dependencyProviders.map((descriptor) => descriptor.kind).sort();
+		expect(kinds).toEqual(['objectStorage', 'postgres', 'redis']);
+		for (const descriptor of plugin.dependencyProviders) {
+			expect(descriptor.targets).toEqual(['ever-works-apps']);
+			expect(descriptor.label).toMatch(/^On Ever Works · /);
+		}
+		// The k8s plugin keeps them for your-cluster only, under the same provider ids.
+		const k8s = new KubernetesPlugin();
+		expect(k8s.dependencyProviders.every((descriptor) => descriptor.targets.join() === 'your-cluster')).toBe(true);
+		expect(plugin.dependencyProviders.map((d) => d.id).sort()).toEqual(k8s.dependencyProviders.map((d) => d.id).sort());
+	});
+
+	it('answers supports for ever-works-apps through the same providers, and refuses your-cluster', async () => {
+		const plugin = new KubernetesAppsTierPlugin();
+		await expect(plugin.supports('postgres', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
+		await expect(plugin.supports('redis', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
+		await expect(plugin.supports('objectStorage', 'ever-works-apps', ctx)).resolves.toMatchObject({ supported: true });
+		await expect(plugin.supports('postgres', 'your-cluster', ctx)).resolves.toMatchObject({ supported: false });
+		await expect(new KubernetesPlugin().supports('postgres', 'ever-works-apps', ctx)).resolves.toMatchObject({
+			supported: false
 		});
 	});
 });
