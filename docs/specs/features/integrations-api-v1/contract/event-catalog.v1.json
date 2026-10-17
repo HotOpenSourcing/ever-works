@@ -6,6 +6,14 @@
 	"description": "Event catalog v1 (03 Part B.4). One row per event type. `dataSchema` is the JSON Schema of the envelope `data` (null = reserved for a later phase; the type name is fixed but its data schema is published with that phase). `child` marks events about an edge/child row: `aggregate` is the parent with its new version. `optIn` events are excluded from the feed/webhooks unless requested by exact name. Delete/removed events carry the last snapshot plus `deleted: true`.",
 	"events": [
 		{
+			"type": "organization.created",
+			"version": 1,
+			"domain": "organization",
+			"aggregateType": "organization",
+			"dataSchema": "schemas/resources/organization.schema.json",
+			"phase": "P2"
+		},
+		{
 			"type": "organization.updated",
 			"version": 1,
 			"domain": "organization",

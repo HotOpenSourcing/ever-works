@@ -4,7 +4,7 @@ These files are the published, machine-readable half of the Ever Works integrati
 it under `/api/integrations/v1`, and Ever Gauzy codes against it (its mock Ever Works server and its tests load these
 files). The prose half is [`../spec.md`](../spec.md).
 
-**Contract version:** `v1-draft.12` (2026-10-17; draft.1 2026-10-15, then CR-2 to CR-11; P2 adds CR-9 (Goals), CR-8 (Missions)). Source of truth: the Gauzy ↔ Ever Works integration plan, document 03
+**Contract version:** `v1-draft.13` (2026-10-17; draft.1 2026-10-15, then CR-2 to CR-11; P2 adds CR-9 (Goals), CR-8 (Missions), CR-10 (organizations)). Source of truth: the Gauzy ↔ Ever Works integration plan, document 03
 Part B (private `ever-co/homelab` repo,
 `docs/superpowers/specs/2026-10-15-gauzy-ever-works-integration/03-events-sync-engine-and-contract.md`). Every change
 bumps the version there and gets a change-request (CR) row on that plan's `STATUS.md` board. A breaking change needs `/v2`.
@@ -17,7 +17,7 @@ bumps the version there and gets a change-request (CR) row on that plan's `STATU
 | [`event-catalog.v1.json`](event-catalog.v1.json)                               | Event catalog v1 (B.4): every type, its aggregate, its `data` schema, phase, child/opt-in flags                                                                                                 |
 | [`schemas/event-catalog.schema.json`](schemas/event-catalog.schema.json)       | Shape of the catalog file                                                                                                                                                                       |
 | [`schemas/resources/*.schema.json`](schemas/resources/)                        | Resource DTOs (B.6): organization, member, agent, team, work, task, task comment, link, whoami, feed page, webhook subscription, visibility-changed data; P2 idea, goal, mission; P3 inbox item |
-| [`schemas/requests.schema.json`](schemas/requests.schema.json)                 | Request bodies (create/update/PUT-set/transition/comment/link/webhook/batch; P2 ideas, goals and missions)                                                                                      |
+| [`schemas/requests.schema.json`](schemas/requests.schema.json)                 | Request bodies (create/update/PUT-set/transition/comment/link/webhook/batch; P2 ideas, goals, missions and organization create)                                                                 |
 | [`webhook-signature-vectors.json`](webhook-signature-vectors.json)             | Shared signature test vectors (B.5): secret / body / header / clock → expected                                                                                                                  |
 | [`examples/`](examples/)                                                       | One valid instance per DTO, error and a set of event envelopes                                                                                                                                  |
 | [`tools/generate-signature-vectors.mjs`](tools/generate-signature-vectors.mjs) | Regenerates the vectors (deterministic)                                                                                                                                                         |

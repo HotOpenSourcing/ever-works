@@ -28,7 +28,9 @@ import { IntegrationWebhooksController } from './webhooks.controller';
 import { IntegrationIdeasController } from './ideas.controller';
 import { IntegrationGoalsController } from './goals.controller';
 import { IntegrationMissionsController } from './missions.controller';
+import { IntegrationOrganizationsWriteController } from './organizations-write.controller';
 import { WebhooksModule } from '../../webhooks/webhooks.module';
+import { AuthModule } from '../../auth/auth.module';
 import { OrganizationsModule } from '../../organizations/organizations.module';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-feed-head';
@@ -62,6 +64,10 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         GoalsModule,
         // Missions (EW-P2-5): `MissionsService` (createExternal, transitions, Work links).
         MissionsModule,
+        // Organizations (EW-P2-6, `org:write`): `OrganizationService.createOrganization`
+        // and `IntegrationKeyService.addPin` (AuthModule exports it).
+        OrganizationsModule,
+        AuthModule,
         // The Inbox reply / state routes (EW-P3-1) delegate to the app's own
         // `InboxService` (steer, resume, decide exactly like the Inbox UI).
         AgentInboxModule,
@@ -90,6 +96,7 @@ import { INTEGRATION_FEED_HEAD, type IntegrationFeedHead } from './integration-f
         IntegrationIdeasController,
         IntegrationGoalsController,
         IntegrationMissionsController,
+        IntegrationOrganizationsWriteController,
         // EW-P3-1 — the Inbox (`inbox:*`).
         IntegrationInboxController,
         // EW-P3-2 — the Knowledge Base (`kb:*`).

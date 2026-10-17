@@ -1,6 +1,11 @@
-import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable, Logger, Optional } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { OrganizationRepository, UserRepository } from '@ever-works/agent/database';
+import {
+    OrganizationMemberRepository,
+    OrganizationRepository,
+    TenantRepository,
+    UserRepository,
+} from '@ever-works/agent/database';
 import { INTEGRATION_HEADERS, type IntegrationScope } from '@ever-works/contracts';
 import { ScopeContextService } from '../../scope/scope-context.service';
 import type { AuthenticatedUser, IntegrationPrincipal } from '../types/auth.types';
@@ -61,6 +66,10 @@ export class IntegrationPrincipalGuard implements CanActivate {
         private readonly scopeContext: ScopeContextService,
         private readonly organizationRepository: OrganizationRepository,
         private readonly userRepository: UserRepository,
+        // EW-P2-6 — who an Organization admin's key may act as. Both @Optional(): a
+        // graph without them keeps today's rule (any active user of the Tenant).
+        @Optional() private readonly tenants?: TenantRepository,
+        @Optional() private readonly members?: OrganizationMemberRepository,
     ) {}
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -216,6 +225,9 @@ export class IntegrationPrincipalGuard implements CanActivate {
         ) {
             throw this.actAsForbidden();
         }
+        if (!(await this.mayActAs(principal, target.id, organizationId))) {
+            throw this.actAsForbidden();
+        }
 
         principal.actAsUserId = target.id;
         // The write runs as the person: every ownership check, `createdBy` and
@@ -241,6 +253,34 @@ export class IntegrationPrincipalGuard implements CanActivate {
      * Tenant-wide membership (see the class doc). EW-P1-3 (authoritative
      * `organization_members`) tightens this one method.
      */
+    /**
+     * EW-P2-6 — a key the Tenant owner created may act as any active user of the Tenant
+     * (today's rule). A key an Organization admin created may act only as itself or as a
+     * plain `member` of the pinned Organization: never as the Tenant owner or another
+     * admin, whose records the admin cannot write in the app either, and never on an
+     * org-optional route. Fails closed on a lookup error.
+     */
+    private async mayActAs(
+        principal: IntegrationPrincipal,
+        targetUserId: string,
+        organizationId: string | null,
+    ): Promise<boolean> {
+        if (!this.tenants) return true;
+        try {
+            const tenant = await this.tenants.findById(principal.tenantId);
+            if (!tenant) return false;
+            if (tenant.ownerUserId === principal.ownerUserId) return true;
+            if (targetUserId === tenant.ownerUserId) return false;
+            if (targetUserId === principal.ownerUserId) return true;
+            if (!organizationId || !this.members) return false;
+            const row = await this.members.findByOrgAndUser(organizationId, targetUserId);
+            return row?.role === 'member';
+        } catch (error) {
+            this.logger.warn(`X-Act-As-User check failed: ${String(error)}`);
+            return false;
+        }
+    }
+
     private async isOnOrganizationRoster(
         tenantId: string,
         organizationId: string,

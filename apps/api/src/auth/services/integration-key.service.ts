@@ -10,6 +10,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomBytes, createHash } from 'crypto';
 import {
     ApiKeyRepository,
+    OrganizationMemberRepository,
     OrganizationRepository,
     TenantRepository,
     UserRepository,
@@ -52,9 +53,11 @@ export interface IntegrationKeyRevokedEvent {
  * EW-P1-2 — creating, listing and revoking integration keys (`ew_int_…`).
  * Validation and rotation live in `ApiKeyService`, shared with personal keys.
  *
- * **Who may create:** the Tenant owner only. Ever Works has no per-Organization
- * admin role yet (`ORGANIZATION_MEMBER_ROLES = ['member']`); when owner/admin
- * roles land (EW-P2-6) they widen {@link assertCanManage}.
+ * **Who may create (EW-P2-6):** the Tenant owner (every Organization of the
+ * Tenant), or an Organization `admin` (a roster member the owner promoted), who may
+ * pin only the Organizations they administer. The key acts as its creator; the
+ * principal re-reads the creator's admin Organizations on every request
+ * (`ApiKeyService.effectivePins`), so a demotion takes the pins away at once.
  *
  * **Pins:** at least one, at most 50, every one an Organization of the
  * creator's Tenant. **Scopes:** at least one, every one from vocabulary v1;
@@ -80,13 +83,16 @@ export class IntegrationKeyService {
         private readonly users: UserRepository,
         @Optional() private readonly activityLog?: ActivityLogService,
         @Optional() private readonly events?: EventEmitter2,
+        // EW-P2-6 — Organization admins (roster role `admin`). Appended LAST +
+        // @Optional(): absent, only the Tenant owner manages keys (today's rule).
+        @Optional() private readonly members?: OrganizationMemberRepository,
     ) {}
 
     async create(
         userId: string,
         input: CreateIntegrationKeyRequest,
     ): Promise<CreateIntegrationKeyResponse> {
-        const tenantId = await this.assertCanManage(userId);
+        const { tenantId, administered } = await this.assertCanManage(userId);
 
         const scopes = this.normalizeScopes(input.scopes);
         const integrationKind: IntegrationKind = input.integrationKind ?? 'generic';
@@ -94,7 +100,12 @@ export class IntegrationKeyService {
             throw new BadRequestException(`Unknown integrationKind: ${String(integrationKind)}`);
         }
         const tenantOrgs = await this.organizations.findByTenantId(tenantId);
-        const organizationIds = this.normalizeOrganizationIds(input.organizationIds, tenantOrgs);
+        // An admin pins only the Organizations they administer (the owner: all).
+        const manageable =
+            administered === 'all'
+                ? tenantOrgs
+                : tenantOrgs.filter((org) => administered.includes(org.id));
+        const organizationIds = this.normalizeOrganizationIds(input.organizationIds, manageable);
 
         const expiresAt = input.expiresAt ? new Date(input.expiresAt) : null;
         if (expiresAt && (Number.isNaN(expiresAt.getTime()) || expiresAt <= new Date())) {
@@ -149,15 +160,72 @@ export class IntegrationKeyService {
         return { ...summary, key: rawKey };
     }
 
-    /** The Tenant's active integration keys. Only the Tenant owner sees them. */
+    /**
+     * The Tenant's active integration keys: every one for the Tenant owner; an
+     * Organization admin (EW-P2-6) sees the keys they created. Anyone else: none.
+     */
     async list(userId: string): Promise<IntegrationKeySummary[]> {
         const tenant = await this.ownedTenant(userId);
-        if (!tenant) return [];
+        if (tenant) {
+            const [rows, orgs] = await Promise.all([
+                this.apiKeys.findIntegrationKeysByTenant(tenant.id),
+                this.organizations.findByTenantId(tenant.id),
+            ]);
+            return rows.map((row) => this.toSummary(row, orgs));
+        }
+        const admin = await this.adminTenant(userId);
+        if (!admin) return [];
         const [rows, orgs] = await Promise.all([
-            this.apiKeys.findIntegrationKeysByTenant(tenant.id),
-            this.organizations.findByTenantId(tenant.id),
+            this.apiKeys.findIntegrationKeysByTenant(admin.tenantId),
+            this.organizations.findByTenantId(admin.tenantId),
         ]);
-        return rows.map((row) => this.toSummary(row, orgs));
+        return rows.filter((row) => row.userId === userId).map((row) => this.toSummary(row, orgs));
+    }
+
+    /**
+     * EW-P2-6 — `org:write`: pin an Organization created through the integration
+     * API to the key that created it (at most {@link INTEGRATION_KEY_MAX_ORGANIZATIONS}).
+     */
+    async addPin(keyId: string, organizationId: string): Promise<string[]> {
+        await this.assertPinCapacity(keyId, organizationId);
+        // One locked read-modify-write: concurrent creates through one key keep every pin.
+        const result = await this.apiKeys.appendOrganizationId(
+            keyId,
+            organizationId,
+            INTEGRATION_KEY_MAX_ORGANIZATIONS,
+        );
+        if (result.status === 'missing') throw new NotFoundException('Integration key not found');
+        if (result.status === 'full') throw this.pinsFull();
+        return result.organizationIds;
+    }
+
+    /**
+     * EW-P2-6 — undo a pin {@link addPin} reserved for an Organization whose create then
+     * failed. Never throws for a pin that is not there.
+     */
+    async releasePin(keyId: string, organizationId: string): Promise<void> {
+        await this.apiKeys.removeOrganizationId(keyId, organizationId);
+    }
+
+    /**
+     * EW-P2-6 — refuse BEFORE `POST /organizations` writes anything when the key has no
+     * pin left, so a full key never leaves an orphan Organization behind. `404` when
+     * `keyId` is not an integration key.
+     */
+    async assertPinCapacity(keyId: string, organizationId?: string): Promise<void> {
+        const row = await this.apiKeys.findById(keyId);
+        if (!row || row.kind !== INTEGRATION_API_KEY_KIND) {
+            throw new NotFoundException('Integration key not found');
+        }
+        const pins = Array.isArray(row.organizationIds) ? row.organizationIds : [];
+        if (organizationId && pins.includes(organizationId)) return;
+        if (pins.length >= INTEGRATION_KEY_MAX_ORGANIZATIONS) throw this.pinsFull();
+    }
+
+    private pinsFull(): BadRequestException {
+        return new BadRequestException(
+            `A key may be pinned to at most ${INTEGRATION_KEY_MAX_ORGANIZATIONS} organizations`,
+        );
     }
 
     /**
@@ -169,7 +237,14 @@ export class IntegrationKeyService {
         // A non-uuid id cannot be a key; answer before a uuid column sees it
         // (Postgres would reject the cast) so the caller's 404 stays a 404.
         if (!UUID_RE.test(id)) return false;
-        const row = await this.apiKeys.findByIdAndUserId(id, userId);
+        let row = await this.apiKeys.findByIdAndUserId(id, userId);
+        if (!row) {
+            // EW-P2-6 — the Tenant owner may also revoke a key an Organization admin
+            // created in their Tenant.
+            const tenant = await this.ownedTenant(userId);
+            const candidate = tenant ? await this.apiKeys.findById(id) : null;
+            row = candidate && candidate.tenantId === tenant?.id ? candidate : null;
+        }
         if (!row || row.kind !== INTEGRATION_API_KEY_KIND) return false;
         const deactivated = await this.apiKeys.deactivateById(row.id);
         // Already revoked: the request is handled (idempotent 200). It must
@@ -218,15 +293,35 @@ export class IntegrationKeyService {
 
     // ── internals ────────────────────────────────────────────────────────
 
-    /** The caller's Tenant id, or 403 when the caller does not own it. */
-    private async assertCanManage(userId: string): Promise<string> {
+    /**
+     * The caller's Tenant and the Organizations they may pin: all of them for the
+     * Tenant owner, the ones they administer for an Organization admin (EW-P2-6);
+     * 403 for anyone else.
+     */
+    private async assertCanManage(
+        userId: string,
+    ): Promise<{ tenantId: string; administered: 'all' | string[] }> {
         const tenant = await this.ownedTenant(userId);
-        if (!tenant) {
-            throw new ForbiddenException(
-                'Only the workspace owner can create integration keys. Create an organization first if you have none.',
-            );
-        }
-        return tenant.id;
+        if (tenant) return { tenantId: tenant.id, administered: 'all' };
+        const admin = await this.adminTenant(userId);
+        if (admin) return admin;
+        throw new ForbiddenException(
+            'Only the workspace owner or an organization admin can create integration keys. Create an organization first if you have none.',
+        );
+    }
+
+    /** EW-P2-6 — the caller's Tenant and the Organizations they administer, or `null`. */
+    private async adminTenant(
+        userId: string,
+    ): Promise<{ tenantId: string; administered: string[] } | null> {
+        if (!this.members) return null;
+        const user = await this.users.findById(userId);
+        if (!user?.tenantId) return null;
+        const administered = await this.members.listAdministeredOrganizationIds(
+            userId,
+            user.tenantId,
+        );
+        return administered.length > 0 ? { tenantId: user.tenantId, administered } : null;
     }
 
     private async ownedTenant(userId: string) {

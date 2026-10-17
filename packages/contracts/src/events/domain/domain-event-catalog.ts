@@ -54,6 +54,8 @@ export const DOMAIN_EVENT_CATALOG_VERSION = 1;
 export const DOMAIN_EVENT_PAYLOAD_VERSION = 1;
 
 export const DOMAIN_EVENT_CATALOG = [
+	// EW-P2-6 — `org:write` (and the app) create Organizations.
+	{ type: 'organization.created', domain: 'organization', aggregateType: 'organization', phase: 'P2' },
 	{ type: 'organization.updated', domain: 'organization', aggregateType: 'organization', phase: 'P1' },
 	{
 		type: 'organization.member.added',

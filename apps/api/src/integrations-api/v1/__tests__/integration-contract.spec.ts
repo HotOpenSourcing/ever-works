@@ -62,6 +62,7 @@ import {
     IntegrationPutMissionWorksDto,
     IntegrationUpdateMissionDto,
 } from '../missions.controller';
+import { IntegrationCreateOrganizationDto } from '../organizations-write.controller';
 import {
     IntegrationCreateCommentDto,
     IntegrationExternalAuthorDto,
@@ -350,6 +351,8 @@ const REQUEST_BODIES: Readonly<Record<string, BodyPair>> = {
         dto: IntegrationPutMissionWorksDto,
         nested: { works: { dto: IntegrationMissionWorkLinkDto } },
     },
+    // EW-P2-6 — organization create.
+    CreateOrganization: { dto: IntegrationCreateOrganizationDto },
     CreateWebhook: { dto: IntegrationCreateWebhookDto },
     UpdateWebhook: { dto: IntegrationUpdateWebhookDto },
     Batch: {

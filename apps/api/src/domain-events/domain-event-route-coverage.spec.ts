@@ -52,6 +52,7 @@ const CONTROLLER_FILES: readonly string[] = [
     'integrations-api/v1/ideas.controller.ts',
     'integrations-api/v1/goals.controller.ts',
     'integrations-api/v1/missions.controller.ts',
+    'integrations-api/v1/organizations-write.controller.ts',
     'integrations-api/v1/inbox.controller.ts',
     'integrations-api/v1/kb.controller.ts',
     'integrations-api/v1/email.controller.ts',
