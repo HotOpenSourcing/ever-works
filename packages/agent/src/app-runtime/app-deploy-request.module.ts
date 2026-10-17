@@ -21,6 +21,7 @@ import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
 import { AppBuildSucceededListener } from './app-build-succeeded.listener';
+import { AppEnvRedeployListener } from './app-env-redeploy.listener';
 import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runtime-worker.adapters';
 
 /**
@@ -199,6 +200,9 @@ import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runti
         // APW-06 T35 (A0.6) — a green deployable Build requests one Deployment when `autoDeploy`
         // is on (or a domain rebuild is pending). API process only: the event fires here.
         AppBuildSucceededListener,
+        // 2026-10-17 — a runtime-phase App env change redeploys the live Deployment once
+        // per 30 s window, through `AppDeployRequestService` (lane aw-env-redeploy).
+        AppEnvRedeployListener,
         // APW-06 T28 / T31 (A0.7) — the API ends of the isolated worker's `APP_RUNTIME_EVENT_SINK`
         // and `APP_DEPLOY_DISPATCHER` proxies (`TriggerInternalController.remoteMap`).
         AppRuntimeEventRelayService,
