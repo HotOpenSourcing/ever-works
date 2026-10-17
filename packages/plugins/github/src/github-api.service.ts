@@ -11,6 +11,9 @@ import type {
 	GitPullRequestFile,
 	GitCommitFilesInput,
 	GitCommitFilesResult,
+	GitRepositoryTree,
+	GitRepositoryTreeEntry,
+	GitRepositoryTreeOptions,
 	CreateRepoOptions,
 	UpdateRepoOptions,
 	CreatePROptions,
@@ -1718,6 +1721,64 @@ export class GitHubApiService {
 				isProtected: false
 			};
 		} catch (err) {
+			throw toGitProviderError(err, 'contents');
+		}
+	}
+
+	/**
+	 * APW-03 T38 — the repository tree at `ref`, through `git.getTree` (`recursive=1`
+	 * when asked). GitHub resolves a branch, a tag or a commit sha as the tree-ish.
+	 *
+	 * Capped at `opts.maxEntries`; `truncated` is set when GitHub truncated the listing
+	 * itself (its ~100 000-entry / 7 MB limit) or the cap cut it. A ref that does not
+	 * exist answers `null` (a 404 or 409 — an empty repository has no tree); every
+	 * other failure is a `GitProviderRequestError`.
+	 */
+	async getRepositoryTree(
+		owner: string,
+		repo: string,
+		ref: string,
+		token: string,
+		opts: GitRepositoryTreeOptions,
+		baseUrl?: string
+	): Promise<GitRepositoryTree | null> {
+		const octokit = this.createOctokit(token, baseUrl);
+		const max = Math.max(0, Math.floor(Number(opts?.maxEntries ?? 0)));
+
+		try {
+			const { data } = await octokit.rest.git.getTree({
+				owner,
+				repo,
+				tree_sha: ref,
+				...(opts?.recursive ? { recursive: '1' } : {})
+			});
+
+			const entries: GitRepositoryTreeEntry[] = [];
+			let cut = false;
+			for (const item of data.tree ?? []) {
+				if (item.type !== 'blob' && item.type !== 'tree') {
+					// Submodules (`commit`) are not files the scan can read.
+					continue;
+				}
+				if (typeof item.path !== 'string' || item.path === '') {
+					continue;
+				}
+				if (entries.length >= max) {
+					cut = true;
+					break;
+				}
+				entries.push({
+					path: item.path,
+					type: item.type,
+					...(typeof item.size === 'number' ? { size: item.size } : {})
+				});
+			}
+
+			return { entries, truncated: data.truncated === true || cut };
+		} catch (err) {
+			if (err instanceof RequestError && (err.status === 404 || err.status === 409)) {
+				return null;
+			}
 			throw toGitProviderError(err, 'contents');
 		}
 	}
