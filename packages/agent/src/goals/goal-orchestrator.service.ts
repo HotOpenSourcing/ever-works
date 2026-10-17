@@ -994,6 +994,9 @@ export class GoalOrchestratorService {
                         agentId: slotAgentId,
                         createdByType: 'user',
                         createdById: goal.userId,
+                        // Review 2026-10-17 F1: the Task carries the Goal's title
+                        // and brief, so a private Goal's iteration stays private.
+                        derivedFromPrivate: goal.visibility === 'private',
                     },
                     ownershipScopeOf(goal),
                 );
