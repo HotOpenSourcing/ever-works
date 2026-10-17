@@ -142,8 +142,9 @@ export function detectAppRepository(snapshot: AppRepositorySnapshot): AppReposit
     const procfile = has('Procfile');
     let procfileWeb: string | null = null;
     if (procfile) {
-        const web = /^web:\s*(.+)$/m.exec(files['Procfile']);
-        procfileWeb = web ? web[1].trim() : null;
+        // Line-wise, never a backtracking regex over repository text (CodeQL js/polynomial-redos).
+        const web = files['Procfile'].split(/\r?\n/).find((line) => line.startsWith('web:'));
+        procfileWeb = web ? web.slice('web:'.length).trim() || null : null;
         evidence.push(`Procfile${procfileWeb ? ` (web: ${procfileWeb})` : ''}`);
     }
 
@@ -391,19 +392,23 @@ export function parseDockerfile(text: string): {
     const ports: number[] = [];
     const stages: string[] = [];
     let healthPath: string | null = null;
+    // Token-wise, never a backtracking regex over repository text (CodeQL js/polynomial-redos).
     for (const raw of text.split(/\r?\n/)) {
-        const line = raw.trim();
-        const expose = /^EXPOSE\s+(.+)$/i.exec(line);
-        if (expose) {
-            for (const token of expose[1].split(/\s+/)) {
+        const tokens = raw.trim().split(/[ \t]+/).filter(Boolean);
+        const instruction = (tokens[0] ?? '').toUpperCase();
+        if (instruction === 'EXPOSE') {
+            for (const token of tokens.slice(1)) {
                 const port = Number.parseInt(token.split('/')[0], 10);
                 if (Number.isInteger(port) && port > 0 && port < 65536) ports.push(port);
             }
         }
-        const from = /^FROM\s+\S+\s+AS\s+([A-Za-z0-9._-]{1,64})\s*$/i.exec(line);
-        if (from) stages.push(from[1]);
-        const health = /^HEALTHCHECK\b.*?https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(\/[^\s"'|]*)/i.exec(line);
-        if (health) healthPath = health[1];
+        if (instruction === 'FROM' && tokens.length === 4 && tokens[2].toUpperCase() === 'AS') {
+            if (/^[A-Za-z0-9._-]{1,64}$/.test(tokens[3])) stages.push(tokens[3]);
+        }
+        if (instruction === 'HEALTHCHECK') {
+            const path = localHealthPath(tokens.slice(1));
+            if (path) healthPath = path;
+        }
     }
     // The last stage is what `docker build` produces; name it only when it is clearly the
     // production one, otherwise leave `target` unset (the default is the last stage anyway).
@@ -531,10 +536,29 @@ function record(value: unknown): Record<string, unknown> | null {
 }
 
 function slugName(name: string): string {
-    const slug = name
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .slice(0, 63);
+    const dashed = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    let start = 0;
+    let end = dashed.length;
+    while (start < end && dashed[start] === '-') start += 1;
+    while (end > start && dashed[end - 1] === '-') end -= 1;
+    const slug = dashed.slice(start, end).slice(0, 63);
     return slug || 'app';
+}
+
+/** The path of a `curl`/`wget` health URL on the container itself, from HEALTHCHECK tokens. */
+function localHealthPath(tokens: readonly string[]): string | null {
+    for (const raw of tokens) {
+        let token = raw;
+        while (token.startsWith('"') || token.startsWith("'")) token = token.slice(1);
+        while (token.endsWith('"') || token.endsWith("'")) token = token.slice(0, -1);
+        const scheme = token.startsWith('http://') ? 7 : token.startsWith('https://') ? 8 : 0;
+        if (!scheme) continue;
+        const rest = token.slice(scheme);
+        const slash = rest.indexOf('/');
+        const host = (slash < 0 ? rest : rest.slice(0, slash)).split(':')[0];
+        if (!['localhost', '127.0.0.1', '0.0.0.0'].includes(host)) continue;
+        const path = slash < 0 ? '/' : rest.slice(slash);
+        return path.length <= 255 ? path : null;
+    }
+    return null;
 }

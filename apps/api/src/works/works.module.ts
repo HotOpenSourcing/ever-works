@@ -49,6 +49,7 @@ import { AppSourceController } from './app-source.controller';
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
 import { WorkEvolveController } from './work-evolve.controller';
+import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
@@ -137,6 +138,9 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         // keeps "your spec is invalid" on the Deploy tab and the App spec tab
         // from ever disagreeing.
         AppDeployRequestModule,
+        // APW-09 (lane aw-ai) — `UpstreamPullRequestOpenService` for
+        // `POST /api/works/:id/upstream-pr`. The same module instance `ApiModule` imports.
+        UpstreamPullRequestsModule,
     ],
     providers: [
         CacheEntryRepository,

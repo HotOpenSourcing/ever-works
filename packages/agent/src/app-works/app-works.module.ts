@@ -1,5 +1,6 @@
 import { Module, type FactoryProvider } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, getRepositoryToken } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { DatabaseModule } from '../database/database.module';
 import { FacadesModule } from '../facades/facades.module';
@@ -7,6 +8,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksDomainModule } from '../tasks-domain/tasks.module';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
 import { WorkUpstreamStateRepository } from '../database/repositories/work-upstream-state.repository';
+import { AgentRepository } from '../database/repositories/agent.repository';
+import { Agent } from '../entities/agent.entity';
 import { WorkUpstreamState } from '../entities/work-upstream-state.entity';
 import {
     APP_FORK_READINESS_DISPATCHER,
@@ -348,6 +351,18 @@ export function buildAppForkReadinessDispatcherProvider(): FactoryProvider {
         // APW-08 T25 (lane aw-ai, 2026-10-17) — the agent-resolution rule, bound where
         // APW-02's `AppUpstreamStateService` (declared here) can see it (APW08-G18). Its
         // own dependencies are repository providers only (`DatabaseModule`).
+        // `AgentRepository` is provided locally (the `ActivityLogModule` / `SkillsModule`
+        // shape): `DatabaseModule` does not carry it and `TasksDomainModule` does not
+        // re-export `AgentsModule`'s copy — the DI reachability spec measured both. A
+        // factory over an OPTIONAL entity repository, so the module specs that compile
+        // this module against a shelled `DatabaseModule` still compile (both consumers
+        // inject it `@Optional()` and answer "no Agent" without it).
+        {
+            provide: AgentRepository,
+            useFactory: (repository?: Repository<Agent> | null) =>
+                repository ? new AgentRepository(repository) : null,
+            inject: [{ token: getRepositoryToken(Agent), optional: true }],
+        },
         AppWorkAgentResolverService,
         { provide: APP_WORK_AGENT_RESOLVER, useExisting: AppWorkAgentResolverService },
         // APW-08 T25 — `POST /api/works/:id/evolve`'s service: a Task on the Work, started

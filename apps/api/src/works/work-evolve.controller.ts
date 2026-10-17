@@ -23,9 +23,13 @@ import {
 import { ownershipScopeOf } from '@ever-works/agent/database';
 import { TaskRepository } from '@ever-works/agent/tasks-domain';
 import { WorkOwnershipService, type WorkAccessResult } from '@ever-works/agent/services';
+import {
+    UpstreamPullRequestOpenService,
+    type UpstreamPullRequestOpenResult,
+} from '@ever-works/agent/upstream-pull-requests';
 import { AuthSessionGuard, CurrentUser } from '../auth';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
-import { EvolveWorkDto, ProvisionWorkDto } from './dto/evolve-work.dto';
+import { EvolveWorkDto, ProvisionWorkDto, UpstreamPullRequestDto } from './dto/evolve-work.dto';
 
 /**
  * APW-08 T25 + APW-04 — the App Work's "change it" and "provision it" doors.
@@ -36,6 +40,7 @@ import { EvolveWorkDto, ProvisionWorkDto } from './dto/evolve-work.dto';
  * | `GET  /api/works/:id/evolve` | the Work's change Tasks, newest first (the chat panel's history) |
  * | `POST /api/works/:id/provision` | APW-04 manual start (or `dryRun` inspection) |
  * | `GET  /api/works/:id/provisioning` | the open and recent `app-provision` Tasks |
+ * | `POST /api/works/:id/upstream-pr` | APW-09: offer a fork branch (or a Task's branch) upstream as a draft PR |
  *
  * Everything after the Task exists is the existing Task / run machinery: follow a change
  * with `GET /api/tasks/:taskId` (status, `branchRef`, `prUrl`, `prState`, `ciState`), its
@@ -56,6 +61,7 @@ export class WorkEvolveController {
         private readonly changes: AppChangeRequestService,
         private readonly provisioning: AppProvisioningService,
         private readonly tasks: TaskRepository,
+        private readonly upstreamPullRequests: UpstreamPullRequestOpenService,
     ) {}
 
     @Post(':id/evolve')
@@ -174,6 +180,37 @@ export class WorkEvolveController {
         }));
         const active = recent.find((task) => !['done', 'cancelled'].includes(task.status)) ?? null;
         return { active, recent, canEdit: access.role !== 'viewer' };
+    }
+
+    @Post(':id/upstream-pr')
+    @Throttle({ long: { limit: 10, ttl: 3_600_000 } })
+    @ApiOperation({
+        summary: 'Open a pull request from the fork into the upstream repository (APW-09)',
+        description:
+            'Offers a branch of the App Work’s fork — named, or taken from one of the Work’s Tasks — to the ' +
+            'upstream repository, opened with the CALLER’s own git connection (FR-24), as a draft by default. ' +
+            'Fork App Works only (`422 notAFork` for a private copy or a link).',
+    })
+    @ApiParam({ name: 'id', description: 'Work ID' })
+    async upstreamPullRequest(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() body: UpstreamPullRequestDto,
+        @Res({ passthrough: true }) response: StatusOnlyResponse,
+    ): Promise<UpstreamPullRequestOpenResult> {
+        await this.authorize(id, auth.userId, 'edit', true);
+        const result = await this.upstreamPullRequests.open({
+            workId: id,
+            callerUserId: auth.userId,
+            taskId: body?.taskId ?? null,
+            branch: body?.branch ?? null,
+            title: body?.title ?? null,
+            body: body?.body ?? null,
+            draft: body?.draft ?? null,
+            maintainerCanModify: body?.maintainerCanModify ?? null,
+        });
+        response.status(result.httpStatus);
+        return result;
     }
 
     /** View/edit access to an App Work, or the one refusal each failure gets. */

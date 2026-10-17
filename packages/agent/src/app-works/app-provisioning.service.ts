@@ -576,8 +576,15 @@ function issueLines(issues: ReadonlyArray<{ code: string; path: string; message:
 
 /** The first fenced YAML block in a model answer, or the whole answer when it is bare YAML. */
 export function extractYaml(answer: string): string | null {
-    const fenced = /```(?:ya?ml)?\s*\n([\s\S]*?)```/i.exec(answer);
-    const text = (fenced ? fenced[1] : answer).trim();
+    // Index-based, never a backtracking regex over model output (CodeQL js/polynomial-redos).
+    let text = answer;
+    const open = answer.indexOf('```');
+    if (open >= 0) {
+        const lineEnd = answer.indexOf('\n', open);
+        const close = lineEnd >= 0 ? answer.indexOf('```', lineEnd + 1) : -1;
+        if (lineEnd >= 0 && close > lineEnd) text = answer.slice(lineEnd + 1, close);
+    }
+    text = text.trim();
     return /\bkind:\s*app\b/.test(text) ? `${text}\n` : null;
 }
 

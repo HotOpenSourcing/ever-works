@@ -62,3 +62,39 @@ export class ProvisionWorkDto {
     @IsBoolean()
     dryRun?: boolean;
 }
+
+/** APW-09 — `POST /api/works/:id/upstream-pr`. */
+export class UpstreamPullRequestDto {
+    @ApiPropertyOptional({ description: 'A Task of this Work whose branch is offered upstream.', format: 'uuid' })
+    @IsOptional()
+    @IsUUID()
+    taskId?: string;
+
+    @ApiPropertyOptional({ description: 'The fork branch, named directly (used when `taskId` is absent).', maxLength: 255 })
+    @IsOptional()
+    @IsString()
+    @MaxLength(255)
+    branch?: string;
+
+    @ApiPropertyOptional({ maxLength: 256 })
+    @IsOptional()
+    @IsString()
+    @MaxLength(256)
+    title?: string;
+
+    @ApiPropertyOptional({ maxLength: 20000 })
+    @IsOptional()
+    @IsString()
+    @MaxLength(20000)
+    body?: string;
+
+    @ApiPropertyOptional({ description: '`true` when absent.' })
+    @IsOptional()
+    @IsBoolean()
+    draft?: boolean;
+
+    @ApiPropertyOptional({ description: 'GitHub’s “allow edits by maintainers”; `true` when absent.' })
+    @IsOptional()
+    @IsBoolean()
+    maintainerCanModify?: boolean;
+}
