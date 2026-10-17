@@ -27,6 +27,8 @@ import type {
     ListPullRequestsOptions,
     GitCommitFilesInput,
     GitCommitFilesResult,
+    GitRepositoryTree,
+    GitRepositoryTreeOptions,
     GitCommitter,
     GitFileChange,
     IGitFacade,
@@ -1532,6 +1534,27 @@ export class GitFacadeService implements IGitFacade {
             throw new GitOperationNotSupportedError('commitFiles', plugin.id);
         }
         return impl.call(plugin, owner, repo, input, token);
+    }
+
+    /**
+     * APW-03 T38 — the repository tree at `ref` (plan §2.6, §7). Answers `null`
+     * when the provider has no `getRepositoryTree` (the licence scan then runs
+     * root-only and records `licenseScanIncomplete`, plan §7) or the ref does not
+     * exist. A real provider failure propagates.
+     */
+    async getRepositoryTree(
+        owner: string,
+        repo: string,
+        ref: string,
+        treeOptions: GitRepositoryTreeOptions,
+        options: GitFacadeOptions,
+    ): Promise<GitRepositoryTree | null> {
+        const { plugin, token } = await this.resolvePluginAndToken(options);
+        const impl = plugin.getRepositoryTree;
+        if (typeof impl !== 'function') {
+            return null;
+        }
+        return (await impl.call(plugin, owner, repo, ref, token, treeOptions)) ?? null;
     }
 
     /**
