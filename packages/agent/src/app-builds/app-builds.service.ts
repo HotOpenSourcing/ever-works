@@ -6,6 +6,9 @@ import { Repository } from 'typeorm';
 import {
     APP_BUILD_DEPLOYABLE_TRIGGERS,
     APP_BUILD_LIST_MAX_PAGE_SIZE,
+    APP_BUILD_LIST_PAGE_SIZE,
+    APP_BUILD_STATUSES,
+    APP_BUILD_TRIGGERS,
     APP_BUILD_REBUILD_DEDUPE_MS,
     APP_BUILD_REBUILDS_PER_HOUR,
     APP_BUILD_VERIFY_MEMORY_GIB,
@@ -23,6 +26,8 @@ import {
     type AppBuildEventName,
     type AppBuildEventPayload,
     type AppBuildKind,
+    type AppBuildListQuery,
+    type AppBuildListResponse,
     type AppBuildNotDeployableReason,
     type AppBuildRunSource,
     type AppBuildSummary,
@@ -197,7 +202,15 @@ export const APP_BUILD_WATCH_RUNNER = Symbol('APP_BUILD_WATCH_RUNNER');
  */
 export interface AppBuildPluginBinding {
     readonly pluginId: string;
+    /** The plugin's display name, for the Builds list's `provider` (plan §5:1194). */
+    readonly name?: string;
     readonly buildKind: AppBuildKind;
+    /**
+     * Plan §4.4's resolved Work-scoped settings, secrets included (the facade
+     * resolves them; nothing here logs or returns a value). The Builds list reads
+     * only whether `pullToken` is set and `pullTokenExpiresAt`.
+     */
+    readonly settings?: Record<string, unknown>;
     /** The App Work's image repository, or `null` when the plugin produces none. */
     readonly imageRepository: string | null;
     startBuild?(input: {
@@ -313,9 +326,15 @@ export interface AppBuildRunnerRecipeSource {
 /** DI token for {@link AppBuildRunnerRecipeSource} — APW-07's `APP_RUNTIME_ENV_SOURCE`. */
 export const APP_BUILD_RUNNER_RECIPE_SOURCE = Symbol('APP_BUILD_RUNNER_RECIPE_SOURCE');
 
-/** _Provisional — the App Works controller's ownership service._ */
+/**
+ * The App Works ownership check, as this epic reads it.
+ *
+ * Bound (2026-10-17) over `WorkOwnershipService.ensureCanEdit` in
+ * `AppBuildsModule`. `userId` is the CALLER: without one there is nobody to
+ * grant edit rights to, so the answer is `false` (fail-closed).
+ */
 export interface AppBuildEditAccess {
-    isEditor(workId: string): Promise<boolean>;
+    isEditor(workId: string, userId?: string): Promise<boolean>;
 }
 
 /** DI token for {@link AppBuildEditAccess}. Unbound ⇒ every viewer is a viewer. */
@@ -758,8 +777,19 @@ export function assertVerificationBudget(plan: AppVerificationPlan): void {
  * Result shapes
  * -------------------------------------------------------------------------- */
 
-/** The `requestRebuild` refusal codes of plan §5:1202-1205. */
-export type AppBuildRebuildRefusal = 'rebuildRateLimited' | 'commitNotReachable' | 'nothingToBuild';
+/**
+ * The `requestRebuild` refusal codes of plan §5:1202-1205.
+ *
+ * `buildProviderUnavailable` (503) is the App Work whose build context cannot be
+ * read at all — no resolvable build plugin, no credential, no tracked branch —
+ * which is a different answer from `nothingToBuild` (a strategy that builds
+ * nothing) and must not be shown to the member as one.
+ */
+export type AppBuildRebuildRefusal =
+    | 'rebuildRateLimited'
+    | 'commitNotReachable'
+    | 'nothingToBuild'
+    | 'buildProviderUnavailable';
 
 /** What `requestRebuild` answers. */
 export type AppBuildRebuildResult =
@@ -975,6 +1005,18 @@ function buildEventPayload(
         failureClass: (build.failureClass as AppBuildEventPayload['failureClass']) ?? null,
         cancelReason: build.cancelReason ?? null,
     };
+}
+
+/** A list filter (`a`, `a,b` or `['a','b']`) narrowed to the closed set it filters on. */
+function listFilter<T extends string>(
+    value: T | readonly T[] | string | undefined,
+    allowed: readonly T[],
+): T[] {
+    if (value === undefined || value === null) return [];
+    const raw: readonly string[] = Array.isArray(value) ? value : String(value).split(',');
+    return raw
+        .map((entry) => String(entry).trim())
+        .filter((entry): entry is T => (allowed as readonly string[]).includes(entry));
 }
 
 /** The Builds-list row of plan §3.2 (`contracts/…/builds.ts:907`). */
@@ -1571,7 +1613,7 @@ export class AppBuildsService {
     ): Promise<AppBuildRebuildResult> {
         const context = await this.readWork(workId);
         if (!context) {
-            return { ok: false, code: 'nothingToBuild' };
+            return { ok: false, code: 'buildProviderUnavailable' };
         }
 
         const spec = await this.readSpec(workId, options.commitSha ?? null);
@@ -2461,6 +2503,117 @@ export class AppBuildsService {
     }
 
     /* ---------------------------------------------------------------------- *
+     * listForWork (§5:1194, APW-05 T23)
+     * ---------------------------------------------------------------------- */
+
+    /**
+     * The Builds list of one App Work — plan §5's `GET /api/works/:id/builds`.
+     *
+     * Everything a page of Builds needs in one answer, so the web makes one call:
+     * the rows, the resolved provider (the web never embeds a plugin id), the
+     * repository, the image repository, the preparation row's workflow state
+     * (`{ state: 'none', pullRequestUrl: null }` with no row — `APW05-G03`) and the
+     * pull-token facts. **Never the token**: `pullAccess.tokenSet` is a boolean.
+     *
+     * A provider that cannot be resolved is not an error here: the list still
+     * answers its rows, with `provider: null`, so a member can see the Builds that
+     * already exist while the integration is broken.
+     */
+    async listForWork(
+        workId: string,
+        query: AppBuildListQuery = {},
+        userId?: string,
+    ): Promise<AppBuildListResponse> {
+        const page = Math.max(1, Math.floor(Number(query.page ?? 1)) || 1);
+        const pageSize = Math.min(
+            APP_BUILD_LIST_MAX_PAGE_SIZE,
+            Math.max(1, Math.floor(Number(query.pageSize ?? APP_BUILD_LIST_PAGE_SIZE)) || 1),
+        );
+        const status = listFilter(query.status, APP_BUILD_STATUSES);
+        const trigger = listFilter(query.trigger, APP_BUILD_TRIGGERS);
+        const pullRequestNumber =
+            query.pullRequest !== undefined && Number.isInteger(Number(query.pullRequest))
+                ? Number(query.pullRequest)
+                : undefined;
+
+        const result = await this.builds.findPage(
+            workId,
+            {
+                ...(status.length > 0 ? { status } : {}),
+                ...(trigger.length > 0 ? { trigger } : {}),
+                ...(query.branch ? { branch: String(query.branch) } : {}),
+                ...(pullRequestNumber !== undefined ? { pullRequestNumber } : {}),
+            },
+            page,
+            pageSize,
+        );
+
+        const context = await this.readWork(workId);
+        const binding = context ? await this.resolvePlugin(workId) : null;
+
+        let preparation: WorkBuildPreparation | null = null;
+        try {
+            preparation = await this.preparations.findByWork(workId);
+        } catch (error) {
+            this.logger.warn(
+                `App builds: reading the preparation row of ${workId} failed (${
+                    error instanceof Error ? error.message : String(error)
+                }); the list answers workflow state 'none'.`,
+            );
+        }
+
+        const settings = binding?.settings ?? {};
+        const tokenSet =
+            typeof settings.pullToken === 'string' && settings.pullToken.trim().length > 0;
+        const tokenExpiresAt =
+            typeof settings.pullTokenExpiresAt === 'string' ? settings.pullTokenExpiresAt : null;
+
+        return {
+            items: result.rows.map(toAppBuildSummary),
+            total: result.total,
+            page: result.page,
+            pageSize: result.pageSize,
+            provider: binding
+                ? {
+                      pluginId: binding.pluginId,
+                      name: binding.name ?? binding.pluginId,
+                      buildKind: binding.buildKind,
+                  }
+                : null,
+            repository: context
+                ? {
+                      fullName: context.repositoryFullName,
+                      visibility: context.repositoryVisibility,
+                  }
+                : null,
+            imageRepository: binding?.imageRepository ?? null,
+            workflow: {
+                state: preparation?.workflowState ?? 'none',
+                pullRequestUrl: preparation?.workflowPullRequestUrl ?? null,
+            },
+            pullAccess: {
+                // The image's visibility is the registry's answer (§4.12) and is
+                // only known after a pull-token check; the repository's is not
+                // the image's, so the list does not guess.
+                visibility: 'unknown',
+                tokenSet,
+                tokenExpiresAt,
+            },
+            canEdit: await this.canEdit(workId, userId),
+        };
+    }
+
+    /** `APP_BUILD_EDIT_ACCESS`, fail-closed: unbound, no caller, or a throwing check ⇒ `false`. */
+    private async canEdit(workId: string, userId?: string): Promise<boolean> {
+        if (!this.editAccess || !userId) return false;
+        try {
+            return (await this.editAccess.isEditor(workId, userId)) === true;
+        } catch {
+            return false;
+        }
+    }
+
+    /* ---------------------------------------------------------------------- *
      * getDetail (§5:1197, APW-04's poll fallback)
      * ---------------------------------------------------------------------- */
 
@@ -2473,11 +2626,15 @@ export class AppBuildsService {
      * claim edit rights. `buildValueNames` is `buildSecretNames`: the NAMES only,
      * never a value (`plan.md:1204-1205`).
      */
-    async getDetail(workId: string, buildId: string): Promise<AppBuildDetail | null> {
+    async getDetail(
+        workId: string,
+        buildId: string,
+        userId?: string,
+    ): Promise<AppBuildDetail | null> {
         const row = await this.builds.findByIdForWork(workId, buildId);
         if (!row) return null;
 
-        const canEdit = (await this.editAccess?.isEditor(workId)) ?? false;
+        const canEdit = await this.canEdit(workId, userId);
 
         return {
             ...toAppBuildSummary(row),

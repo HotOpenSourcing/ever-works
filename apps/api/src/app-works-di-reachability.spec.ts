@@ -184,16 +184,6 @@ interface OpenGap extends Expected {
  */
 const EXPECTED_UNBOUND: readonly Expected[] = [
     {
-        key: 'AppBuildsModule[agent] | AppBuildPullTokenService | APP_BUILD_PLATFORM_SETTINGS_WRITER',
-        reason: '`PluginSettingsService.writePlatformManagedWorkSettings` does not exist yet; the port waits for it.',
-        source: 'packages/agent/src/app-builds/app-build-pull-token.service.ts:43-52 (APW-05 T17; plan §4.12:1116-1119)',
-    },
-    {
-        key: 'AppBuildsModule[agent] | AppBuildsService | APP_BUILD_EDIT_ACCESS',
-        reason: 'Provisional port for the Builds controller ownership read; unbound ⇒ `canEdit: false`.',
-        source: 'packages/agent/src/app-builds/app-builds.service.ts:316-321; APW-05 T23 (tasks.md:548-556)',
-    },
-    {
         key: 'AppBuildsModule[agent] | AppBuildsService | APP_PROVISION_EVENTS_PORT',
         reason: "APW-04's provisioner events port; the provisioner is not in this tree.",
         source: 'docs/specs/features/app-works/CONTRACTS.md:366 (added by APW-04); APW-04 T19 (tasks.md:307,326)',
