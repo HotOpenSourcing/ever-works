@@ -158,3 +158,27 @@ describe('computeBackoffSeconds', () => {
         expect(computeBackoffSeconds(60, 0.5, 3)).toBe(60);
     });
 });
+
+describe('classifyIdeaFailure — LangChain retry phrasing (linear, no regex)', () => {
+    it('LangChain followed by retry or transient on one line is TRANSIENT_PLUGIN', () => {
+        expect(classifyIdeaFailure(new Error('LangChain error: will retry'))).toBe(
+            IdeaFailureKind.TRANSIENT_PLUGIN,
+        );
+        expect(classifyIdeaFailure(new Error('langchain call hit a transient failure'))).toBe(
+            IdeaFailureKind.TRANSIENT_PLUGIN,
+        );
+    });
+
+    it('does not match across a line break, as the old /langchain.*(…)/i never did', () => {
+        expect(classifyIdeaFailure(new Error('langchain\nretry'))).not.toBe(
+            IdeaFailureKind.TRANSIENT_PLUGIN,
+        );
+    });
+
+    it('stays fast on many repeated "langchain" (js/polynomial-redos)', () => {
+        const hostile = 'langchain'.repeat(50_000) + 'x';
+        const started = Date.now();
+        classifyIdeaFailure(new Error(hostile));
+        expect(Date.now() - started).toBeLessThan(1_000);
+    });
+});
