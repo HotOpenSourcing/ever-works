@@ -102,7 +102,7 @@ describe('IntegrationMissionsController', () => {
             resources as never,
             scope as never,
         );
-        return { controller, missions, goalService };
+        return { controller, missions, goalService, links };
     };
 
     it('creates through createExternal (paused) attributed to the key', async () => {
