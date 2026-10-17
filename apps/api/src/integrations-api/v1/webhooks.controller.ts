@@ -12,7 +12,7 @@ import {
     UseFilters,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import {
     ArrayMaxSize,
     ArrayMinSize,
@@ -39,10 +39,12 @@ import { principalOf, validationFailed } from './integration-request';
 
 /** `CreateWebhook` (contract v1 requests.schema.json). */
 export class IntegrationCreateWebhookDto {
+    @ApiProperty({ format: 'uri', maxLength: 2048 })
     @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
     @MaxLength(2048)
     url!: string;
 
+    @ApiProperty({ type: [String], minItems: 1, maxItems: 200 })
     @IsArray()
     @ArrayMinSize(1)
     @ArrayMaxSize(200)
@@ -50,11 +52,13 @@ export class IntegrationCreateWebhookDto {
     @MaxLength(64, { each: true })
     events!: string[];
 
+    @ApiProperty({ type: [String], format: 'uuid', minItems: 1 })
     @IsArray()
     @ArrayMinSize(1)
     @IsUUID('all', { each: true })
     organizationIds!: string[];
 
+    @ApiProperty({ required: false, type: [String], maxItems: 20 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(20)
@@ -62,6 +66,7 @@ export class IntegrationCreateWebhookDto {
     @MaxLength(100, { each: true })
     excludeOriginTags?: string[];
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 500 })
     @IsOptional()
     @IsString()
     @MaxLength(500)
@@ -70,11 +75,13 @@ export class IntegrationCreateWebhookDto {
 
 /** `UpdateWebhook` (contract v1 requests.schema.json). */
 export class IntegrationUpdateWebhookDto {
+    @ApiProperty({ required: false, format: 'uri', maxLength: 2048 })
     @IsOptional()
     @IsUrl({ require_tld: false, protocols: ['http', 'https'] })
     @MaxLength(2048)
     url?: string;
 
+    @ApiProperty({ required: false, type: [String], minItems: 1, maxItems: 200 })
     @IsOptional()
     @IsArray()
     @ArrayMinSize(1)
@@ -83,12 +90,14 @@ export class IntegrationUpdateWebhookDto {
     @MaxLength(64, { each: true })
     events?: string[];
 
+    @ApiProperty({ required: false, type: [String], format: 'uuid', minItems: 1 })
     @IsOptional()
     @IsArray()
     @ArrayMinSize(1)
     @IsUUID('all', { each: true })
     organizationIds?: string[];
 
+    @ApiProperty({ required: false, type: [String], maxItems: 20 })
     @IsOptional()
     @IsArray()
     @ArrayMaxSize(20)
@@ -96,11 +105,13 @@ export class IntegrationUpdateWebhookDto {
     @MaxLength(100, { each: true })
     excludeOriginTags?: string[];
 
+    @ApiProperty({ required: false, nullable: true, maxLength: 500 })
     @IsOptional()
     @IsString()
     @MaxLength(500)
     description?: string | null;
 
+    @ApiProperty({ required: false, enum: ['active', 'paused'] })
     @IsOptional()
     @IsIn(['active', 'paused'])
     status?: 'active' | 'paused';

@@ -573,7 +573,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -581,7 +581,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -589,7 +589,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -597,7 +597,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -605,7 +605,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -613,7 +613,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -621,7 +621,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_document",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-document.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -629,7 +629,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_folder",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-folder.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -637,7 +637,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_folder",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-folder.schema.json",
 			"phase": "P3"
 		},
 		{
@@ -645,7 +645,7 @@
 			"version": 1,
 			"domain": "kb",
 			"aggregateType": "kb_folder",
-			"dataSchema": null,
+			"dataSchema": "schemas/resources/kb-folder.schema.json",
 			"phase": "P3"
 		},
 		{

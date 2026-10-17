@@ -35,7 +35,21 @@ describe('IntegrationTasksWriteController', () => {
 
     const setup = () => {
         const tasks = {
-            create: jest.fn().mockResolvedValue({ id: 'task-1' }),
+            // As TasksService.create: `withinCreate` runs in the create's transaction (T17a).
+            create: jest.fn(
+                async (
+                    _userId: string,
+                    _input: unknown,
+                    _scope: unknown,
+                    options?: {
+                        withinCreate?: (row: { id: string }, manager?: unknown) => Promise<void>;
+                    },
+                ) => {
+                    const row = { id: 'task-1' };
+                    if (options?.withinCreate) await options.withinCreate(row, 'tx-manager');
+                    return row;
+                },
+            ),
             update: jest.fn().mockResolvedValue({}),
             remove: jest.fn().mockResolvedValue({ deleted: true }),
             addAssignee: jest.fn().mockResolvedValue({}),
@@ -108,7 +122,9 @@ describe('IntegrationTasksWriteController', () => {
                 createdById: 'key-1',
             }),
             expect.anything(),
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
         );
+        // T17a — linked inside the create's transaction (its manager).
         expect(links.create).toHaveBeenCalledWith(
             expect.objectContaining({
                 organizationId: ORG,
@@ -116,6 +132,7 @@ describe('IntegrationTasksWriteController', () => {
                 installationId: 'conn-1',
             }),
             expect.objectContaining({ entityType: 'task', entityId: 'task-1', externalId: 'g-1' }),
+            'tx-manager',
         );
         expect(tasks.addAssignee).toHaveBeenCalledWith(
             'owner-1',
@@ -144,7 +161,7 @@ describe('IntegrationTasksWriteController', () => {
         expect(body).toMatchObject({ id: 'task-existing' });
     });
 
-    it('undoes its create when a concurrent request linked the externalRef first', async () => {
+    it('a lost externalRef race rolls its create back (no undo call) and answers the winner', async () => {
         const { controller, tasks, links } = setup();
         links.findByExternal
             .mockResolvedValueOnce(null)
@@ -160,7 +177,9 @@ describe('IntegrationTasksWriteController', () => {
             req(),
             response,
         );
-        expect(tasks.remove).toHaveBeenCalledWith('owner-1', 'task-1', expect.anything());
+        // The link failed inside the create's transaction, so the task rolled
+        // back with it: nothing is left to delete.
+        expect(tasks.remove).not.toHaveBeenCalled();
         expect(response.status).toHaveBeenCalledWith(200);
         expect(body).toMatchObject({ id: 'task-winner' });
     });
