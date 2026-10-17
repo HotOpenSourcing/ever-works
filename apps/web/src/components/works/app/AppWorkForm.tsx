@@ -113,6 +113,10 @@ export function AppWorkForm({
             : '';
 
     const [tab, setTab] = useState<'paste' | 'catalog'>('paste');
+    // The Blueprint chosen in the curated catalog (APW-01 T22): carried on
+    // inspect and create until the member types a different URL.
+    const [pickedBlueprintId, setPickedBlueprintId] = useState<string | undefined>(undefined);
+    const chosenBlueprintId = pickedBlueprintId ?? initialBlueprintId;
     const [repositoryUrl, setRepositoryUrl] = useState(seed);
     const [preview, setPreview] = useState<AppSourceInspectResponse | null>(null);
     const [inspectRefusal, setInspectRefusal] = useState<FormRefusal | null>(null);
@@ -135,11 +139,11 @@ export function AppWorkForm({
     const blueprintMatched = preview?.blueprint.status === 'matched';
     // The id the submit carries: the catalog pick, else the preview's match.
     const blueprintId =
-        initialBlueprintId ||
+        chosenBlueprintId ||
         (blueprintMatched && preview?.blueprint.id ? preview.blueprint.id : undefined);
     const prompts = blueprintMatched ? (preview?.blueprint.prompts ?? []) : [];
     // The provisioning switch is offered only when no Blueprint applies (spec §6.2).
-    const showAutoProvision = Boolean(preview) && !blueprintMatched && !initialBlueprintId;
+    const showAutoProvision = Boolean(preview) && !blueprintMatched && !chosenBlueprintId;
 
     const selectedOwner = preview?.targetOwners.find((entry) => entry.login === owner) ?? null;
     const ownerNeeded = mode === 'fork' || mode === 'private-copy';
@@ -200,7 +204,7 @@ export function AppWorkForm({
      * Inspect the URL in the field — or, from a catalog pick, the URL it hands
      * over (state has not caught up with it yet inside the same click).
      */
-    const inspect = (urlOverride?: string) => {
+    const inspect = (urlOverride?: string, blueprintOverride?: string) => {
         const target = urlOverride ?? repositoryUrl;
         if (!parseRepositoryUrl(target) || inspecting) return;
         const ticket = ++inspectTicket.current;
@@ -210,7 +214,9 @@ export function AppWorkForm({
             const result = await inspectAppSourceAction({
                 repositoryUrl: canonicalRepositoryUrl(target) ?? target.trim(),
                 ...(gitProvider ? { gitProvider } : {}),
-                ...(initialBlueprintId ? { blueprintId: initialBlueprintId } : {}),
+                ...((blueprintOverride ?? chosenBlueprintId)
+                    ? { blueprintId: blueprintOverride ?? chosenBlueprintId }
+                    : {}),
             });
             if (ticket !== inspectTicket.current) return;
             if (!result.success) {
@@ -365,10 +371,11 @@ export function AppWorkForm({
                         the Blueprint match comes from inspect, never from the card. */}
                     <AppsCatalogBrowser
                         disabled={busy}
-                        onPick={(item) => {
-                            onUrlChange(item.url);
+                        onPick={(pick) => {
+                            onUrlChange(pick.url);
+                            setPickedBlueprintId(pick.blueprintId);
                             setTab('paste');
-                            inspect(item.url);
+                            inspect(pick.url, pick.blueprintId);
                         }}
                     />
                 </div>
@@ -387,7 +394,11 @@ export function AppWorkForm({
                                 type="url"
                                 name="repositoryUrl"
                                 value={repositoryUrl}
-                                onChange={(event) => onUrlChange(event.target.value)}
+                                onChange={(event) => {
+                                    // A typed URL is no longer the catalog pick.
+                                    setPickedBlueprintId(undefined);
+                                    onUrlChange(event.target.value);
+                                }}
                                 onKeyDown={onUrlKeyDown}
                                 placeholder={t('urlPlaceholder')}
                                 helperText={t('urlHelp')}

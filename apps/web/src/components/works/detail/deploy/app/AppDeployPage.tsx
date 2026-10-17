@@ -112,7 +112,9 @@ export function AppDeployPage({ work, initialTarget, status, canEdit }: AppDeplo
                 workId={work.id}
                 target={target}
                 canEdit={canEdit}
-                managedAvailable={false}
+                // APW-10 lite — the API's own answer: `GET app-target`'s eligibility is
+                // `eligible` only while the operator opened the tier (EVER_WORKS_APPS_MANAGED_ENABLED).
+                managedAvailable={target.eligibility?.managed?.eligible === true}
                 onConnectCluster={() => setConnectOpen(true)}
                 onSaved={setTarget}
             />

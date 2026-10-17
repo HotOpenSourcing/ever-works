@@ -15,15 +15,17 @@ import messages from '../../../../messages/en.json';
  * actions are mocked at their module boundary.
  */
 
-const { inspectMock, createMock, pushMock, catalogMock } = vi.hoisted(() => ({
+const { inspectMock, createMock, pushMock, catalogMock, curatedMock } = vi.hoisted(() => ({
     inspectMock: vi.fn(),
     createMock: vi.fn(),
     pushMock: vi.fn(),
     catalogMock: vi.fn(),
+    curatedMock: vi.fn(),
 }));
 
 vi.mock('@/app/actions/dashboard/apps-catalog', () => ({
     listAppsCatalogBlueprintsAction: catalogMock,
+    listAppsCatalogAction: curatedMock,
 }));
 
 vi.mock('@/app/actions/dashboard/works', () => ({
@@ -268,7 +270,73 @@ describe('AppWorkForm', () => {
         await act(async () => resolve({ success: true, work: { id: 'w-3' } }));
     });
 
-    it('a catalog pick fills the URL and inspects it exactly once (ACC-01-19)', async () => {
+    it('a curated catalog pick fills the upstream URL, carries the Blueprint id and inspects once (ACC-01-19)', async () => {
+        curatedMock.mockResolvedValue({
+            success: true,
+            data: {
+                items: [
+                    {
+                        id: 'umami',
+                        name: 'Umami',
+                        summary: '',
+                        status: 'beta',
+                        selectable: true,
+                        featured: false,
+                        tags: [],
+                        upstream: {
+                            repo: 'umami-software/umami',
+                            url: 'https://github.com/umami-software/umami',
+                            defaultBranch: 'master',
+                        },
+                        blueprint: {
+                            repo: 'ever-works/umami-template',
+                            version: '0.1.0',
+                            ref: 'v0.1.0',
+                            sha: null,
+                            verified: false,
+                        },
+                        license: { spdx: 'MIT', class: 'green' },
+                        managedHosting: { allowed: true, reason: null },
+                        trademark: null,
+                        yourCluster: true,
+                    },
+                ],
+                total: 1,
+                available: true,
+                page: 1,
+                limit: 100,
+                source: 'manifest',
+                repo: 'ever-works/templates',
+                ref: 'main',
+            },
+        });
+        inspectMock.mockResolvedValue({
+            success: true,
+            data: preview({
+                blueprint: { status: 'matched', id: 'umami', name: 'Umami', prompts: [] },
+            }),
+        });
+        createMock.mockResolvedValue({ success: true, work: { id: 'w-umami' } });
+        renderForm();
+        fireEvent.click(screen.getByTestId('app-work-tab-catalog'));
+        const card = await screen.findByTestId('apps-catalog-card');
+        await act(async () => {
+            fireEvent.click(card);
+        });
+        expect(inspectMock).toHaveBeenCalledTimes(1);
+        expect(inspectMock.mock.calls[0][0]).toMatchObject({
+            repositoryUrl: 'https://github.com/umami-software/umami',
+            blueprintId: 'umami',
+        });
+        await screen.findByTestId('app-work-preview');
+        await act(async () => {
+            fireEvent.click(screen.getByTestId('app-work-submit'));
+        });
+        expect(createMock.mock.calls[0][0].blueprintId).toBe('umami');
+    });
+
+    it('a topic-listed pick (curated catalog unavailable) fills the URL and inspects it exactly once', async () => {
+        curatedMock.mockResolvedValue({ success: false, error: 'Not Found', httpStatus: 404 });
         catalogMock.mockResolvedValue({
             success: true,
             data: {

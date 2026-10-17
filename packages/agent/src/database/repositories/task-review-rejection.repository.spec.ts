@@ -29,7 +29,9 @@ describe('TaskReviewRejectionRepository.record — source dedup', () => {
 
     it('records the first delivery with its source key', async () => {
         const { repository, rejections } = build();
-        await expect(rejections.record(input)).resolves.toMatchObject({ sourceKey: input.sourceKey });
+        await expect(rejections.record(input)).resolves.toMatchObject({
+            sourceKey: input.sourceKey,
+        });
         expect(repository.findOne).toHaveBeenCalledWith({
             where: { taskId: 'task-1', sourceKey: input.sourceKey },
         });
@@ -51,7 +53,9 @@ describe('TaskReviewRejectionRepository.record — source dedup', () => {
         const { rejections } = build({ saveError: new Error('db down') });
         await expect(rejections.record(input)).rejects.toThrow('db down');
         const { repository, rejections: plain } = build({ existing: { id: 'x' } });
-        await expect(plain.record({ ...input, sourceKey: null })).resolves.toMatchObject({ sourceKey: null });
+        await expect(plain.record({ ...input, sourceKey: null })).resolves.toMatchObject({
+            sourceKey: null,
+        });
         expect(repository.findOne).not.toHaveBeenCalled();
     });
 });

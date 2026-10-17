@@ -1164,6 +1164,25 @@ export const config = {
              * APW-09 FR-46 — the operator kill switch for upstream pull requests. ON unless
              * `APP_WORKS_UPSTREAM_PRS_ENABLED` is exactly `'false'`; read per call.
              */
+            /**
+             * APW-10 lite — the apex managed-target App hosts live under
+             * (`<label>.<EVER_WORKS_APPS_MANAGED_DOMAIN>`). A plain dotted DNS name or `null`
+             * (unset or malformed ⇒ the shared apps apex, `getDomain()`, is used instead).
+             */
+            managedTargetDomain(): string | null {
+                const raw = (process.env.EVER_WORKS_APPS_MANAGED_DOMAIN ?? '').trim().toLowerCase();
+                if (!raw) return null;
+                // Label-wise (no nested-quantifier regex over operator input): 2+ labels, each a
+                // DNS-1123 label, the last alphabetic.
+                const labels = raw.split('.');
+                const ok =
+                    raw.length <= 253 &&
+                    labels.length >= 2 &&
+                    labels.every((label) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) &&
+                    /^[a-z]{2,63}$/.test(labels[labels.length - 1]);
+                return ok ? raw : null;
+            },
+
             upstreamPullRequestsEnabled() {
                 return process.env.APP_WORKS_UPSTREAM_PRS_ENABLED !== 'false';
             },
