@@ -124,7 +124,16 @@ import {
 // APW-06 §5.1 — the Build source the isolated App runtime worker's
 // `APP_DEPLOY_BUILD_SOURCE` proxies (it owns no DataSource). The adapter CLASS, as
 // `AppDeployRequestModule` exports it, so the allow-list is its two reads.
-import { AppDeployBuildSourceAdapter } from '@ever-works/agent/app-runtime';
+import {
+    AppDeployBuildSourceAdapter,
+    AppDeployDispatchRelay,
+    AppDeployRequestService,
+    AppRuntimeEventRelayService,
+} from '@ever-works/agent/app-runtime';
+// APW-06 T71 (A0.7) — the runtime-state row and the env source the isolated App runtime worker
+// proxies by name (plan §6.4). Both read or write rows, so neither can be local in the worker.
+import { WorkAppRuntimeStateRepository } from '@ever-works/agent/database';
+import { AppEnvRuntimeSource } from '@ever-works/agent/app-env';
 
 /**
  * C-05 RPC half — methods that must never be reachable via `POST
@@ -634,6 +643,26 @@ export class TriggerInternalController implements OnModuleInit {
         // `PluginAllowlistReader`. Appended LAST + `@Optional()` per the arity rule above.
         @Optional()
         private readonly gitHubAppInstallationRepository?: GitHubAppInstallationRepository,
+        // APW-06 T71 / T28 / T31 / T73 (A0.7, 2026-10-17) — the five names the isolated App runtime
+        // worker (`trigger-app-runtime.module.ts`) still needed to run a Deployment end to end.
+        // Appended LAST + `@Optional()` per the arity rule above:
+        //   - `WorkAppRuntimeStateRepository` — `WORK_APP_RUNTIME_STATES` (T71 status item (b)):
+        //     the deploy lock, the target, the snapshot; health, ops, smoke and deletion read it;
+        //   - `AppEnvRuntimeSource` — `APP_RUNTIME_ENV_SOURCE` (§6.4 "proxied by name", T73);
+        //   - `AppRuntimeEventRelayService` — `APP_RUNTIME_EVENT_SINK` (T28's relay);
+        //   - `AppDeployDispatchRelay` — the worker's `APP_DEPLOY_DISPATCHER` (§5.6 step 7's dequeue);
+        //   - `AppDeployRequestService` — `APP_HOSTS_DEPLOY_REQUESTER` (a primary-domain change
+        //     asks for a Deployment; the request re-runs every §5.1 precondition HERE).
+        @Optional()
+        private readonly workAppRuntimeStateRepository?: WorkAppRuntimeStateRepository,
+        @Optional()
+        private readonly appEnvRuntimeSource?: AppEnvRuntimeSource,
+        @Optional()
+        private readonly appRuntimeEventRelayService?: AppRuntimeEventRelayService,
+        @Optional()
+        private readonly appDeployDispatchRelay?: AppDeployDispatchRelay,
+        @Optional()
+        private readonly appDeployRequestService?: AppDeployRequestService,
         // APW-04 (lane aw-ai) — the provisioner's events port, behind the isolated App
         // runtime worker's `APP_PROVISION_EVENTS_PORT` and `APP_TARGET_UPDATED_PORT` proxies
         // (`trigger-app-runtime.module.ts`). Appended LAST + `@Optional()` per the arity rule
@@ -896,6 +925,14 @@ export class TriggerInternalController implements OnModuleInit {
             WorkspaceBackupRunner: this.workspaceBackupRunner,
             WorkspaceBackupService: this.workspaceBackupService,
             WorkspaceBackupRepository: this.workspaceBackupRepository,
+            // APW-06 T71 (A0.7) — the isolated App runtime worker's five remaining names, same rule
+            // as every App entry above: a name that maps to `undefined` answers a loud
+            // "Unknown remote target" instead of pretending.
+            WorkAppRuntimeStateRepository: this.workAppRuntimeStateRepository,
+            AppEnvRuntimeSource: this.appEnvRuntimeSource,
+            AppRuntimeEventRelayService: this.appRuntimeEventRelayService,
+            AppDeployDispatchRelay: this.appDeployDispatchRelay,
+            AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }
                 : {}),

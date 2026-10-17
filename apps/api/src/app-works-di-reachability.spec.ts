@@ -409,34 +409,14 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         source: 'packages/agent/src/app-runtime/app-runtime-deletion.service.ts:507 (APW-06 T31/T32); app-works-port-dormancy.spec.ts:349',
     },
     {
-        key: 'TriggerAppRuntimeModule :: APP_COMMIT_ANCESTRY',
-        reason: "APW-02's commit-ancestry reader is unwritten.",
-        source: 'packages/agent/src/app-runtime/app-deploy.orchestrator.ts:170 (owned by APW-02)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_CUSTOM_DOMAIN_STORE',
-        reason: "The swap is the proxied `WorkCustomDomainRepository`; bound without the runtime-state row, hosts would ignore the owner's settings.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:155-161',
-    },
-    {
         key: 'TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE',
         reason: "APW-07's service must run in the worker, and its `@InjectRepository(WorkAppDependency)` writes cannot cross the internal channel.",
         source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:170-172',
     },
     {
-        key: 'TriggerAppRuntimeModule :: APP_DEPLOY_DEPLOYMENT_STORE',
-        reason: "The API's adapter has no `update`, which the orchestrator's view of the token needs; which class carries it is undecided.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:162-164',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_DEPLOY_DISPATCHER',
-        reason: "The orchestrator's dequeue dispatch: T24 declares the token and T31 binds it; inside the worker it is also the open §5.1/§5.6 dispatcher-gate decision (T71 status item (a)).",
-        source: 'packages/agent/src/app-runtime/app-deploy.orchestrator.ts:98-100 (APW-06 T31); APW-06/tasks.md:1228-1232',
-    },
-    {
         key: 'TriggerAppRuntimeModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY',
-        reason: 'What "an isolated dispatcher is available" means inside the worker is an open §5.1/§5.6 decision (T71 status item (a)); every dequeued Deployment answers `worker_not_isolated` meanwhile.',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1228-1232 (APW-06 T71 status (a))',
+        reason: 'Deliberately unbound — decision B1 (2026-10-17): inside the isolated worker §5.1 step 1 is answered by the run itself (the lock-holding `deploymentId`, `AppDeployPreconditionsService.evaluate`), so the gate is not consulted for a dequeued Deployment and a lock-less one still meets `worker_not_isolated`.',
+        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1228-1232 (APW-06 T71 status (a), decision B1); packages/agent/src/app-runtime/app-deploy-preconditions.service.ts:428-461',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_HEALTH_EGRESS_SOURCE',
@@ -444,34 +424,9 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         source: 'packages/agent/src/app-runtime/app-health.service.ts:722-736',
     },
     {
-        key: 'TriggerAppRuntimeModule :: APP_HOSTS_APPS_DOMAIN',
-        reason: 'The swap is `config.everWorks.apps`; it lands with the runtime-state row (see APP_CUSTOM_DOMAIN_STORE).',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:155-161',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_HOSTS_DEPLOYMENT_STORE',
-        reason: 'The swap is the proxied `WorkDeploymentRepository`; it lands with the runtime-state row (see APP_CUSTOM_DOMAIN_STORE).',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:155-161',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_HOSTS_DEPLOY_REQUESTER',
-        reason: "Bound to the API's `AppDeployRequestService`; §6.4 lists no proxy, so whether the worker may request a Deployment is undecided.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:165-166; docs/specs/features/app-works/APW-06-app-runtime/plan.md:982-989',
-    },
-    {
         key: 'TriggerAppRuntimeModule :: APP_HOSTS_REBUILD_REQUESTER',
         reason: "APW-05's rebuild requester is unwritten.",
         source: 'packages/agent/src/app-runtime/app-hosts.service.ts:142 (owned by APW-05)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_HOSTS_WORK_STORE',
-        reason: 'The swap is the proxied `WorkRepository`; it lands with the runtime-state row (see APP_CUSTOM_DOMAIN_STORE).',
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:155-161',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_IMAGE_REFERENCE_RESOLVER',
-        reason: '`AppImageReferenceResolver` does not exist yet.',
-        source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:131 (APW-06 T72)',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_LICENSE_SERVICE',
@@ -479,29 +434,9 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:134-135 (APW-03 T42)',
     },
     {
-        key: 'TriggerAppRuntimeModule :: APP_RUNTIME_EVENT_SINK',
-        reason: 'The relay (`AppRuntimeEventRelayService`) is APW-06 T28 and is not in this tree.',
-        source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:132-133 (APW-06 T28)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_RUNTIME_NOTIFICATIONS',
-        reason: "APW-06 T29's notification producers are unwritten.",
-        source: 'packages/agent/src/app-runtime/app-deploy.orchestrator.ts:173 (APW-06 T29)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_UPSTREAM_STATE_READER',
-        reason: "APW-02's upstream-state reader adapter is unwritten.",
-        source: 'packages/agent/src/app-runtime/app-deploy.orchestrator.ts:167 (owned by APW-02)',
-    },
-    {
         key: 'TriggerAppRuntimeModule :: APP_WORK_DELETION_COMPLETION',
         reason: 'Deletes the Work row; its binding is owed by T33/T58 and, unbound, a finished removal keeps the row (the fail-closed answer).',
         source: 'packages/agent/src/app-runtime/app-runtime-deletion.service.ts:320-331 (APW-06 T33/T58)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: WORK_APP_RUNTIME_STATES',
-        reason: "§6.4's `WorkAppRuntimeStateRepository` proxy is T71 status item (b); it needs a `remoteMap` name and turns on the health, op, smoke and deletion paths at once.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1232 (APW-06 T71 status (b))',
     },
 ];
 

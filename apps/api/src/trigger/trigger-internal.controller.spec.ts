@@ -378,7 +378,13 @@ describe('TriggerInternalController', () => {
             pluginAllowlistRepository,
             // The worker git facade's installation reads, appended LAST, same rule.
             gitHubAppInstallationRepository,
-            // APW-04 (lane aw-ai) — the provisioner's events port, appended after it.
+            // APW-06 T71 (A0.7) — the App runtime worker's five names, appended after it.
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            // APW-04 (lane aw-ai) — the provisioner's events port, appended after them.
             undefined,
             // APW-03 T42 / APW-02 T33 — the licence service the sync worker proxies, LAST.
             appLicenseService,
@@ -1697,15 +1703,27 @@ describe('TriggerInternalController', () => {
             ).rejects.toThrow('Unknown remote target: AppLicenseService');
         });
 
-        it('appends the service LAST and @Optional()', () => {
+        it('appends the service in the @Optional() tail, after the installation repository', () => {
             const paramTypes: unknown[] =
                 Reflect.getMetadata('design:paramtypes', TriggerInternalController) ?? [];
             const optionalIndices: number[] =
                 Reflect.getMetadata('optional:paramtypes', TriggerInternalController) ?? [];
-            const last = paramTypes.length - 1;
+            // The tail from the installation repository on (A0.7's five App runtime names,
+            // APW-04's provisioner events service, this licence service) is all `@Optional()`
+            // per the arity rule.
+            const at = paramTypes.indexOf(GitHubAppInstallationRepository);
+            expect(at).toBeGreaterThan(0);
 
-            expect((paramTypes[last] as { name?: string })?.name).toBe('AppLicenseService');
-            expect(optionalIndices).toContain(last);
+            // The class itself, not `Object`: an `Object` here is a parameter Nest resolves
+            // to nothing, and `@Optional()` would hide that.
+            expect(paramTypes[at]).toBe(GitHubAppInstallationRepository);
+            for (let index = at; index < paramTypes.length; index += 1) {
+                expect(optionalIndices).toContain(index);
+            }
+            const license = paramTypes.findIndex(
+                (type) => (type as { name?: string })?.name === 'AppLicenseService',
+            );
+            expect(license).toBeGreaterThan(at);
         });
     });
 });
