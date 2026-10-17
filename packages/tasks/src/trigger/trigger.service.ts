@@ -91,6 +91,11 @@ import type { appBuildPrepareTask } from '../tasks/trigger/app-build-prepare.tas
 // two-hour `maxDuration`, and triggering the object keeps both with the task
 // instead of restating them at every call site.
 import { appDeployTask, type AppDeployTaskPayload } from '../tasks/trigger/app-deploy.task';
+import {
+    APP_CLUSTER_OP_VERIFICATION_MAX_DURATION,
+    appClusterOpTask,
+    type AppClusterOpTaskPayload,
+} from '../tasks/trigger/app-cluster-op.task';
 // C10 — the `app-fork-readiness` job (APW-02 plan §6.1/§6.2). Both the id and the type
 // come from the task module itself here: T31's planned agent-side
 // `app-fork-readiness.types.ts` has not landed, and unlike the Build pair there is no
@@ -1239,6 +1244,67 @@ export class TriggerService
             this.logger.error(
                 `Failed to dispatch app-deploy for Work ${payload.workId} ` +
                     `(deployment ${payload.deploymentId})`,
+                error as Error,
+            );
+            return null;
+        }
+    }
+
+    /**
+     * APW-06 T31/T32 (lane aw-deploy-2, 2026-10-17) — the `app-cluster-op` job (plan §9.2:1247): one
+     * op (`cluster-check`, `prepare-namespace`, `status-refresh`, `ingress-reconcile`, `pause`, …)
+     * for one App Work, run on the isolated `app-cluster-io` queue.
+     *
+     * The same two refusals as {@link dispatchAppDeploy}, for the same reasons: no job runtime ⇒
+     * no in-process fallback (FR-5), and production without
+     * `EVER_WORKS_APPS_CLUSTER_WORKER_ISOLATED=true` ⇒ nothing is enqueued. `verification-deploy`
+     * gets its 3 600 s budget at trigger time (§9.2). The payload carries ids only, never a
+     * credential — the worker resolves the kubeconfig itself.
+     */
+    async dispatchAppClusterOp(
+        payload: AppClusterOpTaskPayload,
+        opts: { delayMs?: number } = {},
+    ): Promise<string | null> {
+        if (!this.ensureConfigured()) {
+            this.logger.warn(
+                `Refusing to dispatch app-cluster-op ${payload?.op} for Work ${payload?.workId}: the ` +
+                    'job runtime is disabled, and App cluster work has no in-process fallback (FR-5).',
+            );
+            return null;
+        }
+
+        if (
+            process.env.NODE_ENV === 'production' &&
+            config.everWorks?.apps?.isClusterWorkerIsolated?.() !== true
+        ) {
+            this.logger.warn(
+                `Refusing to dispatch app-cluster-op ${payload?.op} for Work ${payload?.workId}: ` +
+                    'production requires EVER_WORKS_APPS_CLUSTER_WORKER_ISOLATED=true.',
+            );
+            return null;
+        }
+
+        try {
+            const delayMs = typeof opts.delayMs === 'number' && opts.delayMs > 0 ? opts.delayMs : 0;
+            const handle = await appClusterOpTask.trigger(
+                payload,
+                this.stampTenantOptions({
+                    tags: [
+                        'app-cluster-op',
+                        `work:${payload.workId}`,
+                        `op:${payload.op}`,
+                    ],
+                    machine: this.machine() as any,
+                    ...(payload.op === 'verification-deploy'
+                        ? { maxDuration: APP_CLUSTER_OP_VERIFICATION_MAX_DURATION }
+                        : {}),
+                    ...(delayMs > 0 ? { delay: new Date(Date.now() + delayMs) } : {}),
+                }),
+            );
+            return handle?.id ?? null;
+        } catch (error) {
+            this.logger.error(
+                `Failed to dispatch app-cluster-op ${payload?.op} for Work ${payload?.workId}`,
                 error as Error,
             );
             return null;

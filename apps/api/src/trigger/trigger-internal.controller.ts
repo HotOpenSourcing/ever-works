@@ -122,6 +122,7 @@ import {
 // `APP_DEPLOY_BUILD_SOURCE` proxies (it owns no DataSource). The adapter CLASS, as
 // `AppDeployRequestModule` exports it, so the allow-list is its two reads.
 import {
+    AppClusterOpDispatchRelay,
     AppDeployBuildSourceAdapter,
     AppDeployDispatchRelay,
     AppDeployRequestService,
@@ -667,6 +668,10 @@ export class TriggerInternalController implements OnModuleInit {
         // target: AppProvisionEventsService` rather than pretending it was told.
         @Optional()
         private readonly appProvisionEventsService?: AppProvisionEventsService,
+        // APW-06 T31 (lane aw-deploy-2) — the worker's `APP_CLUSTER_OP_DISPATCHER` re-dispatches
+        // through the API's gate. Appended LAST + `@Optional()` per the arity rule above.
+        @Optional()
+        private readonly appClusterOpDispatchRelay?: AppClusterOpDispatchRelay,
     ) {}
 
     onModuleInit() {
@@ -903,6 +908,7 @@ export class TriggerInternalController implements OnModuleInit {
             AppEnvRuntimeSource: this.appEnvRuntimeSource,
             AppRuntimeEventRelayService: this.appRuntimeEventRelayService,
             AppDeployDispatchRelay: this.appDeployDispatchRelay,
+            AppClusterOpDispatchRelay: this.appClusterOpDispatchRelay,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }

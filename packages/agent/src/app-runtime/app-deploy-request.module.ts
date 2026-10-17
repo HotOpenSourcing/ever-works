@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ModuleRef } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { WorkBuild } from '../entities/work-build.entity';
@@ -13,14 +14,38 @@ import {
     APP_DEPLOY_SPEC_SOURCE,
     AppDeployPreconditionsService,
 } from './app-deploy-preconditions.service';
-import { buildAppDeployDispatcherProviders } from './app-deploy-dispatcher.provider';
+import {
+    buildAppClusterOpDispatcherProviders,
+    buildAppDeployDispatcherProviders,
+} from './app-deploy-dispatcher.provider';
+import { AppTargetService } from './app-target.service';
+import { config } from '../config';
+import { WorkCustomDomainRepository } from '../database/repositories/work-custom-domain.repository';
+import { WorkDeploymentRepository } from '../database/repositories/work-deployment.repository';
+import { WorkRepository } from '../database/repositories/work.repository';
+import {
+    APP_CUSTOM_DOMAIN_STORE,
+    APP_HOSTS_APPS_DOMAIN,
+    APP_HOSTS_DEPLOY_REQUESTER,
+    APP_HOSTS_DEPLOYMENT_STORE,
+    APP_HOSTS_WORK_STORE,
+    AppHostsService,
+} from './app-hosts.service';
+import { AppDomainsService } from './app-domains.service';
+import { APP_DEPLOY_HOST_SOURCE } from './app-deploy-preconditions.service';
+import { ConfigAppsTierPolicy } from './app-runtime-worker.adapters';
+import { APPS_TIER_POLICY } from './ports';
 import { APP_DEPLOY_DEPLOYMENT_STORE, AppDeployRequestService } from './app-deploy-request.service';
 import { AppLicenseGate } from './app-license-gate';
 import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
 import { AppBuildSucceededListener } from './app-build-succeeded.listener';
-import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runtime-worker.adapters';
+import {
+    AppClusterOpDispatchRelay,
+    AppDeployDispatchRelay,
+    AppRuntimeEventRelayService,
+} from './app-runtime-worker.adapters';
 
 /**
  * APW-06 §2.2 — the module that finally REGISTERS the deploy request path.
@@ -198,6 +223,38 @@ import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runti
         // and `APP_DEPLOY_DISPATCHER` proxies (`TriggerInternalController.remoteMap`).
         AppRuntimeEventRelayService,
         AppDeployDispatchRelay,
+        // APW-06 T31/T33 (lane aw-deploy-2) — the API's `app-cluster-op` gate, its worker-facing
+        // relay, the app-target/app-status service, and APW-10's minimal tier policy (the managed
+        // target opens only with EVER_WORKS_APPS_MANAGED_ENABLED; the worker binds the same class).
+        ...buildAppClusterOpDispatcherProviders(),
+        AppClusterOpDispatchRelay,
+        AppTargetService,
+        { provide: APPS_TIER_POLICY, useFactory: () => new ConfigAppsTierPolicy() },
+        // C43 / APW-06 T26 (lane aw-deploy-2) — the hosts and domains services in the API, so the
+        // App branch of `DeployFacadeService`'s four domain methods is live here (the facade finds
+        // `AppDomainsService` through `ModuleRef`). Neither dials a cluster: a non-primary change
+        // is an `ingress-reconcile` op the worker runs, a primary change a Deployment request.
+        // The stores are the swaps `app-hosts.service.ts` documents.
+        AppHostsService,
+        AppDomainsService,
+        { provide: APP_DEPLOY_HOST_SOURCE, useExisting: AppHostsService },
+        { provide: APP_CUSTOM_DOMAIN_STORE, useExisting: WorkCustomDomainRepository },
+        { provide: APP_HOSTS_WORK_STORE, useExisting: WorkRepository },
+        { provide: APP_HOSTS_DEPLOYMENT_STORE, useExisting: WorkDeploymentRepository },
+        // Lazy, not `useExisting`: the request service → preconditions → host source
+        // (`AppHostsService`) → this requester would be a constructor cycle Nest cannot resolve.
+        {
+            provide: APP_HOSTS_DEPLOY_REQUESTER,
+            useFactory: (moduleRef: ModuleRef) => ({
+                request: (request: Parameters<AppDeployRequestService['request']>[0]) =>
+                    moduleRef.get(AppDeployRequestService, { strict: false }).request(request),
+            }),
+            inject: [ModuleRef],
+        },
+        {
+            provide: APP_HOSTS_APPS_DOMAIN,
+            useValue: { getDomain: (): string | null => config.everWorks.apps.getDomain() },
+        },
     ],
     exports: [
         AppDeployPreconditionsService,
@@ -211,6 +268,10 @@ import { AppDeployDispatchRelay, AppRuntimeEventRelayService } from './app-runti
         AppDeployBuildSourceAdapter,
         AppRuntimeEventRelayService,
         AppDeployDispatchRelay,
+        AppClusterOpDispatchRelay,
+        AppTargetService,
+        AppHostsService,
+        AppDomainsService,
     ],
 })
 export class AppDeployRequestModule {}

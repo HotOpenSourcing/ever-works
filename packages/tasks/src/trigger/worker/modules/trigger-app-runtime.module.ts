@@ -34,6 +34,7 @@ import {
     APP_CUSTOM_DOMAIN_STORE,
     APP_DEPLOY_DEPLOYMENT_STORE,
     APP_DEPLOY_DISPATCHER,
+    APP_CLUSTER_OP_DISPATCHER,
     APP_HOSTS_APPS_DOMAIN,
     APP_HOSTS_DEPLOY_REQUESTER,
     APP_HOSTS_DEPLOYMENT_STORE,
@@ -267,6 +268,7 @@ export const APP_RUNTIME_REMOTE_PROXIES = [
     'AppEnvRuntimeSource',
     'AppRuntimeEventRelayService',
     'AppDeployDispatchRelay',
+    'AppClusterOpDispatchRelay',
     'AppDeployRequestService',
     'WorkUpstreamStateRepository',
 ] as const;
@@ -432,6 +434,14 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
             provide: APP_DEPLOY_DISPATCHER,
             useFactory: (apiClient: TriggerInternalApiClient) =>
                 workerAppDeployDispatcher(createRemoteProxy(apiClient, 'AppDeployDispatchRelay')),
+            inject: [TriggerInternalApiClient],
+        },
+        // T31 (lane aw-deploy-2): the worker's own re-dispatches — T58's deletion retries, T26's
+        // `ingress-reconcile`, `resume`'s wait — go through the API's `app-cluster-op` gate.
+        {
+            provide: APP_CLUSTER_OP_DISPATCHER,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppClusterOpDispatchRelay'),
             inject: [TriggerInternalApiClient],
         },
         // T26: a primary-domain change asks for a Deployment; the request (and every §5.1 check

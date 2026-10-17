@@ -209,11 +209,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:107-125 (APW-06 T73, APW-06/tasks.md:1271-1276)',
     },
     {
-        key: 'AppDeployRequestModule | AppDeployPreconditionsService | APPS_TIER_POLICY',
-        reason: "APW-10's tier policy is unwritten in this tree.",
-        source: 'packages/agent/src/app-runtime/app-deploy-request.module.ts:73; APW-10 T27 (tasks.md:466,475)',
-    },
-    {
         key: 'AppDeployRequestModule | AppDeployPreconditionsService | APP_DEPLOY_HOST_SOURCE',
         reason: '`AppHostsService` exists but its eight stores are unbound, so binding it would answer null; the check is advisory.',
         source: 'packages/agent/src/app-runtime/app-deploy-request.module.ts:69-72; app-deploy-preconditions.service.ts:249 (APW-06 T26)',
@@ -339,6 +334,11 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'packages/agent/src/facades/app-runtime.facade.ts:50-56,86; docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1220-1234 (APW-06 T71)',
     },
     {
+        key: 'FacadesModule | DeployFacadeService | AppDomainsService',
+        reason: 'C43, closed 2026-10-17 (lane aw-deploy-2): FacadesModule cannot import the module that provides `AppDomainsService` without a cycle, so in the API the facade reaches it through a non-strict `ModuleRef` lookup (`AppDeployRequestModule` provides it); the constructor parameter stays for the worker, which binds it directly.',
+        source: 'packages/agent/src/facades/deploy.facade.ts:137-152,543-551; packages/agent/src/app-runtime/app-deploy-request.module.ts',
+    },
+    {
         key: 'WorkModule | WorkLifecycleService | APP_WORK_DELETION_PORT',
         reason: "APW-06 T33 binds `AppRuntimeDeletionService` to it in the API's ports module; unbound, `deleteWork` reads 'no App runtime exists' and deletes the row as before.",
         source: 'packages/agent/src/services/work-lifecycle.service.ts:204-211; packages/agent/src/app-runtime/app-runtime-deletion.service.ts:24-27 (APW-06 T33, APW-06/tasks.md:577)',
@@ -349,15 +349,7 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
  * API-graph gaps this spec found that are NOT deliberate, routed to the lane that owns the
  * file (see {@link OpenGap}). Shrinking it is owed, not optional.
  */
-const OPEN_API_GAPS: readonly OpenGap[] = [
-    {
-        key: 'FacadesModule | DeployFacadeService | AppDomainsService',
-        reason: "APW-06 T26's App branch of `getDomains`/`addDomain`/`removeDomain`/`verifyDomain` is dead in the API: no API module provides `AppDomainsService` (only the worker's `TriggerAppRuntimeModule` does), so an App Work's custom-domain click takes the website path (recorded gap C43; the facade's docstring now says so).",
-        source: 'packages/agent/src/facades/deploy.facade.ts:137-145,509-511 (found 2026-09-26)',
-        routedTo:
-            "Owner ruling (2026-09-30): a recorded gap (C43). The docstring is corrected and this entry stays until a slice binds `AppDomainsService` where FacadesModule's `DeployFacadeService` can see it (FacadesModule cannot import AppRuntimeStateModule without a cycle, so likely a lazy ModuleRef lookup).",
-    },
-];
+const OPEN_API_GAPS: readonly OpenGap[] = [];
 
 /** App Works module classes the API graph deliberately does not import. None today. */
 const EXPECTED_UNREACHABLE_MODULES: readonly Expected[] = [];
@@ -432,11 +424,6 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         key: 'TriggerAppRuntimeModule :: APPS_DOMAIN_DNS_SERVICE',
         reason: "APW-06's managed-subdomain task is unwritten.",
         source: 'packages/agent/src/app-runtime/app-runtime-deletion.service.ts:525',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_CLUSTER_OP_DISPATCHER',
-        reason: 'No cluster-op dispatcher exists in any process yet (unbound in the API too).',
-        source: 'packages/agent/src/app-runtime/app-runtime-deletion.service.ts:507 (APW-06 T31/T32); app-works-port-dormancy.spec.ts:349',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE',
