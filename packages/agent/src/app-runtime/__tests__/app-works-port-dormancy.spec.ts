@@ -302,6 +302,9 @@ const BOUND: readonly string[] = [
     // MATCH stays behind the apply gate until `APP_BLUEPRINT_APPLY_SERVICE`
     // (T28) is bound — without it a match would fail the Work's readiness.
     'APP_SOURCE_CATALOG_PORT',
+    // APW-11 — bound by `AppLauncherModule` (found red on develop 2026-10-17: the binding
+    // landed without this register moving it out of UNBOUND).
+    'APP_SPEC_DISPLAY_NAMES',
     // APW-03 T42 (2026-10-17) — the same instance, for APW-02's sync (FR-37).
     'APP_UPSTREAM_LICENSE_SERVICE',
     // APW-02 T31 (2026-10-17) — `buildAppUpstreamSyncDispatcherProvider()`, provided by
@@ -437,7 +440,6 @@ const UNBOUND: readonly string[] = [
     'APP_RUNTIME_NOTIFICATIONS',
     'APP_RUNTIME_TARGET',
     'APP_RUNTIME_VERIFICATION_FACADE',
-    'APP_SPEC_DISPLAY_NAMES',
     'APP_TARGET_UPDATED_PORT',
     'APP_UPSTREAM_PRIVATE_COPY_PORT',
     'APP_UPSTREAM_STATE_READER',
@@ -566,8 +568,9 @@ describe('App Works port dormancy register (§5.10)', () => {
         // `BUILD_SETTINGS_SOURCE` is provided (A0.4). Lane aw-deploy-2 (same day) binds the tier
         // policy, the cluster-op dispatcher, T26's host stores, the host source and APW-07's
         // dependency spec source in the API — measured, not added up by hand.
-        expect(UNBOUND).toHaveLength(31);
-        expect(BOUND).toHaveLength(43);
+        // 31/43 → 30/44 on 2026-10-17: `APP_SPEC_DISPLAY_NAMES` is bound by `AppLauncherModule`.
+        expect(UNBOUND).toHaveLength(30);
+        expect(BOUND).toHaveLength(44);
     });
 
     it('names where the worker binds what this package does not', () => {
