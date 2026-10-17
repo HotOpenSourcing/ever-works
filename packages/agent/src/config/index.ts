@@ -1161,6 +1161,26 @@ export const config = {
             },
 
             /**
+             * APW-09 FR-46 — the operator kill switch for upstream pull requests. ON unless
+             * `APP_WORKS_UPSTREAM_PRS_ENABLED` is exactly `'false'`; read per call.
+             */
+            upstreamPullRequestsEnabled() {
+                return process.env.APP_WORKS_UPSTREAM_PRS_ENABLED !== 'false';
+            },
+
+            /**
+             * APW-09 FR-41 — the operator deny list: upstream repositories (`owner/repo`,
+             * comma- or whitespace-separated, case-insensitive) no proposal may target.
+             * Read per call, so an entry takes effect without a restart of the reader.
+             */
+            upstreamDenyList(): readonly string[] {
+                return (process.env.APP_WORKS_UPSTREAM_DENY_LIST ?? '')
+                    .split(/[\s,]+/)
+                    .map((entry) => entry.trim().toLowerCase())
+                    .filter((entry) => entry.includes('/'));
+            },
+
+            /**
              * APW-06 T19 — the apex an App Work's managed subdomain lives under
              * (`EVER_WORKS_APPS_DOMAIN`, plan §8.3, spec FR-40, Resolution R-16).
              *

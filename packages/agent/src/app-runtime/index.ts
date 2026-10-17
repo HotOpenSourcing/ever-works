@@ -123,3 +123,9 @@ export * from './app-deploy-request.module';
 // controller publishes it as the remote target the isolated App runtime worker's
 // `APP_DEPLOY_BUILD_SOURCE` proxies. Its helpers stay file-private to this folder.
 export { AppDeployBuildSourceAdapter } from './app-deploy-build.source';
+export { AppDeployDeploymentStoreAdapter } from './app-deploy-deployment.store';
+// APW-06 T71/T72/T35 (A0.6/A0.7, 2026-10-17) — the worker's real port implementations, the API-side
+// relays they dial, and the Build-succeeded auto-deploy listener.
+export * from './app-image-reference.resolver';
+export * from './app-runtime-worker.adapters';
+export * from './app-build-succeeded.listener';

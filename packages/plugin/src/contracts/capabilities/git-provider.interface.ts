@@ -435,6 +435,30 @@ export interface ListPullRequestsOptions {
 	readonly head?: string;
 }
 
+/**
+ * One file of a {@link IGitProviderPlugin.commitFiles} call (APW-03 T22, plan §7).
+ * `encoding: 'base64'` carries binary content verbatim.
+ */
+export interface GitCommitFile {
+	readonly path: string;
+	readonly content: string;
+	readonly encoding: 'utf-8' | 'base64';
+}
+
+/** The payload of one clone-free commit (APW-03 T22, plan §7:717-719). */
+export interface GitCommitFilesInput {
+	readonly branch: string;
+	/** The commit the caller believes `branch` is at; a mismatch rejects with code `nonFastForward`. */
+	readonly baseSha: string;
+	readonly message: string;
+	readonly files: Array<GitCommitFile>;
+}
+
+/** The commit a {@link IGitProviderPlugin.commitFiles} call landed. */
+export interface GitCommitFilesResult {
+	readonly commitSha: string;
+}
+
 // ── PR insights (kanban run cockpit M5/M6) ─────────────────────────
 //
 // Two optional read capabilities used by the Tasks board to render a
@@ -1102,6 +1126,17 @@ export interface IGitProviderPlugin extends IPlugin, IGitOperations {
 	 * before calling it (the lazy-plugin proxy over-reports optional methods).
 	 */
 	createBranchFromSha?(owner: string, repo: string, name: string, sha: string, token: string): Promise<GitBranch>;
+
+	/**
+	 * Land files on `input.branch` in ONE commit, without a clone (APW-03 T22,
+	 * plan §7). Fast-forward only: when the branch head is not `input.baseSha`
+	 * the call rejects with an error whose `code` is `nonFastForward` (a
+	 * `GitProviderRequestError` with reason `conflict`), and nothing is written.
+	 *
+	 * OPTIONAL. Callers MUST materialise `commitFiles` on the plugin before
+	 * calling it (the lazy-plugin proxy over-reports optional methods).
+	 */
+	commitFiles?(owner: string, repo: string, input: GitCommitFilesInput, token: string): Promise<GitCommitFilesResult>;
 
 	/**
 	 * Move an existing branch ref to a commit sha — **fast-forward only**.

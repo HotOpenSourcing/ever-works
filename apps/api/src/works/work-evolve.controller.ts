@@ -4,6 +4,7 @@ import {
     Get,
     HttpException,
     HttpStatus,
+    Optional,
     Param,
     ParseUUIDPipe,
     Post,
@@ -17,10 +18,12 @@ import { isAppWorkKind } from '@ever-works/contracts';
 import {
     AppChangeRequestService,
     AppProvisioningService,
+    EVOLVE_APP_AGENT_TEMPLATE,
     PROVISION_LABEL,
     type AppChangeRequestResult,
 } from '@ever-works/agent/app-works';
 import { ownershipScopeOf } from '@ever-works/agent/database';
+import { AgentScope, AgentTemplatesService } from '@ever-works/agent/agents';
 import { TaskRepository } from '@ever-works/agent/tasks-domain';
 import { WorkOwnershipService, type WorkAccessResult } from '@ever-works/agent/services';
 import {
@@ -62,6 +65,9 @@ export class WorkEvolveController {
         private readonly provisioning: AppProvisioningService,
         private readonly tasks: TaskRepository,
         private readonly upstreamPullRequests: UpstreamPullRequestOpenService,
+        // APW-08 GAP-14 — the one-click "create the evolve-app Agent" path. Optional so a
+        // graph without the agents module still serves the rest of the routes.
+        @Optional() private readonly agentTemplates?: AgentTemplatesService,
     ) {}
 
     @Post(':id/evolve')
@@ -88,13 +94,38 @@ export class WorkEvolveController {
         @Res({ passthrough: true }) response: StatusOnlyResponse,
     ): Promise<AppChangeRequestResult> {
         const access = await this.authorize(id, auth.userId, 'edit');
-        const result = await this.changes.request({
+        const input = {
             work: access.work,
             actorUserId: auth.userId,
             request: body?.request ?? '',
             agentId: body?.agentId ?? null,
             channel: body?.channel ?? 'api',
-        });
+        };
+        let result = await this.changes.request(input);
+
+        // GAP-14 (FR-42, S32) — the explicit one-click path. Only when the member asked for
+        // it, only when the refusal says no committing Agent exists at all, and only for the
+        // OWNER: the Agent is created in the owner's account, so an editor cannot mint one.
+        if (
+            body?.createAgentFromTemplate === true &&
+            result.status === 'refused' &&
+            result.code === 'agentRequired' &&
+            result.createFromTemplate &&
+            access.work.userId === auth.userId &&
+            this.agentTemplates
+        ) {
+            const agent = await this.agentTemplates.createFromDefinition(
+                auth.userId,
+                EVOLVE_APP_AGENT_TEMPLATE,
+                { scope: AgentScope.WORK, workId: access.work.id, activate: true },
+                ownershipScopeOf(access.work),
+            );
+            result = await this.changes.request({ ...input, agentId: agent.id });
+            if (result.status === 'accepted') {
+                result = { ...result, agentCreated: true };
+            }
+        }
+
         response.status(result.httpStatus);
         return result;
     }
