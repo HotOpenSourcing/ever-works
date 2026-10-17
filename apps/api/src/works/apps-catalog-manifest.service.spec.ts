@@ -16,7 +16,13 @@ import {
 const LISTING = {
     schemaVersion: 1,
     templates: [
-        { slug: 'web', name: 'Website', kind: 'website', status: 'production', template: { repo: 'ever-works/web-template' } },
+        {
+            slug: 'web',
+            name: 'Website',
+            kind: 'website',
+            status: 'production',
+            template: { repo: 'ever-works/web-template' },
+        },
         {
             slug: 'cal',
             name: 'Cal (community build)',
@@ -24,12 +30,19 @@ const LISTING = {
             kind: 'app',
             status: 'beta',
             appSource: { mode: 'repository', repo: 'calcom/cal.diy', defaultBranch: 'main' },
-            template: { repo: 'ever-works/cal-template', ref: 'v0.1.0', sha: '55de074b7feeb82ede98d2c31eedd28201ebba01' },
+            template: {
+                repo: 'ever-works/cal-template',
+                ref: 'v0.1.0',
+                sha: '55de074b7feeb82ede98d2c31eedd28201ebba01',
+            },
             blueprint: { id: 'cal', version: '0.1.0', verified: false },
             upstreams: [{ repo: 'calcom/cal.diy', refs: { branches: ['main'] } }],
             license: { spdx: 'MIT', class: 'green' },
             managedHosting: { allowed: false, reason: 'Upstream recommends personal use.' },
-            trademark: { notice: 'Cal.diy® is a trademark of Cal.com, Inc.', displayNameSuffix: '(community build)' },
+            trademark: {
+                notice: 'Cal.diy® is a trademark of Cal.com, Inc.',
+                displayNameSuffix: '(community build)',
+            },
             tags: ['calendar', 'Bad Tag', 'booking'],
         },
         {
@@ -38,15 +51,41 @@ const LISTING = {
             kind: 'app',
             status: 'beta',
             appSource: { repo: 'umami-software/umami', defaultBranch: 'master' },
-            template: { repo: 'ever-works/umami-template', ref: 'v0.1.0', sha: '7aeb58047d1796ecf7826ef5e09a513e160473ec' },
+            template: {
+                repo: 'ever-works/umami-template',
+                ref: 'v0.1.0',
+                sha: '7aeb58047d1796ecf7826ef5e09a513e160473ec',
+            },
             blueprint: { id: 'umami', version: '0.1.0' },
             license: { spdx: 'MIT', class: 'green' },
             managedHosting: { allowed: true },
             featured: true,
         },
-        { slug: 'nope', kind: 'app', status: 'beta', appSource: { repo: 'x/y' }, template: { repo: 'ever-works/nope-template' }, license: { spdx: 'PolyForm-Noncommercial-1.0.0', class: 'red' } },
-        { slug: 'evil', kind: 'app', status: 'beta', appSource: { repo: 'x/y' }, template: { repo: 'someone/evil-template' }, license: { class: 'green' } },
-        { slug: 'soon', name: 'Soon', kind: 'app', status: 'placeholder', template: { repo: 'ever-works/soon-template' }, license: { class: 'amber' }, managedHosting: { allowed: true } },
+        {
+            slug: 'nope',
+            kind: 'app',
+            status: 'beta',
+            appSource: { repo: 'x/y' },
+            template: { repo: 'ever-works/nope-template' },
+            license: { spdx: 'PolyForm-Noncommercial-1.0.0', class: 'red' },
+        },
+        {
+            slug: 'evil',
+            kind: 'app',
+            status: 'beta',
+            appSource: { repo: 'x/y' },
+            template: { repo: 'someone/evil-template' },
+            license: { class: 'green' },
+        },
+        {
+            slug: 'soon',
+            name: 'Soon',
+            kind: 'app',
+            status: 'placeholder',
+            template: { repo: 'ever-works/soon-template' },
+            license: { class: 'amber' },
+            managedHosting: { allowed: true },
+        },
     ],
 };
 
@@ -63,7 +102,11 @@ describe('apps catalog manifest projection', () => {
             summary: 'Open-source scheduling: booking pages.',
             status: 'beta',
             selectable: true,
-            upstream: { repo: 'calcom/cal.diy', url: 'https://github.com/calcom/cal.diy', defaultBranch: 'main' },
+            upstream: {
+                repo: 'calcom/cal.diy',
+                url: 'https://github.com/calcom/cal.diy',
+                defaultBranch: 'main',
+            },
             blueprint: {
                 repo: 'ever-works/cal-template',
                 version: '0.1.0',
@@ -96,7 +139,11 @@ describe('apps catalog manifest projection', () => {
                     summary: 'Scheduling',
                     status: 'beta',
                     upstreams: [{ repo: 'calcom/cal.diy', refs: { branches: ['main'] } }],
-                    blueprint: { repo: 'ever-works/cal-template', version: '1.0.0', sha: '0123456789abcdef0123456789abcdef01234567' },
+                    blueprint: {
+                        repo: 'ever-works/cal-template',
+                        version: '1.0.0',
+                        sha: '0123456789abcdef0123456789abcdef01234567',
+                    },
                     license: { spdx: 'MIT', class: 'green' },
                     managedHosting: { allowed: false },
                     verified: true,
@@ -114,18 +161,36 @@ describe('apps catalog manifest projection', () => {
         const items = listingItemsOf(LISTING);
         expect(pageListing(items, { q: 'c' }).total).toBe(3);
         expect(pageListing(items, { q: 'calendar' }).items.map((item) => item.id)).toEqual(['cal']);
-        expect(pageListing(items, { status: 'placeholder' }).items.map((item) => item.id)).toEqual(['soon']);
-        expect(pageListing(items, { limit: 1, page: 2 })).toMatchObject({ total: 3, page: 2, limit: 1 });
-        expect(pageListing(items, { limit: 1, page: 2 }).items.map((item) => item.id)).toEqual(['cal']);
+        expect(pageListing(items, { status: 'placeholder' }).items.map((item) => item.id)).toEqual([
+            'soon',
+        ]);
+        expect(pageListing(items, { limit: 1, page: 2 })).toMatchObject({
+            total: 3,
+            page: 2,
+            limit: 1,
+        });
+        expect(pageListing(items, { limit: 1, page: 2 }).items.map((item) => item.id)).toEqual([
+            'cal',
+        ]);
     });
 
     it('reads the source from the environment, validated, and knows a pinned ref', () => {
         expect(appsCatalogSource({})).toEqual({ repo: 'ever-works/templates', ref: 'main' });
-        expect(appsCatalogSource({ EVER_WORKS_APPS_CATALOG_REPO: 'ever-works/apps', EVER_WORKS_APPS_CATALOG_REF: 'e2e' })).toEqual({
+        expect(
+            appsCatalogSource({
+                EVER_WORKS_APPS_CATALOG_REPO: 'ever-works/apps',
+                EVER_WORKS_APPS_CATALOG_REF: 'e2e',
+            }),
+        ).toEqual({
             repo: 'ever-works/apps',
             ref: 'e2e',
         });
-        expect(appsCatalogSource({ EVER_WORKS_APPS_CATALOG_REPO: '../../etc', EVER_WORKS_APPS_CATALOG_REF: '../x' })).toEqual({
+        expect(
+            appsCatalogSource({
+                EVER_WORKS_APPS_CATALOG_REPO: '../../etc',
+                EVER_WORKS_APPS_CATALOG_REF: '../x',
+            }),
+        ).toEqual({
             repo: 'ever-works/templates',
             ref: 'main',
         });
@@ -150,12 +215,26 @@ describe('AppsCatalogManifestService', () => {
         const service = new AppsCatalogManifestService(git as never);
         let now = 1_000;
         service.now = () => now;
-        const fetchImpl = jest.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(LISTING) });
+        const fetchImpl = jest
+            .fn()
+            .mockResolvedValue({
+                ok: true,
+                status: 200,
+                text: async () => JSON.stringify(LISTING),
+            });
         service.fetchImpl = fetchImpl;
 
         const first = await service.list();
-        expect(first).toMatchObject({ available: true, total: 3, source: 'manifest', repo: 'ever-works/templates', ref: 'v0.1.0' });
-        expect(fetchImpl.mock.calls[0][0]).toBe('https://raw.githubusercontent.com/ever-works/templates/v0.1.0/manifest.json');
+        expect(first).toMatchObject({
+            available: true,
+            total: 3,
+            source: 'manifest',
+            repo: 'ever-works/templates',
+            ref: 'v0.1.0',
+        });
+        expect(fetchImpl.mock.calls[0][0]).toBe(
+            'https://raw.githubusercontent.com/ever-works/templates/v0.1.0/manifest.json',
+        );
         expect(git.getFileContent).not.toHaveBeenCalled();
 
         await service.get('cal');
@@ -169,7 +248,11 @@ describe('AppsCatalogManifestService', () => {
     it('reads through the GitHub plugin when a platform token is configured', async () => {
         process.env.EVER_WORKS_APPS_CATALOG_TOKEN = 'catalog-token';
         process.env.EVER_WORKS_APPS_CATALOG_REF = 'e2e';
-        const git = { getFileContent: jest.fn().mockResolvedValue({ content: JSON.stringify(LISTING), encoding: 'utf-8' }) };
+        const git = {
+            getFileContent: jest
+                .fn()
+                .mockResolvedValue({ content: JSON.stringify(LISTING), encoding: 'utf-8' }),
+        };
         const service = new AppsCatalogManifestService(git as never);
         service.fetchImpl = jest.fn();
         expect((await service.get('umami'))?.upstream?.repo).toBe('umami-software/umami');

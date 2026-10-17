@@ -7,7 +7,14 @@ import {
     Query,
     UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiParam, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import {
+    ApiBearerAuth,
+    ApiOperation,
+    ApiParam,
+    ApiQuery,
+    ApiResponse,
+    ApiTags,
+} from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { APPS_CATALOG_PUBLIC_PER_MIN } from '@ever-works/contracts';
 import type { AppsCatalogListingItem, AppsCatalogListingResponse } from '@ever-works/contracts';
@@ -45,7 +52,11 @@ export class AppsCatalogController {
             '`available: false` with no items when the manifest could not be read.',
     })
     @ApiQuery({ name: 'q', required: false, description: 'Search (2 characters or more).' })
-    @ApiQuery({ name: 'status', required: false, description: '`production` · `beta` · `placeholder`.' })
+    @ApiQuery({
+        name: 'status',
+        required: false,
+        description: '`production` · `beta` · `placeholder`.',
+    })
     @ApiQuery({ name: 'page', required: false })
     @ApiQuery({ name: 'limit', required: false, description: '1–100, default 24.' })
     @ApiResponse({ status: 200, description: '`AppsCatalogListingResponse`.' })

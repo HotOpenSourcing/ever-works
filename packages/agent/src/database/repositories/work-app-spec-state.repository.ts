@@ -188,7 +188,9 @@ export class WorkAppSpecStateRepository {
      * with no display name, maps to `null`, so the launcher falls back to the
      * Work's own name.
      */
-    async findDisplayNamesByWorkIds(workIds: readonly string[]): Promise<Map<string, string | null>> {
+    async findDisplayNamesByWorkIds(
+        workIds: readonly string[],
+    ): Promise<Map<string, string | null>> {
         const ids = [...new Set(workIds.filter((id) => typeof id === 'string' && id.length > 0))];
         const names = new Map<string, string | null>(ids.map((id) => [id, null]));
         if (ids.length === 0) return names;

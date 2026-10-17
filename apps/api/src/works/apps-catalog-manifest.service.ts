@@ -65,7 +65,10 @@ export const DEFAULT_APPS_CATALOG_REF = 'main';
 export const APPS_CATALOG_MANIFEST_PATH = 'manifest.json';
 
 /** The catalog repository and ref this instance reads, validated. */
-export function appsCatalogSource(env: NodeJS.ProcessEnv = process.env): { repo: string; ref: string } {
+export function appsCatalogSource(env: NodeJS.ProcessEnv = process.env): {
+    repo: string;
+    ref: string;
+} {
     const repo = (env.EVER_WORKS_APPS_CATALOG_REPO ?? '').trim();
     const ref = (env.EVER_WORKS_APPS_CATALOG_REF ?? '').trim();
     return {
@@ -95,10 +98,12 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
     value !== null && typeof value === 'object' && !Array.isArray(value);
 
-const str = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
+const str = (value: unknown): string | null =>
+    typeof value === 'string' && value.trim() ? value.trim() : null;
 
 function statusOf(value: unknown): AppsCatalogEntryStatus | null {
-    return typeof value === 'string' && (APPS_CATALOG_ENTRY_STATUSES as readonly string[]).includes(value)
+    return typeof value === 'string' &&
+        (APPS_CATALOG_ENTRY_STATUSES as readonly string[]).includes(value)
         ? (value as AppsCatalogEntryStatus)
         : null;
 }
@@ -118,7 +123,9 @@ function upstreamOf(row: Json): AppsCatalogListingItem['upstream'] {
     const upstreams = Array.isArray(row.upstreams) ? row.upstreams.filter(isObject) : [];
     const repo = str(appSource?.repo) ?? str(upstreams[0]?.repo);
     if (!repo || !REPO_PATTERN.test(repo)) return null;
-    const branches = isObject(upstreams[0]?.refs) ? (upstreams[0].refs as Json).branches : undefined;
+    const branches = isObject(upstreams[0]?.refs)
+        ? (upstreams[0].refs as Json).branches
+        : undefined;
     const defaultBranch =
         str(appSource?.defaultBranch) ??
         (Array.isArray(branches) && typeof branches[0] === 'string' && !branches[0].includes('*')
@@ -153,10 +160,11 @@ export function toListingItem(row: unknown): AppsCatalogListingItem | null {
     const managed = isObject(row.managedHosting) ? row.managedHosting : {};
     const trademark = isObject(row.trademark) ? row.trademark : null;
     const sha = str(blueprint.sha) ?? str(template.sha);
-    const verifiedFlag =
-        row.verified === true || blueprint.verified === true;
+    const verifiedFlag = row.verified === true || blueprint.verified === true;
     const tags = Array.isArray(row.tags)
-        ? row.tags.filter((tag): tag is string => typeof tag === 'string' && TAG_PATTERN.test(tag)).slice(0, 8)
+        ? row.tags
+              .filter((tag): tag is string => typeof tag === 'string' && TAG_PATTERN.test(tag))
+              .slice(0, 8)
         : [];
 
     return {
@@ -171,7 +179,8 @@ export function toListingItem(row: unknown): AppsCatalogListingItem | null {
         blueprint: {
             repo: blueprintRepo,
             version: str(blueprint.version),
-            ref: str(template.ref) ?? (str(blueprint.version) ? `v${str(blueprint.version)}` : null),
+            ref:
+                str(template.ref) ?? (str(blueprint.version) ? `v${str(blueprint.version)}` : null),
             sha: sha && SHA_PATTERN.test(sha) ? sha : null,
             verified: verifiedFlag,
         },
@@ -180,7 +189,8 @@ export function toListingItem(row: unknown): AppsCatalogListingItem | null {
             // Amber is never managed without a recorded upstream agreement (C6, R-3).
             allowed:
                 managed.allowed === true &&
-                (license.class === 'green' || (license.class === 'amber' && isObject(managed.upstreamAgreement))),
+                (license.class === 'green' ||
+                    (license.class === 'amber' && isObject(managed.upstreamAgreement))),
             reason: plainText(managed.reason, 200) || null,
         },
         trademark: trademark
@@ -235,8 +245,8 @@ export function pageListing(
     const filtered = items.filter((item) => {
         if (status && item.status !== status) return false;
         if (needle.length < APPS_CATALOG_SEARCH_MIN_CHARS) return true;
-        return [item.id, item.name, item.summary, item.upstream?.repo ?? '', ...item.tags].some((field) =>
-            field.toLowerCase().includes(needle),
+        return [item.id, item.name, item.summary, item.upstream?.repo ?? '', ...item.tags].some(
+            (field) => field.toLowerCase().includes(needle),
         );
     });
     const limit = Math.min(
@@ -248,7 +258,10 @@ export function pageListing(
     return { items: filtered.slice(start, start + limit), total: filtered.length, page, limit };
 }
 
-type FetchLike = (url: string, init?: { signal?: AbortSignal; headers?: Record<string, string> }) => Promise<{
+type FetchLike = (
+    url: string,
+    init?: { signal?: AbortSignal; headers?: Record<string, string> },
+) => Promise<{
     ok: boolean;
     status: number;
     text(): Promise<string>;
@@ -257,9 +270,14 @@ type FetchLike = (url: string, init?: { signal?: AbortSignal; headers?: Record<s
 @Injectable()
 export class AppsCatalogManifestService {
     private readonly logger = new Logger(AppsCatalogManifestService.name);
-    private cache: { items: AppsCatalogListingItem[]; available: boolean; key: string; expiresAt: number } | null =
+    private cache: {
+        items: AppsCatalogListingItem[];
+        available: boolean;
+        key: string;
+        expiresAt: number;
+    } | null = null;
+    private inFlight: Promise<{ items: AppsCatalogListingItem[]; available: boolean }> | null =
         null;
-    private inFlight: Promise<{ items: AppsCatalogListingItem[]; available: boolean }> | null = null;
 
     /** Seams for the unit spec (plain fields, so Nest injects only the facade). */
     fetchImpl: FetchLike = (url, init) => fetch(url, init);
@@ -281,7 +299,8 @@ export class AppsCatalogManifestService {
 
     private async read(source: { repo: string; ref: string }) {
         const key = `${source.repo}@${source.ref}`;
-        if (this.cache && this.cache.key === key && this.cache.expiresAt > this.now()) return this.cache;
+        if (this.cache && this.cache.key === key && this.cache.expiresAt > this.now())
+            return this.cache;
         this.inFlight ??= this.fetchManifest(source).finally(() => {
             this.inFlight = null;
         });
@@ -298,10 +317,17 @@ export class AppsCatalogManifestService {
         try {
             const text = await this.readText(source);
             if (text.length > APPS_CATALOG_MANIFEST_MAX_BYTES) {
-                throw new Error(`manifest.json is larger than ${APPS_CATALOG_MANIFEST_MAX_BYTES} bytes`);
+                throw new Error(
+                    `manifest.json is larger than ${APPS_CATALOG_MANIFEST_MAX_BYTES} bytes`,
+                );
             }
             const items = listingItemsOf(JSON.parse(text));
-            const entry = { items, available: true, key, expiresAt: this.now() + APPS_CATALOG_CACHE_TTL_MS };
+            const entry = {
+                items,
+                available: true,
+                key,
+                expiresAt: this.now() + APPS_CATALOG_CACHE_TTL_MS,
+            };
             this.cache = entry;
             return entry;
         } catch (error) {
@@ -310,7 +336,12 @@ export class AppsCatalogManifestService {
                     error instanceof Error ? error.message : String(error)
                 }`,
             );
-            const entry = { items: [], available: false, key, expiresAt: this.now() + APPS_CATALOG_FAILURE_TTL_MS };
+            const entry = {
+                items: [],
+                available: false,
+                key,
+                expiresAt: this.now() + APPS_CATALOG_FAILURE_TTL_MS,
+            };
             this.cache = entry;
             return entry;
         }
@@ -318,7 +349,11 @@ export class AppsCatalogManifestService {
 
     private async readText(source: { repo: string; ref: string }): Promise<string> {
         const [owner, repo] = source.repo.split('/');
-        const token = (process.env.EVER_WORKS_APPS_CATALOG_TOKEN || process.env.GITHUB_TOKEN || '').trim();
+        const token = (
+            process.env.EVER_WORKS_APPS_CATALOG_TOKEN ||
+            process.env.GITHUB_TOKEN ||
+            ''
+        ).trim();
         if (token) {
             const file = await this.git.getFileContent(
                 owner,

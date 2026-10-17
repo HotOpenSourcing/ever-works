@@ -55,7 +55,8 @@ const card = cn(
     'h-full w-full rounded-lg border p-4 text-left transition-colors',
     'border-card-border dark:border-border-secondary-dark',
 );
-const badge = 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium';
+const badge =
+    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium';
 
 /**
  * APW-01 T22 / APW-03 §5 — "Browse the Apps catalog" on the App Work create form.
@@ -141,39 +142,61 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
 
             <div aria-live="polite" className="space-y-1">
                 {state.kind === 'loading' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-loading">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-loading"
+                    >
                         {t('loading')}
                     </p>
                 )}
                 {state.kind === 'unavailable' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-unavailable">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-unavailable"
+                    >
                         {t('unavailable')}
                     </p>
                 )}
                 {state.kind === 'disabled' && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-disabled">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-disabled"
+                    >
                         {t('disabled')}
                     </p>
                 )}
                 {state.kind === 'error' && (
-                    <p className="text-sm text-red-600 dark:text-red-400" data-testid="apps-catalog-error" role="alert">
+                    <p
+                        className="text-sm text-red-600 dark:text-red-400"
+                        data-testid="apps-catalog-error"
+                        role="alert"
+                    >
                         {t('error')}
                     </p>
                 )}
                 {state.kind === 'fallback' && (
-                    <p className="text-xs text-text-muted dark:text-text-muted-dark" data-testid="apps-catalog-fallback">
+                    <p
+                        className="text-xs text-text-muted dark:text-text-muted-dark"
+                        data-testid="apps-catalog-fallback"
+                    >
                         {t('fallbackNote')}
                     </p>
                 )}
                 {empty && (
-                    <p className="text-sm text-text-secondary dark:text-text-secondary-dark" data-testid="apps-catalog-empty">
+                    <p
+                        className="text-sm text-text-secondary dark:text-text-secondary-dark"
+                        data-testid="apps-catalog-empty"
+                    >
                         {searching ? t('noMatches') : t('empty')}
                     </p>
                 )}
             </div>
 
             {state.kind === 'curated' && state.items.length > 0 && (
-                <ul className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3" aria-label={t('listLabel')}>
+                <ul
+                    className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3"
+                    aria-label={t('listLabel')}
+                >
                     {state.items.map((item) => {
                         const pick = pickOfListingItem(item);
                         const targets = [
@@ -192,7 +215,11 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                                     data-testid="apps-catalog-card"
                                     data-blueprint-id={item.id}
                                     data-source="manifest"
-                                    aria-label={pick ? t('pick', { name: item.name }) : `${item.name} — ${t('notSelectable')}`}
+                                    aria-label={
+                                        pick
+                                            ? t('pick', { name: item.name })
+                                            : `${item.name} — ${t('notSelectable')}`
+                                    }
                                     className={cn(
                                         card,
                                         pick
@@ -201,21 +228,41 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                                     )}
                                 >
                                     <span className="flex flex-wrap items-baseline justify-between gap-2">
-                                        <span className="font-semibold text-text dark:text-text-dark">{item.name}</span>
+                                        <span className="font-semibold text-text dark:text-text-dark">
+                                            {item.name}
+                                        </span>
                                         <span className="flex flex-wrap gap-1">
                                             {item.status === 'beta' && (
-                                                <span className={cn(badge, 'border-sky-300 text-sky-700 dark:text-sky-300')}>
+                                                <span
+                                                    className={cn(
+                                                        badge,
+                                                        'border-sky-300 text-sky-700 dark:text-sky-300',
+                                                    )}
+                                                >
                                                     {t('statusBeta')}
                                                 </span>
                                             )}
                                             {item.status === 'placeholder' && (
-                                                <span className={cn(badge, 'border-gray-300 text-text-secondary')}>
+                                                <span
+                                                    className={cn(
+                                                        badge,
+                                                        'border-gray-300 text-text-secondary',
+                                                    )}
+                                                >
                                                     {t('statusPlaceholder')}
                                                 </span>
                                             )}
                                             {item.blueprint.verified && (
-                                                <span className={cn(badge, 'border-emerald-300 text-emerald-700 dark:text-emerald-300')}>
-                                                    <BadgeCheck className="h-3 w-3" aria-hidden="true" />
+                                                <span
+                                                    className={cn(
+                                                        badge,
+                                                        'border-emerald-300 text-emerald-700 dark:text-emerald-300',
+                                                    )}
+                                                >
+                                                    <BadgeCheck
+                                                        className="h-3 w-3"
+                                                        aria-hidden="true"
+                                                    />
                                                     {t('verified')}
                                                 </span>
                                             )}
@@ -243,7 +290,9 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                                         </span>
                                     )}
                                     {!pick && (
-                                        <span className="mt-2 block text-xs text-text-muted">{t('notSelectable')}</span>
+                                        <span className="mt-2 block text-xs text-text-muted">
+                                            {t('notSelectable')}
+                                        </span>
                                     )}
                                 </button>
                             </li>
@@ -253,7 +302,10 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
             )}
 
             {state.kind === 'fallback' && state.items.length > 0 && (
-                <ul className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3" aria-label={t('listLabel')}>
+                <ul
+                    className="grid gap-3 @lg/main:grid-cols-2 @3xl/main:grid-cols-3"
+                    aria-label={t('listLabel')}
+                >
                     {state.items.map((item) => (
                         <li key={item.repo}>
                             <button
@@ -270,7 +322,9 @@ export function AppsCatalogBrowser({ onPick, disabled }: AppsCatalogBrowserProps
                                 )}
                             >
                                 <span className="flex items-baseline justify-between gap-2">
-                                    <span className="font-semibold text-text dark:text-text-dark">{item.name}</span>
+                                    <span className="font-semibold text-text dark:text-text-dark">
+                                        {item.name}
+                                    </span>
                                     {typeof item.stars === 'number' && (
                                         <span className="inline-flex items-center gap-1 text-xs text-text-secondary">
                                             <Star className="h-3 w-3" aria-hidden="true" />

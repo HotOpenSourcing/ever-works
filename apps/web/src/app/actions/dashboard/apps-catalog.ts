@@ -15,17 +15,27 @@ export type AppsCatalogListResult =
  * The create form's "Browse the Apps catalog" read (APW-01 T22). A server
  * action is a POST endpoint, so the session is checked here, not only on the API.
  */
-export async function listAppsCatalogBlueprintsAction(query?: string): Promise<AppsCatalogListResult> {
+export async function listAppsCatalogBlueprintsAction(
+    query?: string,
+): Promise<AppsCatalogListResult> {
     const user = await getAuthFromCookie();
-    if (!user) return { success: false, error: 'unauthorized', code: 'unauthorized', httpStatus: 401 };
+    if (!user)
+        return { success: false, error: 'unauthorized', code: 'unauthorized', httpStatus: 401 };
     try {
         return {
             success: true,
-            data: await appsCatalogAPI.listBlueprints(typeof query === 'string' ? query : undefined),
+            data: await appsCatalogAPI.listBlueprints(
+                typeof query === 'string' ? query : undefined,
+            ),
         };
     } catch (error) {
         if (error instanceof ApiResponseError) {
-            return { success: false, error: error.message, code: error.code, httpStatus: error.statusCode };
+            return {
+                success: false,
+                error: error.message,
+                code: error.code,
+                httpStatus: error.statusCode,
+            };
         }
         console.error('Failed to list the Apps catalog:', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -44,12 +54,21 @@ export type AppsCatalogManifestResult =
  */
 export async function listAppsCatalogAction(query?: string): Promise<AppsCatalogManifestResult> {
     const user = await getAuthFromCookie();
-    if (!user) return { success: false, error: 'unauthorized', code: 'unauthorized', httpStatus: 401 };
+    if (!user)
+        return { success: false, error: 'unauthorized', code: 'unauthorized', httpStatus: 401 };
     try {
-        return { success: true, data: await appsCatalogAPI.list(typeof query === 'string' ? query : undefined) };
+        return {
+            success: true,
+            data: await appsCatalogAPI.list(typeof query === 'string' ? query : undefined),
+        };
     } catch (error) {
         if (error instanceof ApiResponseError) {
-            return { success: false, error: error.message, code: error.code, httpStatus: error.statusCode };
+            return {
+                success: false,
+                error: error.message,
+                code: error.code,
+                httpStatus: error.statusCode,
+            };
         }
         console.error('Failed to list the curated Apps catalog:', error);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
