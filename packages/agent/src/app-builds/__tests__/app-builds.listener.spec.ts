@@ -71,6 +71,28 @@ describe('AppBuildsListener (APW-05 T22)', () => {
         expect(h.builds.requestPrepare.mock.calls).toEqual([[WORK_ID, 'envChanged']]);
     });
 
+    it('re-prepares only for build-phase names of APW-07 events (2026-10-17)', async () => {
+        const h = harness();
+        h.listener.onEnvChanged({
+            payload: { workId: WORK_ID, names: ['TZ'], buildPhaseNames: [] },
+        });
+        jest.advanceTimersByTime(APP_BUILD_ENV_DEBOUNCE_MS + 1);
+        expect(h.builds.requestPrepare).not.toHaveBeenCalled();
+
+        h.listener.onEnvChanged({
+            payload: { workId: WORK_ID, names: ['SENTRY_DSN'], buildPhaseNames: ['SENTRY_DSN'] },
+        });
+        jest.advanceTimersByTime(APP_BUILD_ENV_DEBOUNCE_MS + 1);
+        expect(h.builds.requestPrepare.mock.calls).toEqual([[WORK_ID, 'envChanged']]);
+
+        // A rotated generated value is a changed value.
+        h.listener.onEnvRotated({
+            payload: { workId: WORK_ID, names: ['SECRET'], buildPhaseNames: ['SECRET'] },
+        });
+        jest.advanceTimersByTime(APP_BUILD_ENV_DEBOUNCE_MS + 1);
+        expect(h.builds.requestPrepare).toHaveBeenCalledTimes(2);
+    });
+
     it('treats a spec change that only renames env entries as an env change', async () => {
         const h = harness();
         await h.listener.onSpecApplied(applied({ changedBlocks: ['env'], changedEnvNames: ['API_KEY'] }));

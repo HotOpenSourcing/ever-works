@@ -52,6 +52,7 @@ import {
 // imported rather than restated, so a field the plugin adds is visible here.
 import type { BuildSnapshot } from '@ever-works/plugin';
 import { ActivityLogService } from '../activity-log/activity-log.service';
+import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
 import {
     APP_ENV_RESOLVER_FINGERPRINTS,
     AppEnvResolvedFingerprints,
@@ -957,6 +958,31 @@ export type AppBuildRecordRunResult =
     | { readonly accepted: true; readonly build: WorkBuild; readonly created: boolean }
     | { readonly accepted: false; readonly reason: AppBuildRunRefusal };
 
+/**
+ * The per-Work lock shared by everything that writes or deletes the ONE
+ * repository secret `EW_VERIFY__PROMPTED` (2026-10-17, lane aw-builds-3):
+ * `startVerification` (insert + dispatch, which writes it), the watch runner's
+ * terminal deletion and the sweep's orphan pass. Serialising the three closes the
+ * race CodeRabbit flagged on #2686 — an orphan pass that checked "no other open
+ * verification" and then deleted a secret a verification started in between had
+ * just written.
+ */
+export const APP_BUILD_VERIFY_SECRET_LOCK_PREFIX = 'app-builds:verify-secret:';
+
+/** The lock's lease — far above the critical sections it guards (one insert + one dispatch, or one delete). */
+export const APP_BUILD_VERIFY_SECRET_LOCK_TTL_MS = 2 * 60_000;
+
+/** How long `startVerification` waits for a deletion holding the lock before going ahead. */
+export const APP_BUILD_VERIFY_SECRET_LOCK_WAIT_MS = 15_000;
+
+/** The pause between two attempts while waiting for the lock. */
+const VERIFY_SECRET_LOCK_RETRY_MS = 250;
+
+/** The lock key of one Work's verification secret. */
+export function appBuildVerifySecretLockKey(workId: string): string {
+    return `${APP_BUILD_VERIFY_SECRET_LOCK_PREFIX}${workId}`;
+}
+
 /** The terminal statuses — a Build that reached one of these is done (§7.3). */
 const TERMINAL_STATUSES = ['succeeded', 'failed', 'cancelled'] as const;
 
@@ -1182,6 +1208,14 @@ export class AppBuildsService {
         @Optional()
         @Inject(APP_BUILD_EDIT_ACCESS)
         private readonly editAccess?: AppBuildEditAccess,
+        // 2026-10-17 — the per-Work verification-secret lock (see
+        // {@link APP_BUILD_VERIFY_SECRET_LOCK_PREFIX}). Appended last and
+        // `@Optional()`: unbound, the guarded sections run unlocked, exactly as
+        // before. `@Inject` by class because SWC erases an optional parameter's
+        // type to `Object` (the `BuildFacadeService` registry lesson).
+        @Optional()
+        @Inject(DistributedTaskLockService)
+        private readonly locks?: DistributedTaskLockService,
     ) {}
 
     /* ---------------------------------------------------------------------- *
@@ -1882,46 +1916,56 @@ export class AppBuildsService {
             });
         }
 
-        const build = await this.insertManualBuild(workId, context, {
-            trigger: 'verification',
-            branch: request.ref,
-            commitSha: request.sha,
-            userId: ownerUserId,
-        });
+        // The insert and the dispatch (which writes `EW_VERIFY__PROMPTED`) run under
+        // the Work's verification-secret lock, so an orphan pass can never delete
+        // the secret this run is about to read (2026-10-17).
+        const locked = await this.withVerifySecretLock(
+            workId,
+            async () => {
+                const build = await this.insertManualBuild(workId, context, {
+                    trigger: 'verification',
+                    branch: request.ref,
+                    commitSha: request.sha,
+                    userId: ownerUserId,
+                });
 
-        const promptedNames = plan.env
-            .filter((entry) => entry.source === 'prompted')
-            .map((entry) => entry.name);
+                const promptedNames = plan.env
+                    .filter((entry) => entry.source === 'prompted')
+                    .map((entry) => entry.name);
 
-        const binding = await this.resolvePlugin(workId);
-        let dispatched: { providerRunId: string | null; dispatchedAt: string } | null = null;
-        try {
-            dispatched =
-                (await binding?.startBuild?.({
-                    buildId: build.id,
-                    ref: request.ref,
-                    sha: request.sha,
-                    mode: 'verify',
-                    ...(request.reuseImageDigest
-                        ? { reuseImageDigest: request.reuseImageDigest }
+                const binding = await this.resolvePlugin(workId);
+                let dispatched: { providerRunId: string | null; dispatchedAt: string } | null = null;
+                try {
+                    dispatched =
+                        (await binding?.startBuild?.({
+                            buildId: build.id,
+                            ref: request.ref,
+                            sha: request.sha,
+                            mode: 'verify',
+                            ...(request.reuseImageDigest
+                                ? { reuseImageDigest: request.reuseImageDigest }
+                                : {}),
+                            verification: { json: encoded, promptedNames },
+                        })) ?? null;
+                } catch (error) {
+                    this.logger.warn(
+                        `App builds: dispatching verification build ${build.id} failed (${
+                            error instanceof Error ? error.message : String(error)
+                        }).`,
+                    );
+                }
+
+                return this.persist(build, {
+                    ...(dispatched?.providerRunId ? { providerRunId: dispatched.providerRunId } : {}),
+                    dispatchedAt: dispatched?.dispatchedAt ? new Date(dispatched.dispatchedAt) : new Date(),
+                    ...(promptedNames.length > 0
+                        ? { verifySecretNames: [APP_BUILD_VERIFY_PROMPTED_SECRET] }
                         : {}),
-                    verification: { json: encoded, promptedNames },
-                })) ?? null;
-        } catch (error) {
-            this.logger.warn(
-                `App builds: dispatching verification build ${build.id} failed (${
-                    error instanceof Error ? error.message : String(error)
-                }).`,
-            );
-        }
-
-        const started = await this.persist(build, {
-            ...(dispatched?.providerRunId ? { providerRunId: dispatched.providerRunId } : {}),
-            dispatchedAt: dispatched?.dispatchedAt ? new Date(dispatched.dispatchedAt) : new Date(),
-            ...(promptedNames.length > 0
-                ? { verifySecretNames: [APP_BUILD_VERIFY_PROMPTED_SECRET] }
-                : {}),
-        });
+                });
+            },
+            { waitMs: APP_BUILD_VERIFY_SECRET_LOCK_WAIT_MS },
+        );
+        const started = locked.result as WorkBuild;
 
         await this.publish(started, 'app.build.queued');
         void this.dispatchWatch({ buildId: started.id, reason: 'dispatched' });
@@ -2245,11 +2289,37 @@ export class AppBuildsService {
         }
 
         const { verdict } = await this.verdictFor(row, binding, true);
+
+        // Exactly once (2026-10-17): the move OUT of `digestUnconfirmed` is a
+        // conditional UPDATE, so of two re-checks racing (a pull-token save and a
+        // sweep, two API replicas) only one settles the verdict — and only that one
+        // publishes. The loser answers what the winner wrote.
+        const claimed = await this.claimReconfirmation(row.id, verdict);
+        if (!claimed) {
+            const current = (await this.rowById(row.id)) ?? row;
+            return {
+                reconfirmed: false,
+                reason: 'notDigestUnconfirmed',
+                build: current,
+                deployable: current.deployable,
+                notDeployableReason:
+                    (current.notDeployableReason as AppBuildNotDeployableReason | null) ?? null,
+            };
+        }
         const settled = await this.persist(row, {
             ...digest.patch,
             deployable: verdict.deployable,
             notDeployableReason: verdict.notDeployableReason,
         });
+
+        // A Build confirmed after the fact is deployable NOW, and APW-06's
+        // auto-deploy listens for `app.build.succeeded` with `deployable: true`. The
+        // first succeeded event carried `deployable: false` (`digestUnconfirmed`), so
+        // the late confirmation publishes it again, once (the claim above), with the
+        // settled verdict. No second Activity row: the Build's success was recorded.
+        if (verdict.deployable) {
+            await this.publish(settled, 'app.build.succeeded', true, null, { activity: false });
+        }
         return {
             reconfirmed: true,
             reason: 'reconfirmed',
@@ -2257,6 +2327,30 @@ export class AppBuildsService {
             deployable: verdict.deployable,
             notDeployableReason: verdict.notDeployableReason,
         };
+    }
+
+    /**
+     * `UPDATE work_builds SET deployable, notDeployableReason WHERE id AND
+     * notDeployableReason = 'digestUnconfirmed'` — true only for the call that
+     * moved the row. Without the entity repository there is nothing to race with
+     * (a unit graph), so the claim is granted.
+     */
+    private async claimReconfirmation(
+        buildId: string,
+        verdict: { readonly deployable: boolean; readonly notDeployableReason: AppBuildNotDeployableReason | null },
+    ): Promise<boolean> {
+        if (!this.rows || typeof this.rows.createQueryBuilder !== 'function') return true;
+        const result = await this.rows
+            .createQueryBuilder()
+            .update(WorkBuild)
+            .set({
+                deployable: verdict.deployable,
+                notDeployableReason: verdict.notDeployableReason,
+            })
+            .where('id = :id', { id: buildId })
+            .andWhere('notDeployableReason = :was', { was: 'digestUnconfirmed' })
+            .execute();
+        return (result.affected ?? 0) === 1;
     }
 
     /**
@@ -2477,6 +2571,9 @@ export class AppBuildsService {
         event: AppBuildEventName,
         deployable = false,
         notDeployableReason: AppBuildNotDeployableReason | null = null,
+        // `activity: false` — a re-publication whose transition is already in the
+        // feed (the late digest confirmation): emit and notify, write no second row.
+        options: { readonly activity?: boolean } = {},
     ): Promise<void> {
         const EventClass: AppBuildEventClass | null = APP_BUILD_EVENT_CLASSES[build.status];
         if (!EventClass || EventClass.EVENT_NAME !== event) {
@@ -2492,7 +2589,7 @@ export class AppBuildsService {
 
         const payload = buildEventPayload(build, userId, deployable, notDeployableReason);
 
-        if (this.activityLog && userId) {
+        if (this.activityLog && userId && options.activity !== false) {
             try {
                 await this.activityLog.log({
                     userId,
@@ -2591,34 +2688,75 @@ export class AppBuildsService {
      * was handled (deleted or already absent) AND the record cleared.
      */
     async removeOrphanedVerifySecret(buildId: string): Promise<boolean> {
-        const row = await this.rowById(buildId);
-        if (!row || row.trigger !== 'verification' || (row.verifySecretNames ?? []).length === 0) {
+        const first = await this.rowById(buildId);
+        if (!first || first.trigger !== 'verification' || (first.verifySecretNames ?? []).length === 0) {
             return false;
         }
-        // A Build still running may still read its secret: never delete under it.
-        if (!isTerminalBuildStatus(row.status)) return false;
 
-        // `EW_VERIFY__PROMPTED` is ONE repository secret, so a newer verification
-        // Build of the same Work may have rewritten it for its own run. While one is
-        // open, only this row's record of the secret is cleared and the secret is
-        // left for the newer run (its own terminal transition, or a later orphan
-        // pass, removes it). Residual, recorded: a verification started between this
-        // read and the delete below can still lose its secret; a per-Work lock
-        // shared with `startVerification` would close that window (CodeRabbit #2686).
-        if (await this.hasOtherOpenVerification(row)) {
+        // Under the Work's verification-secret lock (2026-10-17): the check below and
+        // the delete cannot interleave with a `startVerification` insert + dispatch.
+        // Held elsewhere ⇒ nothing is done now; the next sweep tick retries.
+        const locked = await this.withVerifySecretLock(first.workId, async () => {
+            // Re-read under the lock: the watch runner may have cleared it meanwhile.
+            const row = await this.rowById(buildId);
+            if (!row || (row.verifySecretNames ?? []).length === 0) return false;
+            // A Build still running may still read its secret: never delete under it.
+            if (!isTerminalBuildStatus(row.status)) return false;
+
+            // `EW_VERIFY__PROMPTED` is ONE repository secret, so a newer verification
+            // Build of the same Work owns it while it is open: only this row's record
+            // is cleared, and the newer run's own terminal transition removes it.
+            if (await this.hasOtherOpenVerification(row)) {
+                await this.persist(row, { verifySecretNames: [] });
+                return false;
+            }
+
+            const binding = await this.resolvePlugin(row.workId);
+            if (!binding?.deleteVerifyPromptedSecret) return false;
+            await binding.deleteVerifyPromptedSecret();
             await this.persist(row, { verifySecretNames: [] });
-            return false;
-        }
+            return true;
+        });
+        return locked.acquired ? locked.result === true : false;
+    }
 
-        const binding = await this.resolvePlugin(row.workId);
-        if (!binding?.deleteVerifyPromptedSecret) return false;
-        await binding.deleteVerifyPromptedSecret();
-        await this.persist(row, { verifySecretNames: [] });
-        return true;
+    /**
+     * Run `fn` under one Work's verification-secret lock (see
+     * {@link APP_BUILD_VERIFY_SECRET_LOCK_PREFIX}).
+     *
+     * `waitMs` (startVerification) retries while another holder finishes — a
+     * deletion holds it for one request — and then runs `fn` unlocked rather than
+     * refuse the verification; that fallback is logged. Without `waitMs` a held
+     * lock answers `{ acquired: false }` and `fn` does not run (the deletions retry
+     * on their next trigger). With no lock service bound, `fn` runs directly.
+     */
+    async withVerifySecretLock<T>(
+        workId: string,
+        fn: () => Promise<T>,
+        options: { readonly waitMs?: number } = {},
+    ): Promise<{ readonly acquired: boolean; readonly result?: T }> {
+        if (!this.locks) return { acquired: true, result: await fn() };
+        const key = appBuildVerifySecretLockKey(workId);
+        const deadline = Date.now() + Math.max(0, options.waitMs ?? 0);
+        for (;;) {
+            const attempt = await this.locks.runExclusive(key, fn, {
+                ttlMs: APP_BUILD_VERIFY_SECRET_LOCK_TTL_MS,
+                maxLifetimeMs: APP_BUILD_VERIFY_SECRET_LOCK_TTL_MS * 2,
+            });
+            if (attempt.acquired) return attempt;
+            if (options.waitMs === undefined) return { acquired: false };
+            if (Date.now() >= deadline) {
+                this.logger.warn(
+                    `App builds: the verification-secret lock of work ${workId} stayed held for ${options.waitMs} ms; going ahead without it.`,
+                );
+                return { acquired: true, result: await fn() };
+            }
+            await new Promise((resolve) => setTimeout(resolve, VERIFY_SECRET_LOCK_RETRY_MS));
+        }
     }
 
     /** Another queued or running verification Build of the same Work. */
-    private async hasOtherOpenVerification(row: WorkBuild): Promise<boolean> {
+    async hasOtherOpenVerification(row: WorkBuild): Promise<boolean> {
         const open = await this.builds.findPage(
             row.workId,
             { trigger: ['verification'], status: ['queued', 'running'] },
