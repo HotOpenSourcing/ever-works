@@ -8,8 +8,12 @@ import {
 } from '@nestjs/common';
 import { DomainEventPublisher, recordAfterWrite } from '@ever-works/agent/domain-events';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
-import { OrganizationRepository, UserRepository } from '@ever-works/agent/database';
+import { DataSource, type EntityManager } from 'typeorm';
+import {
+    OrganizationRepository,
+    UserRepository,
+    serializeOnSingleConnection,
+} from '@ever-works/agent/database';
 import { isUniqueConstraintError } from '@ever-works/agent/utils';
 import type {
     Organization,
@@ -540,7 +544,7 @@ export class OrganizationService {
         // they would have got a second later. A 409 would be us reporting our
         // own race back to a user who did nothing wrong.
         return this.withSlugCollisionRetry(slugBase, (slug) =>
-            this.dataSource.transaction(async (manager) => {
+            this.inQueuedTransaction(async (manager) => {
                 // Use the manager's repository so the INSERT lands in the
                 // same transaction as the backfill UPDATEs below.
                 //
@@ -633,6 +637,20 @@ export class OrganizationService {
      * starts clean. `allocateUsername` is called fresh each time, so attempt 2
      * sees the winner's row and picks the next free suffix.
      */
+    /**
+     * `dataSource.transaction`, queued on single-connection drivers (better-sqlite3:
+     * local/self-hosted installs, CI and e2e). Every caller shares ONE query runner
+     * there, so an unqueued transaction overlapping a queued one (domain events, record
+     * visibility) nests as its savepoint and fails on commit ("no such savepoint").
+     * Postgres runs it at once, unchanged. The work must not queue again on this
+     * DataSource; everything inside goes through the given `manager`.
+     */
+    private inQueuedTransaction<T>(work: (manager: EntityManager) => Promise<T>): Promise<T> {
+        return serializeOnSingleConnection(this.dataSource.manager, () =>
+            this.dataSource.transaction(work),
+        );
+    }
+
     private async withSlugCollisionRetry<T>(
         slugBase: string,
         create: (slug: string) => Promise<T>,
@@ -844,7 +862,7 @@ export class OrganizationService {
         const tenantId = user.tenantId;
         const newOrgId = org.id;
 
-        return this.dataSource.transaction(async (manager) => {
+        return this.inQueuedTransaction(async (manager) => {
             // Postgres: cap the transaction so a runaway backfill
             // doesn't hold locks indefinitely on prod traffic. SQLite
             // doesn't recognize this; wrap in a try so the call is a
