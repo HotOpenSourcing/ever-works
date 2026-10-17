@@ -44,6 +44,7 @@ import { PluginSettingsService } from '../plugins/services/plugin-settings.servi
 import type { AppClusterOpDispatchGate } from './app-deploy-dispatcher.provider';
 import { APP_CLUSTER_OP_DISPATCHER } from './app-runtime-deletion.service';
 import { APPS_TIER_POLICY, type AppsTierPolicy } from './ports';
+import { AppsDomainDnsServiceImpl } from '../ever-works-providers/apps-domain-dns.service';
 
 /** The managed tier's capability (`facades/app-runtime.facade.ts` `APP_TIER_CAPABILITY`). */
 const APP_TIER_CAPABILITY = 'apps-tier';
@@ -150,6 +151,9 @@ export class AppTargetService {
         @Optional()
         @Inject(APPS_TIER_POLICY)
         private readonly tier?: AppsTierPolicy,
+        // T48 — the managed label is allocated when a target is chosen, so the FIRST render
+        // already carries `<label>.<apps domain>` (the record follows the live ingress address).
+        @Optional() private readonly appsDns?: AppsDomainDnsServiceImpl,
     ) {}
 
     /* ---------------------------------------------------------------------- *
@@ -213,6 +217,14 @@ export class AppTargetService {
         }
 
         await this.states.patchRuntimeState(workId, { target, targetSettings: settings });
+
+        if (target !== 'none' && settings.managedSubdomain !== false && this.appsDns?.allocate) {
+            try {
+                await this.appsDns.allocate(workId);
+            } catch (error) {
+                this.logger.warn(`Allocating the managed subdomain of ${workId} failed: ${messageOf(error)}`);
+            }
+        }
 
         const namespaceChanged =
             parsed.settings?.namespaceOverride !== undefined &&

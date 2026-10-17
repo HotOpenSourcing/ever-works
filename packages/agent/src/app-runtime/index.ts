@@ -133,6 +133,7 @@ export * from './app-build-succeeded.listener';
 export * from './app-target.service';
 export * from './app-spec-applied.listener';
 export * from './app-runtime-activity.listener';
+export * from './app-managed-dns.listener';
 export {
     appClusterOpDispatcherGate,
     buildAppClusterOpDispatcherProviders,

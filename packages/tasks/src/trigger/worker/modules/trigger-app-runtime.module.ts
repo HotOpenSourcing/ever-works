@@ -35,6 +35,7 @@ import {
     APP_DEPLOY_DEPLOYMENT_STORE,
     APP_DEPLOY_DISPATCHER,
     APP_CLUSTER_OP_DISPATCHER,
+    APPS_DOMAIN_DNS_SERVICE,
     APP_HOSTS_APPS_DOMAIN,
     APP_HOSTS_DEPLOY_REQUESTER,
     APP_HOSTS_DEPLOYMENT_STORE,
@@ -269,6 +270,7 @@ export const APP_RUNTIME_REMOTE_PROXIES = [
     'AppRuntimeEventRelayService',
     'AppDeployDispatchRelay',
     'AppClusterOpDispatchRelay',
+    'AppsDomainDnsServiceImpl',
     'AppDeployRequestService',
     'WorkUpstreamStateRepository',
 ] as const;
@@ -442,6 +444,14 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
             provide: APP_CLUSTER_OP_DISPATCHER,
             useFactory: (apiClient: TriggerInternalApiClient) =>
                 createRemoteProxy(apiClient, 'AppClusterOpDispatchRelay'),
+            inject: [TriggerInternalApiClient],
+        },
+        // T47/T48 (lane aw-deploy-2): the deletion path removes the managed subdomain's record
+        // through the API's apps-DNS service, where the apps-DNS token lives.
+        {
+            provide: APPS_DOMAIN_DNS_SERVICE,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppsDomainDnsServiceImpl'),
             inject: [TriggerInternalApiClient],
         },
         // T26: a primary-domain change asks for a Deployment; the request (and every §5.1 check

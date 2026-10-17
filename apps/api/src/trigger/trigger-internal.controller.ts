@@ -132,6 +132,7 @@ import {
 // proxies by name (plan §6.4). Both read or write rows, so neither can be local in the worker.
 import { WorkAppDependencyRepository, WorkAppRuntimeStateRepository } from '@ever-works/agent/database';
 import { AppEnvRuntimeSource } from '@ever-works/agent/app-env';
+import { AppsDomainDnsServiceImpl } from '@ever-works/agent/ever-works-providers';
 // A0.10 (lane aw-deploy-2) — the dependency worker's rows, cipher, spec and re-dispatch.
 import {
     AppDependencyConfigCipherRelay,
@@ -692,6 +693,9 @@ export class TriggerInternalController implements OnModuleInit {
         private readonly appDependencySpecSourceAdapter?: AppDependencySpecSourceAdapter,
         @Optional()
         private readonly appDependencyProvisionDispatchRelay?: AppDependencyProvisionDispatchRelay,
+        // T47/T48 (lane aw-deploy-2) — the worker's `APPS_DOMAIN_DNS_SERVICE` (managed record removal).
+        @Optional()
+        private readonly appsDomainDnsService?: AppsDomainDnsServiceImpl,
     ) {}
 
     onModuleInit() {
@@ -934,6 +938,7 @@ export class TriggerInternalController implements OnModuleInit {
             AppDependencyConfigCipherRelay: this.appDependencyConfigCipherRelay,
             AppDependencySpecSourceAdapter: this.appDependencySpecSourceAdapter,
             AppDependencyProvisionDispatchRelay: this.appDependencyProvisionDispatchRelay,
+            AppsDomainDnsServiceImpl: this.appsDomainDnsService,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }

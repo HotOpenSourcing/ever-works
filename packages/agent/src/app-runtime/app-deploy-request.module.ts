@@ -43,6 +43,8 @@ import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
 import { AppBuildSucceededListener } from './app-build-succeeded.listener';
 import { AppSpecAppliedListener } from './app-spec-applied.listener';
 import { AppRuntimeActivityListener } from './app-runtime-activity.listener';
+import { AppManagedDnsListener } from './app-managed-dns.listener';
+import { AppsDomainDnsServiceImpl } from '../ever-works-providers/apps-domain-dns.service';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import {
     AppClusterOpDispatchRelay,
@@ -228,6 +230,14 @@ import {
         // (one row per relayed runtime event) — lane aw-deploy-2.
         AppSpecAppliedListener,
         AppRuntimeActivityListener,
+        // T47/T48 (lane aw-deploy-2) — the apps-domain DNS service (label allocation + the managed
+        // record) and the listener that points the record at the ingress after a live Deployment.
+        {
+            provide: AppsDomainDnsServiceImpl,
+            useFactory: (works?: WorkRepository) => new AppsDomainDnsServiceImpl(works),
+            inject: [{ token: WorkRepository, optional: true }],
+        },
+        AppManagedDnsListener,
         // APW-06 T28 / T31 (A0.7) — the API ends of the isolated worker's `APP_RUNTIME_EVENT_SINK`
         // and `APP_DEPLOY_DISPATCHER` proxies (`TriggerInternalController.remoteMap`).
         AppRuntimeEventRelayService,
@@ -281,6 +291,7 @@ import {
         AppTargetService,
         AppHostsService,
         AppDomainsService,
+        AppsDomainDnsServiceImpl,
     ],
 })
 export class AppDeployRequestModule {}

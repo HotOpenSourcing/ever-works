@@ -345,6 +345,7 @@ const BOUND: readonly string[] = [
  * binds here. One implementation reached from two processes, not two instances.
  */
 const WORKER_BOUND: readonly string[] = [
+    'APPS_DOMAIN_DNS_SERVICE',
     'APPS_TIER_POLICY',
     // A0.7 (2026-10-17) — the worker binds these with real implementations
     // (`trigger-app-runtime.module.ts`, `app-runtime-worker.adapters.ts`).
