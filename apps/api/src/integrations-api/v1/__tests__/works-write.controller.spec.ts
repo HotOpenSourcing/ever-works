@@ -13,6 +13,7 @@ jest.mock('@ever-works/agent/config', () => ({
 }));
 
 import { config } from '@ever-works/agent/config';
+import { DuplicateExternalRefError } from '@ever-works/agent/integrations-api';
 import { IntegrationWorksWriteController } from '../works-write.controller';
 
 /**
@@ -42,7 +43,24 @@ describe('IntegrationWorksWriteController', () => {
     const res = () => ({ status: jest.fn(), setHeader: jest.fn() });
 
     const setup = () => {
-        const lifecycle = { createProjectWork: jest.fn().mockResolvedValue({ id: 'work-1' }) };
+        const lifecycle = {
+            // As WorkLifecycleService.createProjectWork: `withinCreate` runs in the create's
+            // transaction (T17a pattern), and its throw rolls the Work back.
+            createProjectWork: jest.fn(
+                async (
+                    _owner: unknown,
+                    _params: unknown,
+                    options?: {
+                        withinCreate?: (row: { id: string }, manager: unknown) => Promise<void>;
+                    },
+                ) => {
+                    if (options?.withinCreate) {
+                        await options.withinCreate({ id: 'work-1' }, 'tx-manager');
+                    }
+                    return { id: 'work-1' };
+                },
+            ),
+        };
         const workQuery = {
             checkSlugAvailability: jest
                 .fn()
@@ -101,16 +119,39 @@ describe('IntegrationWorksWriteController', () => {
         expect(lifecycle.createProjectWork).toHaveBeenCalledWith(
             { id: 'owner-1' },
             expect.objectContaining({ name: 'Site', slug: 'site-2', website: 'https://acme.test' }),
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
         );
+        // The link is written in the create's transaction (T17a pattern).
         expect(links.create).toHaveBeenCalledWith(
             expect.objectContaining({ installationId: 'conn-1' }),
             expect.objectContaining({ entityType: 'work', entityId: 'work-1', externalId: 'p-1' }),
+            'tx-manager',
         );
         expect(teamResources.attach).toHaveBeenCalledWith('owner-1', ORG, 'team-a', {
             resourceType: 'work',
             resourceId: 'work-1',
         });
         expect(response.status).toHaveBeenCalledWith(201);
+    });
+
+    it('a lost externalRef race rolls the Project Work back and answers the winner (200)', async () => {
+        const { controller, links, teamResources } = setup();
+        links.findByExternal
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ entityId: 'work-w' });
+        links.create.mockRejectedValue(new DuplicateExternalRefError('external', 'work-w', 'p-1'));
+        const response = res();
+        const body = await controller.create(
+            user,
+            { kind: 'project', name: 'Site', externalRef: { source: 'gauzy', externalId: 'p-1' } },
+            undefined,
+            req(),
+            response,
+        );
+        expect(response.status).toHaveBeenCalledWith(200);
+        expect(body).toMatchObject({ id: 'work-w' });
+        // Nothing of ours is left to attach: the Work rolled back with its link.
+        expect(teamResources.attach).not.toHaveBeenCalled();
     });
 
     it('answers 422 project_works_disabled while the flag is off, and 422 for private', async () => {

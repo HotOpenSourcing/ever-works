@@ -14,6 +14,7 @@ import {
     DomainEventPublisher,
     recordAfterWrite,
 } from '../domain-events/domain-event-publisher.service';
+import type { EntityManager } from 'typeorm';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { randomUUID } from 'node:crypto';
 import { WorkRepository } from '@src/database/repositories/work.repository';
@@ -969,6 +970,11 @@ export class WorkLifecycleService {
      *
      * Behind `EVER_WORKS_PROJECT_WORKS_ENABLED` (exactly `'true'`, default
      * OFF): refused with `400 project_works_disabled` otherwise.
+     *
+     * `withinCreate` (T17a pattern, integration `POST /works`): the row, its
+     * `work.created` event and whatever the hook writes (the `externalRef` link)
+     * commit in ONE transaction, and a throw rolls all of it back. Without the
+     * hook the event stays best-effort after the write, as before.
      */
     async createProjectWork(
         user: User,
@@ -979,6 +985,9 @@ export class WorkLifecycleService {
             /** Gauzy CR-6 — the project's website (`projectUrl`), optional. */
             website?: string | null;
         },
+        options: {
+            readonly withinCreate?: (work: Work, manager: EntityManager) => Promise<void>;
+        } = {},
     ): Promise<Work> {
         if (!config.everWorks.projectWorks.enabled()) {
             throw new BadRequestException({
@@ -998,6 +1007,35 @@ export class WorkLifecycleService {
             deployProvider: null,
         };
         if (params.website) workData.website = params.website;
+
+        const withinCreate = options.withinCreate;
+        if (withinCreate) {
+            const publisher = this.domainEvents;
+            if (!publisher) {
+                throw new Error(
+                    'Project Work withinCreate needs DomainEventsModule (one transaction)',
+                );
+            }
+            // The hook's own error (e.g. the integration API's lost externalRef race)
+            // reaches the caller as thrown; only the create's errors are normalized.
+            let hookError: { readonly error: unknown } | null = null;
+            try {
+                return await publisher.transaction(async (manager) => {
+                    const row = await this.workRepository.create(workData, user, manager);
+                    await publisher.created(manager, 'work', row.id, 'work.created');
+                    try {
+                        await withinCreate(row, manager);
+                    } catch (error) {
+                        hookError = { error };
+                        throw error;
+                    }
+                    return row;
+                });
+            } catch (error) {
+                if (hookError) throw (hookError as { readonly error: unknown }).error;
+                rethrowAsNormalized(error, this.logger, 'creating project work');
+            }
+        }
 
         try {
             const created = await this.workRepository.create(workData, user);
