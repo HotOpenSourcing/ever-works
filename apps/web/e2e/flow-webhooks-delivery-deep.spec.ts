@@ -31,10 +31,9 @@ import { API_BASE, authedHeaders, registerUserViaAPI } from './helpers/api';
  *   POST /api/webhooks/deliveries/<absent-uuid>/redeliver → 404
  *        { message:'Webhook delivery not found' } (NOT 5xx; mirrors the
  *        subscription enumeration cover).
- *   PATCH /api/webhooks/:id { status:'active' } → 400
- *        'Resuming a paused subscription is not supported yet; recreate the
- *        subscription' (resume is intentionally a hard 400, not a no-op).
- *   PATCH /api/webhooks/:id {} (empty) → 400 'status must be one of: paused'.
+ *   PATCH /api/webhooks/:id { status:'active' } → 200 view status:'active'
+ *        (webhooks v2 #2623: resume is live and resets the failure streak).
+ *   PATCH /api/webhooks/:id {} (empty) → 400 'Nothing to update'.
  *   PATCH /api/webhooks/:id { status:'deleted' } → 400 DTO array message
  *        ['status must be one of the following values: paused, active'].
  *   PATCH /api/webhooks/:id { status:'paused' } → 200 view status:'paused';
