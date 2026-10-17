@@ -42,6 +42,10 @@ export type {
 	GitCommitFile,
 	GitCommitFilesInput,
 	GitCommitFilesResult,
+	// APW-03 T38 — the recursive repository listing.
+	GitRepositoryTreeEntry,
+	GitRepositoryTreeOptions,
+	GitRepositoryTree,
 	// PR insights (kanban run cockpit M5/M6).
 	GitCheckStatus,
 	GitCheckConclusion,

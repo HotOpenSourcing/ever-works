@@ -718,6 +718,12 @@ export class AppSourceInitializerService implements AppForkReadyHandler {
                 relation: context.relation,
                 matchSource: context.blueprintMatchSource,
                 userId: context.work.userId,
+                // The source a private Blueprint is judged against (`allowsPrivateBlueprint`):
+                // the upstream for a fork or private copy, the Work Repository for a link.
+                sourceOwner:
+                    context.relation === 'link'
+                        ? context.owner
+                        : (context.record.upstream?.owner ?? null),
             });
             if (composed?.status === 'composed' && typeof composed.text === 'string') {
                 if (composed.dropped && composed.dropped.length > 0) {
@@ -1535,6 +1541,7 @@ interface InlineBlueprintApply {
         relation: AppRepositoryMode;
         matchSource?: string | null;
         userId?: string;
+        sourceOwner?: string | null;
     }): Promise<{ status: string; text?: string; dropped?: readonly string[]; code?: string }>;
     recordOutcome(workId: string, landing: InlineBlueprintLanding, userId?: string): Promise<void>;
 }

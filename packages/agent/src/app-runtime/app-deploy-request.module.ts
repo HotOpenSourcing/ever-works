@@ -42,6 +42,7 @@ import { AppRuntimeStateModule } from './app-runtime-state.module';
 import { AppDependenciesModule } from '../app-dependencies/app-dependencies.module';
 import { AppRuntimeEnvModule } from '../app-env/app-runtime-env.module';
 import { AppBuildSucceededListener } from './app-build-succeeded.listener';
+import { AppEnvRedeployListener } from './app-env-redeploy.listener';
 import { AppSpecAppliedListener } from './app-spec-applied.listener';
 import { AppRuntimeActivityListener } from './app-runtime-activity.listener';
 import { AppManagedDnsListener } from './app-managed-dns.listener';
@@ -231,6 +232,9 @@ import {
         // APW-06 T35 (A0.6) — a green deployable Build requests one Deployment when `autoDeploy`
         // is on (or a domain rebuild is pending). API process only: the event fires here.
         AppBuildSucceededListener,
+        // 2026-10-17 — a runtime-phase App env change redeploys the live Deployment once
+        // per 30 s window, through `AppDeployRequestService` (lane aw-env-redeploy).
+        AppEnvRedeployListener,
         // T35's other half (spec-applied redeploys of a published image) and T28's Activity half
         // (one row per relayed runtime event) — lane aw-deploy-2.
         AppSpecAppliedListener,
