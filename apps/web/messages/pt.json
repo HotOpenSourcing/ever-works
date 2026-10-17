@@ -7281,6 +7281,43 @@
                     "pullCredentialUnavailable": "The credential to pull the image isn't available.",
                     "namespaceForeign": "That namespace already belongs to something else on the cluster.",
                     "verificationNamespaceForbidden": "That namespace is reserved for verification runs."
+                },
+                "license": {
+                    "loading": "Reading the license…",
+                    "unavailable": "License details aren't available on this instance yet.",
+                    "error": "Couldn't read the license. Reload the page to try again.",
+                    "headline": "{spdx} — {classLabel}",
+                    "headlineUnknown": "No license we recognise was found.",
+                    "classes": {
+                        "green": "Hosting allowed",
+                        "amber": "Your cluster, after you confirm the license terms",
+                        "red": "Your cluster only, after you confirm the license terms",
+                        "unknown": "License unknown — confirm the terms before deploying",
+                        "unclassified": "Not classified yet"
+                    },
+                    "mixed": "Parts of this repository use a different license.",
+                    "incomplete": "This repository is too large to scan completely.",
+                    "yourClusterAllowed": "Your cluster: allowed",
+                    "yourClusterAfterConfirm": "Your cluster: allowed after you confirm the license terms",
+                    "review": "Review and confirm",
+                    "confirmed": "Confirmed on {date}.",
+                    "disclaimer": "This is an automated reading of the repository's license files, not legal advice.",
+                    "unknownSpdx": "This software's license",
+                    "dialogTitle": "Confirm the license terms",
+                    "dialogBody": "{spdx} restricts how this software may be hosted. Ever Works Apps is not available for it. To run it on your own cluster, confirm:",
+                    "noText": "The license registry has no statement for this license.",
+                    "checkbox": "I confirm the statement above.",
+                    "footer": "We record who confirmed, when, and for which license and commit.",
+                    "cancel": "Cancel",
+                    "confirm": "Confirm",
+                    "refusals": {
+                        "ownerOnly": "Only the App Work's owner can attest.",
+                        "licenseChanged": "The license changed while you were reviewing it. Review the new terms and confirm again.",
+                        "attestationNotRequired": "This license doesn't need a confirmation any more.",
+                        "licenseUnavailable": "License confirmation isn't available on this instance yet.",
+                        "route_unavailable": "License confirmation isn't available on this instance yet.",
+                        "failed": "Couldn't record the confirmation. Try again."
+                    }
                 }
             }
         },
@@ -7907,6 +7944,18 @@
                     "cluster_target_unavailable": "No deployment option that can run apps is installed.",
                     "app_works_disabled": "App Works are not available on this instance.",
                     "blueprint_mismatch": "The Blueprint for this repository changed. Check the repository again."
+                },
+                "catalog": {
+                    "searchLabel": "Search the Apps catalog",
+                    "searchPlaceholder": "Search apps — for example umami or calendar",
+                    "listLabel": "App Blueprints",
+                    "loading": "Loading the Apps catalog…",
+                    "unavailable": "The Apps catalog isn't available right now. Paste a repository URL instead.",
+                    "disabled": "App Works are not available on this instance.",
+                    "error": "Couldn't load the Apps catalog. Try again, or paste a repository URL.",
+                    "empty": "No App Blueprints are published yet. Paste a repository URL instead.",
+                    "noMatches": "No apps match your search.",
+                    "pick": "Start from {name}"
                 }
             }
         },
