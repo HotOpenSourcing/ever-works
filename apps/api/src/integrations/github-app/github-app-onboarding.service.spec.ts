@@ -11,7 +11,11 @@ import { GitHubAppOnboardingService } from './github-app-onboarding.service';
 import { GitHubAppService } from './github-app.service';
 
 jest.mock('@ever-works/agent/database', () => ({}));
-jest.mock('@ever-works/agent/entities', () => ({}));
+jest.mock('@ever-works/agent/entities', () => ({
+    ActivityActionType: { PROVIDER_CONNECTED: 'provider_connected' },
+    ActivityStatus: { COMPLETED: 'completed' },
+}));
+jest.mock('@ever-works/agent/activity-log', () => ({ ActivityLogService: class {} }));
 
 /** Item 13 — the browser-binding nonce the initiating browser's cookie holds. */
 const BINDING = 'browser-binding-nonce';
@@ -84,6 +88,10 @@ describe('GitHubAppOnboardingService', () => {
             suggest: jest.fn(),
         };
 
+        const activityLog = {
+            log: jest.fn().mockResolvedValue({}),
+        };
+
         for (const repo of [
             installationRepository,
             userLinkRepository,
@@ -100,6 +108,7 @@ describe('GitHubAppOnboardingService', () => {
             authAccountRepository as any,
             userRepository as any,
             usernameAllocator as any,
+            activityLog as any,
         );
 
         return {
@@ -110,8 +119,213 @@ describe('GitHubAppOnboardingService', () => {
             authAccountRepository,
             userRepository,
             usernameAllocator,
+            activityLog,
         };
     };
+
+    // Prod 2026-10-17 — App installs made straight from github.com never pass
+    // through the setup URL, so the row the verified `installation.created`
+    // webhook recorded stayed unclaimed (createdByUserId NULL) and invisible to
+    // its owner. The verified webhook path now claims it — for the RECORDED
+    // installer only, resolved through OAuth-proven links, never by email.
+    describe('claimForRecordedInstaller (verified installation webhook)', () => {
+        const INSTALLER = '7001';
+        const recordedRow = (overrides: Record<string, unknown> = {}) => ({
+            id: 'installation-row-1',
+            installationId: '12345',
+            accountLogin: 'ever-co',
+            targetType: 'Organization',
+            createdByUserId: null,
+            createdByGithubUserId: INSTALLER,
+            deletedAt: null,
+            ...overrides,
+        });
+        const owner = { id: 'user-owner', isActive: true };
+
+        const arrange = (
+            links: { link?: string | null; account?: string | null } = {},
+            user: unknown = owner,
+        ) => {
+            const ctx = createService();
+            ctx.userLinkRepository.findByGithubUserId.mockResolvedValue(
+                links.link ? { userId: links.link, githubUserId: INSTALLER } : null,
+            );
+            ctx.authAccountRepository.findProviderAccountByAccountId.mockResolvedValue(
+                links.account
+                    ? { userId: links.account, providerId: 'github', accountId: INSTALLER }
+                    : null,
+            );
+            ctx.userRepository.findById.mockResolvedValue(user);
+            ctx.installationRepository.claimOwnershipIfUnassigned.mockImplementation(
+                async (_installationId: string, userId: string, githubUserId: string) =>
+                    recordedRow({ createdByUserId: userId, createdByGithubUserId: githubUserId }),
+            );
+            return ctx;
+        };
+
+        const expectUntouched = (ctx: ReturnType<typeof arrange>) => {
+            expect(ctx.installationRepository.claimOwnershipIfUnassigned).not.toHaveBeenCalled();
+            expect(ctx.activityLog.log).not.toHaveBeenCalled();
+        };
+
+        it('claims for the user behind the GitHub App user link and records the activity', async () => {
+            const ctx = arrange({ link: owner.id });
+
+            const claimed = await ctx.service.claimForRecordedInstaller(recordedRow() as any);
+
+            expect(ctx.userLinkRepository.findByGithubUserId).toHaveBeenCalledWith(INSTALLER);
+            expect(ctx.installationRepository.claimOwnershipIfUnassigned).toHaveBeenCalledWith(
+                '12345',
+                owner.id,
+                INSTALLER,
+            );
+            expect(claimed).toEqual(expect.objectContaining({ createdByUserId: owner.id }));
+            expect(ctx.activityLog.log).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    userId: owner.id,
+                    actionType: 'provider_connected',
+                    action: 'github_app_installation_claimed',
+                    status: 'completed',
+                    details: expect.objectContaining({
+                        installationId: '12345',
+                        accountLogin: 'ever-co',
+                        githubUserId: INSTALLER,
+                        source: 'installation-webhook',
+                        matchedBy: ['github-app-user-link'],
+                    }),
+                }),
+            );
+            // Identity never comes from an email.
+            expect(ctx.userRepository.findByEmail).not.toHaveBeenCalled();
+        });
+
+        it('claims for the user behind the linked `github` OAuth account (accountId = GitHub id)', async () => {
+            const ctx = arrange({ account: owner.id });
+
+            const claimed = await ctx.service.claimForRecordedInstaller(recordedRow() as any);
+
+            expect(ctx.authAccountRepository.findProviderAccountByAccountId).toHaveBeenCalledWith(
+                'github',
+                INSTALLER,
+            );
+            expect(ctx.installationRepository.claimOwnershipIfUnassigned).toHaveBeenCalledWith(
+                '12345',
+                owner.id,
+                INSTALLER,
+            );
+            expect(claimed).not.toBeNull();
+        });
+
+        it('claims when both links agree on the same user', async () => {
+            const ctx = arrange({ link: owner.id, account: owner.id });
+
+            await ctx.service.claimForRecordedInstaller(recordedRow() as any);
+
+            expect(ctx.activityLog.log).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    details: expect.objectContaining({
+                        matchedBy: ['github-app-user-link', 'github-auth-account'],
+                    }),
+                }),
+            );
+        });
+
+        it('leaves the row unclaimed (NULL) when the installer has no linked platform user', async () => {
+            const ctx = arrange({});
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(recordedRow() as any),
+            ).resolves.toBeNull();
+
+            expectUntouched(ctx);
+        });
+
+        it('never touches an already-claimed row', async () => {
+            const ctx = arrange({ link: owner.id });
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(
+                    recordedRow({ createdByUserId: 'user-someone-else' }) as any,
+                ),
+            ).resolves.toBeNull();
+
+            expect(ctx.userLinkRepository.findByGithubUserId).not.toHaveBeenCalled();
+            expectUntouched(ctx);
+        });
+
+        it('refuses when the installer id matches MORE than one platform user', async () => {
+            const ctx = arrange({ link: 'user-a', account: 'user-b' });
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(recordedRow() as any),
+            ).resolves.toBeNull();
+
+            expect(ctx.userRepository.findById).not.toHaveBeenCalled();
+            expectUntouched(ctx);
+        });
+
+        it.each([
+            [
+                'no recorded installer (row created by a non-`created` action)',
+                { createdByGithubUserId: null },
+            ],
+            ['a deleted installation', { deletedAt: new Date('2026-10-17T00:00:00Z') }],
+        ])('does nothing for %s', async (_label, overrides) => {
+            const ctx = arrange({ link: owner.id });
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(recordedRow(overrides) as any),
+            ).resolves.toBeNull();
+
+            expect(ctx.userLinkRepository.findByGithubUserId).not.toHaveBeenCalled();
+            expectUntouched(ctx);
+        });
+
+        it.each([
+            ['a linked user that no longer exists', null],
+            ['a deactivated user', { id: 'user-owner', isActive: false }],
+        ])('refuses %s', async (_label, user) => {
+            const ctx = arrange({ link: owner.id }, user);
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(recordedRow() as any),
+            ).resolves.toBeNull();
+
+            expectUntouched(ctx);
+        });
+
+        it('reports nothing claimed when a concurrent claim for someone else won the conditional update', async () => {
+            const ctx = arrange({ link: owner.id });
+            ctx.installationRepository.claimOwnershipIfUnassigned.mockResolvedValue(
+                recordedRow({ createdByUserId: 'user-setup-flow' }),
+            );
+
+            await expect(
+                ctx.service.claimForRecordedInstaller(recordedRow() as any),
+            ).resolves.toBeNull();
+
+            expect(ctx.activityLog.log).not.toHaveBeenCalled();
+        });
+
+        it('keeps the claim when the activity log write fails', async () => {
+            const ctx = arrange({ link: owner.id });
+            ctx.activityLog.log.mockRejectedValue(new Error('activity store down'));
+            const warnSpy = jest
+                .spyOn(Logger.prototype, 'warn')
+                .mockImplementation(() => undefined);
+
+            try {
+                await expect(
+                    ctx.service.claimForRecordedInstaller(recordedRow() as any),
+                ).resolves.toEqual(expect.objectContaining({ createdByUserId: owner.id }));
+                expect(warnSpy).toHaveBeenCalledWith(
+                    expect.stringContaining('Could not record the activity'),
+                );
+            } finally {
+                warnSpy.mockRestore();
+            }
+        });
+    });
 
     describe('completeUserAuth', () => {
         it('rejects linking an unverified GitHub email to an existing user', async () => {

@@ -5,6 +5,7 @@ jest.mock('@ever-works/agent/database', () => ({}));
 jest.mock('@ever-works/agent/entities', () => ({}));
 jest.mock('@ever-works/agent/import', () => ({}));
 jest.mock('@ever-works/agent/services', () => ({}));
+jest.mock('@ever-works/agent/activity-log', () => ({ ActivityLogService: class {} }));
 // Stub the auth barrel so importing AuthService doesn't pull in the full
 // auth module (which transitively requires the agent runtime tree we
 // can't satisfy in unit tests).
