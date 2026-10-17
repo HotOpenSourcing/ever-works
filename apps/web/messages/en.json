@@ -4978,7 +4978,22 @@
                 "lastUsed": "Last used {date}",
                 "neverUsed": "Never used",
                 "revokeSuccess": "Ever Gauzy key revoked",
-                "revokeError": "Failed to revoke the key"
+                "revokeError": "Failed to revoke the key",
+                "revokeHintWithWebhooks": "Revoking a key disconnects Ever Gauzy immediately and disables the {count, plural, one {webhook subscription} other {# webhook subscriptions}} it owns.",
+                "revokeSuccessWithWebhooks": "Ever Gauzy key revoked; {count, plural, one {its webhook subscription is} other {its # webhook subscriptions are}} disabled",
+                "webhooksTitle": "{count, plural, one {Webhook subscription} other {# webhook subscriptions}}",
+                "manageWebhooks": "Manage webhooks",
+                "noWebhooks": "No webhook subscription yet. Ever Gauzy creates its own once it is connected.",
+                "webhooksUnavailable": "Webhook subscriptions could not be loaded.",
+                "webhookEvents": "{count, plural, one {# event filter} other {# event filters}}",
+                "webhookLastDelivery": "last delivery {date}",
+                "webhookNoDelivery": "no delivery yet",
+                "webhookStatus": {
+                    "active": "Active",
+                    "paused": "Paused",
+                    "failed": "Failing",
+                    "disabled": "Disabled"
+                }
             },
             "fleet": {
                 "title": "Fleet",

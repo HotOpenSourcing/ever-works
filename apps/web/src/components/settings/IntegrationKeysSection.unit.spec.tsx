@@ -35,6 +35,7 @@ vi.mock('@/app/actions/api-keys', () => ({
 
 import { IntegrationKeysSection } from './IntegrationKeysSection';
 import { EverGauzyIntegrationCard, EVER_GAUZY_NEW_KEY_HREF } from './EverGauzyIntegrationCard';
+import type { WebhookSubscription } from '@/lib/api/webhooks';
 
 /**
  * EW-P1-7 — Settings → API keys → Integration keys, and the Ever Gauzy card.
@@ -195,5 +196,55 @@ describe('EverGauzyIntegrationCard', () => {
     it('shows the empty state when Ever Gauzy is not connected', () => {
         render(<EverGauzyIntegrationCard initialKeys={[]} apiUrl="https://api.ever.works/api" />);
         expect(screen.getByText('noKeys')).toBeInTheDocument();
+    });
+
+    const webhook = (extra: Partial<WebhookSubscription>): WebhookSubscription => ({
+        id: 'w-1',
+        accountId: 'u-1',
+        workId: null,
+        url: 'https://gauzy.test/hooks/ever-works',
+        status: 'active',
+        consecutiveFailures: 0,
+        lastDeliveryAt: null,
+        createdAt: '2026-10-16T00:00:00.000Z',
+        updatedAt: '2026-10-16T00:00:00.000Z',
+        version: 2,
+        ownerType: 'integration_key',
+        ownerId: 'k-1',
+        events: ['task.*', 'team.*'],
+        organizationIds: ['o-1'],
+        excludeOriginTags: ['gauzy:conn-1'],
+        description: null,
+        ...extra,
+    });
+
+    it("lists each key's own webhook subscriptions; revoking says it disables them too", () => {
+        revokeApiKey.mockReset();
+        const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+        render(
+            <EverGauzyIntegrationCard
+                initialKeys={[KEY]}
+                apiUrl="https://api.ever.works/api"
+                webhooks={[
+                    webhook({}),
+                    webhook({ id: 'w-2', status: 'disabled', url: 'https://gauzy.test/old' }),
+                    webhook({ id: 'w-3', ownerId: 'k-other', url: 'https://other.test/hook' }),
+                ]}
+            />,
+        );
+        const list = screen.getByTestId('ever-gauzy-key-webhooks-k-1');
+        expect(list.textContent).toContain('https://gauzy.test/hooks/ever-works');
+        expect(list.textContent).toContain('webhookStatus.disabled');
+        expect(list.textContent).not.toContain('https://other.test/hook');
+        fireEvent.click(screen.getByText('revoke'));
+        // Only the subscriptions that still deliver are counted.
+        expect(confirm).toHaveBeenCalledWith('revokeHintWithWebhooks:{"count":1}');
+        expect(revokeApiKey).not.toHaveBeenCalled();
+        confirm.mockRestore();
+    });
+
+    it('says so when the webhook subscriptions could not be loaded', () => {
+        render(<EverGauzyIntegrationCard initialKeys={[KEY]} apiUrl={null} webhooks={null} />);
+        expect(screen.getByText('webhooksUnavailable')).toBeInTheDocument();
     });
 });
