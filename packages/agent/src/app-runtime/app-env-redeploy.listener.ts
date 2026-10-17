@@ -71,7 +71,10 @@ type EnvEventLike =
     | {
           readonly workId?: string;
           readonly runtimePhaseNames?: readonly string[];
-          readonly payload?: { readonly workId?: string; readonly runtimePhaseNames?: readonly string[] };
+          readonly payload?: {
+              readonly workId?: string;
+              readonly runtimePhaseNames?: readonly string[];
+          };
       };
 
 interface Window {
@@ -113,8 +116,9 @@ export class AppEnvRedeployListener implements OnModuleDestroy {
     /** Add one event's runtime names to its Work's window, opening the window when needed. */
     private collect(event: EnvEventLike): void {
         if (!enabled()) return;
-        const payload = (event as { payload?: { workId?: string; runtimePhaseNames?: readonly string[] } })
-            ?.payload ?? (event as { workId?: string; runtimePhaseNames?: readonly string[] });
+        const payload =
+            (event as { payload?: { workId?: string; runtimePhaseNames?: readonly string[] } })
+                ?.payload ?? (event as { workId?: string; runtimePhaseNames?: readonly string[] });
         const workId = payload?.workId;
         const names = payload?.runtimePhaseNames ?? [];
         if (!workId || names.length === 0) return;
@@ -128,8 +132,9 @@ export class AppEnvRedeployListener implements OnModuleDestroy {
         const timer = setTimeout(() => {
             const window = this.windows.get(workId);
             this.windows.delete(workId);
-            void this.redeploy(workId, startedAt, window ? [...window.names] : [...names]).catch((error) =>
-                this.logger.warn(`Env redeploy of Work ${workId} failed: ${messageOf(error)}`),
+            void this.redeploy(workId, startedAt, window ? [...window.names] : [...names]).catch(
+                (error) =>
+                    this.logger.warn(`Env redeploy of Work ${workId} failed: ${messageOf(error)}`),
             );
         }, APP_ENV_REDEPLOY_DEBOUNCE_MS);
         timer.unref?.();
@@ -140,10 +145,15 @@ export class AppEnvRedeployListener implements OnModuleDestroy {
      * One window's decision and, when it passes, its one request. Public so the
      * spec can drive it without the timer.
      */
-    async redeploy(workId: string, windowStartedAt: number, names: readonly string[]): Promise<AppEnvRedeployOutcome> {
+    async redeploy(
+        workId: string,
+        windowStartedAt: number,
+        names: readonly string[],
+    ): Promise<AppEnvRedeployOutcome> {
         if (!enabled()) return { requested: false, reason: 'disabled' };
         if (names.length === 0) return { requested: false, reason: 'no_runtime_names' };
-        if (!this.requests?.request || !this.states?.getOrCreate) return { requested: false, reason: 'unbound' };
+        if (!this.requests?.request || !this.states?.getOrCreate)
+            return { requested: false, reason: 'unbound' };
 
         const key = `${workId}:${windowStartedAt}`;
         if (this.inFlight.has(key)) return { requested: false, reason: 'in_flight' };
@@ -152,15 +162,19 @@ export class AppEnvRedeployListener implements OnModuleDestroy {
             const state = await this.states.getOrCreate(workId);
             const target = state?.target ?? null;
             if (!target || target === 'none') return { requested: false, reason: 'target_none' };
-            if (state?.targetSettings?.autoDeploy === false) return { requested: false, reason: 'auto_deploy_off' };
+            if (state?.targetSettings?.autoDeploy === false)
+                return { requested: false, reason: 'auto_deploy_off' };
 
-            if (await this.buildPending(workId)) return { requested: false, reason: 'build_pending' };
+            if (await this.buildPending(workId))
+                return { requested: false, reason: 'build_pending' };
 
             const live = await this.liveDeployment(workId);
             if (!live) return { requested: false, reason: 'no_live_deployment' };
 
             const specCommitSha =
-                typeof live.appRender?.specCommitSha === 'string' ? live.appRender.specCommitSha : null;
+                typeof live.appRender?.specCommitSha === 'string'
+                    ? live.appRender.specCommitSha
+                    : null;
             const result = await this.requests.request({
                 workId,
                 userId: null,

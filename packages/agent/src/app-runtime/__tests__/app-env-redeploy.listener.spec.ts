@@ -58,7 +58,13 @@ function harness(
         ),
     };
     const builds = {
-        findPage: jest.fn(async () => ({ rows: options.openBuilds ?? [], total: 0, page: 1, pageSize: 1, hasMore: false })),
+        findPage: jest.fn(async () => ({
+            rows: options.openBuilds ?? [],
+            total: 0,
+            page: 1,
+            pageSize: 1,
+            hasMore: false,
+        })),
     };
     const listener = new AppEnvRedeployListener(
         { request } as never,
@@ -88,7 +94,12 @@ describe('AppEnvRedeployListener', () => {
         jest.advanceTimersByTime(5_000);
         h.listener.onEnvChanged(changed(['SMTP_HOST']));
         h.listener.onEnvRotated(
-            new AppEnvRotatedEvent({ workId: WORK_ID, names: ['KEY'], buildPhaseNames: [], runtimePhaseNames: ['KEY'] }),
+            new AppEnvRotatedEvent({
+                workId: WORK_ID,
+                names: ['KEY'],
+                buildPhaseNames: [],
+                runtimePhaseNames: ['KEY'],
+            }),
         );
         expect(h.request).not.toHaveBeenCalled();
 
@@ -131,7 +142,9 @@ describe('AppEnvRedeployListener', () => {
     });
 
     it('skips with no live Deployment, no target, or auto-deploy off', async () => {
-        const none = harness({ deployments: [{ id: 'd', appTarget: 'your-cluster', state: 'FAILED' }] });
+        const none = harness({
+            deployments: [{ id: 'd', appTarget: 'your-cluster', state: 'FAILED' }],
+        });
         await expect(none.listener.redeploy(WORK_ID, 1, ['A'])).resolves.toEqual({
             requested: false,
             reason: 'no_live_deployment',

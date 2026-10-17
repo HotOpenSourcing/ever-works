@@ -1351,3 +1351,20 @@ code comments and specs cite.
   is still open). Proof: `packages/tasks/src/trigger/worker/modules/__tests__/trigger-app-runtime.deploy.spec.ts` boots
   the module against a stub API and drives a dequeued published-image Deployment to `READY`. `EXPECTED_WORKER_UNBOUND`
   lost 13 `TriggerAppRuntimeModule` rows; `OPEN_WORKER_GAPS` stays empty.
+- **T33 / T31 / T26 / T47 / T48 / T28 / T35 + APW-07 T25 (2026-10-17, lane aw-deploy-2, PR #2688).** The Deploy tab's
+  routes exist: `GET`/`PUT :id/app-target`, `POST :id/app-target/check` and `GET :id/app-status`
+  (`apps/api/src/works/work-app-runtime.controller.ts` + `AppTargetService`), with the shapes `apps/web/src/lib/api/app-runtime.ts`
+  reads and access resolved first (one 404 for missing/invisible, `404 notAppWork` for other kinds). The kubeconfig is
+  stored write-only through `PluginSettingsService.writePlatformManagedWorkSettings` (encrypted, no validation, no
+  connection) and the check is an `app-cluster-op { op: 'cluster-check' }`: `TriggerService.dispatchAppClusterOp` +
+  the API's `APP_CLUSTER_OP_DISPATCHER` gate, which the worker reaches as `remoteMap.AppClusterOpDispatchRelay`.
+  **C43 closed:** `AppHostsService`/`AppDomainsService` are provided in the API (`AppDeployRequestModule`, the host
+  store swaps) and `DeployFacadeService` finds `AppDomainsService` through `ModuleRef`; the hosts deploy requester is
+  lazy, because `AppDeployRequestService` → preconditions → `AppHostsService` → requester is a constructor cycle.
+  **T47/T48:** `AppsDomainDnsServiceImpl` (apps apex + `EVER_WORKS_APPS_DNS_*` only) allocates the managed label when a
+  target is chosen and `AppManagedDnsListener` writes an unproxied `A`/`CNAME` to the public ingress address after
+  `app.deploy.succeeded`; deletion removes it through the worker's `APPS_DOMAIN_DNS_SERVICE` proxy. **APW-07 T25:**
+  `AppDependencySpecSourceAdapter` is bound, and `app-dependency-provision`'s worker module imports
+  `TriggerAppRuntimeModule` and proxies the row store, the id-scoped raw rows, the cipher, the spec and the re-dispatch
+  (`app-dependency-worker.relays.ts`). **T28:** `AppRuntimeActivityListener` writes `app_deploy` / `app_job` /
+  `app_smoke` rows. **T35:** `AppSpecAppliedListener` redeploys a published image on a spec change that runs.
