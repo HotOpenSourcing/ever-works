@@ -36,7 +36,7 @@ describe('IntegrationOrganizationsWriteController', () => {
         };
         const keys = {
             addPin: jest.fn().mockResolvedValue(['org-a', 'org-new']),
-            assertPinCapacity: jest.fn().mockResolvedValue(undefined),
+            releasePin: jest.fn().mockResolvedValue(undefined),
         };
         const tenants = {
             findById: jest.fn().mockResolvedValue({ id: 'tenant-1', ownerUserId: 'owner-1' }),
@@ -77,13 +77,18 @@ describe('IntegrationOrganizationsWriteController', () => {
             req(),
             response,
         );
+        // The pin is reserved first, for the id the Organization is then created with.
+        const reserved = keys.addPin.mock.calls[0][1] as string;
+        expect(reserved).toMatch(/^[0-9a-f-]{36}$/);
         expect(organizations.createOrganization).toHaveBeenCalledWith(
             'owner-1',
             'Acme EU',
             undefined,
-            { legalName: null, countryCode: 'DE' },
+            { legalName: null, countryCode: 'DE', id: reserved },
         );
-        expect(keys.addPin).toHaveBeenCalledWith('key-1', 'org-new');
+        expect(keys.addPin.mock.invocationCallOrder[0]).toBeLessThan(
+            organizations.createOrganization.mock.invocationCallOrder[0],
+        );
         expect(members.create).not.toHaveBeenCalled();
         expect(response.status).toHaveBeenCalledWith(201);
         expect(body).toEqual({ id: 'org-new' });
@@ -109,7 +114,7 @@ describe('IntegrationOrganizationsWriteController', () => {
 
     it('writes nothing when the key has no pin left (400 before the create)', async () => {
         const { controller, organizations, keys, members } = setup();
-        keys.assertPinCapacity.mockRejectedValue(
+        keys.addPin.mockRejectedValue(
             Object.assign(new Error('A key may be pinned to at most 50 organizations'), {
                 status: 400,
             }),
@@ -119,7 +124,16 @@ describe('IntegrationOrganizationsWriteController', () => {
         ).rejects.toMatchObject({ status: 400 });
         expect(organizations.createOrganization).not.toHaveBeenCalled();
         expect(members.create).not.toHaveBeenCalled();
-        expect(keys.addPin).not.toHaveBeenCalled();
+    });
+
+    it('a failed create releases the reserved pin', async () => {
+        const { controller, organizations, keys } = setup();
+        organizations.createOrganization.mockRejectedValue(new Error('slug taken'));
+        await expect(
+            controller.create(user('owner-1'), { displayName: 'Acme EU' }, req(), res()),
+        ).rejects.toThrow('slug taken');
+        const reserved = keys.addPin.mock.calls[0][1] as string;
+        expect(keys.releasePin).toHaveBeenCalledWith('key-1', reserved);
     });
 
     it("a demoted admin's key cannot create an Organization (and so regain the role)", async () => {

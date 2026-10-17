@@ -259,8 +259,18 @@ export class GoalEvaluationService {
         }
 
         // Invariant I-4: only the Goal row is written — linked
-        // Missions are NEVER auto-completed from here.
-        await this.goals.save(withoutAggregateVersion(goal));
+        // Missions are NEVER auto-completed from here. Only the columns this
+        // evaluation decides are written (an external source's observation is
+        // the integration's, never re-written from the scan's copy).
+        await this.saveEvaluation(goal, [
+            'status',
+            'outcome',
+            'nextCheckAt',
+            ...(resolved ? (['resolvedScore'] as const) : []),
+            ...(sample && !external
+                ? (['currentValue', 'currentValueAt', 'baselineValue'] as const)
+                : []),
+        ]);
         await this.recordEvaluation(goal, before);
 
         // Escalate-on-hard (G1's stated behavior). AFTER the save so the
@@ -346,9 +356,37 @@ export class GoalEvaluationService {
             outcome = 'missed';
         }
 
-        await this.goals.save(withoutAggregateVersion(goal));
+        await this.saveEvaluation(goal, ['status', 'outcome', 'nextCheckAt']);
         await this.recordEvaluation(goal, before);
         return { goalId: goal.id, outcome };
+    }
+
+    /**
+     * Save only the columns an evaluation decided (EW-P2-2 review). The Goal is the
+     * due scan's copy; a whole-entity `save()` would write back every column a
+     * concurrent write changed meanwhile — an integration's pushed sample
+     * (`currentValue`, `resolvedScore`), a PATCH, a Definition-of-Done edit. Every
+     * other column is cleared for the save (TypeORM skips `undefined`, so `version`
+     * is never rolled back either) and restored on the object after it. Without
+     * entity metadata (a unit-test double) it is the plain save.
+     */
+    private async saveEvaluation(goal: Goal, written: ReadonlyArray<keyof Goal>): Promise<void> {
+        const columns = (this.goals.metadata?.columns ?? []).map(
+            (column) => column.propertyName as keyof Goal,
+        );
+        const keep = new Set<keyof Goal>(['id', ...written]);
+        const target = goal as unknown as Record<string, unknown>;
+        const held = new Map<string, unknown>();
+        for (const column of columns) {
+            if (keep.has(column)) continue;
+            held.set(column, target[column]);
+            target[column] = undefined;
+        }
+        try {
+            await this.goals.save(withoutAggregateVersion(goal));
+        } finally {
+            for (const [column, value] of held) target[column] = value;
+        }
     }
 
     // ─── internals ──────────────────────────────────────────────────

@@ -631,9 +631,25 @@ export class GoalsService {
         // `goal.deleted` carries the last snapshot, its version claimed first (under the
         // row lock), in the delete's own transaction.
         await publisher.transaction(async (manager) => {
+            // The delete cascades to its Mission links (ON DELETE CASCADE): read them
+            // first, so each linked Mission records `mission.goal.unlinked` too.
+            const links = await manager.getRepository(MissionGoal).find({
+                where: { goalId },
+                select: { missionId: true, isPrimary: true },
+            });
             const tombstone = await publisher.beforeDelete(manager, 'goal', goalId);
             await manager.getRepository(Goal).delete({ id: goalId });
             await publisher.deleted(manager, tombstone, 'goal.deleted');
+            for (const link of links) {
+                await publisher.child(
+                    manager,
+                    'mission',
+                    link.missionId,
+                    'mission.goal.unlinked',
+                    { missionId: link.missionId, goalId, isPrimary: link.isPrimary, deleted: true },
+                    { changedFields: ['goals'] },
+                );
+            }
         });
         return { deleted: true };
     }

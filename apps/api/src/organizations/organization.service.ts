@@ -498,6 +498,12 @@ export class OrganizationService {
              * non-null.
              */
             vision?: string | null;
+            /**
+             * EW-P2-6 — the id to create the Organization with: `POST
+             * /api/integrations/v1/organizations` reserves the key's pin for it
+             * before anything is written. Omitted (every app path): generated.
+             */
+            id?: string;
         },
     ): Promise<Organization> {
         const trimmedName = name?.trim();
@@ -548,6 +554,7 @@ export class OrganizationService {
                 // for a blank field the modal submitted untouched.
                 const vision = this.normalizeVision(extra?.vision);
                 const org = manager.getRepository<Organization>('organizations').create({
+                    ...(extra?.id ? { id: extra.id } : {}),
                     tenantId: tenant.id,
                     slug,
                     displayName: trimmedName,

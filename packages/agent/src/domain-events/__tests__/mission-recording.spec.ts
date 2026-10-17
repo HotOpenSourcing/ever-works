@@ -267,6 +267,37 @@ describe('mission recording points', () => {
         for (const event of recorded) expectValid(event);
     });
 
+    it('deleting a linked Goal records mission.goal.unlinked for its Mission', async () => {
+        const mission = await external();
+        const goal = await goals.createExternal(
+            OWNER,
+            {
+                title: 'Grow',
+                metricSource: { pluginId: 'external', metricId: 'value' },
+                comparator: 'gte',
+                targetValue: 10,
+                unit: 'deals',
+                window: 'point',
+            },
+            scope,
+        );
+        await goals.linkToMission(OWNER, mission.id, goal.id, true, scope);
+        await resetDomainEventsTables(dataSource);
+        await goals.delete(OWNER, goal.id, scope);
+        const recorded = await events();
+        expect(recorded.map((event) => [event.type, event.aggregateId])).toEqual([
+            ['goal.deleted', goal.id],
+            ['mission.goal.unlinked', mission.id],
+        ]);
+        expect(recorded[1].data).toMatchObject({
+            missionId: mission.id,
+            goalId: goal.id,
+            isPrimary: true,
+            deleted: true,
+        });
+        for (const event of recorded) expectValid(event);
+    });
+
     it('delete records mission.deleted with the last snapshot', async () => {
         const mission = await external();
         await missions.delete(OWNER, mission.id, scope);

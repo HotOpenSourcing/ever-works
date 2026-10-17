@@ -322,6 +322,31 @@ describe('goal recording points', () => {
         expect(completed[0].data).toMatchObject({ status: 'completed', outcome: 'achieved' });
     });
 
+    it('an evaluation of the scanned copy never writes back a sample pushed after the scan', async () => {
+        const goal = await external({ targetValue: 100 });
+        await goals.activate(OWNER, goal.id, scope);
+        await goals.recordExternalSample(
+            OWNER,
+            goal.id,
+            { value: 10, sampledAt: new Date() },
+            scope,
+        );
+        // The due scan's copy, then a newer sample lands before the evaluation saves.
+        const scanned = await dataSource.getRepository(Goal).findOneByOrFail({ id: goal.id });
+        await goals.recordExternalSample(
+            OWNER,
+            goal.id,
+            { value: 40, sampledAt: new Date() },
+            scope,
+        );
+        await evaluation.evaluateOne(scanned);
+        const stored = await dataSource.getRepository(Goal).findOneByOrFail({ id: goal.id });
+        expect(Number(stored.currentValue)).toBe(40);
+        expect(stored.status).toBe(GoalStatus.ACTIVE);
+        // The version only moves forward (the stale copy's is never written back).
+        expect(Number(stored.version)).toBeGreaterThan(Number(scanned.version));
+    });
+
     it('delete records goal.deleted with the last snapshot at a version claimed first', async () => {
         const goal = await external();
         await goals.delete(OWNER, goal.id, scope);

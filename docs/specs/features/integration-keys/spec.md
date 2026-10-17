@@ -73,8 +73,8 @@ into Gauzy. One-click connect waits for Ever ID; when it comes, only how the pri
 - **FR-2 Cap:** 20 active, unexpired integration keys per tenant. They do not count against the ten personal keys.
 - **FR-3 Session only:** creating and rotating any API key needs `authMethod = 'session'`. A personal key, a fleet-run
   token, an integration key or a delegated Ever ID token gets `403`.
-- **FR-4 Listing:** `GET /api/auth/api-keys/integration` lists the tenant's active integration keys for the tenant
-  owner (others get an empty list): name, description, prefix, kind, scopes, pins (with slug and display name), creator,
+- **FR-4 Listing:** `GET /api/auth/api-keys/integration` lists the active integration keys: every key of the tenant
+  for the tenant owner, their own for an organization admin (EW-P2-6), an empty list for anyone else. Each row: name, description, prefix, kind, scopes, pins (with slug and display name), creator,
   created/last-used/expiry/rotation timestamps. Never the secret or a digest.
 - **FR-5 Revocation:** `DELETE /api/auth/api-keys/:id` switches an integration key off (`isActive = false`) instead of
   deleting it, so audit rows and webhook subscriptions keep their target. It emits `integration-key.revoked`
