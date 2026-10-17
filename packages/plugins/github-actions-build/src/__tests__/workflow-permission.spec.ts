@@ -97,6 +97,19 @@ describe('the workflow-permission guard (octokitRepositoryWriter)', () => {
 		});
 	});
 
+	it('passes a generic App refusal through when it comes before the ref update (a Contents gap, not Workflows)', async () => {
+		const { octokit } = scripted({
+			...COMMIT_ROUTES,
+			'POST /repos/{owner}/{repo}/git/blobs': () => {
+				throw httpError(403, 'Resource not accessible by integration');
+			}
+		});
+		const writer = octokitRepositoryWriter(octokit, repository, { credential: 'githubApp' });
+		await expect(writer.commitFiles(WORKFLOW_COMMIT)).rejects.toSatisfy(
+			(error: unknown) => repositoryWriteErrorCode(error) === null
+		);
+	});
+
 	it("translates GitHub's \"without `workflow` scope\" refusal too", async () => {
 		const { octokit } = scripted({
 			...COMMIT_ROUTES,

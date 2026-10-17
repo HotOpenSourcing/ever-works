@@ -186,21 +186,24 @@ export function octokitRepositoryWriter(
 		}
 	}
 
-	/** A write refusal on a workflow commit, translated when it is GitHub's workflow guard. */
+	/**
+	 * A write refusal on a workflow commit, translated when it is GitHub's workflow
+	 * guard — only the explicit "… workflow … scope/permission" wording. The App's
+	 * generic "Resource not accessible by integration" is NOT read as a workflow
+	 * refusal here: it is just as much a missing `Contents: write` (CodeRabbit
+	 * #2686). See the ref update in {@link commit} for the one place it is.
+	 */
 	function translateWorkflowRefusal(error: unknown, touchesWorkflows: boolean): unknown {
 		if (!touchesWorkflows || error instanceof RepositoryWriteError) return error;
 		const message = messageOf(error);
 		if (WORKFLOW_REFUSAL.test(message)) {
 			return workflowPermissionMissingError(/github app|integration/i.test(message) ? 'githubApp' : kind, error);
 		}
-		if (statusOf(error) === 403 && INTEGRATION_REFUSAL.test(message)) {
-			return workflowPermissionMissingError('githubApp', error);
-		}
 		return error;
 	}
 
 	/** The four-call commit of {@link RepositoryWriter.commitFiles}. */
-	async function commit(input: RepositoryCommitInput): Promise<{ commitSha: string }> {
+	async function commit(input: RepositoryCommitInput, touchesWorkflows: boolean): Promise<{ commitSha: string }> {
 		const { data: baseCommit } = await octokit.request('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', {
 			...base,
 			commit_sha: input.baseSha
@@ -252,6 +255,13 @@ export function octokitRepositoryWriter(
 			if ((status === 409 || status === 422 || status === 403) && RULE_REFUSAL.test(message)) {
 				throw new RepositoryWriteError('refRejectedByRule', `${input.branch} refused the update`, error);
 			}
+			// The blob, tree and commit above were written, so `Contents: write` is
+			// granted; an App refusing only the ref update of a workflow commit is the
+			// missing `Workflows: write`. Earlier in the sequence the same wording is a
+			// different missing permission and is passed through untouched.
+			if (touchesWorkflows && status === 403 && INTEGRATION_REFUSAL.test(message)) {
+				throw workflowPermissionMissingError('githubApp', error);
+			}
 			throw error;
 		}
 		return { commitSha };
@@ -282,7 +292,7 @@ export function octokitRepositoryWriter(
 			const touchesWorkflows = input.files.some((file) => file.path.startsWith(WORKFLOWS_DIRECTORY));
 			if (touchesWorkflows) await assertCanWriteWorkflows();
 			try {
-				return await commit(input);
+				return await commit(input, touchesWorkflows);
 			} catch (error) {
 				throw translateWorkflowRefusal(error, touchesWorkflows);
 			}

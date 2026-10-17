@@ -91,6 +91,14 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
             expect(h.builds.insertWithNextNumber).not.toHaveBeenCalled();
         });
 
+        it('refuses a named commit when no build plugin can be resolved to check it', async () => {
+            const h = service({ binding: null });
+            await expect(h.svc.requestRebuild(WORK_ID, USER_ID, { commitSha: 'c'.repeat(40) })).resolves.toEqual({
+                ok: false,
+                code: 'buildProviderUnavailable',
+            });
+        });
+
         it('refuses with buildProviderUnavailable when the provider cannot tell', async () => {
             const h = service({
                 binding: {
@@ -178,7 +186,13 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
     describe('removeOrphanedVerifySecret (§7.4)', () => {
         it('deletes the secret through the binding and clears the record', async () => {
             const deleteVerifyPromptedSecret = jest.fn(async () => ({ deleted: true }));
-            const row = { id: 'v1', workId: WORK_ID, trigger: 'verification', verifySecretNames: ['EW_VERIFY__PROMPTED'] };
+            const row = {
+                id: 'v1',
+                workId: WORK_ID,
+                trigger: 'verification',
+                status: 'succeeded',
+                verifySecretNames: ['EW_VERIFY__PROMPTED'],
+            };
             const h = service({
                 binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
                 rowById: row as Partial<WorkBuild>,
@@ -186,6 +200,40 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
             await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(true);
             expect(deleteVerifyPromptedSecret).toHaveBeenCalledTimes(1);
             expect(h.rows.save).toHaveBeenCalledWith(expect.objectContaining({ verifySecretNames: [] }));
+        });
+
+        it('leaves the shared secret to a newer open verification Build, clearing only this record', async () => {
+            const deleteVerifyPromptedSecret = jest.fn(async () => ({ deleted: true }));
+            const h = service({
+                binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+                rowById: {
+                    id: 'v1',
+                    workId: WORK_ID,
+                    trigger: 'verification',
+                    status: 'failed',
+                    verifySecretNames: ['EW_VERIFY__PROMPTED'],
+                } as Partial<WorkBuild>,
+                rows: [{ id: 'v2', trigger: 'verification', status: 'running' }],
+            });
+            await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
+            expect(deleteVerifyPromptedSecret).not.toHaveBeenCalled();
+            expect(h.rows.save).toHaveBeenCalledWith(expect.objectContaining({ verifySecretNames: [] }));
+        });
+
+        it('never deletes under a Build that is still running', async () => {
+            const deleteVerifyPromptedSecret = jest.fn(async () => ({ deleted: true }));
+            const h = service({
+                binding: { pluginId: 'p', buildKind: 'github-actions', imageRepository: IMAGE, deleteVerifyPromptedSecret },
+                rowById: {
+                    id: 'v1',
+                    workId: WORK_ID,
+                    trigger: 'verification',
+                    status: 'running',
+                    verifySecretNames: ['EW_VERIFY__PROMPTED'],
+                } as Partial<WorkBuild>,
+            });
+            await expect(h.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
+            expect(deleteVerifyPromptedSecret).not.toHaveBeenCalled();
         });
 
         it('does nothing for a non-verification Build, an empty record, or a binding without the member', async () => {
@@ -196,7 +244,13 @@ describe('AppBuildsService — aw-builds-2 additions', () => {
             await expect(empty.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
 
             const bare = service({
-                rowById: { id: 'v1', workId: WORK_ID, trigger: 'verification', verifySecretNames: ['EW_VERIFY__PROMPTED'] },
+                rowById: {
+                    id: 'v1',
+                    workId: WORK_ID,
+                    trigger: 'verification',
+                    status: 'succeeded',
+                    verifySecretNames: ['EW_VERIFY__PROMPTED'],
+                },
             });
             await expect(bare.svc.removeOrphanedVerifySecret('v1')).resolves.toBe(false);
             expect(bare.rows.save).not.toHaveBeenCalled();

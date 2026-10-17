@@ -1639,7 +1639,13 @@ export class AppBuildsService {
         // the member keeps today's behaviour.
         if (options.commitSha) {
             const binding = await this.resolvePlugin(workId);
-            if (binding?.isCommitReachable) {
+            // No binding means nothing can check the commit now — and a later prepare
+            // that does resolve one dispatches the Build without re-checking it — so a
+            // named commit is refused rather than queued unchecked (CodeRabbit #2686).
+            if (!binding) {
+                return { ok: false, code: 'buildProviderUnavailable' };
+            }
+            if (binding.isCommitReachable) {
                 let reachable: boolean;
                 try {
                     reachable = await binding.isCommitReachable(options.commitSha);
@@ -2589,11 +2595,37 @@ export class AppBuildsService {
         if (!row || row.trigger !== 'verification' || (row.verifySecretNames ?? []).length === 0) {
             return false;
         }
+        // A Build still running may still read its secret: never delete under it.
+        if (!isTerminalBuildStatus(row.status)) return false;
+
+        // `EW_VERIFY__PROMPTED` is ONE repository secret, so a newer verification
+        // Build of the same Work may have rewritten it for its own run. While one is
+        // open, only this row's record of the secret is cleared and the secret is
+        // left for the newer run (its own terminal transition, or a later orphan
+        // pass, removes it). Residual, recorded: a verification started between this
+        // read and the delete below can still lose its secret; a per-Work lock
+        // shared with `startVerification` would close that window (CodeRabbit #2686).
+        if (await this.hasOtherOpenVerification(row)) {
+            await this.persist(row, { verifySecretNames: [] });
+            return false;
+        }
+
         const binding = await this.resolvePlugin(row.workId);
         if (!binding?.deleteVerifyPromptedSecret) return false;
         await binding.deleteVerifyPromptedSecret();
         await this.persist(row, { verifySecretNames: [] });
         return true;
+    }
+
+    /** Another queued or running verification Build of the same Work. */
+    private async hasOtherOpenVerification(row: WorkBuild): Promise<boolean> {
+        const open = await this.builds.findPage(
+            row.workId,
+            { trigger: ['verification'], status: ['queued', 'running'] },
+            1,
+            APP_BUILD_LIST_PAGE_SIZE,
+        );
+        return open.rows.some((other) => other.id !== row.id);
     }
 
     /* ---------------------------------------------------------------------- *
