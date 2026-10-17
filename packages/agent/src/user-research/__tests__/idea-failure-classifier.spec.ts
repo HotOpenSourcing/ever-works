@@ -169,11 +169,14 @@ describe('classifyIdeaFailure — LangChain retry phrasing (linear, no regex)', 
         );
     });
 
-    it('does not match across a line break, as the old /langchain.*(…)/i never did', () => {
-        expect(classifyIdeaFailure(new Error('langchain\nretry'))).not.toBe(
-            IdeaFailureKind.TRANSIENT_PLUGIN,
-        );
-    });
+    it.each(['\n', '\r', '\r\n', '\u2028', '\u2029'])(
+        'does not match across a line terminator (%j), as the old /langchain.*(…)/i never did',
+        (separator) => {
+            expect(classifyIdeaFailure(new Error(`langchain${separator}retry`))).not.toBe(
+                IdeaFailureKind.TRANSIENT_PLUGIN,
+            );
+        },
+    );
 
     it('stays fast on many repeated "langchain" (js/polynomial-redos)', () => {
         const hostile = 'langchain'.repeat(50_000) + 'x';
