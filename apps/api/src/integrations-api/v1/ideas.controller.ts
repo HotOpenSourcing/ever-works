@@ -5,7 +5,6 @@ import {
     Headers,
     HttpCode,
     HttpStatus,
-    Logger,
     Param,
     ParseUUIDPipe,
     Patch,
@@ -197,8 +196,6 @@ type Response = IdempotentResponse & { setHeader(name: string, value: string): u
 @UseGuards(IntegrationOnlyGuard)
 @UseFilters(IntegrationExceptionFilter)
 export class IntegrationIdeasController {
-    private readonly logger = new Logger(IntegrationIdeasController.name);
-
     constructor(
         private readonly ideas: WorkProposalService,
         private readonly visibility: RecordVisibilityService,
@@ -284,52 +281,61 @@ export class IntegrationIdeasController {
                 }
             }
 
-            const idea = await this.ideas.createExternal({
-                userId: user.userId,
-                tenantId: this.scope.getScope().tenantId ?? principal.tenantId ?? null,
-                organizationId,
-                title: dto.title,
-                description: dto.description,
-                missionId: dto.missionId ?? null,
-                teamIds: dto.teamIds,
-                visibility: dto.visibility as 'team' | 'organization' | undefined,
-                integrationKeyId: principal.keyId,
-                createdBy: writeAttribution(user),
-            });
-
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'idea',
-                        entityId: idea.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // The link failed (a concurrent create with the same externalRef won,
-                    // or a write error): undo ours — a fresh Idea has no Works or Agents, so
-                    // the delete guards pass — and, on a lost race, answer theirs. A failed
-                    // undo is logged: that Idea is an orphan an operator can find.
-                    await this.ideas
-                        .delete(user.userId, idea.id)
-                        .catch((cleanupError: unknown) =>
-                            this.logger.warn(
-                                `Idea ${idea.id}: its externalRef link failed and so did the undo; ` +
-                                    `the Idea stays (${String(cleanupError)})`,
-                            ),
-                        );
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'idea',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return { status: 200, body: await this.dto(winner.entityId, source) };
-                        }
+            const externalRef = dto.externalRef;
+            let idea: Awaited<ReturnType<WorkProposalService['createExternal']>>;
+            try {
+                idea = await this.ideas.createExternal(
+                    {
+                        userId: user.userId,
+                        tenantId: this.scope.getScope().tenantId ?? principal.tenantId ?? null,
+                        organizationId,
+                        title: dto.title,
+                        description: dto.description,
+                        missionId: dto.missionId ?? null,
+                        teamIds: dto.teamIds,
+                        visibility: dto.visibility as 'team' | 'organization' | undefined,
+                        integrationKeyId: principal.keyId,
+                        createdBy: writeAttribution(user),
+                    },
+                    // T17a pattern — the Idea and its externalRef link commit together (one
+                    // transaction): a lost race rolls the Idea back instead of leaving it to be
+                    // undone, and a crash can no longer leave an unlinked Idea behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'idea',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled back with
+                // its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'idea',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return { status: 200, body: await this.dto(winner.entityId, source) };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const created = await this.resources.get('idea', organizationId, idea.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);

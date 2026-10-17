@@ -99,6 +99,36 @@ describe('goal recording points', () => {
             scope,
         );
 
+    it('createExternal runs withinCreate in its transaction: a throw rolls the Goal and its event back', async () => {
+        let seen: unknown;
+        await expect(
+            goals.createExternal(
+                OWNER,
+                {
+                    title: 'Linked',
+                    goalKind: 'metric',
+                    metricSource: { pluginId: 'external', metricId: 'value' },
+                    comparator: 'gte',
+                    targetValue: 1,
+                    unit: 'customers',
+                    window: 'point',
+                    createdBy: { type: 'integration', id: KEY },
+                } as never,
+                scope,
+                {
+                    withinCreate: async (goal, manager) => {
+                        seen = await manager.getRepository(Goal).findOneBy({ id: goal.id });
+                        throw new Error('the link lost its race');
+                    },
+                },
+            ),
+        ).rejects.toThrow('the link lost its race');
+        // The row existed inside the transaction, and is gone after it.
+        expect(seen).toBeTruthy();
+        expect(await dataSource.getRepository(Goal).count()).toBe(0);
+        expect(await events()).toEqual([]);
+    });
+
     it('createExternal stores a draft Goal and records goal.created at version 1, with its Teams (D11)', async () => {
         const team = await dataSource.getRepository(Team).save(
             dataSource.getRepository(Team).create({

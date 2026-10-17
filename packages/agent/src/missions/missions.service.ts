@@ -184,6 +184,16 @@ const RUNNABLE_STATUSES: ReadonlyArray<MissionStatus> = [
  * (Phase 3 PR J's tick worker may want hand-tuned queries) we can
  * extract a repository later without changing the service contract.
  */
+/**
+ * Runs inside a Mission create's transaction, after the row and its `mission.created` event
+ * (T17a pattern): the integration API links the new Mission to its `externalRef` there. A
+ * throw rolls the create back.
+ */
+export type MissionWithinCreate = (
+    mission: { readonly id: string },
+    manager: EntityManager,
+) => Promise<void>;
+
 @Injectable()
 export class MissionsService {
     private readonly logger = new Logger(MissionsService.name);
@@ -351,7 +361,11 @@ export class MissionsService {
         userId: string,
         input: CreateMissionInput,
         scope?: OwnershipScope,
+        options: { withinCreate?: MissionWithinCreate } = {},
     ): Promise<MissionDto> {
+        if (options.withinCreate && !this.domainEvents) {
+            throw new Error('Mission withinCreate needs DomainEventsModule (one transaction)');
+        }
         this.assertScheduleConsistency(input.type, input.schedule);
         const description = input.description.trim();
         // Phase 3 PR I — when the caller doesn't pass a title (or
@@ -409,6 +423,9 @@ export class MissionsService {
                     });
                 }
                 await publisher.created(manager, 'mission', row.id, 'mission.created');
+                // T17a pattern — e.g. the integration API's externalRef link, in this
+                // transaction: a throw rolls the Mission back.
+                if (options.withinCreate) await options.withinCreate({ id: row.id }, manager);
             },
         );
         await this.recordActivity(userId, ActivityActionType.MISSION_CREATED, 'create', {
@@ -425,7 +442,8 @@ export class MissionsService {
      * auto-building Works, no guardrails (an EW-only setting; a `scheduled` Mission keeps
      * its cron but ticks only once resumed), and a title is
      * required (no AI titler call). `teamIds` and D11 apply in the create's
-     * transaction, with `mission.created`.
+     * transaction, with `mission.created`, and so does `withinCreate` (T17a pattern: the
+     * integration API's `externalRef` link, so a throw there undoes the create).
      */
     async createExternal(
         userId: string,
@@ -439,6 +457,7 @@ export class MissionsService {
             createdBy?: { type: 'user' | 'agent' | 'integration'; id: string };
         },
         scope: OwnershipScope,
+        options: { withinCreate?: MissionWithinCreate } = {},
     ): Promise<MissionDto> {
         if (input.visibility !== undefined) {
             RecordVisibilityService.assertIntegrationVisibility(input.visibility);
@@ -462,6 +481,7 @@ export class MissionsService {
                 createdBy: input.createdBy,
             },
             scope,
+            options,
         );
     }
 

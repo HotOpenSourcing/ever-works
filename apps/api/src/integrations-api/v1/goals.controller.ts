@@ -554,33 +554,52 @@ export class IntegrationGoalsController {
                     return { status: 200, body: await this.dto(existing.entityId, source) };
                 }
             }
-            const goal = await this.goals.createExternal(user.userId, input, this.ownership());
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'goal',
-                        entityId: goal.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // and answer theirs.
-                    await this.goals
-                        .delete(user.userId, goal.id, this.ownership())
-                        .catch(() => undefined);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'goal',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            return { status: 200, body: await this.dto(winner.entityId, source) };
-                        }
+            const externalRef = dto.externalRef;
+            let goal: Awaited<ReturnType<GoalsService['createExternal']>>;
+            try {
+                goal = await this.goals.createExternal(
+                    user.userId,
+                    input,
+                    this.ownership(),
+                    // T17a pattern — the Goal and its externalRef link commit together (one
+                    // transaction): a lost race rolls the Goal back instead of leaving it to be
+                    // undone, and a crash can no longer leave an unlinked Goal behind.
+                    linkScope && externalRef
+                        ? {
+                              withinCreate: async (row, manager) => {
+                                  await this.links.create(
+                                      linkScope,
+                                      {
+                                          entityType: 'goal',
+                                          entityId: row.id,
+                                          externalId: externalRef.externalId,
+                                          externalUrl: externalRef.externalUrl ?? null,
+                                      },
+                                      manager,
+                                  );
+                              },
+                          }
+                        : {},
+                );
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled back with
+                // its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'goal',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        return { status: 200, body: await this.dto(winner.entityId, source) };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const created = await this.resources.get('goal', organizationId, goal.id, source);
             if (created.etag) res.setHeader('ETag', created.etag);

@@ -33,7 +33,20 @@ describe('IntegrationIdeasController', () => {
 
     const setup = (status = 'pending') => {
         const ideas = {
-            createExternal: jest.fn().mockResolvedValue({ id: 'idea-1' }),
+            // As WorkProposalService.createExternal: `withinCreate` runs in the create's
+            // transaction (T17a pattern), and its throw rolls the Idea back.
+            createExternal: jest.fn(
+                async (
+                    _input: unknown,
+                    options?: {
+                        withinCreate?: (row: { id: string }, manager: unknown) => Promise<void>;
+                    },
+                ) => {
+                    if (options?.withinCreate)
+                        await options.withinCreate({ id: 'idea-1' }, 'tx-manager');
+                    return { id: 'idea-1' };
+                },
+            ),
             updateContent: jest.fn().mockResolvedValue({}),
             dismiss: jest.fn().mockResolvedValue(true),
             restore: jest.fn().mockResolvedValue(true),
@@ -102,6 +115,7 @@ describe('IntegrationIdeasController', () => {
                 integrationKeyId: 'key-1',
                 createdBy: { type: 'integration', id: 'key-1' },
             }),
+            expect.objectContaining({ withinCreate: expect.any(Function) }),
         );
         expect(links.create).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -110,6 +124,7 @@ describe('IntegrationIdeasController', () => {
                 installationId: 'conn-1',
             }),
             expect.objectContaining({ entityType: 'idea', entityId: 'idea-1', externalId: 'g-1' }),
+            'tx-manager',
         );
         expect(response.status).toHaveBeenCalledWith(201);
         expect(response.setHeader).toHaveBeenCalledWith('ETag', '"3"');
@@ -136,7 +151,7 @@ describe('IntegrationIdeasController', () => {
         expect(body).toMatchObject({ id: 'idea-0' });
     });
 
-    it('undoes its create and answers the winner when a concurrent create took the externalRef', async () => {
+    it('rolls its create back (one transaction) and answers the winner when a concurrent create took the externalRef', async () => {
         const { controller, ideas, links } = setup();
         links.findByExternal
             .mockResolvedValueOnce(null)
@@ -154,7 +169,8 @@ describe('IntegrationIdeasController', () => {
             req(),
             response,
         );
-        expect(ideas.delete).toHaveBeenCalledWith('owner-1', 'idea-1');
+        // Nothing to undo: the link threw inside the create's transaction.
+        expect(ideas.delete).not.toHaveBeenCalled();
         expect(response.status).toHaveBeenCalledWith(200);
         expect(body).toMatchObject({ id: 'idea-w' });
     });
