@@ -388,6 +388,10 @@ test.describe('Webhooks deliveries listing — ?limit + ?subscriptionId (v2), ev
         const limited = await listDeliveries(request, user, '?limit=1');
         expect(limited.length, '?limit=1 returns exactly one row').toBe(1);
         expect(ids(full), 'the capped row is one of the account rows').toContain(limited[0].id);
+        // createdAt DESC: the one row kept is a most recent one (ties allowed at
+        // second resolution).
+        const newest = Math.max(...full.map((r) => Date.parse(r.createdAt)));
+        expect(Date.parse(limited[0].createdAt), '?limit=1 keeps a most-recent row').toBe(newest);
     });
 
     test('degenerate ?limit values all 200: 0 and -5 clamp to 1, 99999 to the full window, abc and limit[]=1 fall back to the default', async ({

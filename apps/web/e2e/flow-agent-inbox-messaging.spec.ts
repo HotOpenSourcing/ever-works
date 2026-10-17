@@ -225,7 +225,7 @@ test.describe('Agent inbox + messaging', () => {
     //          (from-address resolution → body), and a failed provider
     //          send leaves the inbox empty (no phantom rows).
     // ----------------------------------------------------------------
-    test('new agent inbox is empty; compose validates from-address, then the sender is verified, then body; failed send adds no row', async ({
+    test('new agent inbox is empty; compose validates from-address, then refuses an UNVERIFIED sender (403) before the body', async ({
         request,
     }) => {
         const user: RegisteredUser = await registerUserViaAPI(request);
@@ -271,17 +271,35 @@ test.describe('Agent inbox + messaging', () => {
             `unverified body=${await unverified.text().catch(() => '')}`,
         ).toBe(403);
         expect((await unverified.json()).message).toContain(NOT_VERIFIED);
+        // The refused send held nothing: no draft, no phantom inbox row.
+        expect((await listInbox(request, token, agent.id)).length, 'refused send adds no row').toBe(
+            0,
+        );
+    });
 
-        // Verify the sender through its confirmation email; then body validation
-        // must still fire (a no-key provider can't mask the 400) when the body is missing.
-        if (!(await isMailhogAvailable(request))) {
-            test.skip(
-                true,
-                'MailHog is not available on this stack: the sender cannot be verified',
-            );
-            return;
-        }
+    // ----------------------------------------------------------------
+    // FLOW 1b — With a VERIFIED sender (EW-P4-3: confirmed through its
+    //           confirmation email), compose validates the body, and a
+    //           failed provider send still leaves the inbox empty.
+    //           Needs MailHog to read the confirmation; skips without it.
+    // ----------------------------------------------------------------
+    test('a VERIFIED sender: compose validates the body (400), and a failed provider send adds no row', async ({
+        request,
+    }) => {
+        test.skip(
+            !(await isMailhogAvailable(request)),
+            'MailHog is not available on this stack: the sender cannot be verified',
+        );
+        const user: RegisteredUser = await registerUserViaAPI(request);
+        const token = user.access_token;
+        const agent = await createAgentViaAPI(request, token, {
+            name: uniq('Inbox verified'),
+            scope: 'tenant',
+        });
+        const addr = await createOutboundAddress(request, token);
         await verifyAddressViaConfirmationMail(request, token, addr);
+
+        // Body validation must still fire (a no-key provider can't mask the 400).
         const noBody = await request.post(`${API_BASE}/api/email/messages`, {
             headers: authedHeaders(token),
             data: {
