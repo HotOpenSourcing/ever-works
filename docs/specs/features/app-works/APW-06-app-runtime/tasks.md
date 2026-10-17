@@ -1368,3 +1368,15 @@ code comments and specs cite.
   `TriggerAppRuntimeModule` and proxies the row store, the id-scoped raw rows, the cipher, the spec and the re-dispatch
   (`app-dependency-worker.relays.ts`). **T28:** `AppRuntimeActivityListener` writes `app_deploy` / `app_job` /
   `app_smoke` rows. **T35:** `AppSpecAppliedListener` redeploys a published image on a spec change that runs.
+- **T33 / T30 / T71 / T73 (2026-10-17, lane aw-deploy-3).** `POST :id/app-rollback` (FR-34: an earlier Live
+  Deployment's Build, spec commit and image digest through `AppDeployRequestService`, pre-deploy jobs skipped unless
+  asked) and `POST :id/app-lifecycle` (`pause` / `resume` / `remove` / `cancel-deploy` as `app-cluster-op`s;
+  `deleteData` needs `confirmSlug === work.slug`, else `422 CONFIRM_SLUG_MISMATCH`) are live in
+  `WorkAppRuntimeController`. `GET app-status` reports `ops` (recent deploys/rollbacks from the Deployment rows plus
+  the runtime row's pause/remove/delete facts) and T30's `sourceOffer` (the licence gate's offer for the live
+  commit, when the obligation applies and a URL exists). `TriggerAppRuntimeModule` now composes APW-07's
+  `AppDependenciesService` over the API proxies and binds `APP_DEPENDENCIES_SERVICE`, so the worker's §5.1 re-check
+  enforces `dependency_not_ready` instead of warning, and `remove` orders the dependency deletion. The pull credential
+  prefers APW-05's stored read-only `pullToken` (`AppBuildPullTokenReader`, `remoteMap` read-only facade) and falls
+  back to the owner's GitHub token only when none is stored, recording the warning `pull_credential_owner_token` on
+  the Deployment.

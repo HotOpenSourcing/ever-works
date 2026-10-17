@@ -32,7 +32,7 @@ function harness(row: Record<string, unknown> | null = { target: 'none', targetS
     };
     const deployments = {
         findByWork: jest.fn(async () => [] as Array<Record<string, unknown>>),
-        findById: jest.fn(async () => null as Record<string, unknown> | null),
+        findById: jest.fn(async (_id: string) => null as Record<string, unknown> | null),
     };
     const k8s = {
         capabilities: ['deployment'],
@@ -245,5 +245,171 @@ describe('AppTargetService.getStatus (GET app-status)', () => {
             'unreachable',
         );
         expect(runtimeStateOf({ currentDeploymentId: 'd', health: 'unknown' })).toBe('live');
+    });
+});
+
+describe('AppTargetService — rollback, lifecycle, ops and source offer (lane aw-deploy-3)', () => {
+    function withRequests(
+        row: Record<string, unknown>,
+        deployments: Array<Record<string, unknown>>,
+    ) {
+        const h = harness(row);
+        const request = jest.fn(async () => ({ status: 'accepted', httpStatus: 202 }) as never);
+        const evaluate = jest.fn(async () => ({
+            sourceOffer: {
+                required: true,
+                url: 'https://github.com/acme/app/tree/c0ffee',
+                missing: false,
+            },
+        }));
+        const service = new AppTargetService(
+            h.states as never,
+            h.works as never,
+            h.deployments as never,
+            h.registry as never,
+            h.settings as never,
+            h.ops,
+            new ConfigAppsTierPolicy({}),
+            undefined,
+            { request } as never,
+            { evaluate } as never,
+        );
+        h.deployments.findByWork.mockResolvedValue(deployments);
+        h.deployments.findById.mockImplementation(
+            async (id: string) => deployments.find((d) => d.id === id) ?? null,
+        );
+        return { ...h, service, request, evaluate };
+    }
+
+    const OLD = {
+        id: 'd-old',
+        workId: 'w-1',
+        state: 'READY',
+        buildId: 'b-1',
+        commitSha: 'c1',
+        appTrigger: 'build',
+        completedAt: new Date('2026-10-16T10:00:00Z'),
+        appRender: {
+            specCommitSha: 'c1',
+            image: { reference: 'ghcr.io/a/b@sha256:x', digest: 'sha256:x' },
+        },
+    };
+    const CURRENT = {
+        id: 'd-new',
+        workId: 'w-1',
+        state: 'READY',
+        commitSha: 'c2',
+        appTrigger: 'manual',
+        website: 'https://acme.apps.example.com',
+        completedAt: new Date('2026-10-17T10:00:00Z'),
+        appRender: {},
+    };
+
+    it('rolls back to an earlier live Deployment with its recorded build, commit and digest', async () => {
+        const { service, request } = withRequests(
+            { target: 'your-cluster', currentDeploymentId: 'd-new' },
+            [CURRENT, OLD],
+        );
+        await expect(
+            service.rollback('w-1', 'u-1', { deploymentId: 'd-old' }),
+        ).resolves.toMatchObject({
+            ok: true,
+        });
+        expect(request).toHaveBeenCalledWith(
+            expect.objectContaining({
+                trigger: 'rollback',
+                buildId: 'b-1',
+                specCommitSha: 'c1',
+                runPreDeployJobs: false,
+                rollback: expect.objectContaining({
+                    deploymentId: 'd-old',
+                    imageDigest: 'sha256:x',
+                }),
+            }),
+        );
+    });
+
+    it('refuses a rollback to the running, a foreign or a never-live Deployment', async () => {
+        const { service, request } = withRequests(
+            { target: 'your-cluster', currentDeploymentId: 'd-new' },
+            [
+                CURRENT,
+                OLD,
+                { id: 'd-err', workId: 'w-1', state: 'ERROR' },
+                { id: 'd-other', workId: 'w-2', state: 'READY' },
+            ],
+        );
+        await expect(
+            service.rollback('w-1', 'u-1', { deploymentId: 'd-new' }),
+        ).resolves.toMatchObject({
+            refusal: { code: 'rollback_target_is_current' },
+        });
+        await expect(
+            service.rollback('w-1', 'u-1', { deploymentId: 'd-err' }),
+        ).resolves.toMatchObject({
+            refusal: { code: 'rollback_target_not_live' },
+        });
+        await expect(
+            service.rollback('w-1', 'u-1', { deploymentId: 'd-other' }),
+        ).resolves.toMatchObject({ refusal: { httpStatus: 404 } });
+        expect(request).not.toHaveBeenCalled();
+    });
+
+    it('dispatches remove / cancel-deploy as cluster ops, and guards deleteData with the slug', async () => {
+        const { service, ops } = withRequests(
+            { target: 'your-cluster', deployLockId: 'd-run' },
+            [],
+        );
+        const work = { id: 'w-1', slug: 'acme' };
+
+        await expect(
+            service.lifecycle(work, 'u-1', {
+                action: 'remove',
+                deleteData: true,
+                confirmSlug: 'nope',
+            }),
+        ).resolves.toMatchObject({ refusal: { httpStatus: 422, code: 'CONFIRM_SLUG_MISMATCH' } });
+        expect(ops.dispatch).not.toHaveBeenCalled();
+
+        await expect(
+            service.lifecycle(work, 'u-1', {
+                action: 'remove',
+                deleteData: true,
+                confirmSlug: 'acme',
+            }),
+        ).resolves.toMatchObject({ ok: true, action: 'remove' });
+        expect(ops.dispatch).toHaveBeenLastCalledWith(
+            expect.objectContaining({ op: 'remove', workId: 'w-1', deleteData: true }),
+        );
+
+        await service.lifecycle(work, 'u-1', { action: 'cancel-deploy' });
+        expect(ops.dispatch).toHaveBeenLastCalledWith(
+            expect.objectContaining({ op: 'cancel-deploy', deploymentId: 'd-run' }),
+        );
+        await expect(service.lifecycle(work, 'u-1', { action: 'explode' })).resolves.toMatchObject({
+            refusal: { code: 'invalid_action' },
+        });
+    });
+
+    it('lists recent ops newest first and reports the source offer of the live commit', async () => {
+        const { service, evaluate } = withRequests(
+            {
+                target: 'your-cluster',
+                currentDeploymentId: 'd-new',
+                health: 'healthy',
+                statusObservedAt: new Date(),
+            },
+            [
+                CURRENT,
+                { ...OLD, appTrigger: 'rollback', state: 'ERROR', lastError: 'image_pull: no' },
+            ],
+        );
+        const status = await service.getStatus('w-1');
+        expect(status.ops).toEqual([
+            expect.objectContaining({ kind: 'deploy', state: 'done', deploymentId: 'd-new' }),
+            expect.objectContaining({ kind: 'rollback', state: 'failed', code: 'image_pull' }),
+        ]);
+        expect(status.sourceOffer).toEqual({ url: 'https://github.com/acme/app/tree/c0ffee' });
+        expect(evaluate).toHaveBeenCalledWith(expect.objectContaining({ commitSha: 'c2' }));
     });
 });
