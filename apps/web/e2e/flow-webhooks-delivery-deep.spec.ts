@@ -339,22 +339,29 @@ test.describe('Webhook deliveries — redeliver reuses the original event', () =
 });
 
 test.describe('Webhook subscription — pause / resume PATCH branch matrix', () => {
-    test('PATCH { status:active } is a hard 400 (resume intentionally unsupported)', async ({
+    test('PATCH { status:paused } pauses and { status:active } resumes (webhooks v2, #2623)', async ({
         request,
     }) => {
         const u = await registerUserViaAPI(request);
         const sub = await createSubscription(request, u.access_token, 'patch-resume');
-        const res = await request.patch(`${WEBHOOKS}/${sub.id}`, {
-            headers: authedHeaders(u.access_token),
+        const headers = authedHeaders(u.access_token);
+        const paused = await request.patch(`${WEBHOOKS}/${sub.id}`, {
+            headers,
+            data: { status: 'paused' },
+        });
+        expect(paused.status()).toBe(200);
+        expect(((await paused.json()) as { status?: string }).status).toBe('paused');
+        // Resume used to be a hard 400; since v2 it re-activates the subscription
+        // (and resets its failure streak).
+        const resumed = await request.patch(`${WEBHOOKS}/${sub.id}`, {
+            headers,
             data: { status: 'active' },
         });
-        expect(res.status()).toBe(400);
-        expect(((await res.json()) as { message?: string }).message).toBe(
-            'Resuming a paused subscription is not supported yet; recreate the subscription',
-        );
+        expect(resumed.status()).toBe(200);
+        expect(((await resumed.json()) as { status?: string }).status).toBe('active');
     });
 
-    test('PATCH with an empty body → 400 "status must be one of: paused"', async ({ request }) => {
+    test('PATCH with an empty body → 400 "Nothing to update"', async ({ request }) => {
         const u = await registerUserViaAPI(request);
         const sub = await createSubscription(request, u.access_token, 'patch-empty');
         const res = await request.patch(`${WEBHOOKS}/${sub.id}`, {
@@ -362,9 +369,9 @@ test.describe('Webhook subscription — pause / resume PATCH branch matrix', () 
             data: {},
         });
         expect(res.status()).toBe(400);
-        expect(((await res.json()) as { message?: string }).message).toBe(
-            'status must be one of: paused',
-        );
+        // v2 PATCH changes status, url, events, organizationIds, excludeOriginTags
+        // or description; an empty body changes none of them.
+        expect(((await res.json()) as { message?: string }).message).toBe('Nothing to update');
     });
 
     test('PATCH with an unknown status enum → 400 at the DTO (array message)', async ({
