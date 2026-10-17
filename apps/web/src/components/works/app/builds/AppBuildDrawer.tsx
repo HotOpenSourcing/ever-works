@@ -136,7 +136,10 @@ export function AppBuildDrawer({
         return () => {
             cancelled = true;
         };
-    }, [workId, buildId]);
+        // `build?.status`: the list's poll replaces the summary; a detail read
+        // while the build was running must not keep overriding the newer status,
+        // image and failure fields once it finishes — so refetch on a change.
+    }, [workId, buildId, build?.status]);
 
     // The row's summary first, the detail over it once it arrives.
     const view: (AppBuildSummary & Partial<AppBuildDetail>) | null = build

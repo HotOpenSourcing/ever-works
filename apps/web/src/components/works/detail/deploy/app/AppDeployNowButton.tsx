@@ -100,6 +100,10 @@ export function AppDeployNowButton({
                 kind: 'message',
                 text: t('failed', { reason: result.error ?? code ?? '' }),
             });
+        } catch {
+            // A rejection at the server-action boundary is still a failure the
+            // member is told about.
+            setOutcome({ kind: 'message', text: t('failed', { reason: '' }) });
         } finally {
             inFlight.current = false;
             setPending(false);

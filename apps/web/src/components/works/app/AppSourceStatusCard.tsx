@@ -147,6 +147,10 @@ export function AppSourceStatusCard({ workId, initialState, blueprintName }: App
             } else {
                 setRetryFailed(true);
             }
+        } catch {
+            // A thrown action (network, server error) is a failure the member
+            // must see, not a spinner that silently stops.
+            setRetryFailed(true);
         } finally {
             setRetrying(false);
         }

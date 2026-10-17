@@ -124,7 +124,9 @@ export default async function WorkOverviewPage({ params }: Params) {
                     workId={id}
                     initialState={upstreamState}
                     blueprintName={
-                        appSpec?.blueprintApplyStatus === 'applying' ? (appSpec.blueprintId ?? null) : null
+                        appSpec?.blueprintApplyStatus === 'applying'
+                            ? (appSpec.displayName ?? appSpec.blueprintId ?? null)
+                            : null
                     }
                 />
             )}

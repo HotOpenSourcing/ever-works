@@ -102,6 +102,10 @@ export function ConnectClusterDialog({
     // A poll that outlives the dialog must not write state. The Deploy page
     // mounts this dialog only while it is open, so unmount is "closed".
     const alive = useRef(true);
+    // The newest check this dialog has seen. A second **Check again** (or a
+    // newly pasted kubeconfig) must wait for ITS result, not re-adopt the first
+    // one, so the baseline advances every time a check is adopted.
+    const lastCheckedAt = useRef<string | null>(target.clusterCheckedAt);
     useEffect(() => {
         alive.current = true;
         return () => {
@@ -129,7 +133,7 @@ export function ConnectClusterDialog({
         }
         setNotice(null);
         setChecking(true);
-        const previousCheckedAt = target.clusterCheckedAt;
+        const previousCheckedAt = lastCheckedAt.current;
         try {
             const sent = await checkAppTargetAction(workId, {
                 ...(pasted ? { kubeconfig: pasted } : {}),
@@ -155,6 +159,7 @@ export function ConnectClusterDialog({
                     read.data?.clusterCheckedAt &&
                     read.data.clusterCheckedAt !== previousCheckedAt
                 ) {
+                    lastCheckedAt.current = read.data.clusterCheckedAt;
                     adoptCheck(read.data);
                     return;
                 }

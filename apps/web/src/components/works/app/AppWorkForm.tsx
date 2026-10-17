@@ -173,6 +173,10 @@ export function AppWorkForm({ gitProvider, initialRepositoryUrl, initialBlueprin
 
     const onUrlChange = (next: string) => {
         setRepositoryUrl(next);
+        // Drop any in-flight inspect for the previous URL — even the FIRST one,
+        // when there is no preview yet — so a late answer can never become the
+        // preview (and the submitted repository) for a URL no longer in the field.
+        inspectTicket.current += 1;
         // A different URL is a different repository: the preview, the Blueprint
         // it carried and every choice made against it go (ACC-01-21).
         if (preview || inspectRefusal) clearPreview();
