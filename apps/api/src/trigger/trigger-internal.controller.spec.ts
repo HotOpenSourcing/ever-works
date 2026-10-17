@@ -378,7 +378,9 @@ describe('TriggerInternalController', () => {
             pluginAllowlistRepository,
             // The worker git facade's installation reads, appended LAST, same rule.
             gitHubAppInstallationRepository,
-            // APW-03 T42 / APW-02 T33 — the licence service the sync worker proxies.
+            // APW-04 (lane aw-ai) — the provisioner's events port, appended after it.
+            undefined,
+            // APW-03 T42 / APW-02 T33 — the licence service the sync worker proxies, LAST.
             appLicenseService,
         );
         c.onModuleInit();

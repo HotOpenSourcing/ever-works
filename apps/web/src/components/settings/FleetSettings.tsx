@@ -55,6 +55,7 @@ import { FleetKillSwitchBanner } from './FleetKillSwitchBanner';
 import { FleetNodeDrawer } from './FleetNodeDrawer';
 import { isEmptyLimitCeiling, keepIfStillOpen } from './fleet-node-limits.shared';
 import type { FleetNodeLimitCeiling } from '@ever-works/contracts';
+import { describeFleetModelProvider } from '@ever-works/contracts';
 import { FleetPanicControls } from './FleetPanicControls';
 import { FleetTokensSection } from './FleetTokensSection';
 
@@ -528,6 +529,22 @@ export function FleetSettings({
                                             />
                                             {t(`statuses.${node.status}` as never)}
                                         </span>
+                                        {/* Fleet usage limits: "online" alone hid a
+                                            machine whose model CLI is out of quota. */}
+                                        {(node.modelThrottles ?? []).map((throttle) => (
+                                            <span
+                                                key={throttle.provider}
+                                                className="mt-1 flex w-fit items-center px-1.5 py-0.5 rounded text-[11px] font-medium bg-warning/10 text-warning whitespace-nowrap"
+                                                title={throttle.reason}
+                                                data-testid={`fleet-node-throttle-${node.id}-${throttle.provider}`}
+                                            >
+                                                {t('modelThrottles.entry', {
+                                                    cli: describeFleetModelProvider(throttle.provider),
+                                                    window: t(`modelThrottles.windows.${throttle.window}` as never),
+                                                    until: new Date(throttle.until).toLocaleString(),
+                                                })}
+                                            </span>
+                                        ))}
                                     </td>
                                     <td className="px-4 py-3 text-text-muted dark:text-text-muted-dark">
                                         {node.platform ?? '-'}

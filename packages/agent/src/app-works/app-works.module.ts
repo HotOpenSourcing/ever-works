@@ -1,5 +1,6 @@
 import { Module, type FactoryProvider } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
+import { TypeOrmModule, getRepositoryToken } from '@nestjs/typeorm';
+import type { Repository } from 'typeorm';
 import { ActivityLogModule } from '../activity-log/activity-log.module';
 import { DatabaseModule } from '../database/database.module';
 import { FacadesModule } from '../facades/facades.module';
@@ -7,6 +8,8 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { TasksDomainModule } from '../tasks-domain/tasks.module';
 import { DistributedTaskLockService } from '../cache/distributed-task-lock.service';
 import { WorkUpstreamStateRepository } from '../database/repositories/work-upstream-state.repository';
+import { AgentRepository } from '../database/repositories/agent.repository';
+import { Agent } from '../entities/agent.entity';
 import { WorkUpstreamState } from '../entities/work-upstream-state.entity';
 import {
     APP_FORK_READINESS_DISPATCHER,
@@ -29,6 +32,11 @@ import { AppBlueprintApplyService } from '../apps-catalog/app-blueprint-apply.se
 import { AppLicenseModule } from '../app-license/app-license.module';
 import { AppWorksTelemetryService } from './app-works-telemetry.service';
 import { APP_SOURCE_CATALOG_PORT } from './app-source-catalog.port';
+import { APP_WORK_AGENT_RESOLVER, AppWorkAgentResolverService } from './app-work-agent-resolver';
+import { AppChangeRequestService } from './app-change-request.service';
+import { AppProvisionEventsService, AppProvisioningService } from './app-provisioning.service';
+import { APP_PROVISIONING_SERVICE } from './app-source-initializer.service';
+import { APP_PROVISION_EVENTS_PORT } from './app-fork-readiness.service';
 import { AppBlueprintResolverService } from '../apps-catalog/app-blueprint-resolver.service';
 import { AppSourceCatalogAdapter } from '../apps-catalog/app-source-catalog.adapter';
 import {
@@ -400,6 +408,35 @@ export function buildAppUpstreamSyncDispatcherProvider(): FactoryProvider {
         // APW-01 T36 — FR-53's five events. Its sink is the API's to bind (a global
         // alias); unbound, events are counted and dropped. See the docstring above.
         AppWorksTelemetryService,
+        // APW-08 T25 (lane aw-ai, 2026-10-17) — the agent-resolution rule, bound where
+        // APW-02's `AppUpstreamStateService` (declared here) can see it (APW08-G18). Its
+        // own dependencies are repository providers only (`DatabaseModule`).
+        // `AgentRepository` is provided locally (the `ActivityLogModule` / `SkillsModule`
+        // shape): `DatabaseModule` does not carry it and `TasksDomainModule` does not
+        // re-export `AgentsModule`'s copy — the DI reachability spec measured both. A
+        // factory over an OPTIONAL entity repository, so the module specs that compile
+        // this module against a shelled `DatabaseModule` still compile (both consumers
+        // inject it `@Optional()` and answer "no Agent" without it).
+        {
+            provide: AgentRepository,
+            useFactory: (repository?: Repository<Agent> | null) =>
+                repository ? new AgentRepository(repository) : null,
+            inject: [{ token: getRepositoryToken(Agent), optional: true }],
+        },
+        AppWorkAgentResolverService,
+        { provide: APP_WORK_AGENT_RESOLVER, useExisting: AppWorkAgentResolverService },
+        // APW-08 T25 — `POST /api/works/:id/evolve`'s service: a Task on the Work, started
+        // through `TasksService.runTask` (THE dispatch path — the Self-Build Fleet's).
+        AppChangeRequestService,
+        // APW-04 — the provisioner (inspect → draft → validate → an `app-provision` Task
+        // for the resolved Agent) and its events port. `APP_PROVISIONING_SERVICE` is read
+        // by both copies of `AppSourceInitializerService` (this module's and the API's),
+        // which is why it is bound and exported here. `APP_TARGET_UPDATED_PORT` has no
+        // consumer in the API graph; the worker binds it to the same class by name.
+        AppProvisioningService,
+        { provide: APP_PROVISIONING_SERVICE, useExisting: AppProvisioningService },
+        AppProvisionEventsService,
+        { provide: APP_PROVISION_EVENTS_PORT, useExisting: AppProvisionEventsService },
     ],
     exports: [
         WorkUpstreamStateRepository,
@@ -425,6 +462,17 @@ export function buildAppUpstreamSyncDispatcherProvider(): FactoryProvider {
         // APW-01 T36 — exported so the API-side ready handler and `WorkModule`'s
         // `WorkLifecycleService` receive the same instance the services here do.
         AppWorksTelemetryService,
+        // APW-08 T25 / APW-04 — exported so the API's controllers, its copy of the ready
+        // handler (`APP_PROVISIONING_SERVICE`), its readiness service
+        // (`APP_PROVISION_EVENTS_PORT`) and the `remoteMap` (`AppProvisionEventsService`)
+        // all resolve the SAME instances.
+        AppWorkAgentResolverService,
+        APP_WORK_AGENT_RESOLVER,
+        AppChangeRequestService,
+        AppProvisioningService,
+        APP_PROVISIONING_SERVICE,
+        AppProvisionEventsService,
+        APP_PROVISION_EVENTS_PORT,
     ],
 })
 export class AppWorksModule {}

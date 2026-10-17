@@ -275,6 +275,12 @@ const BOUND: readonly string[] = [
     // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
     // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
     'APP_LICENSE_SERVICE',
+    // APW-04 (lane aw-ai, 2026-10-17) — `AppProvisioningService` and
+    // `AppProvisionEventsService`, provided by `AppWorksModule`. Unbound, the ready
+    // handler's step 8 logged "no AppProvisioningService is bound" for every App Work
+    // without a spec, so nothing ever worked out how to run a repository.
+    'APP_PROVISIONING_SERVICE',
+    'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_ENV_SOURCE',
     // APW-03 T26 (explicit + probe halves) — `AppSourceCatalogAdapter`, bound
     // 2026-09-25 by `AppWorksModule`, beside the inspector and the create service
@@ -292,6 +298,11 @@ const BOUND: readonly string[] = [
     // `AppWorksModule` over the active job runtime's `dispatchAppUpstreamSync`, the
     // same shape as C10's readiness binding above.
     'APP_UPSTREAM_SYNC_DISPATCHER',
+    // APW-08 T25 (lane aw-ai, 2026-10-17) — `AppWorkAgentResolverService`, provided by
+    // `AppWorksModule` where APW-02's `AppUpstreamStateService` is declared (APW08-G18).
+    // Unbound, every upstream conflict Task was filed unassigned, and the evolve loop had
+    // no rule to pick its Agent.
+    'APP_WORK_AGENT_RESOLVER',
     // APW-05 T16's two credential/fact ports, provided by `AppBuildsModule`
     // (2026-09-22). Declared by `build-facade.service.ts`, so they belong in this
     // register like any other port — a new token in NEITHER list fails the
@@ -346,11 +357,13 @@ const WORKER_BOUND: readonly string[] = [
     'APP_DEPLOY_SPEC_SOURCE',
     'APP_DEPLOY_TARGET_RESOLVER',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
+    'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_ENV_SOURCE',
     'APP_RUNTIME_HEALTH_FACADE',
     'APP_RUNTIME_TARGET',
     'APP_RUNTIME_VERIFICATION_FACADE',
+    'APP_TARGET_UPDATED_PORT',
     'APP_VERIFICATION_SINK',
     'APP_VERIFICATION_SPEC_SOURCE',
 ];
@@ -399,8 +412,6 @@ const UNBOUND: readonly string[] = [
     // been applied. Binding it means inventing an actor and an ordering that
     // APW-07 T24/T25 own, and both are open.
     'APP_PROMPTED_VALUES_PORT',
-    'APP_PROVISIONING_SERVICE',
-    'APP_PROVISION_EVENTS_PORT',
     'APP_PUBLISHED_HOSTS',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_EVENT_SINK',
@@ -420,7 +431,6 @@ const UNBOUND: readonly string[] = [
     // export reaches `AppWorksTelemetryService` without an import. Unbound in THIS
     // package on purpose: the agent never depends on `@ever-works/monitoring`.
     'APP_WORKS_TELEMETRY_SINK',
-    'APP_WORK_AGENT_RESOLVER',
     'APP_WORK_DELETION_COMPLETION',
     'APP_WORK_DELETION_PORT',
 ];
@@ -532,11 +542,12 @@ describe('App Works port dormancy register (§5.10)', () => {
         // 48/25 → 45/28 on 2026-10-17: APW-03 T28 binds `APP_BLUEPRINT_APPLY_SERVICE`,
         // T42 binds `APP_LICENSE_SERVICE` and `APP_UPSTREAM_LICENSE_SERVICE`.
         //
-        // 45/28 → 43/31 on 2026-10-17 (outstanding-work A0.4, merged from develop):
-        // APW-05's `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER`
-        // moved across, and the new `BUILD_SETTINGS_SOURCE` is provided.
-        expect(UNBOUND).toHaveLength(43);
-        expect(BOUND).toHaveLength(31);
+        // 45/28 → 40/34 the same day, merged from develop: APW-05's
+        // `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER` moved across
+        // and `BUILD_SETTINGS_SOURCE` is provided (A0.4); APW-08 T25's resolver and
+        // APW-04's provisioning service and events port are bound (lane aw-ai).
+        expect(UNBOUND).toHaveLength(40);
+        expect(BOUND).toHaveLength(34);
     });
 
     it('names where the worker binds what this package does not', () => {
@@ -556,9 +567,13 @@ describe('App Works port dormancy register (§5.10)', () => {
         //   second instance: the worker binds each to a `createRemoteProxy` of
         //   the API's own provider (`AppDeployBuildSourceAdapter`,
         //   `AppSpecService`), so both processes read through one implementation.
+        //
+        //   `APP_PROVISION_EVENTS_PORT` (APW-04, 2026-10-17) is the same shape: the
+        //   worker binds a `createRemoteProxy` of the API's `AppProvisionEventsService`.
         const BOUND_IN_BOTH: readonly string[] = [
             'APP_DEPLOY_BUILD_SOURCE',
             'APP_DEPLOY_SPEC_SOURCE',
+            'APP_PROVISION_EVENTS_PORT',
             'APP_RUNTIME_ENV_SOURCE',
         ];
 

@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import type { IPlugin } from '@ever-works/plugin';
 import {
+    activeFleetNodeModelThrottles,
     FLEET_DEFAULT_ENROLLMENT_TOKEN_TTL_MS,
     FLEET_DEFAULT_MAX_CAPABILITY_TAG_LENGTH,
     FLEET_DEFAULT_MAX_CAPABILITY_TAGS,
@@ -1700,6 +1701,8 @@ export class FleetService {
             workerStateChangedAt: node.workerStateChangedAt
                 ? toIso(node.workerStateChangedAt)
                 : null,
+            // Fleet usage limits — only the throttles still in force.
+            modelThrottles: activeFleetNodeModelThrottles(node.modelThrottles),
             // Credential lifecycle (EW-799). The two hash columns and the
             // window expiry stay OUT of the view: a wire shape that can
             // carry a credential artefact eventually does.

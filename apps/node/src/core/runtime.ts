@@ -653,7 +653,14 @@ export function createNodeRuntime(config: NodeConfig, io: NodeIo, options: Creat
 			// attended lane alone — never parked in (or holding a slot of) the
 			// work lane. Sent only under `--attend`, so a work-only node's lease
 			// body is exactly what it always was.
-			...(options.attendEnabled ? { excludeKinds: ['computer-session' as const] } : {})
+			...(options.attendEnabled ? { excludeKinds: ['computer-session' as const] } : {}),
+			// Fleet usage limits: the CLIs an agent-task can run with here, so a
+			// node whose only CLI is out of quota stops leasing agent-task work
+			// until the reset (other kinds keep leasing).
+			modelProviders: () =>
+				Object.entries(options.modelCli ?? io.environment.modelCli ?? {})
+					.filter(([, path]) => typeof path === 'string' && path.length > 0)
+					.map(([provider]) => provider)
 		});
 		// Node lifecycle (slice AR): the version floor holds this lane, and a
 		// LEASE refusal (the other channel that can say it) is folded into

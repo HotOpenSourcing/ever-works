@@ -185,8 +185,8 @@ interface OpenGap extends Expected {
 const EXPECTED_UNBOUND: readonly Expected[] = [
     {
         key: 'AppBuildsModule[agent] | AppBuildsService | APP_PROVISION_EVENTS_PORT',
-        reason: "APW-04's provisioner events port; the provisioner is not in this tree.",
-        source: 'docs/specs/features/app-works/CONTRACTS.md:366 (added by APW-04); APW-04 T19 (tasks.md:307,326)',
+        reason: "APW-04's events port is bound by `AppWorksModule` (2026-10-17, lane aw-ai), which `AppBuildsModule` deliberately does not import (it compiles standalone); `buildUpdated` is record-only in APW-04 P1, so unbound answers the same.",
+        source: 'packages/agent/src/app-works/app-provisioning.service.ts (AppProvisionEventsService.buildUpdated); packages/agent/src/app-builds/app-builds.module.ts:245-256 (the ModuleRef-only rule); APW-04 T19 (tasks.md:307,326)',
     },
     {
         key: 'AppDependenciesModule | AppDependenciesService | APP_DEPENDENCY_CLUSTER_ACCESS',
@@ -264,11 +264,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'apps/api/src/app-launcher/platform-catalog.service.ts:127-132',
     },
     {
-        key: 'AppWorksModule[agent] | AppSourceInitializerService | APP_PROVISIONING_SERVICE',
-        reason: "APW-04's provisioner is not in this tree.",
-        source: 'packages/agent/src/app-works/app-source-initializer.service.ts:267; apps/api/src/app-works/app-works.module.ts:69-79 (APW-04)',
-    },
-    {
         key: 'AppWorksModule[agent] | AppSourceInitializerService | AppSpecService',
         reason: "The agent module's COPY, which deliberately imports neither AppSpecModule nor WorkModule; the wired copy is the API module's.",
         source: 'apps/api/src/app-works/app-works.module.ts:138-144 (APW-01 T15)',
@@ -284,11 +279,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
     },
     {
-        key: 'AppWorksModule[agent] | AppUpstreamStateService | APP_WORK_AGENT_RESOLVER',
-        reason: "APW-08's agent-resolution rule is unwritten in this tree.",
-        source: 'packages/agent/src/app-works/app-upstream-state.service.ts:392; APW-08 T25 (tasks.md:580-588)',
-    },
-    {
         key: 'AppWorksModule[agent] | AppWorkCreateService | APPS_TIER_POLICY',
         reason: "APW-10's tier policy is unwritten in this tree.",
         source: 'docs/specs/features/app-works/APW-10-apps-hosting-tier/tasks.md:466,475 (APW-10 T27)',
@@ -297,16 +287,6 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         key: 'AppWorksModule[agent] | AppWorkCreateService | APP_PROMPTED_VALUES_PORT',
         reason: 'Unbound on purpose: binding it means inventing the actor and ordering APW-07 T24/T25 own.',
         source: 'packages/agent/src/app-runtime/__tests__/app-works-port-dormancy.spec.ts:373-379; app-works/app-prompted-values.port.ts:46-53',
-    },
-    {
-        key: 'AppWorksModule[api] | AppForkReadinessService | APP_PROVISION_EVENTS_PORT',
-        reason: "APW-04's provisioner events port; the provisioner is not in this tree.",
-        source: 'docs/specs/features/app-works/APW-02-fork-lifecycle/tasks.md:354; APW-04 T19 (tasks.md:307,326)',
-    },
-    {
-        key: 'AppWorksModule[api] | AppSourceInitializerService | APP_PROVISIONING_SERVICE',
-        reason: "APW-04's provisioner is not in this tree.",
-        source: 'apps/api/src/app-works/app-works.module.ts:69-79 (APW-04)',
     },
     {
         key: 'FacadesModule | AppRuntimeFacadeService | APPS_TIER_POLICY',
@@ -499,11 +479,6 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:134-135 (APW-03 T42)',
     },
     {
-        key: 'TriggerAppRuntimeModule :: APP_PROVISION_EVENTS_PORT',
-        reason: "APW-04's provisioner events port; the provisioner is not in this tree.",
-        source: 'docs/specs/features/app-works/CONTRACTS.md:366; APW-04 T19 (tasks.md:307,326)',
-    },
-    {
         key: 'TriggerAppRuntimeModule :: APP_RUNTIME_EVENT_SINK',
         reason: 'The relay (`AppRuntimeEventRelayService`) is APW-06 T28 and is not in this tree.',
         source: 'packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:132-133 (APW-06 T28)',
@@ -512,11 +487,6 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         key: 'TriggerAppRuntimeModule :: APP_RUNTIME_NOTIFICATIONS',
         reason: "APW-06 T29's notification producers are unwritten.",
         source: 'packages/agent/src/app-runtime/app-deploy.orchestrator.ts:173 (APW-06 T29)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_TARGET_UPDATED_PORT',
-        reason: "APW-04's port; the provisioner is not in this tree.",
-        source: 'packages/agent/src/app-runtime/app-lifecycle-ops.service.ts:359 (owned by APW-04)',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_UPSTREAM_STATE_READER',

@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppBuildsModule as AgentAppBuildsModule } from '@ever-works/agent/app-builds';
 import { DatabaseModule } from '@ever-works/agent/database';
 import { WorkOwnershipService } from '@ever-works/agent/services';
+import { AuthModule } from '@src/auth';
 import { AppBuildsController } from './app-builds.controller';
 import { AppBuildSweepCronService } from './app-build-sweep-cron.service';
 import { AppBuildWorkflowRunConsumer } from './app-build-workflow-run.consumer';
@@ -34,7 +35,9 @@ import { AppBuildWorkflowRunConsumer } from './app-build-workflow-run.consumer';
     // rather than by importing `WorkModule`, which would drag `AppWorksModule` and
     // the facade graph in and stop `app-builds.module.spec.ts` composing this
     // module standalone — the same local-provider shape `AgentsModule` uses.
-    imports: [AgentAppBuildsModule, DatabaseModule],
+    // `AuthModule` — `AppBuildsController`'s `@UseGuards(AuthSessionGuard)` injects
+    // `AUTH_PROVIDER`, which is not global; found by the DI reachability spec (lane aw-ai).
+    imports: [AgentAppBuildsModule, DatabaseModule, AuthModule],
     // APW-05 T23 — the Builds routes (plan §5).
     controllers: [AppBuildsController],
     // APW-05 T24 — the `workflow_run` consumer, registered on the ingest
