@@ -149,7 +149,6 @@ export class IntegrationKbService {
         };
     }
 
-    /** One library folder of the pinned organization (`404 not_found` for any other). */
     /**
      * `If-Match` as a compare-and-set: move a document's or a folder's
      * `version` from `expected` to `expected + 1` only while it still is
@@ -174,6 +173,7 @@ export class IntegrationKbService {
         return (result.affected ?? 0) > 0;
     }
 
+    /** One library folder of the pinned organization (`404 not_found` for any other). */
     async getFolder(organizationId: string, id: string): Promise<IntegrationKbFolder> {
         const row = await this.dataSource.getRepository(MemoryFolder).findOne({
             where: { id, organizationId, scope: MemoryFolderScope.ORGANIZATION },
