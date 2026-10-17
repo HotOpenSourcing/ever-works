@@ -149,6 +149,30 @@ export class IntegrationKbService {
         };
     }
 
+    /**
+     * `If-Match` as a compare-and-set: move a document's or a folder's
+     * `version` from `expected` to `expected + 1` only while it still is
+     * `expected` (one conditional UPDATE, the same on Postgres, MySQL and
+     * SQLite). `false` = another write moved it first. The caller then writes
+     * inside `runWithClaimedAggregateVersion`, so the write's event carries
+     * the claimed version instead of bumping again.
+     */
+    async claimVersion(
+        kind: 'kb_document' | 'kb_folder',
+        id: string,
+        expected: number,
+    ): Promise<boolean> {
+        const target = kind === 'kb_document' ? WorkKnowledgeDocument : MemoryFolder;
+        const escape = (name: string) => this.dataSource.driver.escape(name);
+        const result = await this.dataSource
+            .createQueryBuilder()
+            .update(target)
+            .set({ version: () => `${escape('version')} + 1` })
+            .where(`${escape('id')} = :id AND ${escape('version')} = :expected`, { id, expected })
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
     /** One library folder of the pinned organization (`404 not_found` for any other). */
     async getFolder(organizationId: string, id: string): Promise<IntegrationKbFolder> {
         const row = await this.dataSource.getRepository(MemoryFolder).findOne({

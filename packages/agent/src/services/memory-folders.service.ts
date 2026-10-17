@@ -367,38 +367,60 @@ export class MemoryFoldersService {
         organizationId: string,
         userId: string,
         input: { name: string; parentId?: string | null },
+        options: {
+            /**
+             * EW-P3-2 (the T17a pattern) — runs right after the folder row is
+             * written, in the tree's transaction (the integration API's
+             * `externalRef` link): a throw undoes the create.
+             */
+            readonly withinCreate?: (folder: MemoryFolder, manager: EntityManager) => Promise<void>;
+        } = {},
     ): Promise<MemoryFolder> {
         const name = this.validateName(input.name);
         let folder: MemoryFolder;
         try {
-            folder = await this.folders.withOrganizationTree(organizationId, async (tree) => {
-                const parent = input.parentId
-                    ? await this.requireOrganizationFolderIn(tree, organizationId, input.parentId)
-                    : null;
-                if (parent && folderDepth(parent.path) + 1 > KB_LIBRARY_FOLDER_MAX_DEPTH) {
-                    throw folderDepthError();
-                }
-                const count = await tree.countByOrganization(organizationId);
-                if (count >= KB_LIBRARY_FOLDERS_MAX_PER_ORG) {
-                    throw new UnprocessableEntityException({
-                        status: 'error',
-                        code: 'FolderLimitReached',
-                        message: `You have ${KB_LIBRARY_FOLDERS_MAX_PER_ORG} folders, the maximum. Delete one to add another.`,
+            folder = await this.folders.withOrganizationTree(
+                organizationId,
+                async (tree, manager) => {
+                    const parent = input.parentId
+                        ? await this.requireOrganizationFolderIn(
+                              tree,
+                              organizationId,
+                              input.parentId,
+                          )
+                        : null;
+                    if (parent && folderDepth(parent.path) + 1 > KB_LIBRARY_FOLDER_MAX_DEPTH) {
+                        throw folderDepthError();
+                    }
+                    const count = await tree.countByOrganization(organizationId);
+                    if (count >= KB_LIBRARY_FOLDERS_MAX_PER_ORG) {
+                        throw new UnprocessableEntityException({
+                            status: 'error',
+                            code: 'FolderLimitReached',
+                            message: `You have ${KB_LIBRARY_FOLDERS_MAX_PER_ORG} folders, the maximum. Delete one to add another.`,
+                        });
+                    }
+                    await this.assertSiblingNameFree(
+                        tree,
+                        organizationId,
+                        parent?.id ?? null,
+                        name,
+                    );
+                    const path = this.childPath(parent?.path ?? '', name);
+                    const created = await tree.create({
+                        userId,
+                        name,
+                        parentId: parent?.id ?? null,
+                        path,
+                        ownerAgentId: null,
+                        syncRepo: null,
+                        scope: MemoryFolderScope.ORGANIZATION,
+                        organizationId,
                     });
-                }
-                await this.assertSiblingNameFree(tree, organizationId, parent?.id ?? null, name);
-                const path = this.childPath(parent?.path ?? '', name);
-                return tree.create({
-                    userId,
-                    name,
-                    parentId: parent?.id ?? null,
-                    path,
-                    ownerAgentId: null,
-                    syncRepo: null,
-                    scope: MemoryFolderScope.ORGANIZATION,
-                    organizationId,
-                });
-            });
+                    if (options.withinCreate) await options.withinCreate(created, manager);
+                    return created;
+                },
+            );
         } catch (error) {
             throw await this.siblingNameConflictOr(error, organizationId, input.parentId, name);
         }

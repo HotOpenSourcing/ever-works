@@ -12,6 +12,8 @@ import { WorkKnowledgeDocument } from '../../entities/work-knowledge-document.en
 import { KnowledgeBaseService } from '../../services/knowledge-base.service';
 import { MemoryFoldersService } from '../../services/memory-folders.service';
 import type { WorkOwnershipService } from '../../services/work-ownership.service';
+import { IntegrationKbService } from '../../integrations-api/integration-kb.service';
+import { runWithClaimedAggregateVersion } from '../domain-event-context';
 import { KB_EVENT_BODY_MAX_BYTES } from '../domain-event-kb-snapshots';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
@@ -153,6 +155,54 @@ describe('Knowledge Base recording points', () => {
             revision: 1,
         });
         expectValid(event);
+    });
+
+    it('withinCreate runs in the create transaction: a throw rolls the document back and records nothing', async () => {
+        let seen: unknown;
+        await expect(
+            kb.createDocument(
+                {
+                    workId: WORK,
+                    userId: OWNER,
+                    path: 'brand/voice.md',
+                    title: 'Voice',
+                    class: KbDocumentClass.BRAND,
+                    body: 'x',
+                },
+                {
+                    withinCreate: async (document, manager) => {
+                        seen = await manager
+                            .getRepository(WorkKnowledgeDocument)
+                            .findOneBy({ id: document.id });
+                        throw new Error('the link lost its race');
+                    },
+                },
+            ),
+        ).rejects.toThrow('the link lost its race');
+        // The row existed inside the transaction, and is gone after it.
+        expect(seen).toBeTruthy();
+        expect(await dataSource.getRepository(WorkKnowledgeDocument).count()).toBe(0);
+        expect(await events()).toEqual([]);
+    });
+
+    it('If-Match as a compare-and-set: one claim per version, and the claimed write records that version once', async () => {
+        const doc = await createWorkDoc();
+        const integration = new IntegrationKbService(dataSource);
+        expect(await integration.claimVersion('kb_document', doc.id, 1)).toBe(true);
+        // A second writer holding the same version loses.
+        expect(await integration.claimVersion('kb_document', doc.id, 1)).toBe(false);
+        expect(await docVersion(doc.id)).toBe(2);
+        await runWithClaimedAggregateVersion(
+            { aggregateType: 'kb_document', id: doc.id, version: 2 },
+            () => kb.updateDocument(WORK, doc.id, OWNER, { title: 'Brand voice' }),
+        );
+        // Not bumped a second time by the event.
+        expect(await docVersion(doc.id)).toBe(2);
+        const updated = (await events()).filter((event) => event.type === 'kb.document.updated');
+        expect(updated.map((event) => event.aggregateVersion)).toEqual([2]);
+        // Outside a claim, the next edit bumps as usual.
+        await kb.updateDocument(WORK, doc.id, OWNER, { title: 'Voice' });
+        expect(await docVersion(doc.id)).toBe(3);
     });
 
     it('a document of a personal Work records nothing (never served to an integration)', async () => {

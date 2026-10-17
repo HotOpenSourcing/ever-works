@@ -1,5 +1,9 @@
 import { ForbiddenException } from '@nestjs/common';
-import { ResourceNotFoundError, VersionMismatchError } from '@ever-works/agent/integrations-api';
+import {
+    DuplicateExternalRefError,
+    ResourceNotFoundError,
+    VersionMismatchError,
+} from '@ever-works/agent/integrations-api';
 import { IntegrationKbController } from '../kb.controller';
 
 /**
@@ -60,10 +64,21 @@ describe('IntegrationKbController', () => {
                 .fn()
                 .mockResolvedValue({ data: [], nextCursor: null, hasMore: false }),
             getFolder: jest.fn(async () => ({ dto: { id: FOLDER, version: 1 }, etag: '"1"' })),
+            claimVersion: jest.fn().mockResolvedValue(true),
         };
+        // As the Knowledge Base: `withinCreate` runs in the create's transaction.
+        const createWith =
+            (id: string) =>
+            async (...args: unknown[]) => {
+                const options = args[args.length - 1] as {
+                    withinCreate?: (row: { id: string }, manager: unknown) => Promise<void>;
+                };
+                if (options?.withinCreate) await options.withinCreate({ id }, 'tx-manager');
+                return { id };
+            };
         const knowledgeBase = {
-            createOrgDocument: jest.fn().mockResolvedValue({ id: 'doc-1' }),
-            createDocument: jest.fn().mockResolvedValue({ id: 'doc-1' }),
+            createOrgDocument: jest.fn(createWith('doc-1')),
+            createDocument: jest.fn(createWith('doc-1')),
             updateDocument: jest.fn().mockResolvedValue({}),
             updateOrgDocument: jest.fn().mockResolvedValue({}),
             deleteDocument: jest.fn().mockResolvedValue(undefined),
@@ -75,7 +90,7 @@ describe('IntegrationKbController', () => {
             fileDocuments: jest.fn().mockResolvedValue({ filed: 1, folderId: FOLDER }),
             archive: jest.fn().mockResolvedValue({}),
             unarchive: jest.fn().mockResolvedValue({}),
-            createFolder: jest.fn().mockResolvedValue({ id: FOLDER }),
+            createFolder: jest.fn(createWith(FOLDER)),
             renameFolder: jest.fn().mockResolvedValue({}),
             moveFolder: jest.fn().mockResolvedValue({}),
             deleteFolder: jest.fn().mockResolvedValue({ deletedFolders: 1, unfiledDocuments: 2 }),
@@ -140,14 +155,17 @@ describe('IntegrationKbController', () => {
             ORG,
             'owner-1',
             expect.objectContaining({ class: 'freeform', source: 'imported' }),
+            { withinCreate: expect.any(Function) },
         );
         expect(library.fileDocuments).toHaveBeenCalledWith(
             expect.objectContaining({ organizationId: ORG, canManageOrganization: true }),
             { documentIds: ['doc-1'], folderId: FOLDER },
         );
+        // Linked inside the create's transaction (its manager).
         expect(links.create).toHaveBeenCalledWith(
             expect.objectContaining({ organizationId: ORG, installationId: 'conn-1' }),
             expect.objectContaining({ entityType: 'kb_document', entityId: 'doc-1' }),
+            'tx-manager',
         );
         expect(response.status).toHaveBeenCalledWith(201);
         expect(body).toMatchObject({ id: 'doc-1' });
@@ -165,6 +183,7 @@ describe('IntegrationKbController', () => {
         expect(kb.assertWorkOfOrganization).toHaveBeenCalledWith(ORG, WORK);
         expect(knowledgeBase.createDocument).toHaveBeenCalledWith(
             expect.objectContaining({ workId: WORK, userId: 'user-7', source: 'user' }),
+            { withinCreate: undefined },
         );
     });
 
@@ -189,6 +208,57 @@ describe('IntegrationKbController', () => {
             ),
         ).rejects.toMatchObject({ code: 'validation_failed' });
         expect(knowledgeBase.createOrgDocument).not.toHaveBeenCalled();
+    });
+
+    it('a lost externalRef race rolls the create back (nothing archived or deleted) and answers the winner', async () => {
+        const { controller, kb, knowledgeBase, links } = setup();
+        links.create.mockRejectedValueOnce(
+            new DuplicateExternalRefError('external', 'doc-w', 'gd-1'),
+        );
+        links.findByExternal
+            .mockResolvedValueOnce(null)
+            .mockResolvedValueOnce({ entityId: 'doc-w' });
+        const response = res();
+        await controller.createDocument(
+            user(),
+            {
+                ...createBody({ type: 'organization', id: ORG }),
+                externalRef: { source: 'gauzy', externalId: 'gd-1' },
+            },
+            'gauzy:conn-1',
+            req(),
+            response,
+        );
+        expect(kb.getDocument).toHaveBeenCalledWith(ORG, 'doc-w');
+        expect(knowledgeBase.archiveOrgDocument).not.toHaveBeenCalled();
+        expect(knowledgeBase.deleteDocument).not.toHaveBeenCalled();
+        expect(response.status).toHaveBeenCalledWith(200);
+    });
+
+    it('If-Match claims the version (compare-and-set); a writer that lost the claim gets 412, no If-Match claims nothing', async () => {
+        const { controller, kb, knowledgeBase } = setup();
+        await controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res());
+        expect(kb.claimVersion).toHaveBeenCalledWith('kb_document', 'doc-1', 1);
+        expect(knowledgeBase.updateOrgDocument).toHaveBeenCalledTimes(1);
+        kb.claimVersion.mockResolvedValueOnce(false);
+        await expect(
+            controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res()),
+        ).rejects.toBeInstanceOf(VersionMismatchError);
+        expect(knowledgeBase.updateOrgDocument).toHaveBeenCalledTimes(1);
+        kb.claimVersion.mockClear();
+        await controller.updateDocument(user(), 'doc-1', { title: 'T' }, undefined, res());
+        expect(kb.claimVersion).not.toHaveBeenCalled();
+    });
+
+    it('a refused write claims nothing: a non-admin is refused before the If-Match claim', async () => {
+        const { controller, kb } = setup({ admin: false });
+        await expect(
+            controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res()),
+        ).rejects.toMatchObject({ code: 'domain_rule' });
+        await expect(
+            controller.updateFolder(user(), FOLDER, { name: 'N' }, '"1"', res()),
+        ).rejects.toMatchObject({ code: 'domain_rule' });
+        expect(kb.claimVersion).not.toHaveBeenCalled();
     });
 
     it('checks the folder BEFORE creating: a folder outside the organization creates nothing (404)', async () => {
@@ -315,6 +385,7 @@ describe('IntegrationKbController', () => {
         expect(library.createFolder).toHaveBeenCalledWith(
             expect.objectContaining({ organizationId: ORG }),
             { name: 'Support', parentId: null },
+            {},
         );
         await controller.updateFolder(
             user(),

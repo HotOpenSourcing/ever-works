@@ -455,8 +455,12 @@ organization overlay into Works, locks, revisions and the activity trail therefo
     - a Work's documents need edit access to that Work;
     - organization documents and library folders need organization admin.
 - **A refusal** answers `422 domain_rule`.
-- **`If-Match`** is compared with the version read just before the write, as for the Inbox (§9). Two writers sending
-  the same version at the same moment can both succeed.
+- **`If-Match`** is a compare-and-set. A stale version answers `412` at once. Otherwise the write first claims the
+  version with one conditional `UPDATE … SET version = version + 1 WHERE id = ? AND version = ?` (the same on
+  Postgres, MySQL and SQLite), so of two writers sending the same version only one writes and the other gets `412`.
+  The write's event carries the claimed version: one version per write. Rules the API can check up front
+  (organization admin) are checked before the claim. A refusal that only the Knowledge Base can make (a locked
+  document, no edit access to the Work) leaves the claimed version moved.
 - **Creates** check `folderId` before writing: a folder that is not one of the organization's library folders answers
   `404` and creates nothing. An organization document's `path` must stay relative: no `..` segment, `\`, NUL or drive
   letter (`400`). A Work document's path follows the Work rule, which also requires a class folder first.
@@ -504,7 +508,9 @@ Folder routes:
 - A document of a personal Work records no events.
 
 **Links.** `PUT /links/kb_document|kb_folder/...` still answers `400`. The consumer keys documents and folders by their
-Ever Works id; creates still de-duplicate on `externalRef`.
+Ever Works id; creates still de-duplicate on `externalRef`. A create and its `externalRef` link commit in one
+transaction (the T17a pattern; for a folder, the folder tree's): a lost race rolls the create back and answers the
+winner (`200`). Filing into `folderId` follows as its own step (the folder is checked before the create).
 
 ## 11. Agent email (P4, EW-P4-2 + EW-P4-1) — `v1-draft.10`, CR-11
 

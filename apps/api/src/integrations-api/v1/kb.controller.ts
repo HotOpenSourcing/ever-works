@@ -32,9 +32,11 @@ import {
     ValidateIf,
     ValidateNested,
 } from 'class-validator';
+import { runWithClaimedAggregateVersion } from '@ever-works/agent/domain-events';
 import {
     KnowledgeBaseService,
     KnowledgeLibraryService,
+    type KbDocumentWithinCreate,
     type KnowledgeLibraryActor,
 } from '@ever-works/agent/services';
 import {
@@ -48,6 +50,7 @@ import {
     IntegrationKbService,
     type KeysetPage,
     parseIfMatch,
+    VersionMismatchError,
 } from '@ever-works/agent/integrations-api';
 import {
     KB_DOCUMENT_CLASSES,
@@ -458,17 +461,65 @@ export class IntegrationKbController {
             // A Work path is checked by the Knowledge Base; an organization
             // path (no class-folder prefix) at least stays relative.
             if (dto.scope.type === 'organization') assertRelativeKbPath(dto.path);
-            const created = await asDomainRule(async () => {
-                if (dto.scope.type === 'organization') {
-                    await this.assertOrganizationAdmin(organizationId, user.userId);
-                    return this.knowledgeBase.createOrgDocument(organizationId, user.userId, input);
-                }
-                return this.knowledgeBase.createDocument({
-                    ...input,
-                    workId: dto.scope.id,
-                    userId: user.userId,
+            // The document and its externalRef link commit in ONE transaction
+            // (the T17a pattern): a lost race rolls the create back instead of
+            // leaving a duplicate to archive, and a crash cannot leave an
+            // unlinked document behind.
+            const externalRef = dto.externalRef;
+            const withinCreate: KbDocumentWithinCreate | undefined =
+                linkScope && externalRef
+                    ? async (document, manager) => {
+                          await this.links.create(
+                              linkScope,
+                              {
+                                  entityType: 'kb_document',
+                                  entityId: document.id,
+                                  externalId: externalRef.externalId,
+                                  externalUrl: externalRef.externalUrl ?? null,
+                              },
+                              manager,
+                          );
+                      }
+                    : undefined;
+            let created: { id: string };
+            try {
+                created = await asDomainRule(async () => {
+                    if (dto.scope.type === 'organization') {
+                        await this.assertOrganizationAdmin(organizationId, user.userId);
+                        return this.knowledgeBase.createOrgDocument(
+                            organizationId,
+                            user.userId,
+                            input,
+                            { withinCreate },
+                        );
+                    }
+                    return this.knowledgeBase.createDocument(
+                        { ...input, workId: dto.scope.id, userId: user.userId },
+                        { withinCreate },
+                    );
                 });
-            });
+            } catch (error) {
+                // A concurrent create with the same externalRef won (ours rolled
+                // back with its link): answer theirs.
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'kb_document',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        const found = await this.kb.getDocument(organizationId, winner.entityId);
+                        res.setHeader('ETag', found.etag);
+                        return { status: 200, body: found.dto };
+                    }
+                }
+                throw error;
+            }
             if (dto.folderId) {
                 await asDomainRule(async () =>
                     this.library.fileDocuments(await this.actor(user, organizationId), {
@@ -476,36 +527,6 @@ export class IntegrationKbController {
                         folderId: dto.folderId ?? null,
                     }),
                 );
-            }
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'kb_document',
-                        entityId: created.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: archive ours
-                    // (organization documents are never deleted) and answer theirs.
-                    await this.discardDuplicate(user, organizationId, created.id, dto.scope);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'kb_document',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            const found = await this.kb.getDocument(
-                                organizationId,
-                                winner.entityId,
-                            );
-                            res.setHeader('ETag', found.etag);
-                            return { status: 200, body: found.dto };
-                        }
-                    }
-                    throw error;
-                }
             }
             const fresh = await this.kb.getDocument(organizationId, created.id);
             res.setHeader('ETag', fresh.etag);
@@ -537,6 +558,7 @@ export class IntegrationKbController {
         }
         const organizationId = this.organizationId();
         const current = await this.kb.getDocument(organizationId, id);
+        // Malformed or stale If-Match first (400 / 412), before any other rule.
         assertIfMatch(expectedVersion(ifMatch), current.dto.version);
         if (patch.status !== undefined && current.dto.status === 'archived') {
             // A status write would un-archive it half-way (archive markers and
@@ -547,14 +569,19 @@ export class IntegrationKbController {
                 'An archived document is restored with POST /kb/documents/:id/unarchive, not by setting its status.',
             );
         }
-        await asDomainRule(async () => {
-            if (current.workId) {
-                await this.knowledgeBase.updateDocument(current.workId, id, user.userId, patch);
-                return;
-            }
-            await this.assertOrganizationAdmin(organizationId, user.userId);
-            await this.knowledgeBase.updateOrgDocument(organizationId, id, user.userId, patch);
-        });
+        // Checked before the If-Match claim, so a refusal does not move the version.
+        if (!current.workId) {
+            await asDomainRule(() => this.assertOrganizationAdmin(organizationId, user.userId));
+        }
+        await this.ifMatchWrite('kb_document', id, ifMatch, current.dto.version, () =>
+            asDomainRule(async () => {
+                if (current.workId) {
+                    await this.knowledgeBase.updateDocument(current.workId, id, user.userId, patch);
+                    return;
+                }
+                await this.knowledgeBase.updateOrgDocument(organizationId, id, user.userId, patch);
+            }),
+        );
         return this.sendDocument(res, await this.kb.getDocument(organizationId, id));
     }
 
@@ -581,7 +608,9 @@ export class IntegrationKbController {
             );
         }
         const workId = current.workId;
-        await asDomainRule(() => this.knowledgeBase.deleteDocument(workId, id, user.userId));
+        await this.ifMatchWrite('kb_document', id, ifMatch, current.dto.version, () =>
+            asDomainRule(() => this.knowledgeBase.deleteDocument(workId, id, user.userId)),
+        );
         await this.links.removeAllFor(organizationId, 'kb_document', id);
     }
 
@@ -731,38 +760,52 @@ export class IntegrationKbController {
                 }
             }
             const actor = await this.actor(user, organizationId);
-            const folder = await asDomainRule(() =>
-                this.library.createFolder(actor, {
-                    name: dto.name,
-                    parentId: dto.parentId ?? null,
-                }),
-            );
-            if (linkScope && dto.externalRef) {
-                try {
-                    await this.links.create(linkScope, {
-                        entityType: 'kb_folder',
-                        entityId: folder.id,
-                        externalId: dto.externalRef.externalId,
-                        externalUrl: dto.externalRef.externalUrl ?? null,
-                    });
-                } catch (error) {
-                    // A concurrent create with the same externalRef won: undo ours
-                    // (an empty folder just created) and answer theirs.
-                    await this.library.deleteFolder(actor, folder.id).catch(() => undefined);
-                    if (error instanceof DuplicateExternalRefError && error.side === 'external') {
-                        const winner = await this.links.findByExternal(
-                            linkScope,
-                            'kb_folder',
-                            dto.externalRef.externalId,
-                        );
-                        if (winner) {
-                            const found = await this.kb.getFolder(organizationId, winner.entityId);
-                            res.setHeader('ETag', found.etag);
-                            return { status: 200, body: found.dto };
-                        }
+            // The folder and its externalRef link commit in ONE transaction (the
+            // folder tree's): a lost race rolls the folder back.
+            const externalRef = dto.externalRef;
+            let folder: { id: string };
+            try {
+                folder = await asDomainRule(() =>
+                    this.library.createFolder(
+                        actor,
+                        { name: dto.name, parentId: dto.parentId ?? null },
+                        linkScope && externalRef
+                            ? {
+                                  withinCreate: async (row, manager) => {
+                                      await this.links.create(
+                                          linkScope,
+                                          {
+                                              entityType: 'kb_folder',
+                                              entityId: row.id,
+                                              externalId: externalRef.externalId,
+                                              externalUrl: externalRef.externalUrl ?? null,
+                                          },
+                                          manager,
+                                      );
+                                  },
+                              }
+                            : {},
+                    ),
+                );
+            } catch (error) {
+                if (
+                    linkScope &&
+                    externalRef &&
+                    error instanceof DuplicateExternalRefError &&
+                    error.side === 'external'
+                ) {
+                    const winner = await this.links.findByExternal(
+                        linkScope,
+                        'kb_folder',
+                        externalRef.externalId,
+                    );
+                    if (winner) {
+                        const found = await this.kb.getFolder(organizationId, winner.entityId);
+                        res.setHeader('ETag', found.etag);
+                        return { status: 200, body: found.dto };
                     }
-                    throw error;
                 }
+                throw error;
             }
             const fresh = await this.kb.getFolder(organizationId, folder.id);
             res.setHeader('ETag', fresh.etag);
@@ -787,12 +830,15 @@ export class IntegrationKbController {
         const current = await this.kb.getFolder(organizationId, id);
         assertIfMatch(expectedVersion(ifMatch), current.dto.version);
         const actor = await this.actor(user, organizationId);
-        await asDomainRule(async () => {
-            if (dto.name !== undefined) await this.library.renameFolder(actor, id, dto.name);
-            if (dto.parentId !== undefined) {
-                await this.library.moveFolder(actor, id, dto.parentId ?? null);
-            }
-        });
+        assertCanManageLibrary(actor);
+        await this.ifMatchWrite('kb_folder', id, ifMatch, current.dto.version, () =>
+            asDomainRule(async () => {
+                if (dto.name !== undefined) await this.library.renameFolder(actor, id, dto.name);
+                if (dto.parentId !== undefined) {
+                    await this.library.moveFolder(actor, id, dto.parentId ?? null);
+                }
+            }),
+        );
         return this.sendFolder(res, await this.kb.getFolder(organizationId, id));
     }
 
@@ -812,7 +858,10 @@ export class IntegrationKbController {
         const current = await this.kb.getFolder(organizationId, id);
         assertIfMatch(expectedVersion(ifMatch), current.dto.version);
         const actor = await this.actor(user, organizationId);
-        const result = await asDomainRule(() => this.library.deleteFolder(actor, id));
+        assertCanManageLibrary(actor);
+        const result = await this.ifMatchWrite('kb_folder', id, ifMatch, current.dto.version, () =>
+            asDomainRule(() => this.library.deleteFolder(actor, id)),
+        );
         await this.links.removeAllFor(organizationId, 'kb_folder', id);
         return result;
     }
@@ -848,22 +897,36 @@ export class IntegrationKbController {
         }
     }
 
-    /** Undo a create that lost the externalRef race: delete a Work document, archive an organization one. */
-    private async discardDuplicate(
-        user: AuthenticatedUser,
-        organizationId: string,
+    /**
+     * `If-Match` as a compare-and-set. The pre-check (already done by the
+     * caller) answers a stale or malformed version at once; then the claim, a
+     * conditional UPDATE on `version`, makes this write the only one that
+     * moves the record from that version: a concurrent writer with the same
+     * `If-Match` gets `412`. The write runs with the claimed version, so its
+     * event does not bump it again. Without `If-Match` the write just runs.
+     */
+    private async ifMatchWrite<T>(
+        kind: 'kb_document' | 'kb_folder',
         id: string,
-        scope: IntegrationKbScopeDto,
-    ): Promise<void> {
-        try {
-            if (scope.type === 'work') {
-                await this.knowledgeBase.deleteDocument(scope.id, id, user.userId);
-            } else {
-                await this.knowledgeBase.archiveOrgDocument(organizationId, id, user.userId);
-            }
-        } catch {
-            // Best-effort: the duplicate stays, unlinked; the caller still gets the winner.
+        ifMatch: string | undefined,
+        currentVersion: number,
+        write: () => Promise<T>,
+    ): Promise<T> {
+        const expected = expectedVersion(ifMatch);
+        assertIfMatch(expected, currentVersion);
+        if (expected === null) return write();
+        if (!(await this.kb.claimVersion(kind, id, expected))) {
+            const organizationId = this.organizationId();
+            const now =
+                kind === 'kb_document'
+                    ? await this.kb.getDocument(organizationId, id)
+                    : await this.kb.getFolder(organizationId, id);
+            throw new VersionMismatchError(expected, now.dto.version);
         }
+        return runWithClaimedAggregateVersion(
+            { aggregateType: kind, id, version: expected + 1 },
+            write,
+        );
     }
 
     private sendDocument(res: Response, doc: IntegrationKbDocument): IntegrationKbDocumentDto {
@@ -895,6 +958,20 @@ async function asDomainRule<T>(fn: () => Promise<T>): Promise<T> {
             throw new IntegrationHttpException(422, 'domain_rule', message);
         }
         throw error;
+    }
+}
+
+/**
+ * Library folders need organization admin; checked before an `If-Match` claim
+ * so a refusal does not move the version (the library checks it again).
+ */
+function assertCanManageLibrary(actor: KnowledgeLibraryActor): void {
+    if (!actor.canManageOrganization) {
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            'Library folders need organization admin (send X-Act-As-User of an admin).',
+        );
     }
 }
 
