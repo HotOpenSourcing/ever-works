@@ -3,7 +3,10 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type { DomainEventActor, DomainEventAggregateType } from '@ever-works/contracts';
 import { DataSource, type EntityManager } from 'typeorm';
 import { serializeOnSingleConnection } from '../database/repositories/single-connection-write-queue';
-import { assertExpectedAggregateVersion } from './domain-event-context';
+import {
+    assertExpectedAggregateVersion,
+    takeClaimedAggregateVersion,
+} from './domain-event-context';
 import { DomainEventRecorder } from './domain-event-recorder.service';
 import { buildKbDocumentSnapshot, buildKbFolderSnapshot } from './domain-event-kb-snapshots';
 import { buildEmailMessageSnapshot } from './domain-event-email-snapshots';
@@ -97,8 +100,12 @@ export class DomainEventPublisher {
         options: PublishOptions = {},
     ): Promise<number | null> {
         const builder = this.builderFor(aggregateType);
-        const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
-        assertExpectedAggregateVersion(aggregateType, id, version);
+        // An If-Match write that claimed its version first (a compare-and-set
+        // on `version`, see `runWithClaimedAggregateVersion`) is not bumped twice.
+        const claimed = takeClaimedAggregateVersion(aggregateType, id);
+        const version =
+            claimed ?? (await this.recorder.bumpAggregateVersion(manager, aggregateType, id));
+        if (claimed === null) assertExpectedAggregateVersion(aggregateType, id, version);
         const snapshot = await builder(manager, id);
         if (!snapshot) return null;
         await this.recorder.record(manager, {
@@ -196,8 +203,12 @@ export class DomainEventPublisher {
         id: string,
     ): Promise<AggregateTombstone | null> {
         const builder = this.builderFor(aggregateType);
-        const version = await this.recorder.bumpAggregateVersion(manager, aggregateType, id);
-        assertExpectedAggregateVersion(aggregateType, id, version);
+        // An If-Match write that claimed its version first (a compare-and-set
+        // on `version`, see `runWithClaimedAggregateVersion`) is not bumped twice.
+        const claimed = takeClaimedAggregateVersion(aggregateType, id);
+        const version =
+            claimed ?? (await this.recorder.bumpAggregateVersion(manager, aggregateType, id));
+        if (claimed === null) assertExpectedAggregateVersion(aggregateType, id, version);
         const snapshot = await builder(manager, id);
         return snapshot ? { aggregateType, id, snapshot } : null;
     }

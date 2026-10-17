@@ -113,6 +113,12 @@
 - [x] **T31** `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `/accept`, `/archive`, `/unarchive`,
       `/move`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (`IntegrationKbController`) + coverage
       gate entries for every KB controller. Contract CR-7 (`kb-document`, `kb-folder`, five request bodies).
+- [x] **T35** KB writes as T17a / CAS: a document or folder create and its `externalRef` link commit in one
+      transaction (`withinCreate` on `KnowledgeBaseService.createDocument` / `createOrgDocument` and
+      `MemoryFoldersService.createOrganizationFolder`); `If-Match` on `PATCH`/`DELETE /kb/documents/:id` and
+      `/kb/folders/:id` claims the version with a conditional `UPDATE` (`IntegrationKbService.claimVersion`) and the
+      write records that version (`runWithClaimedAggregateVersion`, taken by the publisher's `changed` /
+      `beforeDelete`).
 
 ## Phase 8 — Agent email (EW-P4-2, EW-P4-1)
 

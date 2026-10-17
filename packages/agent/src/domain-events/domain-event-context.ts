@@ -93,6 +93,40 @@ export function runExpectingAggregateVersion<T>(
     return versionExpectations.run({ ...expectation, checked: false }, fn);
 }
 
+interface ClaimedAggregateVersion {
+    readonly aggregateType: string;
+    readonly id: string;
+    readonly version: number;
+    taken: boolean;
+}
+
+const claimedVersions = new AsyncLocalStorage<ClaimedAggregateVersion>();
+
+/**
+ * Run `fn` after its caller CLAIMED the next version of `aggregateType`/`id`:
+ * a compare-and-set (`UPDATE … SET version = version + 1 WHERE id = ? AND
+ * version = ?`) already moved the row to `version`. The FIRST version step
+ * recorded for that aggregate inside `fn` (`changed`, `beforeDelete`) carries `version` instead of bumping
+ * again, so an `If-Match` write that records its event after the write (its own
+ * transaction) is still one version, taken atomically before the write.
+ */
+export function runWithClaimedAggregateVersion<T>(
+    claim: { aggregateType: string; id: string; version: number },
+    fn: () => Promise<T>,
+): Promise<T> {
+    return claimedVersions.run({ ...claim, taken: false }, fn);
+}
+
+/** The claimed version of this aggregate, once (`null` when there is none). */
+export function takeClaimedAggregateVersion(aggregateType: string, id: string): number | null {
+    const claim = claimedVersions.getStore();
+    if (!claim || claim.taken || claim.aggregateType !== aggregateType || claim.id !== id) {
+        return null;
+    }
+    claim.taken = true;
+    return claim.version;
+}
+
 /**
  * Called by the publisher right after it bumps an aggregate's version: throws
  * {@link AggregateVersionConflictError} when the active expectation names this
