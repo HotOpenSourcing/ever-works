@@ -10,7 +10,7 @@ import type { AppBuildDetail, AppBuildSummary } from '@ever-works/contracts';
 import { getAuthFromCookie } from '@/lib/auth';
 import { ROUTES } from '@/lib/constants';
 import { ApiResponseError } from '@/lib/api/server-api';
-import { appBuildsAPI, type AppBuildsListQuery } from '@/lib/api/app-builds';
+import { appBuildsWebAPI as appBuildsAPI, type AppBuildsListQuery } from '@/lib/api/app-builds';
 import type { AppBuildsList, AppBuildsPullAccess } from '@/lib/works/app-builds.shared';
 
 /**

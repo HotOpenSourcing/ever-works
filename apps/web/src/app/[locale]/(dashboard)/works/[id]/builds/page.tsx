@@ -3,7 +3,7 @@ import { getTranslations } from 'next-intl/server';
 import { notFound } from 'next/navigation';
 import { getWorkCapabilities } from '@ever-works/contracts';
 import { workAPI } from '@/lib/api';
-import { appBuildsAPI } from '@/lib/api/app-builds';
+import { appBuildsWebAPI as appBuildsAPI } from '@/lib/api/app-builds';
 import { ApiResponseError } from '@/lib/api/server-api';
 import { canEdit } from '@/lib/permissions';
 import type { AppBuildsListState } from '@/lib/works/app-builds.shared';
