@@ -35,7 +35,7 @@
  *   DELIVERIES  GET /api/webhooks/deliveries → { deliveries: View[] }  (bare envelope)
  *     • repo window: createdAt DESC, default take=50, clamp [1,200].
  *     • `?limit=N` caps the window: 0 and -5 clamp to 1, 99999 to 200, `abc` falls
- *       back to the default, `limit[]=1` coerces to 1.
+ *       back to the default, and `limit[]=1` is a different key (→ the default).
  *     • `?subscriptionId=<uuid>` keeps one subscription's rows (scoped to the
  *       caller's account: another account's id lists nothing); a non-uuid is 400.
  *     • `?status=delivered`, `?offset=`, `?sort=id;DROP TABLE`, `?cursor=…` → ALL
@@ -390,7 +390,7 @@ test.describe('Webhooks deliveries listing — ?limit + ?subscriptionId (v2), ev
         expect(ids(full), 'the capped row is one of the account rows').toContain(limited[0].id);
     });
 
-    test('degenerate ?limit values all 200: 0 and -5 clamp to 1, 99999 to the full window, abc falls back to the default, limit[]=1 coerces to 1', async ({
+    test('degenerate ?limit values all 200: 0 and -5 clamp to 1, 99999 to the full window, abc and limit[]=1 fall back to the default', async ({
         request,
     }) => {
         test.setTimeout(60_000);
@@ -404,13 +404,14 @@ test.describe('Webhooks deliveries listing — ?limit + ?subscriptionId (v2), ev
         const baseline = new Set(ids(await listDeliveries(request, user)));
         expect(baseline.size, 'two rows for this fresh account').toBe(2);
         // Clamped to [1, 200] (WebhookDeliveryRepository.listForAccount).
-        for (const q of ['?limit=0', '?limit=-5', '?limit[]=1']) {
+        for (const q of ['?limit=0', '?limit=-5']) {
             const got = await listDeliveries(request, user, q);
-            expect(got.length, `${q} clamps / coerces to one row`).toBe(1);
+            expect(got.length, `${q} clamps to one row`).toBe(1);
             expect(baseline.has(got[0].id), `${q} returns one of the account rows`).toBe(true);
         }
-        // Above the cap, and unparseable (→ the default 50): the whole two-row window.
-        for (const q of ['?limit=99999', '?limit=abc']) {
+        // Above the cap, unparseable, and the array form (`limit[]` is a different
+        // key, so `limit` stays unset → the default 50): the whole two-row window.
+        for (const q of ['?limit=99999', '?limit=abc', '?limit[]=1']) {
             const got = new Set(ids(await listDeliveries(request, user, q)));
             expect(got, `${q} returns the full window`).toEqual(baseline);
         }
