@@ -216,6 +216,37 @@ describe('IntegrationGoalsController', () => {
         expect(visibility.setTeams).not.toHaveBeenCalled();
     });
 
+    it('PUT dod keeps the planner proposals it does not name (Gauzy CR-12)', async () => {
+        const { controller, goals, orchestrator } = setup();
+        const proposal = {
+            id: 'dod-proposed',
+            text: 'Docs published',
+            status: 'open',
+            evidence: null,
+            note: null,
+            source: 'planner',
+            proposed: true,
+        };
+        goals.getForUser.mockResolvedValue({
+            id: 'goal-1',
+            dodCriteria: [
+                { id: 'kr-launch', text: 'Launched', status: 'open', source: 'operator' },
+                proposal,
+            ],
+        });
+        await controller.putDod(
+            user,
+            'goal-1',
+            { dodCriteria: [{ id: 'kr-launch', text: 'Launched', status: 'done' }] },
+            undefined,
+            res(),
+        );
+        expect(orchestrator.setDodCriteria).toHaveBeenCalledWith('owner-1', 'goal-1', [
+            { id: 'kr-launch', text: 'Launched', status: 'done', evidence: null, note: null },
+            proposal,
+        ]);
+    });
+
     it('a sample is recorded through recordExternalSample and answers the Goal', async () => {
         const { controller, goals } = setup();
         const response = res();
