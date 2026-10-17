@@ -28,7 +28,9 @@
 		"test:watch": "vitest"
 	},
 	"dependencies": {
-		"@ever-works/k8s-plugin": "workspace:*"
+		"@ever-works/k8s-plugin": "workspace:*",
+		"@kubernetes/client-node": "^1.4.0",
+		"js-yaml": "^5.5.0"
 	},
 	"peerDependencies": {
 		"@ever-works/plugin": "workspace:*"
@@ -48,7 +50,8 @@
 			"category": "deployment",
 			"capabilities": [
 				"deployment",
-				"apps-tier"
+				"apps-tier",
+				"app-dependency"
 			],
 			"description": "Runs App Works on the platform's own Kubernetes cluster, one restricted namespace per App Work",
 			"author": {

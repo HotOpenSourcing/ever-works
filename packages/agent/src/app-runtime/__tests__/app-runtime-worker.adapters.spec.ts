@@ -94,7 +94,7 @@ describe('ConfigAppsTierPolicy (APPS_TIER_POLICY, minimal APW-10)', () => {
         await expect(policy.resolveClusterCredential('w-1')).resolves.toBe(yaml.trim());
         expect(policy.managedScope()).toBe('any');
         const pod = policy.podPolicy();
-        expect(pod.quota).toMatchObject({ 'limits.cpu': '8', pods: 40, 'limits.memory': '6Gi' });
+        expect(pod.quota).toMatchObject({ 'limits.cpu': '8', pods: 40, 'limits.memory': '10Gi' });
         expect(pod.limitRange.max).toMatchObject({ memory: '8Gi', cpu: '2' });
         expect(
             new ConfigAppsTierPolicy({
@@ -181,6 +181,45 @@ describe('AppBuildPullCredentialSource (APP_IMAGE_PULL_CREDENTIAL_SOURCE)', () =
             providerId: 'github',
             workId: 'w-1',
         });
+    });
+
+    it('prefers the stored pull token over the owner token, and records which was used', async () => {
+        const git = { getAccessToken: jest.fn(async () => 'gh-token') };
+        const fetchImpl = jest.fn(async () => ({
+            status: 403,
+            ok: false,
+            headers: { get: () => null },
+        }));
+        const stored = {
+            read: jest.fn(async () => ({ token: 'ghp_pull_ro', username: 'acme-bot' })),
+        };
+        const source = new AppBuildPullCredentialSource(
+            builds('ghcr.io/acme/app/ever-works-app:main'),
+            works,
+            git,
+            fetchImpl,
+            stored,
+        );
+
+        await expect(source.resolve('w-1', 'b-1')).resolves.toEqual({
+            server: 'ghcr.io',
+            username: 'acme-bot',
+            password: 'ghp_pull_ro',
+        });
+        expect(git.getAccessToken).not.toHaveBeenCalled();
+        expect(source.lastSource.get('w-1')).toBe('pull-token');
+
+        const fallback = new AppBuildPullCredentialSource(
+            builds('ghcr.io/acme/app/ever-works-app:main'),
+            works,
+            git,
+            fetchImpl,
+            { read: async () => null },
+        );
+        await expect(fallback.resolve('w-1', 'b-1')).resolves.toMatchObject({
+            password: 'gh-token',
+        });
+        expect(fallback.lastSource.get('w-1')).toBe('owner-token');
     });
 
     it('refuses with pull_credential_unavailable when nothing can pull it', async () => {
