@@ -281,6 +281,9 @@ const BOUND: readonly string[] = [
     // register like any other port — a new token in NEITHER list fails the
     // "classifies every token …" case below.
     'BUILD_REPOSITORY_FACTS_SOURCE',
+    // 2026-10-17 (A0.4) — the build plugin's resolved Work settings, lazily over
+    // `PluginSettingsService`; provided by `AppBuildsModule` beside the two above.
+    'BUILD_SETTINGS_SOURCE',
     'BUILD_TOKEN_SOURCE',
     // APW-06 — `DefaultManagedHostRootResolver`, provided by `AppLauncherModule`
     // (`useClass`). Provided and unlisted until 2026-09-26, like the readiness
@@ -513,8 +516,12 @@ describe('App Works port dormancy register (§5.10)', () => {
         // `MANAGED_HOST_ROOT_RESOLVER`) and three that no module in this package
         // provides (`APP_FORK_READY_HANDLER`, `APP_UPSTREAM_SYNC_DISPATCHER`,
         // `APP_WORKS_TELEMETRY_SINK`).
-        expect(UNBOUND).toHaveLength(49);
-        expect(BOUND).toHaveLength(24);
+        //
+        // 49/24 → 47/27 on 2026-10-17 (outstanding-work A0.4): APW-05's
+        // `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER` moved
+        // across, and the new `BUILD_SETTINGS_SOURCE` is provided.
+        expect(UNBOUND).toHaveLength(47);
+        expect(BOUND).toHaveLength(27);
     });
 
     it('names where the worker binds what this package does not', () => {
