@@ -609,30 +609,35 @@ export class AgentRunRepository {
     async findQueuedTooLong(
         cutoff: Date,
         limit: number,
+        /** Rows parked for one of these reasons are not surfaced (they say why themselves). */
+        exemptQueuedReasons: readonly string[] = [],
     ): Promise<
         Pick<
             AgentRun,
             'id' | 'agentId' | 'userId' | 'taskId' | 'workId' | 'queuedReason' | 'createdAt'
         >[]
     > {
-        return addInsertionOrderTieBreak(
-            this.repository
-                .createQueryBuilder('run')
-                .select([
-                    'run.id',
-                    'run.agentId',
-                    'run.userId',
-                    'run.taskId',
-                    'run.workId',
-                    'run.queuedReason',
-                    'run.createdAt',
-                ])
-                .where('run.status = :queued', { queued: 'queued' })
-                .andWhere('run.attentionReason IS NULL')
-                .andWhere('run.createdAt <= :cutoff', { cutoff })
-                .orderBy('run.createdAt', 'ASC'),
-            'ASC',
-        )
+        const query = this.repository
+            .createQueryBuilder('run')
+            .select([
+                'run.id',
+                'run.agentId',
+                'run.userId',
+                'run.taskId',
+                'run.workId',
+                'run.queuedReason',
+                'run.createdAt',
+            ])
+            .where('run.status = :queued', { queued: 'queued' })
+            .andWhere('run.attentionReason IS NULL')
+            .andWhere('run.createdAt <= :cutoff', { cutoff });
+        if (exemptQueuedReasons.length > 0) {
+            query.andWhere(
+                '(run.queuedReason IS NULL OR run.queuedReason NOT IN (:...exemptQueuedReasons))',
+                { exemptQueuedReasons: [...exemptQueuedReasons] },
+            );
+        }
+        return addInsertionOrderTieBreak(query.orderBy('run.createdAt', 'ASC'), 'ASC')
             .limit(limit)
             .getMany();
     }
@@ -1597,6 +1602,42 @@ export class AgentRunRepository {
             .where('id = :id', { id: runId })
             .andWhere('status = :status', { status: 'queued' satisfies AgentRunStatus })
             .andWhere('queuedReason = :from', { from })
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * Fleet usage limits — put a fleet run whose job was PARKED (the model
+     * CLI on its node ran out of quota) back to `queued` with `queuedReason`,
+     * where it waits for the reset. Not terminal and not a failure: the
+     * sweepers exempt the reason (it is waiting, not stuck), the dispatch gate
+     * does not count it as in-flight, and the run's next lease flips it back
+     * to `running` (then {@link clearQueuedReason}). CAS on the non-terminal
+     * statuses, so a run cancelled meanwhile stays cancelled.
+     */
+    async parkQueued(runId: string, queuedReason: string): Promise<boolean> {
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(AgentRun)
+            .set({ status: 'queued', queuedReason })
+            .where('id = :id', { id: runId })
+            .andWhere('status IN (:...statuses)', { statuses: NON_TERMINAL })
+            .execute();
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * Clear `queuedReason` when it is still `queuedReason` — the parked fleet
+     * run was leased again and {@link markStarted} flipped it to `running`.
+     * No-clobber: any other reason (written by another path since) is kept.
+     */
+    async clearQueuedReason(runId: string, queuedReason: string): Promise<boolean> {
+        const result = await this.repository
+            .createQueryBuilder()
+            .update(AgentRun)
+            .set({ queuedReason: null })
+            .where('id = :id', { id: runId })
+            .andWhere('queuedReason = :queuedReason', { queuedReason })
             .execute();
         return (result.affected ?? 0) > 0;
     }

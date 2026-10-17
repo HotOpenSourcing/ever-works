@@ -48,6 +48,8 @@ import { AppSourceController } from './app-source.controller';
 // §4.1. Both are four segments deep under `api/works`, so no `works/:id/...`
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
+import { WorkEvolveController } from './work-evolve.controller';
+import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
 // Lane aw-web-2 — the attestation dialog's read and the create form's catalog tab.
 import { WorkAppLicenseController } from './work-app-license.controller';
@@ -140,6 +142,9 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         // keeps "your spec is invalid" on the Deploy tab and the App spec tab
         // from ever disagreeing.
         AppDeployRequestModule,
+        // APW-09 (lane aw-ai) — `UpstreamPullRequestOpenService` for
+        // `POST /api/works/:id/upstream-pr`. The same module instance `ApiModule` imports.
+        UpstreamPullRequestsModule,
     ],
     providers: [
         CacheEntryRepository,
@@ -202,6 +207,10 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         WorkAppLicenseController,
         // `GET /api/apps-catalog/blueprints` — the create form's "Browse the Apps catalog".
         AppsCatalogBlueprintsController,
+        // APW-08 T25 + APW-04 (lane aw-ai) — `POST/GET /api/works/:id/evolve`,
+        // `POST /api/works/:id/provision`, `GET /api/works/:id/provisioning`. Its services
+        // come from `AgentAppWorksModule` (imported above).
+        WorkEvolveController,
         // Wave 4 M3 — per-Work AgentRun summary counts.
         WorkRunsController,
         // Wave 7 feature h (v1) — open PRs across the Work's repos.
