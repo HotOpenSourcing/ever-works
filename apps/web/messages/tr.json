@@ -7321,6 +7321,40 @@
                         "route_unavailable": "Lisans onayı bu örnekte henüz kullanılamıyor.",
                         "failed": "Onay kaydedilemedi. Tekrar deneyin."
                     }
+                },
+                "rollback": {
+                    "button": "Geri al",
+                    "title": "Önceki bir dağıtıma geri dön",
+                    "description": "Daha önce yayında olmuş bir dağıtım seçin. Görüntüsü ve uygulama tanımı yeniden çalışır; hiçbir şey yeniden derlenmez.",
+                    "pickLabel": "Geri dönülecek dağıtım",
+                    "liveAt": "{when, date, medium} {when, time, short} tarihinden beri yayında",
+                    "liveAtUnknown": "Daha önce yayındaydı",
+                    "none": "Geri dönülebilecek önceki bir yayındaki dağıtım yok.",
+                    "runJobs": "Dağıtım öncesi işleri yeniden çalıştır",
+                    "confirm": "Geri al",
+                    "cancel": "İptal",
+                    "started": "Geri alma başlatıldı.",
+                    "failed": "Geri alma başlatılamadı: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Duraklat",
+                    "resume": "Sürdür",
+                    "remove": "Kümeden kaldır",
+                    "removeTitle": "Bu uygulamayı kümesinden kaldır",
+                    "removeDescription": "Çalışan uygulama durur ve Kubernetes nesneleri silinir. App Work ve derlemeleri kalır.",
+                    "deleteData": "Depolanan verileri de sil (birimler ve bağımlılık veritabanları)",
+                    "deleteDataWarning": "Bu işlem geri alınamaz.",
+                    "confirmSlugLabel": "Onaylamak için {slug} yazın",
+                    "confirmRemove": "Kaldır",
+                    "cancel": "İptal",
+                    "failed": "Bu yapılamadı: {reason}",
+                    "slugMismatch": "Yazdığınız kısa ad bu App Work ile eşleşmiyor.",
+                    "accepted": {
+                        "pause": "Duraklatma istendi.",
+                        "resume": "Sürdürme istendi.",
+                        "remove": "Kaldırma istendi.",
+                        "cancelDeploy": "İptal istendi."
+                    }
                 }
             },
             "appEnv": {

@@ -7,6 +7,8 @@ import {
     type AppStatusView,
     type AppTargetSettingsView,
     type AppTargetView,
+    type AppLifecycleActionChoice,
+    type AppLifecycleView,
 } from './app-runtime.types';
 
 /**
@@ -171,6 +173,63 @@ export const appRuntimeAPI = {
             throw error;
         }
     },
+};
+
+/**
+ * Lane aw-deploy-3's two writes, outside the object above only so the deploy answer's
+ * normaliser is shared: `POST app-rollback` answers exactly like `POST deploy`.
+ */
+export const appRuntimeActionsAPI = {
+    rollbackApp: async (
+        workId: string,
+        body: { deploymentId: string; runPreDeployJobs?: boolean },
+    ): Promise<{ httpStatus: number; result: AppDeployRequestView }> => {
+        try {
+            const result = await serverMutation<Partial<AppDeployRequestView>>({
+                endpoint: `/works/${workId}/app-rollback`,
+                data: {
+                    deploymentId: body.deploymentId,
+                    ...(body.runPreDeployJobs === true ? { runPreDeployJobs: true } : {}),
+                },
+                method: 'POST',
+                wrapInData: false,
+            });
+            return { httpStatus: 202, result: normaliseDeploy(result) };
+        } catch (error) {
+            if (
+                error instanceof ApiResponseError &&
+                [409, 422, 503].includes(error.statusCode) &&
+                error.details
+            ) {
+                return {
+                    httpStatus: error.statusCode,
+                    result: normaliseDeploy({
+                        ...(error.details as Partial<AppDeployRequestView>),
+                        code:
+                            (error.details as Partial<AppDeployRequestView>).code ??
+                            error.code ??
+                            null,
+                    }),
+                };
+            }
+            throw error;
+        }
+    },
+
+    appLifecycle: async (
+        workId: string,
+        body: { action: AppLifecycleActionChoice; deleteData?: boolean; confirmSlug?: string },
+    ): Promise<AppLifecycleView> =>
+        serverMutation<AppLifecycleView>({
+            endpoint: `/works/${workId}/app-lifecycle`,
+            data: {
+                action: body.action,
+                ...(body.deleteData === true ? { deleteData: true } : {}),
+                ...(body.confirmSlug ? { confirmSlug: body.confirmSlug } : {}),
+            },
+            method: 'POST',
+            wrapInData: false,
+        }),
 };
 
 function normaliseDeploy(

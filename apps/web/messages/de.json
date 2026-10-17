@@ -7389,6 +7389,40 @@
                         "route_unavailable": "Die Lizenzbestätigung ist auf dieser Instanz noch nicht verfügbar.",
                         "failed": "Die Bestätigung konnte nicht gespeichert werden. Versuchen Sie es erneut."
                     }
+                },
+                "rollback": {
+                    "button": "Zurücksetzen",
+                    "title": "Auf eine frühere Bereitstellung zurücksetzen",
+                    "description": "Wähle eine Bereitstellung, die schon einmal live war. Ihr Image und ihre App-Spezifikation laufen erneut; nichts wird neu gebaut.",
+                    "pickLabel": "Bereitstellung, zu der zurückgekehrt wird",
+                    "liveAt": "Live seit {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "War früher live",
+                    "none": "Es gibt keine frühere Live-Bereitstellung, auf die zurückgesetzt werden kann.",
+                    "runJobs": "Die Vor-Bereitstellungs-Jobs erneut ausführen",
+                    "confirm": "Zurücksetzen",
+                    "cancel": "Abbrechen",
+                    "started": "Zurücksetzen gestartet.",
+                    "failed": "Zurücksetzen konnte nicht gestartet werden: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Pausieren",
+                    "resume": "Fortsetzen",
+                    "remove": "Aus dem Cluster entfernen",
+                    "removeTitle": "Diese App aus ihrem Cluster entfernen",
+                    "removeDescription": "Die laufende App wird gestoppt und ihre Kubernetes-Objekte werden gelöscht. Das App-Work und seine Builds bleiben erhalten.",
+                    "deleteData": "Auch gespeicherte Daten löschen (Volumes und Abhängigkeits-Datenbanken)",
+                    "deleteDataWarning": "Dies kann nicht rückgängig gemacht werden.",
+                    "confirmSlugLabel": "Gib {slug} zur Bestätigung ein",
+                    "confirmRemove": "Entfernen",
+                    "cancel": "Abbrechen",
+                    "failed": "Das hat nicht geklappt: {reason}",
+                    "slugMismatch": "Der eingegebene Slug passt nicht zu diesem App-Work.",
+                    "accepted": {
+                        "pause": "Pausieren angefordert.",
+                        "resume": "Fortsetzen angefordert.",
+                        "remove": "Entfernen angefordert.",
+                        "cancelDeploy": "Abbruch angefordert."
+                    }
                 }
             },
             "appEnv": {

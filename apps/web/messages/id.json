@@ -7321,6 +7321,40 @@
                         "route_unavailable": "Konfirmasi lisensi belum tersedia di instans ini.",
                         "failed": "Tidak dapat mencatat konfirmasi. Coba lagi."
                     }
+                },
+                "rollback": {
+                    "button": "Kembalikan",
+                    "title": "Kembali ke Deployment sebelumnya",
+                    "description": "Pilih Deployment yang pernah live. Image dan spesifikasi App-nya berjalan lagi; tidak ada yang dibangun ulang.",
+                    "pickLabel": "Deployment tujuan",
+                    "liveAt": "Live sejak {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Pernah live sebelumnya",
+                    "none": "Tidak ada Deployment live sebelumnya untuk dikembalikan.",
+                    "runJobs": "Jalankan lagi job pra-deploy",
+                    "confirm": "Kembalikan",
+                    "cancel": "Batal",
+                    "started": "Pengembalian dimulai.",
+                    "failed": "Tidak dapat memulai pengembalian: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Jeda",
+                    "resume": "Lanjutkan",
+                    "remove": "Hapus dari cluster",
+                    "removeTitle": "Hapus App ini dari cluster-nya",
+                    "removeDescription": "App yang berjalan dihentikan dan objek Kubernetes-nya dihapus. App Work dan Build-nya tetap ada.",
+                    "deleteData": "Hapus juga data tersimpan (volume dan database dependensi)",
+                    "deleteDataWarning": "Tindakan ini tidak dapat dibatalkan.",
+                    "confirmSlugLabel": "Ketik {slug} untuk mengonfirmasi",
+                    "confirmRemove": "Hapus",
+                    "cancel": "Batal",
+                    "failed": "Tidak dapat melakukannya: {reason}",
+                    "slugMismatch": "Slug yang Anda ketik tidak cocok dengan App Work ini.",
+                    "accepted": {
+                        "pause": "Penjedaan diminta.",
+                        "resume": "Pelanjutan diminta.",
+                        "remove": "Penghapusan diminta.",
+                        "cancelDeploy": "Pembatalan diminta."
+                    }
                 }
             },
             "appEnv": {

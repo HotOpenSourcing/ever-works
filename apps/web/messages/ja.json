@@ -7321,6 +7321,40 @@
                         "route_unavailable": "このインスタンスではまだライセンスの確認を利用できません。",
                         "failed": "確認を記録できませんでした。もう一度お試しください。"
                     }
+                },
+                "rollback": {
+                    "button": "ロールバック",
+                    "title": "以前のデプロイにロールバック",
+                    "description": "以前に稼働していたデプロイを選んでください。そのイメージとアプリ仕様が再び実行されます。再ビルドは行われません。",
+                    "pickLabel": "戻り先のデプロイ",
+                    "liveAt": "{when, date, medium} {when, time, short} から稼働",
+                    "liveAtUnknown": "以前に稼働していました",
+                    "none": "ロールバックできる以前の稼働中デプロイはありません。",
+                    "runJobs": "デプロイ前ジョブを再実行する",
+                    "confirm": "ロールバック",
+                    "cancel": "キャンセル",
+                    "started": "ロールバックを開始しました。",
+                    "failed": "ロールバックを開始できませんでした: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "一時停止",
+                    "resume": "再開",
+                    "remove": "クラスタから削除",
+                    "removeTitle": "このアプリをクラスタから削除",
+                    "removeDescription": "実行中のアプリが停止し、その Kubernetes オブジェクトが削除されます。App Work とそのビルドは残ります。",
+                    "deleteData": "保存データも削除する（ボリュームと依存関係のデータベース）",
+                    "deleteDataWarning": "この操作は元に戻せません。",
+                    "confirmSlugLabel": "確認のため {slug} と入力してください",
+                    "confirmRemove": "削除",
+                    "cancel": "キャンセル",
+                    "failed": "実行できませんでした: {reason}",
+                    "slugMismatch": "入力したスラッグがこの App Work と一致しません。",
+                    "accepted": {
+                        "pause": "一時停止をリクエストしました。",
+                        "resume": "再開をリクエストしました。",
+                        "remove": "削除をリクエストしました。",
+                        "cancelDeploy": "キャンセルをリクエストしました。"
+                    }
                 }
             },
             "appEnv": {

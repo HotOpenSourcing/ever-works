@@ -3,12 +3,14 @@
 import { z } from 'zod';
 import { getAuthFromCookie } from '@/lib/auth';
 import { ApiResponseError } from '@/lib/api/server-api';
-import { appRuntimeAPI } from '@/lib/api/app-runtime';
+import { appRuntimeAPI, appRuntimeActionsAPI } from '@/lib/api/app-runtime';
 import {
     APP_RUNTIME_ROUTE_UNAVAILABLE,
     APP_TARGET_TLS_MODES,
     type AppDeployNotice,
+    APP_LIFECYCLE_ACTIONS,
     type AppDeployRequestView,
+    type AppLifecycleView,
     type AppRuntimeActionResult,
     type AppTargetSettingsView,
     type AppTargetView,
@@ -201,5 +203,80 @@ export async function requestAppDeployAction(
         };
     } catch (error) {
         return failure('request an App deployment', error);
+    }
+}
+
+/**
+ * Lane aw-deploy-3 — **Roll back** (`POST /api/works/:id/app-rollback`, FR-34): an earlier Live
+ * Deployment runs again; answers like `requestAppDeployAction` (202, 409, 422, 503).
+ */
+export async function rollbackAppAction(
+    workId: string,
+    input: { deploymentId: string; runPreDeployJobs?: boolean },
+): Promise<AppRuntimeActionResult<AppDeployRequestView>> {
+    const user = await getAuthFromCookie();
+    if (!user) return unauthorized();
+
+    const parsed = z
+        .object({
+            workId: workIdSchema,
+            deploymentId: z.string().uuid(),
+            runPreDeployJobs: z.boolean().optional(),
+        })
+        .safeParse({ workId, ...input });
+    if (!parsed.success) {
+        return { success: false, error: parsed.error.errors[0]?.message, code: 'invalid_input' };
+    }
+
+    try {
+        const { httpStatus, result } = await appRuntimeActionsAPI.rollbackApp(parsed.data.workId, {
+            deploymentId: parsed.data.deploymentId,
+            ...(parsed.data.runPreDeployJobs ? { runPreDeployJobs: true } : {}),
+        });
+        if (httpStatus === 202) return { success: true, data: result, httpStatus };
+        return {
+            success: false,
+            data: result,
+            httpStatus,
+            code: result.code ?? undefined,
+            unmet: result.unmet,
+        };
+    } catch (error) {
+        return failure('roll back an App', error);
+    }
+}
+
+/**
+ * Lane aw-deploy-3 — **Pause / Resume / Remove** (`POST /api/works/:id/app-lifecycle`). A removal
+ * that also deletes stored data carries the slug the member typed; the API compares it.
+ */
+export async function appLifecycleAction(
+    workId: string,
+    input: { action: string; deleteData?: boolean; confirmSlug?: string },
+): Promise<AppRuntimeActionResult<AppLifecycleView>> {
+    const user = await getAuthFromCookie();
+    if (!user) return unauthorized();
+
+    const parsed = z
+        .object({
+            workId: workIdSchema,
+            action: z.enum(APP_LIFECYCLE_ACTIONS),
+            deleteData: z.boolean().optional(),
+            confirmSlug: z.string().max(200).optional(),
+        })
+        .safeParse({ workId, ...input });
+    if (!parsed.success) {
+        return { success: false, error: parsed.error.errors[0]?.message, code: 'invalid_input' };
+    }
+
+    try {
+        const data = await appRuntimeActionsAPI.appLifecycle(parsed.data.workId, {
+            action: parsed.data.action,
+            ...(parsed.data.deleteData ? { deleteData: true } : {}),
+            ...(parsed.data.confirmSlug ? { confirmSlug: parsed.data.confirmSlug } : {}),
+        });
+        return { success: true, data, httpStatus: 202 };
+    } catch (error) {
+        return failure('change the App lifecycle', error);
     }
 }

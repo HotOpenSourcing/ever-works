@@ -7321,6 +7321,40 @@
                         "route_unavailable": "Licentiebevestiging is nog niet beschikbaar op deze instantie.",
                         "failed": "Kon de bevestiging niet registreren. Probeer het opnieuw."
                     }
+                },
+                "rollback": {
+                    "button": "Terugdraaien",
+                    "title": "Terugdraaien naar een eerdere deployment",
+                    "description": "Kies een deployment die al eerder live was. Het image en de app-specificatie ervan draaien opnieuw; er wordt niets opnieuw gebouwd.",
+                    "pickLabel": "Deployment om naar terug te gaan",
+                    "liveAt": "Live sinds {when, date, medium} {when, time, short}",
+                    "liveAtUnknown": "Was eerder live",
+                    "none": "Er is geen eerdere live deployment om naar terug te draaien.",
+                    "runJobs": "De pre-deploy-jobs opnieuw uitvoeren",
+                    "confirm": "Terugdraaien",
+                    "cancel": "Annuleren",
+                    "started": "Terugdraaien gestart.",
+                    "failed": "Kon het terugdraaien niet starten: {reason}"
+                },
+                "lifecycle": {
+                    "pause": "Pauzeren",
+                    "resume": "Hervatten",
+                    "remove": "Uit cluster verwijderen",
+                    "removeTitle": "Deze app uit zijn cluster verwijderen",
+                    "removeDescription": "De draaiende app stopt en de Kubernetes-objecten worden verwijderd. Het App Work en de builds blijven bestaan.",
+                    "deleteData": "Ook opgeslagen gegevens verwijderen (volumes en databases van afhankelijkheden)",
+                    "deleteDataWarning": "Dit kan niet ongedaan worden gemaakt.",
+                    "confirmSlugLabel": "Typ {slug} om te bevestigen",
+                    "confirmRemove": "Verwijderen",
+                    "cancel": "Annuleren",
+                    "failed": "Dat is niet gelukt: {reason}",
+                    "slugMismatch": "De ingevoerde slug komt niet overeen met dit App Work.",
+                    "accepted": {
+                        "pause": "Pauzeren aangevraagd.",
+                        "resume": "Hervatten aangevraagd.",
+                        "remove": "Verwijderen aangevraagd.",
+                        "cancelDeploy": "Annuleren aangevraagd."
+                    }
                 }
             },
             "appEnv": {

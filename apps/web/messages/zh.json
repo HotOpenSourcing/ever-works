@@ -7321,6 +7321,40 @@
                         "route_unavailable": "此实例暂不支持许可证确认。",
                         "failed": "无法记录确认。请重试。"
                     }
+                },
+                "rollback": {
+                    "button": "回滚",
+                    "title": "回滚到较早的部署",
+                    "description": "选择一个曾经上线的部署。它的镜像和应用规范将再次运行，不会重新构建任何内容。",
+                    "pickLabel": "要回滚到的部署",
+                    "liveAt": "自 {when, date, medium} {when, time, short} 起上线",
+                    "liveAtUnknown": "之前曾上线",
+                    "none": "没有可回滚到的较早上线部署。",
+                    "runJobs": "重新运行部署前任务",
+                    "confirm": "回滚",
+                    "cancel": "取消",
+                    "started": "回滚已开始。",
+                    "failed": "无法开始回滚：{reason}"
+                },
+                "lifecycle": {
+                    "pause": "暂停",
+                    "resume": "恢复",
+                    "remove": "从集群中移除",
+                    "removeTitle": "从集群中移除此应用",
+                    "removeDescription": "正在运行的应用将停止，其 Kubernetes 对象将被删除。App Work 及其构建会保留。",
+                    "deleteData": "同时删除已存储的数据（卷和依赖数据库）",
+                    "deleteDataWarning": "此操作无法撤销。",
+                    "confirmSlugLabel": "输入 {slug} 以确认",
+                    "confirmRemove": "移除",
+                    "cancel": "取消",
+                    "failed": "无法完成此操作：{reason}",
+                    "slugMismatch": "你输入的标识与此 App Work 不匹配。",
+                    "accepted": {
+                        "pause": "已请求暂停。",
+                        "resume": "已请求恢复。",
+                        "remove": "已请求移除。",
+                        "cancelDeploy": "已请求取消。"
+                    }
                 }
             },
             "appEnv": {
