@@ -60,7 +60,7 @@ import { APP_WORK_AGENT_RESOLVER, type AppWorkAgentResolver } from './app-work-a
  *      notified once. If an AI provider is configured (`AiFacadeService`), a single-shot
  *      generation refines the draft against the validator (one repair pass) first, and the
  *      best valid document goes into the Task. If the git facade carries the optional
- *      clone-free `commitFiles` capability (APW-03 T22, not in this tree yet), that document
+ *      clone-free `commitFiles` capability (APW-03 T22; aw-catalog #2683 adds it to the facade), that document
  *      is also committed to a `works/provision` branch and a pull request is opened into
  *      the fork's default branch — the same delivery shape the Agent path produces.
  *
@@ -73,7 +73,9 @@ export type AppProvisioningTrigger =
     | 'auto-create'
     | 'manual'
     | 'smoke-failed'
-    | 'target-updated';
+    | 'target-updated'
+    /** The provisioning feedback loop: a merged spec failed to build or boot. */
+    | 'build-failed';
 
 /** What {@link AppProvisioningService.start} accepts (a superset of the initializer's call). */
 export interface AppProvisioningStartInput {
@@ -87,6 +89,8 @@ export interface AppProvisioningStartInput {
     readonly agentId?: string | null;
     /** File a new Task even when one is open (a manual "start over"). */
     readonly restart?: boolean;
+    /** The feedback loop's iteration number, carried onto the new Task as a label. */
+    readonly attempt?: number;
 }
 
 /** What {@link AppProvisioningService.start} answers — the initializer reads `started`/`reason`. */
@@ -307,7 +311,10 @@ export class AppProvisioningService implements AppProvisioningCapability {
                     draftOrigin,
                     pullRequestUrl,
                 }),
-                labels: [PROVISION_LABEL],
+                labels: [
+                    PROVISION_LABEL,
+                    ...(input.attempt && input.attempt > 0 ? [`provision-attempt-${input.attempt}`] : []),
+                ],
                 workId: work.id,
                 agentId,
                 createdByType: 'user',
@@ -455,11 +462,19 @@ export class AppProvisioningService implements AppProvisioningCapability {
         if (!git || !repository || typeof git.commitFiles !== 'function') return null;
         const options = gitOptionsOf(work);
         try {
-            const head = await git.getLatestCommit(repository.owner, repository.repo, repository.defaultBranch, options);
-            const baseSha = (head as { sha?: string } | null)?.sha;
-            if (!baseSha) return null;
+            // `createBranch` takes the SOURCE BRANCH name (the GitHub plugin reads
+            // `heads/<fromRef>`), and answers the commit it cut from — which is the commit
+            // `commitFiles` must name as its fast-forward base.
             const branch = `${PROVISION_BRANCH}-${Date.now().toString(36)}`;
-            await git.createBranch(repository.owner, repository.repo, branch, baseSha, options);
+            const created = await git.createBranch(
+                repository.owner,
+                repository.repo,
+                branch,
+                repository.defaultBranch,
+                options,
+            );
+            const baseSha = (created as { commit?: string } | null)?.commit;
+            if (!baseSha) return null;
             await git.commitFiles(
                 repository.owner,
                 repository.repo,
