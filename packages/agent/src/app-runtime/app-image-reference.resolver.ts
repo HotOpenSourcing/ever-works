@@ -66,7 +66,7 @@ export interface ParsedImageReference {
  */
 export function parseImageReference(reference: string): ParsedImageReference | null {
     const raw = typeof reference === 'string' ? reference.trim() : '';
-    if (!raw || /\s/.test(raw) || raw.includes('://')) return null;
+    if (!raw || raw.length > 512 || /\s/.test(raw) || raw.includes('://')) return null;
 
     let rest = raw;
     let digest: string | null = null;
@@ -97,13 +97,25 @@ export function parseImageReference(reference: string): ParsedImageReference | n
     }
 
     let repository = segments.join('/');
-    if (!repository || !/^[a-z0-9]+(?:[._/-][a-z0-9]+)*$/.test(repository)) return null;
+    if (!repository || repository.length > 255 || !segments.every(isRepositoryComponent)) return null;
     if (registry === 'docker.io' && !repository.includes('/')) {
         repository = `library/${repository}`;
     }
 
     return { registry, repository, tag, digest, name };
 }
+
+/** One path component of a repository: lowercase alphanumerics, separators only inside. */
+function isRepositoryComponent(component: string): boolean {
+    return (
+        /^[a-z0-9][a-z0-9._-]*$/.test(component) &&
+        /[a-z0-9]$/.test(component) &&
+        !/[._-]{3}/.test(component)
+    );
+}
+
+/** Longest `WWW-Authenticate` value the anonymous-token dance reads. */
+const APP_IMAGE_CHALLENGE_MAX_LENGTH = 2048;
 
 /** `Bearer realm="…",service="…",scope="…"` → its three parameters. */
 export function parseBearerChallenge(
@@ -112,11 +124,20 @@ export function parseBearerChallenge(
     const value = typeof header === 'string' ? header.trim() : '';
     if (!/^bearer\s/i.test(value)) return null;
 
+    // String operations, not a global regex: the header is registry-controlled input, and a
+    // `(\w+)="…"` scan over it backtracks polynomially on long word runs (CodeQL js/polynomial-redos).
+    if (value.length > APP_IMAGE_CHALLENGE_MAX_LENGTH) return null;
     const params: Record<string, string> = {};
-    for (const match of value.slice(value.indexOf(' ') + 1).matchAll(/(\w+)="([^"]*)"/g)) {
-        params[match[1].toLowerCase()] = match[2];
+    for (const part of value.slice(value.indexOf(' ') + 1).split(',')) {
+        const eq = part.indexOf('=');
+        if (eq <= 0) continue;
+        const key = part.slice(0, eq).trim().toLowerCase();
+        let raw = part.slice(eq + 1).trim();
+        if (raw.startsWith('"')) raw = raw.slice(1);
+        if (raw.endsWith('"')) raw = raw.slice(0, -1);
+        if (key && !(key in params)) params[key] = raw;
     }
-    if (!params.realm || !/^https:\/\//i.test(params.realm)) return null;
+    if (!params.realm || !params.realm.toLowerCase().startsWith('https://')) return null;
 
     return { realm: params.realm, service: params.service, scope: params.scope };
 }

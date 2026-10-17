@@ -1594,17 +1594,22 @@ describe('TriggerInternalController', () => {
             ).rejects.toThrow('Unknown remote target: GitHubAppInstallationRepository');
         });
 
-        it('appends the repository LAST and @Optional()', () => {
+        it('appends the repository @Optional(), followed only by the five A0.7 App runtime names', () => {
             const paramTypes: unknown[] =
                 Reflect.getMetadata('design:paramtypes', TriggerInternalController) ?? [];
             const optionalIndices: number[] =
                 Reflect.getMetadata('optional:paramtypes', TriggerInternalController) ?? [];
-            const last = paramTypes.length - 1;
+            // A0.7 (2026-10-17) appended five names after it (WorkAppRuntimeStateRepository,
+            // AppEnvRuntimeSource, AppRuntimeEventRelayService, AppDeployDispatchRelay,
+            // AppDeployRequestService), all `@Optional()` per the arity rule.
+            const at = paramTypes.length - 6;
 
             // The class itself, not `Object`: an `Object` here is a parameter Nest resolves
             // to nothing, and `@Optional()` would hide that.
-            expect(paramTypes[last]).toBe(GitHubAppInstallationRepository);
-            expect(optionalIndices).toContain(last);
+            expect(paramTypes[at]).toBe(GitHubAppInstallationRepository);
+            for (let index = at; index < paramTypes.length; index += 1) {
+                expect(optionalIndices).toContain(index);
+            }
         });
     });
 });

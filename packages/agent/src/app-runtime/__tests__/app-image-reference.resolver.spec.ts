@@ -74,6 +74,11 @@ describe('parseBearerChallenge', () => {
         ).toEqual({ realm: 'https://ghcr.io/token', service: 'ghcr.io', scope: 'repository:a/b:pull' });
         expect(parseBearerChallenge('Bearer realm="http://x/token"')).toBeNull();
         expect(parseBearerChallenge('Basic realm="x"')).toBeNull();
+        // A multi-action scope keeps its first action; a hostile header is bounded, not scanned.
+        expect(
+            parseBearerChallenge('Bearer realm="https://r/t",scope="repository:a/b:pull,push"')?.scope,
+        ).toBe('repository:a/b:pull');
+        expect(parseBearerChallenge(`Bearer ${'0'.repeat(100_000)}`)).toBeNull();
     });
 });
 
