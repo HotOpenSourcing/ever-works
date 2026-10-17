@@ -422,13 +422,21 @@ describe('FleetService — clear model usage-limit throttles', () => {
     let audit: { recordNodeAction: jest.Mock };
     const future = new Date(Date.now() + 3_600_000).toISOString();
     const throttles = [
-        { provider: 'claude-code', window: 'weekly', until: future, reason: 'weekly', since: future },
+        {
+            provider: 'claude-code',
+            window: 'weekly',
+            until: future,
+            reason: 'weekly',
+            since: future,
+        },
         { provider: 'codex', window: 'usage', until: future, reason: 'usage', since: future },
     ];
 
     beforeEach(() => {
         repository = {
-            findById: jest.fn(async () => node({ modelThrottles: throttles } as Partial<FleetNode>)),
+            findById: jest.fn(async () =>
+                node({ modelThrottles: throttles } as Partial<FleetNode>),
+            ),
             update: jest.fn(async () => undefined),
         };
         audit = { recordNodeAction: jest.fn(async () => true) };
@@ -455,9 +463,9 @@ describe('FleetService — clear model usage-limit throttles', () => {
     });
 
     it("answers 404 for another account's node and writes nothing", async () => {
-        await expect(build().clearModelThrottlesForUser('someone-else', NODE, null)).rejects.toThrow(
-            /not found/,
-        );
+        await expect(
+            build().clearModelThrottlesForUser('someone-else', NODE, null),
+        ).rejects.toThrow(/not found/);
         expect(repository.update).not.toHaveBeenCalled();
     });
 });

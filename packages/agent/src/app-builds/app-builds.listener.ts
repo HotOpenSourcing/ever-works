@@ -19,7 +19,7 @@ import { AppBuildsService, type AppBuildPrepareReason } from './app-builds.servi
  * | --------------------------------------------- | ------------------------------------------------- | ----------------- |
  * | `app.spec.applied`                            | `changedBlocks` includes `build` or `checks` (R-9) | `specApplied`     |
  * | `app.spec.applied`                            | otherwise, `changedEnvNames` is non-empty          | `envChanged` (10 s debounce) |
- * | `app.env.changed` (`{ workId, names }`)       | any name                                          | `envChanged` (10 s debounce) |
+ * | `app.env.changed` / `app.env.rotated`         | a build-phase name (`build` / `both`)             | `envChanged` (10 s debounce) |
  * | `plugin:settings-changed`, work scope         | the Work's build plugin, `pullToken` among keys    | `pullTokenSaved`  |
  * | `plugin:settings-changed`, work scope         | the Work's build plugin, any other key            | `settingsChanged` |
  *
@@ -35,14 +35,14 @@ import { AppBuildsService, type AppBuildPrepareReason } from './app-builds.servi
  * Work (`buildPluginId`), and a Work with no row has nothing a settings change
  * could unblock — its first prepare reads the new settings anyway.
  *
- * ## `app.env.changed` has no emitter yet
+ * ## `app.env.changed` is emitted by APW-07 (2026-10-17)
  *
- * APW-07 records env changes as Activity rows (`AppEnvService` → `APP_ENV_ACTIVITY`)
- * and publishes no EventEmitter event. This listener subscribes to the name so
- * the day APW-07 emits it the debounce is already in place; until then an env
- * change reaches the build through the next Rebuild's own prepare (which syncs the
- * build values) or through `app.spec.applied`'s `changedEnvNames`. Recorded as a
- * gap in the ledger.
+ * `AppEnvService.apply` / `rotate` emit `AppEnvChangedEvent` / `AppEnvRotatedEvent`
+ * beside their Activity rows, with the changed names split by phase. Only the
+ * build-phase names (`build` / `both`) re-prepare: a runtime-only change reaches
+ * the app through the next Deploy, never through a Build. A payload without the
+ * split (an older emitter) is treated as all-build, the safe direction — a
+ * re-prepare with nothing to sync is a no-op.
  *
  * Every handler is fail-soft: a listener that throws would surface in the
  * emitter's caller (an HTTP request or a job), so failures are logged only.
@@ -53,6 +53,20 @@ export const APP_BUILD_ENV_DEBOUNCE_MS = 10_000;
 
 /** The `app.env.changed` event name this listener subscribes to. */
 export const APP_BUILD_ENV_CHANGED_EVENT = 'app.env.changed';
+
+/** The `app.env.rotated` event name — a rotated generated value is a changed value. */
+export const APP_BUILD_ENV_ROTATED_EVENT = 'app.env.rotated';
+
+/** Either env event's payload, as `AppEnvChangedEvent` carries it (or a bare object). */
+export interface AppEnvChangedLike {
+    readonly workId?: string;
+    readonly names?: readonly string[];
+    readonly payload?: {
+        readonly workId?: string;
+        readonly names?: readonly string[];
+        readonly buildPhaseNames?: readonly string[];
+    };
+}
 
 /** The blocks whose change re-prepares the workflow (R-9: `checks` too). */
 const BUILD_BLOCKS = new Set(['build', 'checks']);
@@ -98,9 +112,19 @@ export class AppBuildsListener implements OnModuleDestroy {
     }
 
     @OnEvent(APP_BUILD_ENV_CHANGED_EVENT)
-    onEnvChanged(event: { readonly workId?: string; readonly names?: readonly string[] }): void {
-        if (!this.enabled() || !event?.workId) return;
-        this.debounceEnv(event.workId);
+    onEnvChanged(event: AppEnvChangedLike): void {
+        if (!this.enabled()) return;
+        const workId = event?.payload?.workId ?? event?.workId;
+        if (!workId) return;
+        const buildNames = event?.payload?.buildPhaseNames;
+        // The split is present: only a build-phase change re-prepares.
+        if (Array.isArray(buildNames) && buildNames.length === 0) return;
+        this.debounceEnv(workId);
+    }
+
+    @OnEvent(APP_BUILD_ENV_ROTATED_EVENT)
+    onEnvRotated(event: AppEnvChangedLike): void {
+        this.onEnvChanged(event);
     }
 
     @OnEvent(PluginEvents.SETTINGS_CHANGED)

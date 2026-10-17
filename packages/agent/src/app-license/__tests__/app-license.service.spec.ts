@@ -119,6 +119,41 @@ describe('AppLicenseService (APW-03 T42)', () => {
             expect(verdict.none).toBe('allowed');
         });
 
+        it('APW-10 lite: an open tier with scope any admits green only — amber/red/unknown keep their codes even attested', () => {
+            const open = { ...base, managedScope: 'any' as const, tierOpen: true };
+            expect(hostingEligibilityOf({ ...open, licenseClass: 'green' }).managed).toBe(
+                'allowed',
+            );
+            expect(
+                hostingEligibilityOf({ ...open, licenseClass: 'amber', attested: true }).managed,
+            ).toBe('upstreamAgreementMissing');
+            expect(
+                hostingEligibilityOf({ ...open, licenseClass: 'red', attested: true }).managed,
+            ).toBe('licenseNotGreen');
+            expect(
+                hostingEligibilityOf({ ...open, licenseClass: 'unknown', attested: true }).managed,
+            ).toBe('licenseNotGreen');
+        });
+
+        it('APW-10 lite: a closed tier is managedTierDisabled, and verified-blueprints keeps the snapshot rule', () => {
+            expect(
+                hostingEligibilityOf({
+                    ...base,
+                    licenseClass: 'green',
+                    managedScope: 'any',
+                    tierOpen: false,
+                }).managed,
+            ).toBe('managedTierDisabled');
+            expect(
+                hostingEligibilityOf({
+                    ...base,
+                    licenseClass: 'green',
+                    managedScope: 'verified-blueprints',
+                    tierOpen: true,
+                }).managed,
+            ).toBe('blueprintNotVerified');
+        });
+
         it('an amber Work is refused for Ever Works Apps (ACC-03-33) and needs attestation', () => {
             const verdict = hostingEligibilityOf({ ...base, licenseClass: 'amber' });
             expect(verdict.yourCluster).toBe('attestationRequired');

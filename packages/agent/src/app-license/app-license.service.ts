@@ -48,6 +48,7 @@
 import { createHash } from 'node:crypto';
 import {
     ForbiddenException,
+    Inject,
     Injectable,
     Logger,
     NotFoundException,
@@ -82,6 +83,7 @@ import {
     type LicenseDetectGit,
     type LicenseDetection,
 } from './license-detect';
+import { APPS_TIER_POLICY, type AppsTierPolicy } from '../app-runtime/ports';
 import { classifyLicenseExpression, detectedLicenseSpdx } from './license-classify';
 import {
     LICENSE_REGISTRY_SNAPSHOT,
@@ -194,6 +196,14 @@ export function hostingEligibilityOf(input: {
     sourceOfferUrl?: string | null;
     registrySnapshot: boolean;
     verified: boolean;
+    /**
+     * APW-10 lite — the tier's `managedScope()`. `any` admits a green licence whatever its
+     * Blueprint status; absent (no policy bound) or `verified-blueprints` keeps the fail-closed
+     * `blueprintNotVerified` rule.
+     */
+    managedScope?: 'any' | 'verified-blueprints';
+    /** APW-10 lite — `AppsTierPolicy.isOpen()`; `false` ⇒ `managedTierDisabled` (reason #5, last). */
+    tierOpen?: boolean;
 }): HostingEligibility {
     const yourCluster =
         input.licenseClass === 'green' || input.attested ? 'allowed' : 'attestationRequired';
@@ -203,8 +213,10 @@ export function hostingEligibilityOf(input: {
         managed = 'licenseNotGreen';
     } else if (input.licenseClass === 'amber') {
         managed = 'upstreamAgreementMissing';
-    } else if (input.registrySnapshot || !input.verified) {
+    } else if (input.managedScope !== 'any' && (input.registrySnapshot || !input.verified)) {
         managed = 'blueprintNotVerified';
+    } else if (input.tierOpen === false) {
+        managed = 'managedTierDisabled';
     } else {
         managed = 'allowed';
     }
@@ -255,6 +267,11 @@ export class AppLicenseService {
         @Optional() private readonly git?: GitFacadeService,
         @Optional() private readonly activity?: ActivityLogService,
         @Optional() private readonly moduleRef?: ModuleRef,
+        // APW-10 lite — the managed tier's scope and switch for `hostingEligibilityOf`. Appended
+        // LAST + `@Optional()`: unbound reads closed, exactly the previous answer.
+        @Optional()
+        @Inject(APPS_TIER_POLICY)
+        private readonly tier?: AppsTierPolicy,
     ) {}
 
     // ── the requests (T42/T43) ────────────────────────────────────────────────
@@ -427,7 +444,25 @@ export class AppLicenseService {
             sourceOfferUrl: firstNonEmpty(spec?.license?.sourceOfferUrl),
             registrySnapshot: (state.licenseRegistrySource ?? 'snapshot') === 'snapshot',
             verified: false,
+            ...this.tierFacts(),
         });
+    }
+
+    /** The tier's scope and switch, read per call; a throwing or absent policy reads closed. */
+    private tierFacts(): { managedScope?: 'any' | 'verified-blueprints'; tierOpen: boolean } {
+        const tier = this.tier;
+        if (!tier || typeof tier.isOpen !== 'function') return { tierOpen: false };
+        try {
+            const open = tier.isOpen() === true;
+            return {
+                tierOpen: open,
+                ...(open && typeof tier.managedScope === 'function'
+                    ? { managedScope: tier.managedScope() }
+                    : {}),
+            };
+        } catch {
+            return { tierOpen: false };
+        }
     }
 
     // ── attestation (T44) ─────────────────────────────────────────────────────

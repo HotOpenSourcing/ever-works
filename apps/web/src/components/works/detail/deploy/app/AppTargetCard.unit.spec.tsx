@@ -75,7 +75,7 @@ describe('AppTargetCard', () => {
         expect(screen.getByText("None — don't deploy yet")).toBeTruthy();
         expect(screen.getByText('Builds still run.')).toBeTruthy();
         expect(screen.getByText('Runs on a Kubernetes cluster you control.')).toBeTruthy();
-        expect(screen.getByText('We run it for you.')).toBeTruthy();
+        expect(screen.getByText('We run it for you on our cluster.')).toBeTruthy();
         expect((screen.getByTestId('app-target-none') as HTMLInputElement).checked).toBe(true);
         expect(screen.getByText('(current)')).toBeTruthy();
         // S1 — Connect your cluster is the primary action.
