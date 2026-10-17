@@ -428,7 +428,9 @@ export class AppLicenseService {
             const open = tier.isOpen() === true;
             return {
                 tierOpen: open,
-                ...(open && typeof tier.managedScope === 'function' ? { managedScope: tier.managedScope() } : {}),
+                ...(open && typeof tier.managedScope === 'function'
+                    ? { managedScope: tier.managedScope() }
+                    : {}),
             };
         } catch {
             return { tierOpen: false };

@@ -53,7 +53,11 @@ describe('KubernetesAppsTierPlugin', () => {
 			guardedAppCredential(credential: string, ctx?: string | null): Promise<string>;
 		};
 		await expect(tier.guardedAppCredential(KUBECONFIG)).resolves.toBe(KUBECONFIG);
-		await expect(tier.guardedAppCredential(KUBECONFIG.replace('    user: { token: abc }', '    user: { exec: { command: sh } }'))).rejects.toThrow();
+		await expect(
+			tier.guardedAppCredential(
+				KUBECONFIG.replace('    user: { token: abc }', '    user: { exec: { command: sh } }')
+			)
+		).rejects.toThrow();
 	});
 
 	it('refuses website deploys', async () => {
@@ -64,7 +68,9 @@ describe('KubernetesAppsTierPlugin', () => {
 describe('the per-namespace grant (least privilege)', () => {
 	it('applies the Namespace and the RoleBinding before deploying, and only into ewapp-*', async () => {
 		const applied: Array<Record<string, unknown>> = [];
-		const api = { applyObject: vi.fn(async (_c: string, manifest: Record<string, unknown>) => void applied.push(manifest)) };
+		const api = {
+			applyObject: vi.fn(async (_c: string, manifest: Record<string, unknown>) => void applied.push(manifest))
+		};
 		const plugin = new KubernetesAppsTierPlugin({ api: api as never, env: {} });
 		const deployer = vi
 			.spyOn(KubernetesPlugin.prototype, 'deployApp')
@@ -79,7 +85,9 @@ describe('the per-namespace grant (least privilege)', () => {
 		expect(applied[1]).toMatchObject({
 			metadata: { name: 'ever-works-apps-controller', namespace: 'ewapp-0123abcd' },
 			roleRef: { kind: 'ClusterRole', name: 'ever-works-apps-namespace-admin' },
-			subjects: [{ kind: 'ServiceAccount', name: 'ever-works-apps-controller', namespace: 'ever-works-apps-system' }]
+			subjects: [
+				{ kind: 'ServiceAccount', name: 'ever-works-apps-controller', namespace: 'ever-works-apps-system' }
+			]
 		});
 		expect(deployer).toHaveBeenCalled();
 

@@ -70,9 +70,7 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 	private readonly tierApi: KubernetesApiService;
 	private readonly env: NodeJS.ProcessEnv;
 
-	constructor(
-		opts: ConstructorParameters<typeof KubernetesPlugin>[0] & { env?: NodeJS.ProcessEnv } = {}
-	) {
+	constructor(opts: ConstructorParameters<typeof KubernetesPlugin>[0] & { env?: NodeJS.ProcessEnv } = {}) {
 		const api = opts?.api ?? new KubernetesApiService();
 		super({ ...opts, api });
 		this.tierApi = api;
@@ -112,7 +110,11 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 	 * everything inside a namespace — Secrets included — is granted by a RoleBinding IN that
 	 * namespace, so the credential can never read another tenant's or the platform's objects.
 	 */
-	override async deployApp(input: AppRenderInput, credential: string, hooks: AppDeployHooks): Promise<AppDeployResult> {
+	override async deployApp(
+		input: AppRenderInput,
+		credential: string,
+		hooks: AppDeployHooks
+	): Promise<AppDeployResult> {
 		this.assertThisPluginServes(input?.ref);
 		const guarded = await this.guardedAppCredential(credential, input?.ref?.kubeContext);
 		await this.ensureNamespaceGrant(input, guarded);
@@ -175,8 +177,13 @@ export class KubernetesAppsTierPlugin extends KubernetesPlugin {
 }
 
 /** The RoleBinding that grants the controller its namespaced-admin role inside ONE managed namespace. */
-export function managedNamespaceGrant(namespace: string, env: NodeJS.ProcessEnv = process.env): Record<string, unknown> {
-	const [saNamespace, saName] = ((env[MANAGED_SERVICE_ACCOUNT_ENV] ?? '').trim() || DEFAULT_MANAGED_SERVICE_ACCOUNT).split('/');
+export function managedNamespaceGrant(
+	namespace: string,
+	env: NodeJS.ProcessEnv = process.env
+): Record<string, unknown> {
+	const [saNamespace, saName] = (
+		(env[MANAGED_SERVICE_ACCOUNT_ENV] ?? '').trim() || DEFAULT_MANAGED_SERVICE_ACCOUNT
+	).split('/');
 	const role = (env[MANAGED_NAMESPACE_ROLE_ENV] ?? '').trim() || DEFAULT_MANAGED_NAMESPACE_ROLE;
 	return {
 		apiVersion: 'rbac.authorization.k8s.io/v1',
@@ -187,6 +194,12 @@ export function managedNamespaceGrant(namespace: string, env: NodeJS.ProcessEnv 
 			labels: { 'app.kubernetes.io/managed-by': 'ever-works', 'app.kubernetes.io/part-of': 'ever-works-apps' }
 		},
 		roleRef: { apiGroup: 'rbac.authorization.k8s.io', kind: 'ClusterRole', name: role },
-		subjects: [{ kind: 'ServiceAccount', name: saName || 'ever-works-apps-controller', namespace: saNamespace || 'ever-works-apps-system' }]
+		subjects: [
+			{
+				kind: 'ServiceAccount',
+				name: saName || 'ever-works-apps-controller',
+				namespace: saNamespace || 'ever-works-apps-system'
+			}
+		]
 	};
 }

@@ -642,7 +642,8 @@ export class AppHostsService implements AppRenderHostSource {
         if (!label) return null;
 
         const apex =
-            (target === 'ever-works-apps' ? this.resolveManagedDomain() : null) ?? this.resolveAppsDomain();
+            (target === 'ever-works-apps' ? this.resolveManagedDomain() : null) ??
+            this.resolveAppsDomain();
         if (!apex) return null;
 
         return `${label}.${apex}`;

@@ -217,13 +217,37 @@ export function managedQuotaFromEnv(env: NodeJS.ProcessEnv = process.env): AppQu
     const base = MANAGED_QUOTA as unknown as Record<string, string | number>;
     return {
         ...MANAGED_QUOTA,
-        'requests.cpu': quantity(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_CPU_REQUESTS', String(base['requests.cpu'])),
-        'limits.cpu': quantity(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_CPU_LIMITS', String(base['limits.cpu'])),
-        'requests.memory': quantity(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_MEMORY_REQUESTS', String(base['requests.memory'])),
-        'limits.memory': quantity(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_MEMORY_LIMITS', String(base['limits.memory'])),
-        'requests.storage': quantity(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_STORAGE', String(base['requests.storage'])),
+        'requests.cpu': quantity(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_CPU_REQUESTS',
+            String(base['requests.cpu']),
+        ),
+        'limits.cpu': quantity(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_CPU_LIMITS',
+            String(base['limits.cpu']),
+        ),
+        'requests.memory': quantity(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_MEMORY_REQUESTS',
+            String(base['requests.memory']),
+        ),
+        'limits.memory': quantity(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_MEMORY_LIMITS',
+            String(base['limits.memory']),
+        ),
+        'requests.storage': quantity(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_STORAGE',
+            String(base['requests.storage']),
+        ),
         pods: count(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_PODS', Number(base.pods)),
-        persistentvolumeclaims: count(env, 'EVER_WORKS_APPS_MANAGED_QUOTA_PVCS', Number(base.persistentvolumeclaims)),
+        persistentvolumeclaims: count(
+            env,
+            'EVER_WORKS_APPS_MANAGED_QUOTA_PVCS',
+            Number(base.persistentvolumeclaims),
+        ),
     } as AppQuotaInput;
 }
 
@@ -240,13 +264,25 @@ export function managedLimitRangeFromEnv(env: NodeJS.ProcessEnv = process.env): 
     return {
         defaultRequest: {
             ...base.defaultRequest,
-            cpu: quantity(env, 'EVER_WORKS_APPS_MANAGED_LIMIT_REQUEST_CPU', base.defaultRequest.cpu),
-            memory: quantity(env, 'EVER_WORKS_APPS_MANAGED_LIMIT_REQUEST_MEMORY', base.defaultRequest.memory),
+            cpu: quantity(
+                env,
+                'EVER_WORKS_APPS_MANAGED_LIMIT_REQUEST_CPU',
+                base.defaultRequest.cpu,
+            ),
+            memory: quantity(
+                env,
+                'EVER_WORKS_APPS_MANAGED_LIMIT_REQUEST_MEMORY',
+                base.defaultRequest.memory,
+            ),
         },
         defaultLimit: {
             ...base.defaultLimit,
             cpu: quantity(env, 'EVER_WORKS_APPS_MANAGED_LIMIT_DEFAULT_CPU', base.defaultLimit.cpu),
-            memory: quantity(env, 'EVER_WORKS_APPS_MANAGED_LIMIT_DEFAULT_MEMORY', base.defaultLimit.memory),
+            memory: quantity(
+                env,
+                'EVER_WORKS_APPS_MANAGED_LIMIT_DEFAULT_MEMORY',
+                base.defaultLimit.memory,
+            ),
         },
         max: {
             ...base.max,
