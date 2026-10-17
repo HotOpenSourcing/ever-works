@@ -34,6 +34,8 @@ import {
     APP_CUSTOM_DOMAIN_STORE,
     APP_DEPLOY_DEPLOYMENT_STORE,
     APP_DEPLOY_DISPATCHER,
+    APP_CLUSTER_OP_DISPATCHER,
+    APPS_DOMAIN_DNS_SERVICE,
     APP_HOSTS_APPS_DOMAIN,
     APP_HOSTS_DEPLOY_REQUESTER,
     APP_HOSTS_DEPLOYMENT_STORE,
@@ -267,6 +269,8 @@ export const APP_RUNTIME_REMOTE_PROXIES = [
     'AppEnvRuntimeSource',
     'AppRuntimeEventRelayService',
     'AppDeployDispatchRelay',
+    'AppClusterOpDispatchRelay',
+    'AppsDomainDnsServiceImpl',
     'AppDeployRequestService',
     'WorkUpstreamStateRepository',
 ] as const;
@@ -434,6 +438,22 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
                 workerAppDeployDispatcher(createRemoteProxy(apiClient, 'AppDeployDispatchRelay')),
             inject: [TriggerInternalApiClient],
         },
+        // T31 (lane aw-deploy-2): the worker's own re-dispatches — T58's deletion retries, T26's
+        // `ingress-reconcile`, `resume`'s wait — go through the API's `app-cluster-op` gate.
+        {
+            provide: APP_CLUSTER_OP_DISPATCHER,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppClusterOpDispatchRelay'),
+            inject: [TriggerInternalApiClient],
+        },
+        // T47/T48 (lane aw-deploy-2): the deletion path removes the managed subdomain's record
+        // through the API's apps-DNS service, where the apps-DNS token lives.
+        {
+            provide: APPS_DOMAIN_DNS_SERVICE,
+            useFactory: (apiClient: TriggerInternalApiClient) =>
+                createRemoteProxy(apiClient, 'AppsDomainDnsServiceImpl'),
+            inject: [TriggerInternalApiClient],
+        },
         // T26: a primary-domain change asks for a Deployment; the request (and every §5.1 check
         // it re-runs) happens in the API, so the worker may ask over the internal channel.
         {
@@ -582,6 +602,10 @@ export function appClusterWorkerRefusal(): { code: string; message: string } | n
         },
     ],
     exports: [
+        // A0.10 (lane aw-deploy-2) — what `app-dependency-provision`'s module reads from here.
+        APP_RUNTIME_TARGET,
+        APP_RUNTIME_EVENT_SINK,
+        WORK_APP_RUNTIME_STATES,
         AppClusterWorkerContextBootstrap,
         AppRuntimeFacadeService,
         DeployFacadeService,

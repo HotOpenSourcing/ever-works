@@ -48,6 +48,8 @@ import { AppSourceController } from './app-source.controller';
 // §4.1. Both are four segments deep under `api/works`, so no `works/:id/...`
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
+// APW-06 T33 (lane aw-deploy-2) — GET/PUT app-target, POST app-target/check, GET app-status.
+import { WorkAppRuntimeController } from './work-app-runtime.controller';
 import { WorkEvolveController } from './work-evolve.controller';
 import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
@@ -202,6 +204,7 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         AppSourceController,
         // APW-03 T15 — the App spec tab's two routes.
         WorkAppDeployController,
+        WorkAppRuntimeController,
         WorkAppSpecController,
         // `GET /api/works/:id/app-license` — the attestation dialog's read.
         WorkAppLicenseController,
