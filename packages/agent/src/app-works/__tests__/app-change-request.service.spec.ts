@@ -172,7 +172,12 @@ describe('AppProvisioningService (APW-04)', () => {
             taskRepo as never,
             resolver,
         );
-        const result = await service.start({ workId: 'w1', trigger: 'auto-create' });
+        // A non-manual trigger answers at once and works behind the answer (RPC callers).
+        await expect(service.start({ workId: 'w1', trigger: 'auto-create' })).resolves.toEqual({
+            started: true,
+            reason: 'queued',
+        });
+        const result = await service.whenSettled('w1')!;
         expect(result).toMatchObject({ started: true, taskId: 't1', agentId: 'a1', runId: 'r1', draftValid: true });
         expect(result.detection).toMatchObject({ dockerfile: 'Dockerfile', framework: 'express', port: 3000 });
         const [, input] = tasks.create.mock.calls[0];
@@ -189,7 +194,7 @@ describe('AppProvisioningService (APW-04)', () => {
             findByUserIdFiltered: jest.fn(async () => ({ rows: [{ id: 'open', slug: 'T-9' }], total: 1 })),
         };
         const service = new AppProvisioningService(works as never, git() as never, tasks as never, taskRepo as never);
-        await expect(service.start({ workId: 'w1', trigger: 'auto-create' })).resolves.toMatchObject({
+        await expect(service.start({ workId: 'w1', trigger: 'manual' })).resolves.toMatchObject({
             started: false,
             reason: 'alreadyProvisioning',
             taskId: 'open',
@@ -209,7 +214,7 @@ describe('AppProvisioningService (APW-04)', () => {
             { resolve: jest.fn(async () => null) },
             notifications as never,
         );
-        const result = await service.start({ workId: 'w1', trigger: 'auto-create' });
+        const result = await service.start({ workId: 'w1', trigger: 'manual' });
         expect(result).toMatchObject({ started: true, agentId: null, runId: null });
         expect(tasks.runTask).not.toHaveBeenCalled();
         expect(notifications.create).toHaveBeenCalledTimes(1);

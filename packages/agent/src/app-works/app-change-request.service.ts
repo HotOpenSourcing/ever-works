@@ -178,7 +178,20 @@ export class AppChangeRequestService {
         }
 
         if (!agentId) {
-            const candidates = (await this.resolverService?.listCandidates(ownerId, scope)) ?? [];
+            // The candidates are the OWNER's Agents. A member who is not the owner gets the
+            // refusal without the list, so editing access to one Work never enumerates the
+            // owner's whole Agent roster.
+            const isOwner = !input.actorUserId || input.actorUserId === ownerId;
+            const candidates = isOwner
+                ? ((await this.resolverService?.listCandidates(ownerId, scope)) ?? [])
+                : [];
+            if (!isOwner) {
+                return refused(
+                    409,
+                    'agentRequired',
+                    'No Agent is set up to change this App Work. Ask the owner to assign one to it.',
+                );
+            }
             return {
                 status: 'refused',
                 httpStatus: 409,

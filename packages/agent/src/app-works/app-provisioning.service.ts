@@ -143,14 +143,39 @@ export class AppProvisioningService implements AppProvisioningCapability {
         @Optional() private readonly ai?: AiFacadeService,
     ) {}
 
-    /** APW-04's `start` — see the class docstring for the four steps. Never throws. */
+    /** One in-flight start per Work in this process, so concurrent callers cannot file two Tasks. */
+    private readonly running = new Map<string, Promise<AppProvisioningResult>>();
+
+    /**
+     * APW-04's `start` — see the class docstring for the four steps. Never throws.
+     *
+     * A `manual` start answers when the Task exists. Every other trigger is called from
+     * inside another job's RPC hop (the ready handler's step 8, the orchestrator's smoke
+     * report), so it answers `{ started: true, reason: 'queued' }` at once and the
+     * inspection, the optional model call and the Task happen behind it — a slow provider
+     * must not time out the readiness run that asked.
+     */
     async start(input: AppProvisioningStartInput): Promise<AppProvisioningResult> {
-        try {
-            return await this.startUnsafe(input);
-        } catch (error) {
-            this.logger.warn(`App provisioning for work ${input.workId} failed: ${errorText(error)}`);
-            return { started: false, reason: `failed: ${errorText(error)}` };
+        const existing = this.running.get(input.workId);
+        if (existing) {
+            return input.trigger === 'manual'
+                ? existing
+                : { started: false, reason: 'alreadyProvisioning' };
         }
+        const run = this.startUnsafe(input)
+            .catch((error): AppProvisioningResult => {
+                this.logger.warn(`App provisioning for work ${input.workId} failed: ${errorText(error)}`);
+                return { started: false, reason: `failed: ${errorText(error)}` };
+            })
+            .finally(() => this.running.delete(input.workId));
+        this.running.set(input.workId, run);
+        if (input.trigger === 'manual') return run;
+        return { started: true, reason: 'queued' };
+    }
+
+    /** The in-flight start for a Work, if any (tests and the manual route await it). */
+    whenSettled(workId: string): Promise<AppProvisioningResult> | null {
+        return this.running.get(workId) ?? null;
     }
 
     /** Inspect a Work's repository without writing anything (also `GET …/provisioning/inspect`). */
