@@ -135,6 +135,8 @@ describe('integration contract v1 (published schemas)', () => {
             ['email-message.json', 'resources/email-message.schema.json'],
             ['email-inbound-result.json', 'resources/email-inbound-result.schema.json'],
             ['inbox-reply-result.json', 'resources/inbox-reply-result.schema.json'],
+            ['kb-document.json', 'resources/kb-document.schema.json'],
+            ['kb-folder.json', 'resources/kb-folder.schema.json'],
             ['events-page.json', 'resources/events-page.schema.json'],
             ['error.transition_blocked.json', 'error.schema.json'],
             ['error.version_mismatch.json', 'error.schema.json'],

@@ -45,11 +45,16 @@
 - [x] **T16** Links: `GET /links`, `PUT`/`DELETE /links/:entityType/:entityId` (the record must be visible; types not
       served in v1 yet → `400`).
 - [x] **T17** OpenAPI in production: `GET /api/integrations/v1/openapi.json` (`serveIntegrationOpenApi`).
-- [ ] **T17a** One transaction per request: create + link, and every edge of a `PUT` set or of a create's assignees /
-      extra teams. Today each step commits on its own (create, then link, undone on a lost race; a `PUT` set that fails
-      half-way keeps the steps before the failure); a crash between create and link leaves an unlinked record.
-- [ ] **T17b** OpenAPI request/response bodies (`@ApiProperty` or the Swagger CLI plugin under SWC); today the document
-      lists every route, scope and summary, and the bodies are the contract JSON Schemas.
+- [~] **T17a** One transaction per request: create + link, and every edge of a `PUT` set or of a create's assignees /
+  extra teams. **Done for create + link of tasks and teams**: `TasksService.create` / `TeamsService.create` take a
+  `withinCreate` hook that runs in the row's own transaction (with its `*.created` event), and the integration
+  routes write the `externalRef` link there, so a lost race rolls the create back instead of undoing it and a crash
+  can no longer leave an unlinked task or team. Still step by step: a `PUT` set, and a create's extra teams /
+  assignees / visibility after the row (each step commits on its own; the reconcile covers a half-applied set).
+- [x] **T17b** OpenAPI request bodies: every property of every request DTO carries `@ApiProperty`, written from its
+      contract schema (required, enum, format, limits, description), so `/api/integrations/v1/openapi.json` shows whole
+      bodies; `integration-contract.spec.ts` fails on a property without it. Response bodies stay the contract JSON
+      Schemas (each route's `@ApiResponse` names its shape).
 - [x] **T17c** Task `visibility` writes (`team` / `organization`, `visibilityExplicit`) through
       `RecordVisibilityService.setVisibility` (EW-P1-3, #2621); `private` → `422`. Reads hide a row whose STORED
       visibility is `private`.
@@ -64,16 +69,16 @@
       `v1-draft.5` (CR-5). Recording points: [`domain-events`](../domain-events/tasks.md) T20.
 - [x] **T32** Goals (EW-P2-2): `GET /goals` (`includeArchived`), `GET /goals/:id`, `POST /goals` (draft; external
       metric source only, default `{pluginId:'external', metricId:'value'}`; Teams + D11 in the create transaction),
-      `PATCH /goals/:id` (no status / outcome / source / kind), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`, `POST
-  /goals/:id/samples` (`currentValue`, baseline, re-score; throttled `goal.progress_changed`), `DELETE /goals/:id`
-      (not while the loop runs); `goal` link target; `goal_metric_samples.criterionId` (migration `1795140000000`);
+      `PATCH /goals/:id` (no status / outcome / source / kind), `PUT /goals/:id/criteria`, `PUT /goals/:id/dod`,
+      `POST /goals/:id/samples` (`currentValue`, baseline, re-score; throttled `goal.progress_changed`),
+      `DELETE /goals/:id` (not while the loop runs); `goal` link target; `goal_metric_samples.criterionId` (migration `1795140000000`);
       external sources are never read from a provider on evaluation; schemas `goal.schema.json`, `CreateGoal`,
       `UpdateGoal`, `PutGoalCriteria`, `PutGoalDod`, `GoalSample`; contract `v1-draft.11` (CR-9). Recording points:
       [`domain-events`](../domain-events/tasks.md) T21.
 - [x] **T33** Missions (EW-P2-5, D3b): `GET /missions`, `GET /missions/:id`, `POST /missions` (paused, one-shot,
       no schedule / auto-build, title required; Teams + D11 in the create transaction), `PATCH /missions/:id` (content,
-      Teams, visibility; `status` paused / completed + `outcome`, never `active`), `PUT /missions/:id/goals`, `PUT
-    /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
+      Teams, visibility; `status` paused / completed + `outcome`, never `active`), `PUT /missions/:id/goals`,
+      `PUT /missions/:id/works`, `DELETE /missions/:id`; `mission` link target; schemas `mission.schema.json` (+ link-event
       `$defs`), `CreateMission`, `UpdateMission`, `PutMissionGoals`, `PutMissionWorks`; contract `v1-draft.12` (CR-8).
       Recording points: [`domain-events`](../domain-events/tasks.md) T22.
 - [ ] **T34** Organization create + member roles (EW-P2-6).
@@ -97,8 +102,18 @@
 
 ## Phase 5 — Tests (EW-P1-8)
 
-- [ ] **T25** Contract test suite over `contract/`.
-- [ ] **T26** Idempotency / `If-Match` / act-as tests.
+- [x] **T25** Contract test suite over `contract/`:
+    - `domain-event-contract.spec.ts` — every schema compiles, the catalog is the TypeScript one, every example and a
+      recorded envelope validate, the webhook signature vectors;
+    - the recording specs (`*-recording.spec.ts`) and the integration services' specs validate every event `data` and
+      resource DTO they build against its schema;
+    - `apps/api/.../integration-contract.spec.ts` — every request body schema has the properties and the required ones
+      of the DTO its route validates with (`forbidNonWhitelisted`: drift would `400` a valid request), a new body
+      without a DTO fails; every error the routes answer is a valid envelope with a listed status ↔ code pair; scopes,
+      error codes and integration kinds are the TypeScript vocabularies; `GET /whoami` answers its schema.
+- [x] **T26** Idempotency / `If-Match` / act-as tests — the `Idempotency-Key` store and `If-Match` in
+      `integrations-api-foundation.spec.ts`, the routes' replay / `412` / `act_as_forbidden` paths in the controller
+      specs, act-as resolution in `integration-keys.http.spec.ts`.
 
 ## Phase 6 — Inbox (EW-P3-1)
 
@@ -109,6 +124,19 @@
       (`403 act_as_forbidden` otherwise), through the app's own `InboxService`; reply answers
       `{item, routed, restart, runId?}`, `Idempotency-Key` optional; state `If-Match` pre-check. Contract CR-4
       (`requests.schema.json` `InboxReply` / `InboxStateChange`, `resources/inbox-reply-result.schema.json`).
+
+## Phase 7 — Knowledge Base (EW-P3-2)
+
+- [x] **T29** `version` on `work_knowledge_documents` and `memory_folders` + keyset indexes (migration
+      `1795130200000`, 3 dialects); `kb_document` / `kb_folder` snapshots (`domain-event-kb-snapshots.ts`, event body
+      limit 256 KiB → `bodyOmitted`).
+- [x] **T30** `kb.document.*` recorded in `KnowledgeBaseService` (Work and organization documents) and
+      `KnowledgeLibraryService` (filing, folder-delete unfiling); `kb.folder.*` in `MemoryFoldersService`
+      (organization folders only); the `kb_document_updated` / `kb_document_deleted` activity rows; every class at
+      organization scope (inheritance into Works unchanged).
+- [x] **T31** `GET`/`POST /kb/documents`, `GET`/`PATCH`/`DELETE /kb/documents/:id`, `/accept`, `/archive`, `/unarchive`,
+      `/move`, `GET`/`POST /kb/folders`, `GET`/`PATCH`/`DELETE /kb/folders/:id` (`IntegrationKbController`) + coverage
+      gate entries for every KB controller. Contract CR-7 (`kb-document`, `kb-folder`, five request bodies).
 
 ## Phase 8 — Agent email (EW-P4-2, EW-P4-1)
 

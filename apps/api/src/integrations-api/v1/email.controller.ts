@@ -289,7 +289,9 @@ export class IntegrationEmailController {
         // The agent must be one the key sees in the pinned organization.
         await this.resources.get('agent', organizationId, dto.agentId, linkSourceOf(principal));
         const inbox = await this.email.inboundAddressOf(dto.agentId);
-        if (!inbox.ok) throw new IntegrationHttpException(422, 'domain_rule', inbox.reason);
+        // `in`, not `!inbox.ok`: apps/api builds without strictNullChecks, where a
+        // boolean discriminant does not narrow the union.
+        if ('reason' in inbox) throw new IntegrationHttpException(422, 'domain_rule', inbox.reason);
         const address = inbox.address;
         // The stored message takes the address's organization: an address of
         // another organization (or of none) would deliver mail this key can
