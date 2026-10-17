@@ -2,7 +2,7 @@ import { Injectable, Logger, Optional } from '@nestjs/common';
 import { WebhookSubscriptionRepository, WebhookDeliveryRepository } from '../database';
 import type { WebhookSubscriptionStatus } from '../entities/webhook-subscription.entity';
 import { WebhookDeliveryService, type DeliveryResult } from './webhook-delivery.service';
-import { WebhookOwnerAccessService } from './webhook-owner-access.service';
+import { type WebhookEventRef, WebhookOwnerAccessService } from './webhook-owner-access.service';
 
 /**
  * Default dead-letter threshold (overridable via env). Picked to match the
@@ -231,6 +231,9 @@ export class WebhookSubscriptionDeliveryService {
                       // EW-P3-1 — a recipient-scoped event (inbox, email) also needs
                       // the key's read scope at send time.
                       input.event,
+                      // Review 2026-10-17 F2 — a user owner must still be able to read
+                      // the event's record (the payload is the domain-event envelope).
+                      input.payload as WebhookEventRef,
                   )
                 : { allowed: false, disable: false };
             if (!access.allowed) {

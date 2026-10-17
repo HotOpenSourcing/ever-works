@@ -459,6 +459,30 @@ export interface GitCommitFilesResult {
 	readonly commitSha: string;
 }
 
+/** One entry of a {@link IGitProviderPlugin.getRepositoryTree} listing (APW-03 T38, plan §7). */
+export interface GitRepositoryTreeEntry {
+	readonly path: string;
+	readonly type: 'blob' | 'tree';
+	readonly size?: number;
+}
+
+/** How a {@link IGitProviderPlugin.getRepositoryTree} call lists (APW-03 T38). */
+export interface GitRepositoryTreeOptions {
+	readonly recursive: boolean;
+	/** At most this many entries are returned; more sets `truncated`. */
+	readonly maxEntries: number;
+}
+
+/**
+ * A repository tree at one ref (APW-03 T38). `truncated` is `true` when the provider
+ * cut the listing itself or `maxEntries` did — the caller then treats a scan as
+ * incomplete, never as "nothing there".
+ */
+export interface GitRepositoryTree {
+	readonly entries: Array<GitRepositoryTreeEntry>;
+	readonly truncated: boolean;
+}
+
 // ── PR insights (kanban run cockpit M5/M6) ─────────────────────────
 //
 // Two optional read capabilities used by the Tasks board to render a
@@ -1137,6 +1161,23 @@ export interface IGitProviderPlugin extends IPlugin, IGitOperations {
 	 * calling it (the lazy-plugin proxy over-reports optional methods).
 	 */
 	commitFiles?(owner: string, repo: string, input: GitCommitFilesInput, token: string): Promise<GitCommitFilesResult>;
+
+	/**
+	 * List a repository's tree at `ref` (a branch, tag or commit sha) — APW-03 T38,
+	 * plan §7. `opts.recursive` lists every level; `opts.maxEntries` caps the answer,
+	 * and `truncated` reports a cut (by the provider or the cap). A ref that does not
+	 * exist answers `null`.
+	 *
+	 * OPTIONAL. Callers MUST materialise `getRepositoryTree` on the plugin before
+	 * calling it (the lazy-plugin proxy over-reports optional methods).
+	 */
+	getRepositoryTree?(
+		owner: string,
+		repo: string,
+		ref: string,
+		token: string,
+		opts: GitRepositoryTreeOptions
+	): Promise<GitRepositoryTree | null>;
 
 	/**
 	 * Move an existing branch ref to a commit sha — **fast-forward only**.

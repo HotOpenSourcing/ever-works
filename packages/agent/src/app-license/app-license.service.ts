@@ -48,6 +48,7 @@
 import { createHash } from 'node:crypto';
 import {
     ForbiddenException,
+    Inject,
     Injectable,
     Logger,
     NotFoundException,
@@ -56,6 +57,7 @@ import {
     UnprocessableEntityException,
 } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
+import { OnEvent } from '@nestjs/event-emitter';
 import {
     LICENSE_CLASS_RANK,
     type AppSourceRecord,
@@ -74,6 +76,14 @@ import { WorkUpstreamStateRepository } from '../database/repositories/work-upstr
 import { GitFacadeService } from '../facades/git.facade';
 import { getOptionalProvider } from '../utils/optional-provider.util';
 import { relationOf } from '../app-works/app-source-initializer.service';
+import { AppSpecAppliedEvent } from '../events/app-spec-applied.event';
+import {
+    applyMixed,
+    detectRepositoryLicense,
+    type LicenseDetectGit,
+    type LicenseDetection,
+} from './license-detect';
+import { APPS_TIER_POLICY, type AppsTierPolicy } from '../app-runtime/ports';
 import { classifyLicenseExpression, detectedLicenseSpdx } from './license-classify';
 import {
     LICENSE_REGISTRY_SNAPSHOT,
@@ -91,6 +101,9 @@ export const APP_LICENSE_ACTIVITY_EVENTS = {
     attestationRequired: 'app.license.attestation_required',
     attested: 'app.license.attested',
 } as const;
+
+/** How many Works one registry-change fan-out re-classifies at most (T43, ACC-03-22). */
+export const LICENSE_REGISTRY_FANOUT_MAX = 500;
 
 /** The obligation that makes a source offer required (FR-61). */
 export const NETWORK_SOURCE_OFFER = 'network-source-offer';
@@ -183,6 +196,14 @@ export function hostingEligibilityOf(input: {
     sourceOfferUrl?: string | null;
     registrySnapshot: boolean;
     verified: boolean;
+    /**
+     * APW-10 lite — the tier's `managedScope()`. `any` admits a green licence whatever its
+     * Blueprint status; absent (no policy bound) or `verified-blueprints` keeps the fail-closed
+     * `blueprintNotVerified` rule.
+     */
+    managedScope?: 'any' | 'verified-blueprints';
+    /** APW-10 lite — `AppsTierPolicy.isOpen()`; `false` ⇒ `managedTierDisabled` (reason #5, last). */
+    tierOpen?: boolean;
 }): HostingEligibility {
     const yourCluster =
         input.licenseClass === 'green' || input.attested ? 'allowed' : 'attestationRequired';
@@ -192,8 +213,10 @@ export function hostingEligibilityOf(input: {
         managed = 'licenseNotGreen';
     } else if (input.licenseClass === 'amber') {
         managed = 'upstreamAgreementMissing';
-    } else if (input.registrySnapshot || !input.verified) {
+    } else if (input.managedScope !== 'any' && (input.registrySnapshot || !input.verified)) {
         managed = 'blueprintNotVerified';
+    } else if (input.tierOpen === false) {
+        managed = 'managedTierDisabled';
     } else {
         managed = 'allowed';
     }
@@ -244,6 +267,11 @@ export class AppLicenseService {
         @Optional() private readonly git?: GitFacadeService,
         @Optional() private readonly activity?: ActivityLogService,
         @Optional() private readonly moduleRef?: ModuleRef,
+        // APW-10 lite — the managed tier's scope and switch for `hostingEligibilityOf`. Appended
+        // LAST + `@Optional()`: unbound reads closed, exactly the previous answer.
+        @Optional()
+        @Inject(APPS_TIER_POLICY)
+        private readonly tier?: AppsTierPolicy,
     ) {}
 
     // ── the requests (T42/T43) ────────────────────────────────────────────────
@@ -281,15 +309,22 @@ export class AppLicenseService {
             (state.effectiveSpec as { license?: { spdx?: string } } | null | undefined)?.license
                 ?.spdx,
         );
+        const commitSha = firstNonEmpty(state.effectiveCommitSha, state.headCommitSha);
+        // T41 — the repository scan (tree, root manifests, mixed directories). It runs
+        // even when the spec declares a licence: a declared MIT over an `ee/` directory is
+        // still a mixed repository, and mixed is at least amber (ACC-03-32).
+        const detection = await this.scanRepository(
+            coordinates,
+            commitSha ?? firstNonEmpty(state.trackedBranch) ?? 'main',
+        );
         let spdx: string | null = declared;
         let source: 'detected' | 'blueprint' = 'blueprint';
         if (!spdx) {
             source = 'detected';
-            spdx = await this.detectSpdx(coordinates);
+            spdx = detection ? detection.spdx : await this.detectSpdx(coordinates);
         }
-        const licenseClass = classifyLicenseExpression(spdx);
+        const licenseClass = applyMixed(classifyLicenseExpression(spdx), detection?.mixed === true);
         const obligations = obligationsFor(spdx);
-        const commitSha = firstNonEmpty(state.effectiveCommitSha, state.headCommitSha);
 
         const changed =
             (state.licenseSpdx ?? null) !== (spdx ?? null) ||
@@ -307,6 +342,16 @@ export class AppLicenseService {
             licenseSource: source,
             licenseObligations: obligations,
             licenseCommitSha: commitSha,
+            ...(detection
+                ? {
+                      licenseMixed: detection.mixed,
+                      licenseScanIncomplete: detection.scanIncomplete,
+                      licenseEvidence: {
+                          files: detection.evidence.files,
+                          mixedPaths: detection.evidence.mixedPaths,
+                      },
+                  }
+                : { licenseScanIncomplete: true }),
             licenseRegistryHash: LICENSE_REGISTRY_SNAPSHOT_SOURCE.commitSha,
             licenseRegistrySource: 'snapshot',
             ...(attestationCleared ? { attestation: null } : {}),
@@ -399,7 +444,25 @@ export class AppLicenseService {
             sourceOfferUrl: firstNonEmpty(spec?.license?.sourceOfferUrl),
             registrySnapshot: (state.licenseRegistrySource ?? 'snapshot') === 'snapshot',
             verified: false,
+            ...this.tierFacts(),
         });
+    }
+
+    /** The tier's scope and switch, read per call; a throwing or absent policy reads closed. */
+    private tierFacts(): { managedScope?: 'any' | 'verified-blueprints'; tierOpen: boolean } {
+        const tier = this.tier;
+        if (!tier || typeof tier.isOpen !== 'function') return { tierOpen: false };
+        try {
+            const open = tier.isOpen() === true;
+            return {
+                tierOpen: open,
+                ...(open && typeof tier.managedScope === 'function'
+                    ? { managedScope: tier.managedScope() }
+                    : {}),
+            };
+        } catch {
+            return { tierOpen: false };
+        }
     }
 
     // ── attestation (T44) ─────────────────────────────────────────────────────
@@ -574,6 +637,79 @@ export class AppLicenseService {
             relation,
             providerId: firstNonEmpty(work.gitProvider) ?? 'github',
         };
+    }
+
+    /** T41's scan of the Work Repository at `ref`; `null` when it cannot run (no facade). */
+    private async scanRepository(
+        coordinates: WorkCoordinates | null,
+        ref: string,
+    ): Promise<LicenseDetection | null> {
+        if (!this.git || !coordinates?.owner || !coordinates.repo) return null;
+        if (typeof (this.git as Partial<LicenseDetectGit>).getRepositoryTree !== 'function') {
+            return null;
+        }
+        try {
+            return await detectRepositoryLicense({
+                git: this.git,
+                owner: coordinates.owner,
+                repo: coordinates.repo,
+                ref,
+                options: {
+                    userId: coordinates.userId,
+                    providerId: coordinates.providerId,
+                    workId: coordinates.workId,
+                },
+            });
+        } catch (error) {
+            this.logger.warn(
+                `Licence scan of ${coordinates.owner}/${coordinates.repo}@${ref} failed (${errorText(error)}); root-only.`,
+            );
+            return null;
+        }
+    }
+
+    // ── T43 — the triggers ────────────────────────────────────────────────────
+
+    /**
+     * T43 (first half) — re-classify after the App spec's effective commit changes, so
+     * a licence the spec declares (or a repository change under it) reaches the row
+     * without waiting for the next deploy's freshness check. Listens for APW-03's own
+     * `app.spec.applied` event; never throws.
+     */
+    @OnEvent(AppSpecAppliedEvent.EVENT_NAME, { async: true, suppressErrors: true })
+    async onSpecApplied(event: { workId?: string } | null | undefined): Promise<void> {
+        const workId = firstNonEmpty(event?.workId);
+        if (workId) {
+            await this.request(workId, 'spec_changed');
+        }
+    }
+
+    /**
+     * T43 (second half) — the registry-change fan-out: re-classify at most `limit` (≤ 500)
+     * App Works classified against a different registry than the one in force, oldest
+     * first; the next run continues where this one stopped (ACC-03-22).
+     */
+    async refreshStaleRegistry(limit = LICENSE_REGISTRY_FANOUT_MAX): Promise<{
+        scanned: number;
+        evaluated: number;
+    }> {
+        const states = this.states();
+        if (!states) return { scanned: 0, evaluated: 0 };
+        const stale = await states.findStaleRegistry(
+            LICENSE_REGISTRY_SNAPSHOT_SOURCE.commitSha,
+            Math.min(Math.max(0, Math.floor(limit)), LICENSE_REGISTRY_FANOUT_MAX),
+        );
+        let evaluated = 0;
+        for (const row of stale) {
+            try {
+                if (await this.evaluate(row.workId, 'registry_changed')) evaluated += 1;
+            } catch (error) {
+                this.logger.warn(
+                    `Registry fan-out: re-classifying work ${row.workId} failed (${errorText(error)}).`,
+                );
+            }
+        }
+        return { scanned: stale.length, evaluated };
     }
 
     private async detectSpdx(coordinates: WorkCoordinates | null): Promise<string | null> {

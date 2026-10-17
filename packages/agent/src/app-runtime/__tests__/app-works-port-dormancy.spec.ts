@@ -160,14 +160,15 @@ function boundTokenNames(): Set<string> {
  * document. Keep it sorted; it is read by people.
  */
 const BOUND: readonly string[] = [
-    // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
-    // beside the adapter whose apply gate it opens.
-    'APP_BLUEPRINT_APPLY_SERVICE',
     // APW-05 T23 / §4.12 — bound 2026-10-17 by `AppBuildsModule` (outstanding-work
     // A0.4): the Builds controller's edit check over `WorkOwnershipService`, and the
     // pull token's platform-managed write over
     // `PluginSettingsService.writePlatformManagedWorkSettings`. Until then every
     // detail answered `canEdit: false` and every pull-token save `503`.
+    'APPS_TIER_POLICY',
+    // APW-03 T28 (2026-10-17) — `AppBlueprintApplyService`, bound by `AppWorksModule`
+    // beside the adapter whose apply gate it opens.
+    'APP_BLUEPRINT_APPLY_SERVICE',
     'APP_BUILD_EDIT_ACCESS',
     // APW-05 T16 — `BuildFacadeService`, provided by `AppBuildsModule` (2026-09-21).
     // Four services in this epic inject it; until it was bound every one of them
@@ -234,6 +235,8 @@ const BOUND: readonly string[] = [
     // `ensureReadyForDeploy` answers `specUnavailable` until it is bound.
     // `AppEnvModule`'s three (`APP_ENV_SPEC_SOURCE`, `APP_ENV_ENSURE_GENERATED`,
     // `APP_ENV_RESOLVER_FINGERPRINTS`) reach the API through `AppBuildsModule`.
+    'APP_CLUSTER_OP_DISPATCHER',
+    'APP_CUSTOM_DOMAIN_STORE',
     'APP_DEPENDENCIES_SERVICE',
     'APP_DEPENDENCY_CONFIG_CIPHER',
     // APW-06 §9.2 — the deploy dispatcher and its availability probe, bound
@@ -250,6 +253,8 @@ const BOUND: readonly string[] = [
     // APW-06 §5.1 — `AppDeployBuildSourceAdapter` over APW-05's Build rows,
     // bound 2026-09-22. Unbound, the preconditions answered `no_green_build`
     // for every App Work whether or not it had one.
+    // A0.10 (lane aw-deploy-2) — `AppDependencySpecSourceAdapter`, bound by `AppDependenciesModule`.
+    'APP_DEPENDENCY_SPEC_SOURCE',
     'APP_DEPLOY_BUILD_SOURCE',
     'APP_DEPLOY_DEPLOYMENT_STORE',
     'APP_DEPLOY_DISPATCHER',
@@ -258,6 +263,7 @@ const BOUND: readonly string[] = [
     // preconditions pushed `spec_invalid` with "no App spec source is available
     // in this process" for EVERY request, so no App Work could deploy whatever
     // its spec actually said.
+    'APP_DEPLOY_HOST_SOURCE',
     'APP_DEPLOY_SPEC_SOURCE',
     'APP_ENV_DEPLOY_READINESS',
     'APP_ENV_ENSURE_GENERATED',
@@ -272,13 +278,17 @@ const BOUND: readonly string[] = [
     // and listed nowhere: the register only checked BOUND ⊆ provided until the
     // "names in BOUND every declared …" case (2026-09-26) checked the other half.
     'APP_FORK_READINESS_DISPATCHER',
-    // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
-    // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
-    'APP_LICENSE_SERVICE',
     // APW-04 (lane aw-ai, 2026-10-17) — `AppProvisioningService` and
     // `AppProvisionEventsService`, provided by `AppWorksModule`. Unbound, the ready
     // handler's step 8 logged "no AppProvisioningService is bound" for every App Work
     // without a spec, so nothing ever worked out how to run a repository.
+    'APP_HOSTS_APPS_DOMAIN',
+    'APP_HOSTS_DEPLOYMENT_STORE',
+    'APP_HOSTS_DEPLOY_REQUESTER',
+    'APP_HOSTS_WORK_STORE',
+    // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
+    // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
+    'APP_LICENSE_SERVICE',
     'APP_PROVISIONING_SERVICE',
     'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_ENV_SOURCE',
@@ -292,6 +302,9 @@ const BOUND: readonly string[] = [
     // MATCH stays behind the apply gate until `APP_BLUEPRINT_APPLY_SERVICE`
     // (T28) is bound — without it a match would fail the Work's readiness.
     'APP_SOURCE_CATALOG_PORT',
+    // APW-11 — bound by `AppLauncherModule` (found red on develop 2026-10-17: the binding
+    // landed without this register moving it out of UNBOUND).
+    'APP_SPEC_DISPLAY_NAMES',
     // APW-03 T42 (2026-10-17) — the same instance, for APW-02's sync (FR-37).
     'APP_UPSTREAM_LICENSE_SERVICE',
     // APW-02 T31 (2026-10-17) — `buildAppUpstreamSyncDispatcherProvider()`, provided by
@@ -351,9 +364,11 @@ const BOUND: readonly string[] = [
  * binds here. One implementation reached from two processes, not two instances.
  */
 const WORKER_BOUND: readonly string[] = [
+    'APPS_DOMAIN_DNS_SERVICE',
     'APPS_TIER_POLICY',
     // A0.7 (2026-10-17) — the worker binds these with real implementations
     // (`trigger-app-runtime.module.ts`, `app-runtime-worker.adapters.ts`).
+    'APP_CLUSTER_OP_DISPATCHER',
     'APP_COMMIT_ANCESTRY',
     'APP_CUSTOM_DOMAIN_STORE',
     'APP_DEPLOY_BUILD_SOURCE',
@@ -396,13 +411,8 @@ const WORKER_BOUND: readonly string[] = [
  */
 const UNBOUND: readonly string[] = [
     'APPS_DOMAIN_DNS_SERVICE',
-    'APPS_TIER_POLICY',
-    'APP_CLUSTER_OP_DISPATCHER',
     'APP_COMMIT_ANCESTRY',
-    'APP_CUSTOM_DOMAIN_STORE',
     'APP_DEPENDENCY_CLUSTER_ACCESS',
-    'APP_DEPENDENCY_SPEC_SOURCE',
-    'APP_DEPLOY_HOST_SOURCE',
     'APP_DEPLOY_TARGET_RESOLVER',
     'APP_ENV_ACTIVITY',
     'APP_ENV_ACTOR_NAMES',
@@ -413,11 +423,7 @@ const UNBOUND: readonly string[] = [
     // module in `packages/agent` provides it, which is all this list claims.
     'APP_FORK_READY_HANDLER',
     'APP_HEALTH_EGRESS_SOURCE',
-    'APP_HOSTS_APPS_DOMAIN',
-    'APP_HOSTS_DEPLOYMENT_STORE',
-    'APP_HOSTS_DEPLOY_REQUESTER',
     'APP_HOSTS_REBUILD_REQUESTER',
-    'APP_HOSTS_WORK_STORE',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
     'APP_IMAGE_REFERENCE_RESOLVER',
     // Still unbound ON PURPOSE (2026-09-22): its declared owner is APW-07's env
@@ -434,7 +440,6 @@ const UNBOUND: readonly string[] = [
     'APP_RUNTIME_NOTIFICATIONS',
     'APP_RUNTIME_TARGET',
     'APP_RUNTIME_VERIFICATION_FACADE',
-    'APP_SPEC_DISPLAY_NAMES',
     'APP_TARGET_UPDATED_PORT',
     'APP_UPSTREAM_PRIVATE_COPY_PORT',
     'APP_UPSTREAM_STATE_READER',
@@ -554,15 +559,18 @@ describe('App Works port dormancy register (§5.10)', () => {
         //
         // 49/24 → 48/25 on 2026-10-17: APW-02 T31 binds `APP_UPSTREAM_SYNC_DISPATCHER`.
         //
-        // 48/25 → 45/28 on 2026-10-17: APW-03 T28 binds `APP_BLUEPRINT_APPLY_SERVICE`,
-        // T42 binds `APP_LICENSE_SERVICE` and `APP_UPSTREAM_LICENSE_SERVICE`.
+        // 47/27 → 44/30 the same day (lane aw-ai): APW-08 T25's resolver and APW-04's
+        // provisioning service and events port are bound by `AppWorksModule`.
         //
-        // 45/28 → 40/34 the same day, merged from develop: APW-05's
-        // `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER` moved across
-        // and `BUILD_SETTINGS_SOURCE` is provided (A0.4); APW-08 T25's resolver and
-        // APW-04's provisioning service and events port are bound (lane aw-ai).
-        expect(UNBOUND).toHaveLength(40);
-        expect(BOUND).toHaveLength(34);
+        // 48/25 → 45/28 on 2026-10-17: APW-03 T28 binds `APP_BLUEPRINT_APPLY_SERVICE`,
+        // T42 binds `APP_LICENSE_SERVICE` and `APP_UPSTREAM_LICENSE_SERVICE`; APW-05's
+        // `APP_BUILD_EDIT_ACCESS` and `APP_BUILD_PLATFORM_SETTINGS_WRITER` moved across and
+        // `BUILD_SETTINGS_SOURCE` is provided (A0.4). Lane aw-deploy-2 (same day) binds the tier
+        // policy, the cluster-op dispatcher, T26's host stores, the host source and APW-07's
+        // dependency spec source in the API — measured, not added up by hand.
+        // 31/43 → 30/44 on 2026-10-17: `APP_SPEC_DISPLAY_NAMES` is bound by `AppLauncherModule`.
+        expect(UNBOUND).toHaveLength(30);
+        expect(BOUND).toHaveLength(44);
     });
 
     it('names where the worker binds what this package does not', () => {
@@ -590,11 +598,23 @@ describe('App Works port dormancy register (§5.10)', () => {
         //   the API's gate (`AppDeployDispatchRelay`) — one dispatcher reached from two processes.
         //   `APP_PROVISION_EVENTS_PORT` (APW-04, 2026-10-17) is the same shape: the
         //   worker binds a `createRemoteProxy` of the API's `AppProvisionEventsService`.
+        //   Lane aw-deploy-2 (2026-10-17): `APPS_TIER_POLICY` is the same `ConfigAppsTierPolicy`
+        //   class in both processes; T26's host stores and `APP_DEPLOY_HOST_SOURCE` bind the same
+        //   `AppHostsService` swaps in both (the API's `AppDomainsService` closes C43); and the
+        //   worker's `APP_CLUSTER_OP_DISPATCHER` dials the API's gate (`AppClusterOpDispatchRelay`).
         const BOUND_IN_BOTH: readonly string[] = [
+            'APPS_TIER_POLICY',
+            'APP_CLUSTER_OP_DISPATCHER',
+            'APP_CUSTOM_DOMAIN_STORE',
             'APP_DEPLOY_BUILD_SOURCE',
             'APP_DEPLOY_DEPLOYMENT_STORE',
             'APP_DEPLOY_DISPATCHER',
+            'APP_DEPLOY_HOST_SOURCE',
             'APP_DEPLOY_SPEC_SOURCE',
+            'APP_HOSTS_APPS_DOMAIN',
+            'APP_HOSTS_DEPLOYMENT_STORE',
+            'APP_HOSTS_DEPLOY_REQUESTER',
+            'APP_HOSTS_WORK_STORE',
             'APP_PROVISION_EVENTS_PORT',
             'APP_RUNTIME_ENV_SOURCE',
             'WORK_APP_RUNTIME_STATES',

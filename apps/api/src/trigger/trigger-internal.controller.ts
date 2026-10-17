@@ -125,6 +125,7 @@ import {
 // `APP_DEPLOY_BUILD_SOURCE` proxies (it owns no DataSource). The adapter CLASS, as
 // `AppDeployRequestModule` exports it, so the allow-list is its two reads.
 import {
+    AppClusterOpDispatchRelay,
     AppDeployBuildSourceAdapter,
     AppDeployDispatchRelay,
     AppDeployRequestService,
@@ -132,8 +133,19 @@ import {
 } from '@ever-works/agent/app-runtime';
 // APW-06 T71 (A0.7) — the runtime-state row and the env source the isolated App runtime worker
 // proxies by name (plan §6.4). Both read or write rows, so neither can be local in the worker.
-import { WorkAppRuntimeStateRepository } from '@ever-works/agent/database';
+import {
+    WorkAppDependencyRepository,
+    WorkAppRuntimeStateRepository,
+} from '@ever-works/agent/database';
 import { AppEnvRuntimeSource } from '@ever-works/agent/app-env';
+import { AppsDomainDnsServiceImpl } from '@ever-works/agent/ever-works-providers';
+// A0.10 (lane aw-deploy-2) — the dependency worker's rows, cipher, spec and re-dispatch.
+import {
+    AppDependencyConfigCipherRelay,
+    AppDependencyProvisionDispatchRelay,
+    AppDependencyRowsRelay,
+    AppDependencySpecSourceAdapter,
+} from '@ever-works/agent/app-dependencies';
 
 /**
  * C-05 RPC half — methods that must never be reachable via `POST
@@ -679,6 +691,26 @@ export class TriggerInternalController implements OnModuleInit {
         // "unknown" and takes the pull-request path (never an unasked fast-forward).
         @Optional()
         private readonly appLicenseService?: AppLicenseService,
+        // APW-06 T31 (lane aw-deploy-2) — the worker's `APP_CLUSTER_OP_DISPATCHER` re-dispatches
+        // through the API's gate. Appended LAST + `@Optional()` per the arity rule above.
+        @Optional()
+        private readonly appClusterOpDispatchRelay?: AppClusterOpDispatchRelay,
+        // A0.10 (lane aw-deploy-2) — `app-dependency-provision` runs `AppDependenciesService` in the
+        // isolated worker, which owns no DataSource and no key: its row store, its raw row writes,
+        // its cipher, its spec source and its re-dispatch land here. Appended LAST + `@Optional()`.
+        @Optional()
+        private readonly workAppDependencyRepository?: WorkAppDependencyRepository,
+        @Optional()
+        private readonly appDependencyRowsRelay?: AppDependencyRowsRelay,
+        @Optional()
+        private readonly appDependencyConfigCipherRelay?: AppDependencyConfigCipherRelay,
+        @Optional()
+        private readonly appDependencySpecSourceAdapter?: AppDependencySpecSourceAdapter,
+        @Optional()
+        private readonly appDependencyProvisionDispatchRelay?: AppDependencyProvisionDispatchRelay,
+        // T47/T48 (lane aw-deploy-2) — the worker's `APPS_DOMAIN_DNS_SERVICE` (managed record removal).
+        @Optional()
+        private readonly appsDomainDnsService?: AppsDomainDnsServiceImpl,
     ) {}
 
     onModuleInit() {
@@ -932,6 +964,21 @@ export class TriggerInternalController implements OnModuleInit {
             AppEnvRuntimeSource: this.appEnvRuntimeSource,
             AppRuntimeEventRelayService: this.appRuntimeEventRelayService,
             AppDeployDispatchRelay: this.appDeployDispatchRelay,
+            AppClusterOpDispatchRelay: this.appClusterOpDispatchRelay,
+            WorkAppDependencyRepository: this.workAppDependencyRepository,
+            AppDependencyRowsRelay: this.appDependencyRowsRelay,
+            AppDependencyConfigCipherRelay: this.appDependencyConfigCipherRelay,
+            AppDependencySpecSourceAdapter: this.appDependencySpecSourceAdapter,
+            AppDependencyProvisionDispatchRelay: this.appDependencyProvisionDispatchRelay,
+            // A one-member facade (the `PluginAllowlistReader` precedent): the worker removes a
+            // managed record by Work id and nothing else — the service's `provider()` holds the
+            // apps-DNS token and must never be reachable over this hop.
+            AppsDomainDnsServiceImpl: this.appsDomainDnsService
+                ? {
+                      removeRecord: (workId: string) =>
+                          this.appsDomainDnsService!.removeRecord(String(workId)),
+                  }
+                : undefined,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService
                 ? { WorkProposalsApiService: this.workProposalsApiService }
