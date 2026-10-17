@@ -290,7 +290,9 @@ export class BuildFacadeService implements AppBuildPluginResolver {
                           plugin.prepareRepository(
                               {
                                   ...input,
-                                  repository: input.repository ?? repositoryRef,
+                                  // Work-bound: always the resolved repository, never
+                                  // one a caller names (the runner passes the same).
+                                  repository: repositoryRef,
                                   settings: { ...settings, ...(input.settings ?? {}) },
                               },
                               auth,
