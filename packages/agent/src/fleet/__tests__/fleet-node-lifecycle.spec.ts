@@ -55,6 +55,7 @@ function makeJob(): FleetJob {
         createdAt: new Date('2026-09-05T10:00:00Z'),
         updatedAt: new Date('2026-09-05T10:00:00Z'),
         leaseGeneration: 1,
+        usageLimitParks: 0,
     } as FleetJob;
 }
 

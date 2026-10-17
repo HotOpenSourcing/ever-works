@@ -48,6 +48,8 @@ import { AppSourceController } from './app-source.controller';
 // §4.1. Both are four segments deep under `api/works`, so no `works/:id/...`
 // handler can shadow them.
 import { WorkAppDeployController } from './work-app-deploy.controller';
+import { WorkEvolveController } from './work-evolve.controller';
+import { UpstreamPullRequestsModule } from '@ever-works/agent/upstream-pull-requests';
 import { WorkAppSpecController } from './work-app-spec.controller';
 import { WorkRunsController } from './work-runs.controller';
 import { WorkPullRequestsController } from './work-pull-requests.controller';
@@ -136,6 +138,9 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         // keeps "your spec is invalid" on the Deploy tab and the App spec tab
         // from ever disagreeing.
         AppDeployRequestModule,
+        // APW-09 (lane aw-ai) — `UpstreamPullRequestOpenService` for
+        // `POST /api/works/:id/upstream-pr`. The same module instance `ApiModule` imports.
+        UpstreamPullRequestsModule,
     ],
     providers: [
         CacheEntryRepository,
@@ -192,6 +197,10 @@ import { WorkScheduleDispatcherCronService } from './tasks/work-schedule-dispatc
         // APW-03 T15 — the App spec tab's two routes.
         WorkAppDeployController,
         WorkAppSpecController,
+        // APW-08 T25 + APW-04 (lane aw-ai) — `POST/GET /api/works/:id/evolve`,
+        // `POST /api/works/:id/provision`, `GET /api/works/:id/provisioning`. Its services
+        // come from `AgentAppWorksModule` (imported above).
+        WorkEvolveController,
         // Wave 4 M3 — per-Work AgentRun summary counts.
         WorkRunsController,
         // Wave 7 feature h (v1) — open PRs across the Work's repos.
