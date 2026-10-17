@@ -44,6 +44,25 @@ describe('WorkAppRuntimeController', () => {
                 dispatched: true,
             })),
             getStatus: jest.fn(async () => ({ state: 'live' })),
+            rollback: jest.fn(async () => ({
+                ok: true,
+                result: {
+                    status: 'accepted',
+                    httpStatus: 202,
+                    code: null,
+                    deploymentId: 'd-2',
+                    unmet: [],
+                    advisory: [],
+                    warnings: [],
+                },
+            })),
+            lifecycle: jest.fn(async () => ({
+                ok: true,
+                httpStatus: 202,
+                requestId: 'req-2',
+                dispatched: true,
+                action: 'remove',
+            })),
         };
         return {
             controller: new WorkAppRuntimeController(ownership as never, targets as never),
@@ -112,6 +131,28 @@ describe('WorkAppRuntimeController', () => {
         expect((error as HttpException).getResponse()).toMatchObject({
             code: 'APP_TARGET_REFUSED',
             unmet: [{ code: 'managed_disabled' }],
+        });
+    });
+
+    it('rolls back with the deploy answer and passes the Work slug to a lifecycle action (lane aw-deploy-3)', async () => {
+        const { controller, targets } = build();
+        const response = { status: jest.fn() };
+
+        await expect(
+            controller.rollbackApp(auth, WORK_ID, { deploymentId: 'd-1' }, response),
+        ).resolves.toMatchObject({ status: 'accepted', deploymentId: 'd-2', unmet: [] });
+        expect(response.status).toHaveBeenCalledWith(202);
+
+        await expect(
+            controller.lifecycleApp(auth, WORK_ID, { action: 'remove' }, response),
+        ).resolves.toEqual({
+            status: 'accepted',
+            action: 'remove',
+            requestId: 'req-2',
+            dispatched: true,
+        });
+        expect(targets.lifecycle).toHaveBeenCalledWith({ id: WORK_ID, slug: null }, 'u-1', {
+            action: 'remove',
         });
     });
 });

@@ -49,6 +49,8 @@ import type { AppClusterOpDispatchGate } from './app-deploy-dispatcher.provider'
 import { APP_CLUSTER_OP_DISPATCHER } from './app-runtime-deletion.service';
 import { APPS_TIER_POLICY, type AppsTierPolicy } from './ports';
 import { AppsDomainDnsServiceImpl } from '../ever-works-providers/apps-domain-dns.service';
+import { AppDeployRequestService, type AppDeployRequestResult } from './app-deploy-request.service';
+import { AppLicenseGate } from './app-license-gate';
 
 /** The managed tier's capability (`facades/app-runtime.facade.ts` `APP_TIER_CAPABILITY`). */
 const APP_TIER_CAPABILITY = 'apps-tier';
@@ -102,6 +104,7 @@ export interface AppTargetStateRow {
     health?: string | null;
     statusSnapshot?: unknown;
     statusObservedAt?: Date | string | null;
+    deployLockId?: string | null;
     ingressAddress?: AppRuntimeIngressAddress | null;
 }
 
@@ -134,8 +137,29 @@ export interface AppStatusBody {
     sourceOffer: { url: string } | null;
     currentDeployment: { id: string; state: string; phase?: string; cancelReason?: string } | null;
     snapshot: unknown;
-    ops: unknown[];
+    ops: AppStatusOpEntry[];
 }
+
+/**
+ * One entry of `GET app-status`'s `ops` (lane aw-deploy-3): the recent runtime operations, newest
+ * first, read from the Deployment rows (deploys and rollbacks) and the runtime-state row (pause,
+ * remove, deletion). Ids, states and timestamps only.
+ */
+export interface AppStatusOpEntry {
+    kind: 'deploy' | 'rollback' | 'pause' | 'remove' | 'delete';
+    state: 'running' | 'done' | 'failed' | 'cancelled';
+    at: string | null;
+    deploymentId?: string;
+    trigger?: string;
+    code?: string;
+}
+
+/** The lifecycle actions `POST app-lifecycle` accepts (plan §9.1). */
+export const APP_LIFECYCLE_ACTIONS = ['pause', 'resume', 'remove', 'cancel-deploy'] as const;
+export type AppLifecycleAction = (typeof APP_LIFECYCLE_ACTIONS)[number];
+
+/** How many recent operations `app-status` reports. */
+export const APP_STATUS_OPS_LIMIT = 10;
 
 @Injectable()
 export class AppTargetService {
@@ -158,6 +182,10 @@ export class AppTargetService {
         // T48 — the managed label is allocated when a target is chosen, so the FIRST render
         // already carries `<label>.<apps domain>` (the record follows the live ingress address).
         @Optional() private readonly appsDns?: AppsDomainDnsServiceImpl,
+        // Lane aw-deploy-3 — the rollback route asks for a Deployment through the one request path,
+        // and the status reads the source offer through T21's licence gate.
+        @Optional() private readonly requests?: AppDeployRequestService,
+        @Optional() private readonly licenseGate?: AppLicenseGate,
     ) {}
 
     /* ---------------------------------------------------------------------- *
@@ -357,7 +385,7 @@ export class AppTargetService {
                 (live?.website ? String(live.website) : null) ??
                 (primary ? `https://${primary}` : null),
             hosts: { primary, extra },
-            sourceOffer: null,
+            sourceOffer: await this.sourceOfferFor(workId, target, live),
             currentDeployment: latest
                 ? {
                       id: String(latest.id),
@@ -371,8 +399,148 @@ export class AppTargetService {
                   }
                 : null,
             snapshot: row?.statusSnapshot ?? null,
-            ops: [],
+            ops: await this.recentOps(workId, row),
         };
+    }
+
+    /* ---------------------------------------------------------------------- *
+     * POST app-rollback (plan §9.1, FR-34)
+     * ---------------------------------------------------------------------- */
+
+    /**
+     * Roll back to an earlier Live Deployment of this Work: the request path re-runs every §5.1
+     * precondition, records the old Build / spec commit / image digest (a rollback "never
+     * re-resolves", §5.8) and skips the pre-deploy jobs unless `runPreDeployJobs` is true.
+     */
+    async rollback(
+        workId: string,
+        userId: string,
+        body: { deploymentId?: unknown; runPreDeployJobs?: unknown },
+    ): Promise<
+        { ok: true; result: AppDeployRequestResult } | { ok: false; refusal: AppTargetRefusal }
+    > {
+        const deploymentId = text(body?.deploymentId);
+        if (!deploymentId) {
+            return refuse(400, 'deployment_id_required', 'Name the Deployment to roll back to.');
+        }
+        if (!this.requests?.request) {
+            return refuse(
+                503,
+                'app_deploy_unavailable',
+                'The App deploy request path is not available.',
+            );
+        }
+
+        const row = await this.deploymentById(deploymentId);
+        if (!row || row.workId !== workId) {
+            return refuse(
+                404,
+                'deployment_not_found',
+                'That Deployment does not belong to this App Work.',
+            );
+        }
+        if (String(row.state ?? '') !== 'READY') {
+            return refuse(
+                422,
+                'rollback_target_not_live',
+                'Only a Deployment that went live can be rolled back to.',
+            );
+        }
+        const state = await this.readState(workId);
+        if (state?.currentDeploymentId === deploymentId) {
+            return refuse(
+                422,
+                'rollback_target_is_current',
+                'That Deployment is the one already running.',
+            );
+        }
+
+        const render = (row.appRender ?? {}) as {
+            specCommitSha?: unknown;
+            image?: { reference?: unknown; digest?: unknown };
+        };
+        const specCommitSha = text(render.specCommitSha) || text(row.commitSha) || null;
+        const result = await this.requests.request({
+            workId,
+            userId,
+            trigger: 'rollback',
+            buildId: row.buildId ?? null,
+            specCommitSha,
+            runPreDeployJobs: body?.runPreDeployJobs === true,
+            rollback: {
+                deploymentId,
+                buildId: row.buildId ?? null,
+                specCommitSha,
+                imageReference: text(render.image?.reference) || null,
+                imageDigest: text(render.image?.digest) || null,
+            },
+        });
+        return { ok: true, result };
+    }
+
+    /* ---------------------------------------------------------------------- *
+     * POST app-lifecycle (plan §9.1)
+     * ---------------------------------------------------------------------- */
+
+    /**
+     * `pause` / `resume` / `remove` / `cancel-deploy` as an `app-cluster-op` the isolated worker
+     * runs (§9.10). `remove` with `deleteData` also deletes volumes and dependency data, so it
+     * needs `confirmSlug === work.slug` (422 `CONFIRM_SLUG_MISMATCH`).
+     */
+    async lifecycle(
+        work: { id: string; slug?: string | null },
+        userId: string,
+        body: { action?: unknown; deleteData?: unknown; confirmSlug?: unknown },
+    ): Promise<
+        | {
+              ok: true;
+              httpStatus: 202;
+              requestId: string;
+              dispatched: boolean;
+              action: AppLifecycleAction;
+          }
+        | { ok: false; refusal: AppTargetRefusal }
+    > {
+        const action = APP_LIFECYCLE_ACTIONS.find((choice) => choice === body?.action);
+        if (!action) {
+            return refuse(
+                400,
+                'invalid_action',
+                `action must be one of ${APP_LIFECYCLE_ACTIONS.join(', ')}.`,
+            );
+        }
+        const deleteData = action === 'remove' && body?.deleteData === true;
+        if (deleteData && text(body?.confirmSlug) !== text(work.slug)) {
+            return refuse(
+                422,
+                'CONFIRM_SLUG_MISMATCH',
+                'Type the App Work slug to confirm that its stored data is deleted too.',
+            );
+        }
+
+        const state = await this.readState(work.id);
+        if (state?.deletionRequestedAt) {
+            return refuse(409, 'APP_WORK_DELETING', 'This App Work is being deleted.');
+        }
+        const lockId = text(state?.deployLockId);
+        if (action === 'cancel-deploy' && !lockId) {
+            return refuse(
+                409,
+                'no_deploy_in_progress',
+                'No Deployment of this App Work is running.',
+            );
+        }
+
+        const requestId = randomUUID();
+        const dispatched = await this.dispatchOp({
+            op: action,
+            workId: work.id,
+            userId,
+            requestId,
+            ...(action === 'remove' ? { deleteData } : {}),
+            ...(action === 'cancel-deploy' ? { deploymentId: lockId } : {}),
+        });
+        return { ok: true, httpStatus: 202, requestId, dispatched, action };
     }
 
     /* ---------------------------------------------------------------------- *
@@ -506,6 +674,7 @@ export class AppTargetService {
         workId: string;
         userId?: string | null;
         requestId?: string;
+        [key: string]: unknown;
     }): Promise<boolean> {
         if (!this.ops?.dispatch) {
             this.logger.warn(
@@ -524,6 +693,76 @@ export class AppTargetService {
                 `Dispatching ${payload.op} for ${payload.workId} failed: ${messageOf(error)}`,
             );
             return false;
+        }
+    }
+
+    /**
+     * The recent operations, newest first: every recent Deployment row (a `rollback` trigger is a
+     * rollback, anything else a deploy) plus the runtime row's pause / removal / deletion facts.
+     */
+    private async recentOps(
+        workId: string,
+        row: AppTargetStateRow | null,
+    ): Promise<AppStatusOpEntry[]> {
+        const entries: AppStatusOpEntry[] = [];
+        let rows: Array<Record<string, unknown>> = [];
+        try {
+            rows = ((await this.deployments?.findByWork?.(workId, {
+                limit: APP_STATUS_OPS_LIMIT,
+            })) ?? []) as unknown as Array<Record<string, unknown>>;
+        } catch {
+            rows = [];
+        }
+        for (const deployment of rows) {
+            const trigger = text(deployment.appTrigger);
+            const lastError = text(deployment.lastError);
+            entries.push({
+                kind: trigger === 'rollback' ? 'rollback' : 'deploy',
+                state: opStateOf(String(deployment.state ?? '')),
+                at: iso(
+                    (deployment.completedAt ?? deployment.startedAt ?? deployment.createdAt) as
+                        | Date
+                        | string
+                        | null,
+                ),
+                deploymentId: String(deployment.id),
+                ...(trigger ? { trigger } : {}),
+                ...(lastError ? { code: lastError.split(':')[0].slice(0, 60) } : {}),
+            });
+        }
+        if (row?.deletionRequestedAt) {
+            entries.push({ kind: 'delete', state: 'running', at: iso(row.deletionRequestedAt) });
+        }
+        if (row?.removedAt) entries.push({ kind: 'remove', state: 'done', at: iso(row.removedAt) });
+        if (row?.paused === true || row?.pausedAt) {
+            entries.push({ kind: 'pause', state: 'done', at: iso(row.pausedAt ?? null) });
+        }
+        return entries
+            .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
+            .slice(0, APP_STATUS_OPS_LIMIT);
+    }
+
+    /**
+     * T30's source offer, when it applies: APW-03's hosting eligibility says the licence carries
+     * the network-source-offer obligation and names a URL. `null` otherwise (no obligation, no
+     * URL, nothing deployed, or no licence service in this process).
+     */
+    private async sourceOfferFor(
+        workId: string,
+        target: AppDeployTarget,
+        live: { commitSha?: string | null } | null,
+    ): Promise<{ url: string } | null> {
+        if (!live || target === 'none' || !this.licenseGate?.evaluate) return null;
+        try {
+            const verdict = await this.licenseGate.evaluate({
+                workId,
+                target,
+                commitSha: text(live.commitSha) || null,
+            });
+            const offer = verdict?.sourceOffer;
+            return offer?.required && text(offer.url) ? { url: text(offer.url) } : null;
+        } catch {
+            return null;
         }
     }
 
@@ -638,4 +877,20 @@ function iso(value: Date | string | null | undefined): string | null {
 function messageOf(error: unknown): string {
     if (error instanceof Error) return error.message.slice(0, 300);
     return typeof error === 'string' ? error.slice(0, 300) : 'unknown error';
+}
+
+function opStateOf(state: string): AppStatusOpEntry['state'] {
+    switch (state) {
+        case 'READY':
+            return 'done';
+        case 'ERROR':
+        case 'TIMEOUT':
+        case 'ROLLED_BACK':
+            return 'failed';
+        case 'CANCELED':
+        case 'SUPERSEDED':
+            return 'cancelled';
+        default:
+            return 'running';
+    }
 }

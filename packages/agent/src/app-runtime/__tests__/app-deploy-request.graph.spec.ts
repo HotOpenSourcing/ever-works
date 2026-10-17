@@ -165,6 +165,8 @@ describe('AppDeployRequestModule — the §5.1 collaborators as the API composes
         expect(moduleRef.get(AppSpecAppliedListener, { strict: false })).toBeInstanceOf(
             AppSpecAppliedListener,
         );
-        expect(producer.events?.listeners(AppSpecAppliedEvent.EVENT_NAME)).toHaveLength(2);
+        // Three since APW-03 T42's `AppLicenseService` (imported here through `AppLicenseModule`) also
+        // listens, to re-evaluate the licence on a spec change.
+        expect(producer.events?.listeners(AppSpecAppliedEvent.EVENT_NAME)).toHaveLength(3);
     });
 });

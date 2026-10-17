@@ -139,6 +139,7 @@ import {
 } from '@ever-works/agent/database';
 import { AppEnvRuntimeSource } from '@ever-works/agent/app-env';
 import { AppsDomainDnsServiceImpl } from '@ever-works/agent/ever-works-providers';
+import { AppBuildPullTokenReader } from '@ever-works/agent/app-builds';
 // A0.10 (lane aw-deploy-2) — the dependency worker's rows, cipher, spec and re-dispatch.
 import {
     AppDependencyConfigCipherRelay,
@@ -711,6 +712,9 @@ export class TriggerInternalController implements OnModuleInit {
         // T47/T48 (lane aw-deploy-2) — the worker's `APPS_DOMAIN_DNS_SERVICE` (managed record removal).
         @Optional()
         private readonly appsDomainDnsService?: AppsDomainDnsServiceImpl,
+        // Lane aw-deploy-3 — the worker's pull credential reads the stored registry pull token.
+        @Optional()
+        private readonly appBuildPullTokenReader?: AppBuildPullTokenReader,
     ) {}
 
     onModuleInit() {
@@ -978,6 +982,10 @@ export class TriggerInternalController implements OnModuleInit {
                       removeRecord: (workId: string) =>
                           this.appsDomainDnsService!.removeRecord(String(workId)),
                   }
+                : undefined,
+            // Lane aw-deploy-3 — one read (`read(workId)`), the `PluginAllowlistReader` shape.
+            AppBuildPullTokenReader: this.appBuildPullTokenReader
+                ? { read: (workId: string) => this.appBuildPullTokenReader!.read(String(workId)) }
                 : undefined,
             AppDeployRequestService: this.appDeployRequestService,
             ...(this.workProposalsApiService

@@ -32,6 +32,8 @@ import type { AuthenticatedUser } from '../auth/types/auth.types';
  * PUT  /api/works/:id/app-target         → 200 AppTargetView | 422 APP_TARGET_REFUSED | 409 APP_WORK_DELETING
  * POST /api/works/:id/app-target/check   → 202 { status: 'accepted', requestId, dispatched }
  * GET  /api/works/:id/app-status         → 200 AppStatusView
+ * POST /api/works/:id/app-rollback       → 202 | 409 | 422 (the deploy answer)   (lane aw-deploy-3)
+ * POST /api/works/:id/app-lifecycle      → 202 { status, action, requestId }      (lane aw-deploy-3)
  * ```
  *
  * ## Access first (APW06-G06)
@@ -122,6 +124,83 @@ export class WorkAppRuntimeController {
     ): Promise<AppStatusBody> {
         await this.authorize(id, auth.userId, 'view');
         return this.targets.getStatus(id);
+    }
+
+    /**
+     * Lane aw-deploy-3 — `POST :id/app-rollback` (plan §9.1, FR-34): roll back to an earlier Live
+     * Deployment. Answers with the deploy request's own status (`202`, `409`, `422`, `503`) and
+     * the same body shape as `POST :id/deploy`.
+     */
+    @Post(':id/app-rollback')
+    @Throttle({ long: { limit: 10, ttl: 60_000 } })
+    @ApiOperation({ summary: 'Roll an App Work back to an earlier Live Deployment' })
+    @ApiParam({ name: 'id', description: 'Work ID' })
+    async rollbackApp(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() body: { deploymentId?: unknown; runPreDeployJobs?: unknown },
+        @Res({ passthrough: true }) response: StatusOnlyResponse,
+    ): Promise<Record<string, unknown>> {
+        await this.authorize(id, auth.userId, 'edit');
+        const answer = await this.targets.rollback(id, auth.userId, body ?? {});
+        if ('refusal' in answer) throw refusalException(answer.refusal);
+        const result = (
+            answer as unknown as { result: Record<string, unknown> & { httpStatus: number } }
+        ).result;
+        response.status(result.httpStatus);
+        const notices = (list: unknown) =>
+            (Array.isArray(list) ? list : []).map(
+                (entry: { code?: unknown; message?: unknown }) => ({
+                    code: String(entry?.code ?? ''),
+                    message: String(entry?.message ?? ''),
+                }),
+            );
+        return {
+            status: result.status,
+            code: result.code,
+            deploymentId: result.deploymentId,
+            queuedDeploymentId: result.queuedDeploymentId,
+            runningDeploymentId: result.runningDeploymentId,
+            dispatched: result.dispatched,
+            deduplicated: result.deduplicated,
+            unmet: notices(result.unmet),
+            advisory: notices(result.advisory),
+            warnings: notices(result.warnings),
+        };
+    }
+
+    /**
+     * Lane aw-deploy-3 — `POST :id/app-lifecycle` (plan §9.1): `{ action: 'pause' | 'resume' |
+     * 'remove' | 'cancel-deploy', deleteData?, confirmSlug? }`, run by the isolated worker as an
+     * `app-cluster-op`. `deleteData` requires `confirmSlug === work.slug`.
+     */
+    @Post(':id/app-lifecycle')
+    @Throttle({ long: { limit: 5, ttl: 60_000 } })
+    @ApiOperation({
+        summary: 'Pause, resume, remove or cancel the running Deployment of an App Work',
+    })
+    @ApiParam({ name: 'id', description: 'Work ID' })
+    async lifecycleApp(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Body() body: { action?: unknown; deleteData?: unknown; confirmSlug?: unknown },
+        @Res({ passthrough: true }) response: StatusOnlyResponse,
+    ): Promise<{ status: 'accepted'; action: string; requestId: string; dispatched: boolean }> {
+        const access = await this.authorize(id, auth.userId, 'edit');
+        const answer = await this.targets.lifecycle(
+            { id, slug: (access.work as { slug?: string | null }).slug ?? null },
+            auth.userId,
+            body ?? {},
+        );
+        if ('refusal' in answer) throw refusalException(answer.refusal);
+        const accepted = answer as { requestId: string; dispatched: boolean; action: string };
+        response.status(HttpStatus.ACCEPTED);
+        return {
+            status: 'accepted',
+            action: accepted.action,
+            requestId: accepted.requestId,
+            dispatched: accepted.dispatched,
+        };
     }
 
     /** `view`/`edit` access to a visible App Work, or the one refusal each failure gets. */

@@ -308,11 +308,6 @@ const EXPECTED_REMOTE_MISSES: readonly Expected[] = [];
  */
 const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
     {
-        key: 'AppDependencyProvisionWorkerModule :: APP_DEPENDENCIES_SERVICE',
-        reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE` row for the reason.",
-        source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:112 (A0.10, the TriggerAppRuntimeModule import)',
-    },
-    {
         key: 'AppDependencyProvisionWorkerModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY',
         reason: "Not this task's own gap: since A0.10 (lane aw-deploy-2) the dependency worker imports `TriggerAppRuntimeModule` for T20's facade and the worker context, and walks its graph — see the `TriggerAppRuntimeModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY` row for the reason.",
         source: 'packages/tasks/src/tasks/trigger/app-dependency-provision.task.ts:112 (A0.10, the TriggerAppRuntimeModule import)',
@@ -346,11 +341,6 @@ const EXPECTED_WORKER_UNBOUND: readonly Expected[] = [
         key: 'AppUpstreamSyncWorkerModule :: ActivityLogService',
         reason: 'The worker has no `ActivityLogService` and no database module; the sync outcome is settled on the row through the state-service proxy, but its `app.upstream.*` / `app.actions.*` Activity rows are not written from the worker.',
         source: 'packages/tasks/src/trigger/worker/modules/trigger-worker.module.ts:161-163 (no ActivityLogService in worker scope)',
-    },
-    {
-        key: 'TriggerAppRuntimeModule :: APP_DEPENDENCIES_SERVICE',
-        reason: "APW-07's service must run in the worker, and its `@InjectRepository(WorkAppDependency)` writes cannot cross the internal channel.",
-        source: 'docs/specs/features/app-works/APW-06-app-runtime/tasks.md:1324 (APW-06 T71 status, owner ruling C44); packages/tasks/src/trigger/worker/modules/trigger-app-runtime.module.ts:170-172',
     },
     {
         key: 'TriggerAppRuntimeModule :: APP_DEPLOY_DISPATCHER_AVAILABILITY',
