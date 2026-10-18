@@ -1,7 +1,9 @@
 import {
     MERGE_POLICY_FIELDS,
+    MERGE_POLICY_PROTECTED_BRANCH_FLOOR,
     MERGE_POLICY_SCOPE_PRECEDENCE,
     PLATFORM_DEFAULT_MERGE_POLICY,
+    mergeTargetNeedsFloorApproval,
     sanitizeMergePolicyOverride,
     type GateStatus,
     type MergeDecision,
@@ -190,6 +192,25 @@ export function evaluateAgentMerge(ctx: MergeDecisionContext): MergeDecision {
                 `Branch '${protectedMatch}' is protected by the effective merge policy — an agent may not merge into it.`,
             );
         }
+    }
+
+    // The protected-branch FLOOR (works-security lane 3a). A scope that
+    // removed `main` / `master` / `develop` / `stage` from its protected list
+    // (or protects nothing) still cannot have an agent land on one of them
+    // unattended: the merge needs a recorded human approval whatever
+    // `requireHumanApproval` resolved to. An unknown base is judged as the
+    // worst case. Listed as protected, the branch was already refused above.
+    if (!ctx.humanApproved && mergeTargetNeedsFloorApproval(ctx.targetBranch)) {
+        const target = ctx.targetBranch?.trim();
+        return deny(
+            target ? 'human-approval-required' : 'target-branch-unknown',
+            target
+                ? `Branch '${target}' is on the platform's protected-branch floor (${MERGE_POLICY_PROTECTED_BRANCH_FLOOR.join(
+                      ', ',
+                  )}). A scope may let agents merge into it, but only with a recorded human approval.`
+                : 'The pull request target branch could not be determined, and it may be one of the ' +
+                      "platform's protected-branch floor — refusing without a recorded human approval.",
+        );
     }
 
     const method: MergeMethod = ctx.mergeMethod ?? 'merge';

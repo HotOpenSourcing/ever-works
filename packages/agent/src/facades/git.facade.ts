@@ -76,7 +76,7 @@ import { WorkRepository } from '../database/repositories/work.repository';
 import { GitHubAppInstallationRepository } from '../database/repositories/github-app-installation.repository';
 import { MERGE_POLICY_ENFORCER, type MergePolicyEnforcer } from '../policy/merge-policy.enforcer';
 import { MERGE_APPROVAL_VERIFIER, type MergeApprovalVerifier } from '../policy/merge-approval.port';
-import { normalizeCommitSha } from '@ever-works/contracts';
+import { mergeTargetNeedsFloorApproval, normalizeCommitSha } from '@ever-works/contracts';
 import type { AuthAccount } from '../entities/auth-account.entity';
 import { FacadeError } from './base.facade';
 import { config } from '@src/config';
@@ -1259,6 +1259,22 @@ export class GitFacadeService implements IGitFacade {
                 },
                 options.providerId,
             );
+        }
+
+        // (2b) The protected-branch FLOOR (works-security lane 3a). An
+        // operator's `requireHumanApproval: false` skips the approval for
+        // ordinary branches only: a merge whose base is `main` / `master` /
+        // `develop` / `stage` — or whose base nobody can name — still needs a
+        // recorded human approval, so a Work-level policy that also emptied
+        // `protectedBranches` cannot land an agent's pull request on the
+        // default branch unattended. Raise-only, exactly like
+        // `agentActor.requireHumanApproval`; the matrix below applies the same
+        // rule a second time.
+        if (!requiresApproval) {
+            const base = agentActor.targetBranch ?? live.baseRef ?? null;
+            if (mergeTargetNeedsFloorApproval(base)) {
+                requiresApproval = true;
+            }
         }
 
         // (3) The approval gate, which IS skipped when the effective policy

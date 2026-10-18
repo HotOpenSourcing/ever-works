@@ -97,6 +97,50 @@ export const PLATFORM_DEFAULT_MERGE_POLICY: MergePolicy = Object.freeze({
 	protectedBranches: ['main', 'master', 'develop', 'stage']
 }) as MergePolicy;
 
+/**
+ * The protected-branch FLOOR (works-security lane 3a, 2026-10-18).
+ *
+ * A scope may still list `protectedBranches: []` — the resolution is
+ * field-by-field and an explicit empty list keeps meaning "protect nothing"
+ * for every OTHER branch. What it can no longer do is make an agent merge
+ * into one of these four branches happen silently: a merge whose base is on
+ * the floor (or whose base cannot be determined) needs a recorded HUMAN
+ * approval whatever `requireHumanApproval` resolved to. Listed in
+ * `protectedBranches`, a floor branch stays refused outright, as before.
+ *
+ * Why a floor that converts to "approval required" rather than an absolute
+ * refusal: the release promotion lane merges INTO `stage` and `main` (always
+ * with a recorded approval), and refusing those outright would remove it.
+ * What the floor closes is the unattended path — a Work-level policy of
+ * `{ allowAgentMerge: true, requireHumanApproval: false, protectedBranches: [] }`
+ * written by anyone (or anything) that can update the Work would otherwise
+ * let green CI land an agent's pull request on the default branch with no
+ * person ever deciding.
+ */
+export const MERGE_POLICY_PROTECTED_BRANCH_FLOOR: readonly string[] = Object.freeze([
+	'main',
+	'master',
+	'develop',
+	'stage'
+]);
+
+/**
+ * Whether a merge into `ref` needs a recorded human approval because of the
+ * {@link MERGE_POLICY_PROTECTED_BRANCH_FLOOR}. An unknown or blank base
+ * answers `true` — a target nobody can name is judged as the worst case.
+ * `refs/heads/` is stripped and the comparison is case-insensitive, the same
+ * normalisation the protected-branch rule uses.
+ */
+export function mergeTargetNeedsFloorApproval(ref: string | null | undefined): boolean {
+	if (typeof ref !== 'string') return true;
+	const normalized = ref
+		.trim()
+		.replace(/^refs\/heads\//i, '')
+		.toLowerCase();
+	if (!normalized) return true;
+	return MERGE_POLICY_PROTECTED_BRANCH_FLOOR.includes(normalized);
+}
+
 /** Every field name of {@link MergePolicy}; the deep-merge iterates this. */
 export const MERGE_POLICY_FIELDS: readonly (keyof MergePolicy)[] = [
 	'allowAgentMerge',

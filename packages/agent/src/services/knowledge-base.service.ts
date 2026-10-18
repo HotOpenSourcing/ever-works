@@ -192,6 +192,15 @@ interface UpdateDocumentInput {
     language?: string;
     status?: KbDocumentStatus;
     class?: KbDocumentClass;
+    /**
+     * Works-security lane 3a — set ONLY by callers that write on behalf of a
+     * machine principal (a fleet-run token, an integration key). An edit such
+     * a caller makes re-enters the M7 review gate (`proposed`: out of context
+     * injection until a person accepts it again), so a prompt-injected run
+     * cannot rewrite an accepted document straight into every later prompt.
+     * Never read from a request body.
+     */
+    reviewState?: KbReviewState;
 }
 
 interface ListOptions {
@@ -4244,6 +4253,7 @@ export class KnowledgeBaseService {
         if (input.language !== undefined) patch.language = input.language;
         if (input.status !== undefined) patch.status = input.status;
         if (input.class !== undefined) patch.kbDocumentClass = input.class;
+        if (input.reviewState !== undefined) patch.reviewState = input.reviewState;
 
         if (input.body !== undefined) {
             patch.wordCount = this.countWords(input.body);
