@@ -106,6 +106,8 @@ const NODE_EXPORTS = [
 	'FLEET_DEFAULT_ENROLLMENT_TOKEN_TTL_MS',
 	'FLEET_DEFAULT_NODE_OFFLINE_AFTER_MS',
 	'FLEET_DEFAULT_MAX_CAPABILITY_TAGS',
+	// FL-02 — the pre-link 16-tag cap a newer node falls back to.
+	'FLEET_LEGACY_MAX_CAPABILITY_TAGS',
 	'FLEET_DEFAULT_MAX_CAPABILITY_TAG_LENGTH',
 	'FLEET_MAX_CAPABILITY_TAGS_CEILING',
 	'FLEET_MAX_CAPABILITY_TAG_LENGTH_CEILING',
@@ -387,6 +389,8 @@ const LINK_EXPORTS = [
 	'FLEET_LINK_FRAME_KINDS',
 	'isFleetLinkFrameKind',
 	'FLEET_LINK_MAX_CLIP_BYTES',
+	'FLEET_LINK_CREDIT_WINDOW_BYTES',
+	'FLEET_LINK_CREDIT_FAMILIES',
 	'FLEET_CONSENT_KEYS',
 	'FLEET_CONSENT_FLAGS',
 	'FLEET_NO_CONSENTS',
@@ -399,6 +403,9 @@ const LINK_EXPORTS = [
 	'FLEET_LINK_CONSENT_REQUIREMENTS',
 	'isFleetLinkConsentRequirement',
 	'FLEET_LINK_FAMILY_CONSENT',
+	'FLEET_LINK_VERB_CONSENT_OVERRIDES',
+	'fleetLinkVerbConsent',
+	'fleetLinkChannelOpenConsent',
 	'fleetConsentSatisfies',
 	'fleetConsentFlagsFor',
 	'fleetConsentMissingHint',
@@ -532,6 +539,8 @@ const FUNCTION_EXPORTS = [
 	'composeFleetTaskCommitMessage',
 	'classifyFleetChangedPaths',
 	'retypeFleetCommitMessage',
+	'fleetLinkVerbConsent',
+	'fleetLinkChannelOpenConsent',
 	'isFleetLinkFrameKind',
 	'normalizeFleetConsents',
 	'effectiveConsents',
@@ -583,7 +592,7 @@ describe('fleet barrel', () => {
 		expect(typeof bag[name]).toBe('function');
 	});
 
-	it('exposes exactly these 319 runtime symbols', () => {
+	it('exposes exactly these 325 runtime symbols', () => {
 		// Regression guard in BOTH directions: an `export *` line deleted from
 		// index.ts fails here, and a NEW runtime export added without a spec
 		// also fails here — which forces the author back to cover it.
@@ -638,11 +647,12 @@ describe('fleet barrel', () => {
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		// → 319 with the node link (FL-02): the sixty-two symbols of
-		// `fleet-link.types.ts`, the twenty-one of `fleet-link.codec.ts` and the
+		// → 325 with the node link (FL-02): the sixty-seven symbols of
+		// `fleet-link.types.ts`, the twenty-one of `fleet-link.codec.ts`, the
 		// three of `fleet-operations.types.ts` — three NEW modules, so the
-		// witness table below gains three rows.
-		expect(Object.keys(fleet)).toHaveLength(319);
+		// witness table below gains three rows — and the legacy tag cap in
+		// `fleet-node.types.ts`.
+		expect(Object.keys(fleet)).toHaveLength(325);
 	});
 
 	it.each([

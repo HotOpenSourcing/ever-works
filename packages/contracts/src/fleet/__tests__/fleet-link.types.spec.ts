@@ -22,7 +22,10 @@ import {
 	fleetConsentMissingHint,
 	fleetConsentSatisfies,
 	fleetConsentsDiffer,
+	fleetLinkChannelOpenConsent,
 	fleetLinkMachineVerbActionFamily,
+	fleetLinkVerbConsent,
+	FLEET_LINK_VERB_CONSENT_OVERRIDES,
 	isFleetLinkEligible,
 	isFleetLinkStateChangingFamily,
 	isFleetLinkVerb,
@@ -81,8 +84,19 @@ describe('channel families', () => {
 		expect(FLEET_LINK_FAMILY_CONSENT.desktop).toBe('attend');
 		expect(FLEET_LINK_FAMILY_CONSENT.clip).toBe('attend');
 		expect(FLEET_LINK_FAMILY_CONSENT.session).toBe('work-or-manage');
-		// R-31: health.now rides any open link, so the machine channel opens on the link alone.
-		expect(FLEET_LINK_FAMILY_CONSENT.machine).toBe('link');
+		expect(FLEET_LINK_FAMILY_CONSENT.machine).toBe('manage');
+	});
+
+	it('keeps the per-verb exceptions in one table: health.now on any link, every other verb manage (R-31)', () => {
+		expect(FLEET_LINK_VERB_CONSENT_OVERRIDES).toEqual({ 'health.now': 'link' });
+		expect(fleetLinkVerbConsent('health.now')).toBe('link');
+		expect(fleetLinkVerbConsent('services.list')).toBe('manage');
+		expect(fleetLinkVerbConsent('constructor')).toBe('manage');
+		expect(fleetLinkVerbConsent('__proto__')).toBe('manage');
+		// So the machine channel itself opens on any link; every other family needs its own consent to open.
+		expect(fleetLinkChannelOpenConsent('machine')).toBe('link');
+		expect(fleetLinkChannelOpenConsent('logs')).toBe('manage');
+		expect(fleetLinkChannelOpenConsent('desktop')).toBe('attend');
 	});
 
 	it('audits a command channel on open and never a logs channel (ACC-FL02-11)', () => {

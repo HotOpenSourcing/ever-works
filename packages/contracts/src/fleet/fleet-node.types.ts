@@ -900,8 +900,24 @@ export const FLEET_DEFAULT_NODE_OFFLINE_AFTER_MS = 5 * 60_000;
  */
 export const FLEET_DEFAULT_NODE_OFFLINE_NOTICE_AFTER_MS = 30 * 60_000;
 
-/** Default cap on how many capability tags one node may advertise. */
-export const FLEET_DEFAULT_MAX_CAPABILITY_TAGS = 16;
+/**
+ * Default cap on how many capability tags one node may advertise.
+ *
+ * 32 since the Fleet node link (FL-02): the program's consent tags
+ * (`managed`, `logs`, `services`, `ports`, `files`, …, CONTRACTS §1.2) would
+ * otherwise push a fully equipped machine's last tags off the end of a
+ * 16-tag list. A node talking to a platform still capped at
+ * {@link FLEET_LEGACY_MAX_CAPABILITY_TAGS} (an older build, or an operator's
+ * explicit `FLEET_MAX_CAPABILITY_TAGS=16`) is answered 400 and retries its
+ * beat with the first 16 tags, so a raised cap never takes a node offline.
+ */
+export const FLEET_DEFAULT_MAX_CAPABILITY_TAGS = 32;
+
+/**
+ * The cap every platform before FL-02 enforced by default. What a node falls
+ * back to when a platform 400s a longer tag list.
+ */
+export const FLEET_LEGACY_MAX_CAPABILITY_TAGS = 16;
 
 /** Default cap on the length of a single capability tag. */
 export const FLEET_DEFAULT_MAX_CAPABILITY_TAG_LENGTH = 32;

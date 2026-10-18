@@ -219,6 +219,17 @@ export function isFleetLinkFrameKind(value: unknown): value is FleetLinkFrameKin
 /** Largest clipboard text a `CLIP` frame may carry (CONTRACTS §10). */
 export const FLEET_LINK_MAX_CLIP_BYTES = 256 * 1024;
 
+/**
+ * Flow control for bulk channels (CONTRACTS §3.2 `ACK`, §10 file transfer):
+ * a sender on a credit family starts with this many bytes of `DATA` credit
+ * and may send more only as the receiver returns `ACK [bytes u32]`. One
+ * bulk transfer therefore never fills the link a terminal shares.
+ */
+export const FLEET_LINK_CREDIT_WINDOW_BYTES = 8 * 1024 * 1024;
+
+/** Families whose `DATA` is credit-controlled. */
+export const FLEET_LINK_CREDIT_FAMILIES: readonly FleetLinkFamily[] = ['files', 'logs'];
+
 // ─── Consents (CONTRACTS §1.1) ──────────────────────────────────────────────
 
 /**
@@ -359,22 +370,47 @@ export function isFleetLinkConsentRequirement(value: unknown): value is FleetLin
 	return typeof value === 'string' && (FLEET_LINK_CONSENT_REQUIREMENTS as readonly string[]).includes(value);
 }
 
-/**
- * The consent each family needs to OPEN a channel. The `machine` family
- * opens on any link and checks each verb's own requirement instead
- * (CONTRACTS §2.1, R-31).
- */
+/** The consent each family needs (CONTRACTS §3.3). */
 export const FLEET_LINK_FAMILY_CONSENT: Readonly<Record<FleetLinkFamily, FleetLinkConsentRequirement>> = {
 	session: 'work-or-manage',
 	desktop: 'attend',
 	logs: 'manage',
-	machine: 'link',
+	machine: 'manage',
 	files: 'manage',
 	command: 'manage',
 	schedule: 'manage',
 	tunnel: 'manage',
 	clip: 'attend'
 };
+
+/**
+ * Per-verb consent exceptions on the `machine` family (CONTRACTS §3.3, R-31):
+ * the family needs `manage`, except the verbs listed here. The ONE place a
+ * later epic adds an exception — never a branch in code, on the platform or
+ * on the node.
+ */
+export const FLEET_LINK_VERB_CONSENT_OVERRIDES: Readonly<Record<string, FleetLinkConsentRequirement>> = {
+	/** A read allowed on any open link. */
+	'health.now': 'link'
+};
+
+/** The consent one `machine` verb needs: its exception, else the family's. */
+export function fleetLinkVerbConsent(verb: string): FleetLinkConsentRequirement {
+	return Object.prototype.hasOwnProperty.call(FLEET_LINK_VERB_CONSENT_OVERRIDES, verb)
+		? FLEET_LINK_VERB_CONSENT_OVERRIDES[verb]
+		: FLEET_LINK_FAMILY_CONSENT.machine;
+}
+
+/**
+ * The consent needed to OPEN a channel of `family`. The family's own
+ * requirement — except `machine`, which opens on any link whenever a verb
+ * exception exists, because each of its requests is checked against its
+ * verb's consent instead (a `--work`-only node still answers `health.now`).
+ */
+export function fleetLinkChannelOpenConsent(family: FleetLinkFamily): FleetLinkConsentRequirement {
+	if (family === 'machine' && Object.keys(FLEET_LINK_VERB_CONSENT_OVERRIDES).length > 0) return 'link';
+	return FLEET_LINK_FAMILY_CONSENT[family];
+}
 
 /** True when `consents` satisfy `requirement`. */
 export function fleetConsentSatisfies(
