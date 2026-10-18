@@ -429,10 +429,31 @@ export class AgentRepository {
             const unset = await this.repository.update({ id, contentHash: IsNull() }, data);
             if ((unset.affected ?? 0) > 0) return true;
             const empty = await this.repository.update({ id, contentHash: '' }, data);
-            return (empty.affected ?? 0) > 0;
+            if ((empty.affected ?? 0) > 0) return true;
+            return this.holdsRewrittenHash(id, expectedHash, data);
         }
         const result = await this.repository.update({ id, contentHash: expectedHash }, data);
-        return (result.affected ?? 0) > 0;
+        if ((result.affected ?? 0) > 0) return true;
+        return this.holdsRewrittenHash(id, expectedHash, data);
+    }
+
+    /**
+     * Review of #2769 — writing back the very content a row already holds
+     * (new hash === expected hash) changes nothing, and MySQL reports 0
+     * affected rows for an UPDATE that changes nothing: that is not a lost
+     * race. When the write is such a no-op, success is decided by the row
+     * still holding the expected hash; any other 0 stays a mismatch.
+     */
+    private async holdsRewrittenHash(
+        id: string,
+        expectedHash: string,
+        data: Partial<Agent>,
+    ): Promise<boolean> {
+        if (data.contentHash === undefined || (data.contentHash ?? '') !== expectedHash) {
+            return false;
+        }
+        const current = await this.repository.findOne({ where: { id } });
+        return current !== null && (current.contentHash ?? '') === expectedHash;
     }
 
     async archiveById(id: string): Promise<void> {
