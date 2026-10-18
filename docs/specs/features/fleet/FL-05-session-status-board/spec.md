@@ -70,7 +70,7 @@ The **Sessions board** is the owner's view of every session across the fleet: fo
 | "Did it finish, or just go quiet?"                               | Read the terminal.                                                                                                              | There is no evidence model: a Run is `completed` when its process reports, and nothing distinguishes "the CLI is waiting for my next prompt" from "nothing has happened for an hour". The platform-raised `attentionReason` covers lifecycle problems (`queued-too-long`, `stale-parked`) only (`agent-run.entity.ts:361-374`). |
 | "Tell me when it needs me."                                      | Nothing for sessions.                                                                                                           | Notification events exist for `inbox_question`, `agent_run_finished` and `agent_run_escalated` (`packages/agent/src/notifications/core-event-catalogue.ts:121-181`) — all Run- or Inbox-shaped. No event names a session, a tool permission, or an outcome. |
 | "Answer it without a terminal."                                  | Reply in the Inbox — for a parked fleet Run only.                                                                               | The Inbox reply restarts a parked Run on the same branch (`packages/agent/src/inbox/inbox.service.ts:151-161`, `393-416`); it cannot type into a live process. The HITL question shapes exist (`packages/contracts/src/hitl/hitl-question.types.ts:32-105`) and are unused by anything interactive.                            |
-| "Show me everything that is running and what needs me."          | Open Activity → Runs, filter `attention=1`.                                                                                     | The Runs ledger is a calendar of executions with receipts (`apps/web/src/app/[locale]/(dashboard)/activity/activity-views.ts:9-20`); there is no board, no state columns, and a session is not a Run. `ACTIVITY_VIEWS` is `log · runs · feed · schedules`.                                                                    |
+| "Show me everything that is running and what needs me."          | Open Activity → Runs, filter `attention=1`; or `/agents/activity`, whose list is already labelled "sessions" but has one row per **Run** (`AgentSessionsClient`, polling every 10 s — EXISTING-SUBSTRATE §3.3). | The Runs ledger is a calendar of executions with receipts (`apps/web/src/app/[locale]/(dashboard)/activity/activity-views.ts:9-20`); there is no board, no state columns (the only boards are Tasks and Works — EXISTING-SUBSTRATE §3.5), and a `FleetSession` is not a Run. `ACTIVITY_VIEWS` is `log · runs · feed · schedules`. The existing Run-based list at `/agents/activity` stays exactly as it is; this epic adds a view beside it and renames nothing. |
 | "What is the agent's own status?"                                | Nothing.                                                                                                                        | Fleet Claude Code runs carry a strict MCP configuration and a permission mode (`apps/node/src/core/executors/model-cli.ts:563,638-672`) but **no hooks**: no settings overlay is generated anywhere in `apps/node`, and the node has no loopback endpoint except the MCP bridge (`apps/node/src/core/executors/mcp-bridge.ts:7-32`), which proxies tool calls, not status. |
 | "Which machine needs a look?"                                    | Read the hub's "needs a look" list (FL-01).                                                                                      | Its producers are health, runners, schedules and cloud (CONTRACTS R-23); nothing produces a "waiting for you" row for a session.                                                                                                                                                                                                  |
 
@@ -150,7 +150,7 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 - **S13 — An Agent asks what another session is asking.**
   **Given** Ops has `fleet_sessions_question`,
   **when** Ops calls it on Nina's session,
-  **then** Ops receives the prompt and the options as text; Ops cannot answer a **permission** prompt (people only) and may answer a **question** only when its grants allow `fleet_sessions_answer`.
+  **then** Ops receives the prompt and the options as text; Ops cannot answer a **permission** prompt (people only) and may answer a **question** only when Ops's owner switched on "may answer other sessions" for Ops (CONTRACTS R-32) and its grants allow `fleet_sessions_answer`.
 
 ### 3.2 Unhappy paths, races, denials and empty states
 
@@ -194,7 +194,7 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 
 - **U11 — Codex owner session with the person's own notify.**
   **Given** the person's Codex configuration already names a notify command,
-  **then** the node's per-session override replaces it for this session only and the detail says so — _"Your own Codex notify command is not run in this session"_ (see §8b).
+  **then** the node's per-session override replaces it for this session only and the detail says so — _"Your own Codex notify command is not run in this session"_ (CONTRACTS R-6).
 
 - **U12 — Done at a session boundary.**
   **Given** a session resumes and its CLI fires a stop hook within 5 s of its start hook with no prompt in between,
@@ -251,7 +251,7 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 - **FR-8** For a Codex owner session the node MUST pass a per-session notify override on the command line; for a Codex Agent session it MUST place the notify configuration in the session's private home overlay; the person's Codex configuration MUST NOT be written.
 - **FR-9** The overlay MUST be written to a per-session scratch directory readable only by the user and MUST be removed when the session ends.
 - **FR-10** The overlay MUST omit hooks the installed CLI version does not support, and the session MUST then say that status for those events comes from the screen.
-- **FR-11** The node MUST record which hooks a session has (`hooks: full · partial · none`) so every surface can label the status source.
+- **FR-11** The node MUST record what it injected for a session — the session's `hooks { provider, injected, events[] }` (CONTRACTS §4.2) — and every surface MUST label the status source from it: _from the CLI's hooks_ when every relied-on event is present, _partly from the screen_ when some are missing, _from the screen_ when none was injected.
 
 ### 4.3 P1 — States, outcome, evidence
 
@@ -261,12 +261,12 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 - **FR-15** A process exit while `working` MUST set `outcome` from the exit evidence — `success` on exit 0 with a stop hook or a clean exit, `failure` on non-zero, `unconfirmed` when the daemon lost the process without a code — and then `ended (exit)`.
 - **FR-16** A stop hook MUST set `done · success`; a prompt-submitted hook MUST set `working`; a permission or question hook MUST set `needs_you` with the matching reason; a session-end hook MUST set `ended`.
 - **FR-17** Ctrl-C or an interrupt reported by the CLI MUST set outcome `interrupted`; a platform-side end MUST set `cancelled`.
-- **FR-18** Each state change MUST record when it happened, so columns order most-recently-moved first.
+- **FR-18** Each state change MUST record when it happened (`stateChangedAt`, CONTRACTS §4.2) and the evidence that caused it (`lastEvidence { source, at, detail }`), so columns order most-recently-moved first and every surface can say why a state was set.
 - **FR-19** A shell session MUST only ever be `working`, `idle` or `ended`.
 
 ### 4.4 P1 — The session card (R-22, CONTRACTS §4.8)
 
-- **FR-20** The card MUST show, in this order: header — agent or shell icon (who) · title · state glyph (what state); body — the last user line and the last agent line (2-line clamp, redacted) or the attention prompt in an amber box; footer — computer · checkout/branch (git line slot, FL-06) · elapsed (since finish when done, else since start) · cost chip when known (FL-20) · PR pill (FL-06) · Task link (FL-15).
+- **FR-20** The card MUST show, in this order: header — agent or shell icon (who) · title · state glyph (what state); body — the last user line and the last agent line (2-line clamp, redacted) or the attention prompt in an amber box; footer — the CONTRACTS §4.8 slots in their order: `computer` · `gitLine` (FL-06) · `prPill` (FL-06) · `taskChip` (FL-15) · `elapsed` (since finish when done, else since start) · `cost` (FL-20, when known) · `cleanUp` (FL-06). An empty slot renders nothing; no epic adds a slot outside this list.
 - **FR-21** Tint MUST be warm for `needs_you`, green for `done · success`, and neutral for everything else; an unread card MUST show a bold title, not a badge.
 - **FR-22** The glyph vocabulary MUST be: working — spinner ring; needs you (permission/question) — question bubble; blocked/failed — red dot; done — green check; interrupted — muted dot; unconfirmed — dashed ring; idle — grey dot; shell — none.
 - **FR-23** The card MUST carry **Open**, **Rename**, **End** and, when applicable, **Answer** and **Open the Run**, and MUST say which status source it uses when it is not hooks.
@@ -277,11 +277,12 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 - **FR-25** The key MUST be the identity for the card badge, the computer-page row, the Inbox item, the Decision, the "needs a look" row and the notification; delivery MUST deduplicate on it.
 - **FR-26** `acknowledgedAt < raisedAt` MUST mean unread; opening the session detail MUST acknowledge (clearing unread, not the attention); a key acknowledged once MUST never re-flag for the same edge.
 - **FR-27** Reasons `question` and `permission` MUST create (or update, by key) **one** Inbox item of kind question or approval that **is** the Decision shown in My Decisions, carrying the computer, the session title, the provider and the options; reasons `blocked` and `failed` MUST create an Inbox notice only (CONTRACTS R-12).
+- **FR-27a** A session's Decision MUST expire when the session ends, and after 24 hours unanswered MUST be marked stale — never answered automatically (CONTRACTS R-12).
 - **FR-28** Answering from the card, the detail, the Inbox, My Decisions, an Agent tool or the CLI MUST send one `session.answer { key, answer }` to the node, which MUST type the answer in the form the CLI expects (option number and Enter; Allow/Deny keys; free text and Enter), and MUST clear the attention everywhere within 2 s.
 - **FR-29** A second answer for an already-cleared key MUST be refused `invalid` with _"Already answered"_; an answer while the node is unreachable MUST be refused `unreachable` and MUST leave the prompt in place.
-- **FR-30** Permission prompts MUST be answerable by people only; an Agent tool answering a permission prompt MUST be refused `permission_denied` with that hint.
-- **FR-31** The approval card MUST offer Allow and Deny with the first option primary and **Esc** as Deny on the detail page; the question card MUST offer numbered options, free text, and MUST treat **Esc** as "keep the prompt"; both MUST replace the composer while pending and MUST restore it when cleared.
-- **FR-32** The `session-needs-you` producer MUST register with the hub's "needs a look" registry and MUST emit one row per session in `needs_you` (severity `warn`, action **Answer**) and one row per Node whose sessions ended `unconfirmed` in the last hour.
+- **FR-30** Permission prompts MUST be answerable by people only; an Agent tool answering a permission prompt MUST be refused `permission_denied` with that hint. An Agent MAY answer another session's **question** only when its owner switched on "may answer other sessions" for that Agent (CONTRACTS R-32); otherwise it MUST be refused `permission_denied` naming the setting.
+- **FR-31** The approval card MUST offer exactly the options the CLI showed — read from the hook payload or the rule's key map (CONTRACTS §5.2) — with the first option primary and **Esc** as the CLI's deny option on the detail page; the question card MUST offer numbered options, free text, and MUST treat **Esc** as "keep the prompt"; both MUST replace the composer while pending and MUST restore it when cleared.
+- **FR-32** The `session-needs-you` producer MUST register with the hub's "needs a look" registry and MUST emit one row per session in `needs_you` (severity `warn`, action **Answer**) and one row per Node whose sessions ended `unconfirmed` in the last hour (severity `info`, action **Open**; emitted under the `session-needs-you` kind until CONTRACTS §4.6 names a kind for it — §8b).
 
 ### 4.6 P2 — The rules file
 
@@ -294,7 +295,7 @@ Nothing is removed or renamed (README rule 1). `AgentRun.status`, `awaitingInput
 
 - **FR-37** Three notification events MUST exist — session needs you, session finished, session failed — delivered through the existing notification service and channel plugins, respecting AW-13 budgets and quiet hours.
 - **FR-38** Wording MUST derive from state and outcome: _"<Who> needs you on <computer> — <prompt>"_, _"<Who> finished on <computer> — <title>"_, _"<Who> failed on <computer> — <reason>"_; `interrupted` and `cancelled` MUST NOT notify.
-- **FR-39** Deliveries MUST deduplicate per subject (session + reason) within **5 s**, MUST NOT be sent for a session-boundary done (a stop within 5 s of a start or resume with no prompt in between), and MUST suppress the in-app toast while the recipient has that session's detail open.
+- **FR-39** Deliveries MUST deduplicate per subject (session + reason) within **5 s**, MUST NOT be sent for a session-boundary done (a stop inside the session's `boundaryUntil` window — 5 s after a start or resume with no prompt in between, CONTRACTS §4.2), and MUST suppress the in-app toast while the recipient has that session's detail open.
 - **FR-40** Shell sessions MUST never notify.
 
 ### 4.8 P3 — Board, lists, palette
@@ -436,7 +437,7 @@ Each card is a focusable article labelled _"<who>, <title>, <state in words>, on
 - **Reliability.** No hook event is lost across a node restart (endpoint file + spool); events are idempotent by sequence; a lost link never changes a state.
 - **Security & privacy.** The endpoint is loopback-only with a per-start token; hook payloads are redacted on the node before they leave it; prompts shown on cards are redacted; free-text answers are never written to audit or notifications; the node never writes a person's global CLI configuration.
 - **Observability.** Audit rows for answers; counters for hook events by source and outcome, spool depth, bad tokens, rule hits by rule id, notifications sent/deduped/suppressed.
-- **Compatibility.** Additive: new Inbox source type, new notification events, new Activity view, new `attention` column; nothing existing changes meaning.
+- **Compatibility.** Additive: new Inbox source type, new notification events, new Activity view, the five FL-05 columns of CONTRACTS §4.2; nothing existing changes meaning.
 
 ---
 
@@ -459,7 +460,7 @@ Each card is a focusable article labelled _"<who>, <title>, <state in words>, on
 
 | Act                              | Consent                 | Family / audience default | Confirmation | Audit                  | Errors                                                                                   | Agent tool                                                                 |
 | -------------------------------- | ----------------------- | ------------------------- | ------------ | ---------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Answer a question                | `manage` (owner) / `work` (Agent session) | `sessions` / owner | `plain`     | `node.session.answer`  | `not_found`, `invalid` (unknown option / already answered), `unreachable`, `kill_switch`, `permission_denied` | `fleet_sessions_answer` · destructive: true · `plain`                       |
+| Answer a question                | `manage` (owner) / `work` (Agent session) | `sessions` / owner | `plain` (the answer is the act) | `node.session.answer`  | `not_found`, `invalid` (unknown option / already answered), `unreachable`, `kill_switch`, `permission_denied` (incl. R-32 setting off) | `fleet_sessions_answer` · destructive: false · `confirm` (FL-19 catalogue §9.1) |
 | Answer a permission request      | same                    | `sessions` / owner        | `plain`      | `node.session.answer`  | same; Agents: `permission_denied` always                                                 | — (people only)                                                            |
 | Read what a session asks         | any                     | `sessions` / owner        | `plain`      | — (read)               | `not_found`, `permission_denied`                                                         | `fleet_sessions_question` · readOnly                                        |
 | Acknowledge (view)               | any                     | `sessions` / owner        | `plain`      | — (read)               | —                                                                                        | —                                                                          |
@@ -483,12 +484,20 @@ Kill switch (R-24): answers refused `kill_switch`; state and attention stay visi
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §4.2 lists attention but not when the state last changed; the board orders columns most-recently-moved first. Proposed: FL-05's slot adds stateChangedAt beside attention. Confirm.]`
-- `[NEEDS CLARIFICATION: Codex owner sessions — a per-session notify override replaces the person's own notify command for that session (U11). Alternative: wrap the person's command so both run. Proposed: replace, and say so on the detail, because wrapping would execute a user-configured command from a node-controlled script.]`
-- `[NEEDS CLARIFICATION: Should an Agent be allowed to answer another Agent's question (not permission) at all? Proposed: only with an explicit grant on fleet_sessions_answer and only for sessions in the same Organization; permission prompts stay human-only in every case.]`
-- `[NEEDS CLARIFICATION: "Done" cards stay on the board 24 h. Should the window be a per-user setting (4 h / 24 h / 7 d)?]`
-- `[NEEDS CLARIFICATION: Rules-file updates between node releases. Proposed: rules ship with the node only (no out-of-band fetch) so nothing executable or behaviour-changing is pulled at runtime; a stale rule is fixed by a node release. Confirm.]`
-- `[NEEDS CLARIFICATION: The Decision for a permission prompt lists Allow and Deny only. Claude Code's prompt also offers "allow for this session". Proposed: expose exactly the options the CLI shows, read from the hook payload, so the card never offers a choice the CLI would not accept.]`
+- **Resolved** by CONTRACTS §4.2 / §13: FL-05's slot `1796050000000-AddFleetSessionAttention` adds
+  `attention`, `stateChangedAt`, `hooks`, `lastEvidence` and `boundaryUntil` (FR-11, FR-18, FR-39).
+- **Resolved** by CONTRACTS R-6: for an owner Codex session the per-session `notify` override
+  replaces the person's own notify command for that session only, and the UI says so (U11); the
+  person's `CODEX_HOME` is kept; a `CODEX_HOME` overlay is used only for Agent sessions.
+- **Resolved** by CONTRACTS R-32: an Agent may answer another session's question only when its
+  owner switched on "may answer other sessions" on that Agent; permission prompts are human-only in
+  every case (FR-30).
+- **Resolved** by CONTRACTS §5.1: `done` cards stay on the board for 24 h, then the list; a
+  per-user window is out of scope.
+- `[NEEDS CLARIFICATION: Rules-file updates between node releases are the owner's call (CONTRACTS is silent). Default until answered: rules ship inside the node package only — no out-of-band fetch, so nothing behaviour-changing is pulled at runtime; a stale rule is fixed by a node release.]`
+- **Resolved** by CONTRACTS §5.2: a permission Decision exposes exactly the options the CLI showed
+  (FR-31), read from the hook payload or the rule's key map.
+- **Resolved** by CONTRACTS §4.6 (rev 3): kind `session-unconfirmed` (severity `info`) for sessions that ended without a result when their computer restarted.
 
 ---
 
@@ -515,10 +524,10 @@ Kill switch (R-24): answers refused `kill_switch`; state and attention stay visi
 
 - [ ] `ACC-FL05-12` (FR-24, FR-25) One key appears on the card, the row, the Inbox item, the Decision, the needs-a-look row and the notification for the same edge.
 - [ ] `ACC-FL05-13` (FR-26) Opening the detail clears unread but not the attention; the same edge never re-flags after acknowledgement.
-- [ ] `ACC-FL05-14` (FR-27) A permission creates one Decision of kind approval; a question one of kind question; a failure one notice.
+- [ ] `ACC-FL05-14` (FR-27, FR-27a) A permission creates one Decision of kind approval; a question one of kind question; a failure one notice; ending the session expires its Decision, and one left 24 h unanswered reads stale and is never auto-answered.
 - [ ] `ACC-FL05-15` (FR-28) Answering from the card, the detail, the Inbox, My Decisions and the CLI each types the expected keys into the session and clears everywhere within 2 s.
 - [ ] `ACC-FL05-16` (FR-29) A second answer is refused `invalid`; an answer with the link down is refused `unreachable` and the prompt stays.
-- [ ] `ACC-FL05-17` (FR-30) `fleet_sessions_answer` on a permission prompt is refused `permission_denied` with the hint.
+- [ ] `ACC-FL05-17` (FR-30) `fleet_sessions_answer` on a permission prompt is refused `permission_denied` with the hint; on another session's question it is refused unless the Agent's "may answer other sessions" setting is on.
 - [ ] `ACC-FL05-18` (FR-31) The approval card's first option is primary and Esc denies; the question card accepts a number or free text and Esc keeps the prompt; the composer returns when cleared.
 - [ ] `ACC-FL05-19` (FR-32) A session in `needs_you` produces one needs-a-look row with **Answer**; a Node with unconfirmed endings produces one row.
 - [ ] `ACC-FL05-20` (FR-33–FR-36) The Codex approval prompt in the fixture transcript raises `needs_you (permission)` with a key map; no rule can raise `done`; an invalid rules file fails node start validation with the rule id.
@@ -554,18 +563,18 @@ Kill switch (R-24): answers refused `kill_switch`; state and attention stay visi
 - [x] **II — Capability-driven resolution.** Channels are resolved by the notification facade; no channel id is hard-coded.
 - [x] **III — Source-of-truth repos.** No content enters the database beyond redacted prompt previews and option ids.
 - [x] **IV — Job runtime.** The idle-decay sweep and the "done leaves the board" housekeeping are scheduled tasks through the configured provider.
-- [x] **V — Forward-only migrations.** One additive migration from the FL-05 slot.
+- [x] **V — Forward-only migrations.** One additive migration from the FL-05 slot (the five CONTRACTS §4.2 columns).
 - [x] **VI — Tests.** Unit, controller, node and Playwright coverage named per phase in the plan, including transcript fixtures for the rules.
 - [x] **VII — Secrets.** Hook payloads and prompts are redacted on the node; free-text answers never reach audit or notifications; the endpoint token never leaves the machine.
 - [x] **VIII — Plugin counts.** No plugin is added.
 - [x] **IX — Behaviour-first.** This document names no class, file or endpoint except in §2's substrate citations.
-- [x] **X — Backwards compatibility.** Additive unions (Inbox source, notification events, Activity view), one nullable column, optional fields.
+- [x] **X — Backwards compatibility.** Additive unions (Inbox source, notification events, Activity view), five nullable columns, optional fields; the existing Run-based list at `/agents/activity` is untouched.
 
 ---
 
 ## 11. References
 
-- Program: [Fleet README](../README.md) (D4, D7, §2 "where sessions are seen") · [CONTRACTS](../CONTRACTS.md) (R-6, R-12, R-22, R-23, R-24; §4.6, §4.8, §5, §7, §8, §10, §11) · [CAPABILITY-MAP §B](../CAPABILITY-MAP.md) · [TRACKER](../TRACKER.md)
+- Program: [Fleet README](../README.md) (D4, D7, §2 "where sessions are seen") · [CONTRACTS](../CONTRACTS.md) (R-6, R-12, R-22, R-23, R-24, R-32; §3.3, §4.2, §4.6, §4.8, §5, §7, §8, §10, §11, §13) · [CAPABILITY-MAP §B](../CAPABILITY-MAP.md) · [TRACKER](../TRACKER.md)
 - Implementation plan: [`./plan.md`](./plan.md) · Task breakdown: [`./tasks.md`](./tasks.md)
 - Sibling epics: [FL-04 Sessions on computers](../FL-04-sessions-on-computers/spec.md) · [FL-01 Fleet hub](../FL-01-fleet-hub/spec.md) · [FL-06](../FL-06-session-git-actions/) · [FL-15](../FL-15-tasks-and-github/) · [FL-20](../FL-20-usage-and-cost/)
 - Agent Workspace: [AW-03 My Decisions](../../agent-workspace/AW-03-decision-queue/spec.md) · [AW-09 Runs & receipts](../../agent-workspace/AW-09-runs-receipts/spec.md) · [AW-13 Attention controls](../../agent-workspace/AW-13-attention-controls/spec.md)

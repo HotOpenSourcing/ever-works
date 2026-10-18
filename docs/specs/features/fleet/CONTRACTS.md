@@ -8,9 +8,15 @@ touches, so twenty specs written in parallel agree. Everything here is additive 
 schema and contracts (README rule 1). Where a value already exists in the codebase it is named as
 "existing" and must not be redefined.
 
-**Revision 2 (2026-10-18)** — incorporates the resolutions the epic drafts asked for (R-25…R-33,
+**Revision 2 (2026-10-18)** — incorporates the resolutions the epic drafts asked for (R-25…R-37,
 columns, families, messages, audit names, limits). Every epic's `[NEEDS CLARIFICATION: CONTRACTS
 change …]` that is answered here is closed by this revision; the epic text defers to it.
+
+**Revision 3 (2026-10-18)** — the audit of FL-01…FL-05: link control messages `link.pause|resume|drain`
+(§3.2), the per-verb consent exception for `health.now` (§3.3), heartbeat payload additions (§1.1),
+the `health` snapshot shape and hourly peaks (§4.5), `session-unconfirmed` (§4.6), column storage
+as `simple-json` text (§4 preamble), `costCents`/`tokens` ownership (§4.2), API and link rates
+(§10.1), the health route (R-7), and hub-tab route ownership (§11.1).
 
 ---
 
@@ -26,7 +32,7 @@ Rulings that settle questions more than one epic would otherwise answer differen
 | R-4  | **`FleetNode.kind` is unchanged** (`desktop-node · node · k8s`). Origin, parentage and provider are new columns (§4.1). `k8s` rows stay live-merged and never stored.                                                                                                                                                                                                                              | FL-01, 03, 16, 17    |
 | R-5  | **Owner sessions vs Agent sessions** (README D14). The start request names `kind`; the node refuses an Agent session without `--work` and an owner session without `--manage`. Agent sessions reuse the Task-run isolation code path unchanged; owner sessions add only the hook overlay.                                                                                                        | FL-04, 05, 19        |
 | R-6  | **Hooks are injected per session.** Claude Code: a generated settings file passed with `--settings`; Codex: `-c notify=[…]` plus a `CODEX_HOME` overlay only for Agent sessions (owner sessions keep their own `CODEX_HOME`; the per-session `notify` override replaces the person's own notify command for that session only, and the UI says so). The node never writes into `~/.claude/settings.json`, `~/.codex/config.toml` or any user-global file. | FL-04, 05 |
-| R-7  | **Relay bus.** With `REDIS_URL` set, every relay (computer, terminal, node link channels) publishes and subscribes on Valkey so any API replica can serve any viewer. Without it the API runs the existing per-process registries and `GET /api/health` reports `fleet_relay: single-replica`. `FLEET_RELAY_REQUIRE_BUS=true` makes a missing bus a boot-time configuration error (set it on every multi-replica deployment). | FL-02         |
+| R-7  | **Relay bus.** With `REDIS_URL` set, every relay (computer, terminal, node link channels) publishes and subscribes on Valkey so any API replica can serve any viewer. Without it the API runs the existing per-process registries and `GET /api/health/ready` reports `fleet_relay: single-replica`. `FLEET_RELAY_REQUIRE_BUS=true` makes a missing bus a boot-time configuration error (set it on every multi-replica deployment). | FL-02         |
 | R-8  | **Native helper admission** (README D3). Admission levels `hash-pinned` (owner acknowledgement recorded on the node and in `fleet_audit`) and `signed`. The node reports `helperTrust: 'none' | 'hash-pinned' | 'signed'` in its heartbeat; the UI labels hash-pinned as "reduced trust".                                                                                                        | FL-07                |
 | R-9  | **Recordings.** At HEAD `computer_sessions` carries only `recorded` and `recordingSkippedReason` (read, never written) and the retention knobs live on `fleet_nodes`. FL-07's slot `1796070100000` adds `recordingRef`, `recordingBytes`, `recordingDurationMs`, `recordingExpiresAt`, `recordingStoppedReason`, `source`, `displayId`, `fleetSessionId` and relaxes `agentId` to nullable; FL-07 also creates the retention job (none exists). Terminal recordings are transcript chunks: FL-04's slot `1796040000000` adds nullable `fleetSessionId` to `terminal_transcript_chunks` and relaxes `runId` to nullable with a check that one of the two is set. Screen recordings go through the configured `storage` plugin. Retention: AW-11's 14 days. | FL-04, 07 |
 | R-10 | **`apps/desktop-node` parity** lands in FL-02's last phase. Until then the platform reads `consents` from the heartbeat and shows "not available on this kind of node yet" wherever a consent cannot be true for that kind.                                                                                                                                                                        | FL-02, 01            |
@@ -74,6 +80,18 @@ Rulings that settle questions more than one epic would otherwise answer differen
 the heartbeat payload and to `FleetNode` (§4.1). The link opens when any of `work`, `attend`,
 `manage` is true (README D2). The heartbeat **response** gains `recommendedNodeVersion` (string,
 optional) so the node can show an upgrade hint before `FLEET_MIN_NODE_VERSION` bites.
+
+All other heartbeat payload additions are optional fields (old nodes omit them):
+
+| Field                                             | Owner | Notes                                         |
+| ------------------------------------------------- | ----- | --------------------------------------------- |
+| `consents`                                        | FL-02 | above                                         |
+| `selfUpdateFailedAt` (ISO time)                   | FL-02 | last failed opt-in auto-update                |
+| `health` (§4.5 snapshot shape)                    | FL-03 | latest sample                                 |
+| `macAddress`, `lanId`                             | FL-03 | wake                                          |
+| `timeZone` (IANA)                                 | FL-13 | schedules                                     |
+| `helperTrust`                                     | FL-07 | R-8                                           |
+| `daemon { state, reason?, sessions, hooks? }`     | FL-04 | session daemon health (`state`: `running · stopped · failed`) |
 
 ### 1.2 Capability tags (advertised by the node; `cap:` requirements on jobs — existing mechanism)
 
@@ -174,8 +192,11 @@ Binary WebSocket frames: `[channel u32][kind u8][len u32][payload]` (big-endian)
 `16 MiB`. Channel `0` is control; JSON payloads with `type`. Channels > 0 are opened by the
 platform with `channel.open { channel, family, params }` and acknowledged or refused by the node
 with `channel.ready` / `channel.refused { code, hint }`; either side closes with `channel.close`.
-Channel 0 also carries `operation.progress`, `operation.done`, `operation.cancel { operationId }`
-and the node→platform session facts of §3.3.
+Channel 0 also carries `operation.progress`, `operation.done`, `operation.cancel { operationId }`,
+the node→platform session facts of §3.3, and three platform→node link controls used by the kill
+switch and panic controls (R-24): `link.pause` (block input on every session and refuse new
+state-changing requests, leave processes running), `link.resume`, and `link.drain { graceSec }`
+(end owner sessions after the grace, end Agent sessions as Runs end today).
 
 | Kind | Name     | Payload                                   | Used by                                  |
 | ---- | -------- | ----------------------------------------- | ---------------------------------------- |
@@ -210,6 +231,10 @@ Every request carries `requestId`; every reply carries `requestId` and either a 
 `{ operationId }` and stream `operation.progress` / `operation.done` on channel 0; `operation.cancel`
 cancels one; FL-02 adds `GET /api/fleet/operations/:id` and `DELETE /api/fleet/operations/:id`.
 
+**Consent exceptions per verb.** The `machine` family needs `manage` except `health.now`, which is
+allowed on any open link (R-31). The link implementation keeps these exceptions in one table
+(`FLEET_LINK_VERB_CONSENT_OVERRIDES`) so later epics add a verb there, not a branch in code.
+
 ### 3.4 Viewer side (browser → platform)
 
 Viewers never connect to a node. They attach to `wss://<api-origin>/ws/fleet/<family>/<id>` with a
@@ -221,6 +246,12 @@ node channels through the relay bus (R-7).
 
 Columns are given so plans agree; migrations use the slots in §13. All tables carry the existing
 conventions (`id uuid`, `createdAt`, `updatedAt`, soft-delete where the sibling table has it).
+
+**Storage types.** "jsonb" below means a structured value. Store it the way sibling columns are
+stored so one migration runs on both SQLite (CI, e2e) and Postgres (production): TypeORM
+`simple-json` in a `text` column, as `fleet_nodes.modelThrottles` does. `uuid[]` / `text[]`
+likewise use `simple-json` (or `simple-array` for plain strings). Enums are `varchar` with the
+allowed values validated in code, as existing fleet columns are.
 
 ### 4.1 `FleetNode` — additions only
 
@@ -267,7 +298,7 @@ conventions (`id uuid`, `createdAt`, `updatedAt`, soft-delete where the sibling 
 | `startedAt`, `endedAt` | timestamptz                                                            |                                                               |
 | `endedReason`          | enum null `user · agent · exit · node-restart · timeout · kill-switch · drain` |                                                       |
 | `recordingState`       | enum `off · recording · stored`                                        | R-9                                                           |
-| `costCents`            | integer null                                                           | mirrored from the Run; filled by FL-20 for owner sessions     |
+| `costCents`            | integer null                                                           | created by FL-20's `1796200000000-AddFleetSessionUsage`, not FL-04's slot; mirrored from the Run; filled by FL-20 for owner sessions |
 | `tokens`               | jsonb null                                                             | FL-20                                                         |
 | `attention`            | jsonb null `{ key, reason, prompt, options[], raisedAt, acknowledgedAt }` | §5.2 (FL-05)                                               |
 | `stateChangedAt`       | timestamptz                                                            | board ordering (FL-05)                                        |
@@ -328,16 +359,20 @@ conventions (`id uuid`, `createdAt`, `updatedAt`, soft-delete where the sibling 
 
 `nodeId`, `at`, `resolution` (`raw · hourly`), `cpuPercent`, `memPercent`, `memTotalMiB`,
 `diskPercent`, `diskFreeMiB`, `loadAvg1`, `uptimeSec`, `gpu jsonb null`, `pendingReboot boolean`,
-`failedServices integer`. One raw row per heartbeat (60 s); raw rows kept 7 days, hourly roll-ups
-90 days (one table, `resolution` column).
+`failedServices integer`, `cpuMax`, `memMax`, `diskMax` (null on raw rows; the hour's peak on
+hourly rows, whose other percentages are means). One raw row per heartbeat (60 s); raw rows kept
+7 days, hourly roll-ups 90 days (one table, `resolution` column).
+
+The `health` snapshot (heartbeat field and `FleetNode.health`) is one sample plus:
+`{ ...sample, cpuCores, memUsedMiB, diskTotalMiB, gpu: [{ vendor, name, utilPercent?, memUsedMiB?, memTotalMiB? }] | null, at }`.
 
 ### 4.6 "Needs a look" item (not a table — computed; shape shared by producers)
 
 ```
 { id, nodeId, severity: 'info'|'warn'|'critical', kind, title, detail, action?: { label, route|command }, since }
 kinds: disk-low · node-throttled · node-quarantined · node-upgrade-required · runner-stopped ·
-       job-unassignable · session-needs-you · schedule-failed · cloud-idle · helper-untrusted ·
-       consent-missing
+       job-unassignable · session-needs-you · session-unconfirmed · schedule-failed · cloud-idle ·
+       helper-untrusted · consent-missing
 ```
 
 ### 4.7 Git line (jsonb snapshot, used by sessions and checkouts)
@@ -515,6 +550,23 @@ Node-side there are no flags, only consents.
 | Cloud computers per owner                       | 10                                      | FL-17  |
 | Usage scan interval                             | 15 min                                  | FL-20  |
 
+### 10.1 Rates (per caller unless stated; `limit_exceeded` with the limit in `hint`)
+
+| Rate                                            | Value                                              | Owner  |
+| ----------------------------------------------- | -------------------------------------------------- | ------ |
+| Link `hello` per node                           | 10 per minute, then refused for 60 s               | FL-02  |
+| Link-token mint per node                        | 20 per minute                                      | FL-02  |
+| Attach-token mint per user                      | 30 per minute                                      | FL-02  |
+| Operation id returned when a request runs over  | 2 s                                                | FL-02  |
+| Finished operations kept                        | 1 h                                                | FL-02  |
+| Slow viewer dropped after                       | 5 s without draining                               | FL-02  |
+| Node retry while `FLEET_NODE_LINK_ENABLED` is off | every 5 min                                      | FL-02  |
+| Wake per node                                   | 3 per 5 minutes                                    | FL-03  |
+| Health refresh per node                         | 10 per minute                                      | FL-03  |
+| Session starts per user                         | 10 per minute                                      | FL-04  |
+| Session attaches per user                       | 30 per minute                                      | FL-04  |
+| Session answers per user                        | 60 per minute                                      | FL-05  |
+
 ## 11. Routes, API paths, names
 
 ### 11.1 Web routes and `ROUTES` constants (`apps/web/src/lib/constants.ts`)
@@ -530,6 +582,10 @@ Node-side there are no flags, only consents.
 | `/fleet/usage`                         | `DASHBOARD_FLEET_USAGE`          | FL-20 |
 | `/activity?view=sessions`              | `DASHBOARD_ACTIVITY_SESSIONS`    | FL-05 |
 | `/settings/fleet` (existing)           | `DASHBOARD_SETTINGS_FLEET`       | —     |
+
+**FL-01 creates every hub route file and `ROUTES` constant above** (rendering an honest "arrives
+with FL-nn" state behind the owning epic's flag); the named epic fills its tab through the
+registry and never creates a second route file or constant.
 
 Computer page tabs (`?tab=`): `overview · sessions · desktop · logs · services · docker ·
 processes · ports · files · schedules · checkouts · settings`, registered through the FL-01 module
