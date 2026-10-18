@@ -43,7 +43,30 @@ export const WHITELIST: WhitelistEntry[] = [
 		toolName: 'get_work',
 		annotations: { readOnlyHint: true }
 	},
-	{ method: 'PUT', path: '/api/works/{id}', toolName: 'update_work' },
+	// Works-security lane 3a (2026-10-18): the merge gate and the commands a
+	// fleet node runs are NOT tool arguments. A Work-level `mergePolicy`
+	// overrides every broader scope (and the merge gate auto-merges on green CI
+	// when it allows), `checkDefaults` / `repoDeclaredCommands` are shell
+	// commands a node executes, `checksPolicy` decides whether their failure
+	// counts, and the `taskIsolation*` fields decide where task branches come
+	// from and land. An agent bound to this server could otherwise loosen its
+	// own merge gate or plant the commands its next run executes. The API also
+	// refuses them for fleet-run tokens and integration keys; a person changes
+	// them in the Work settings.
+	{
+		method: 'PUT',
+		path: '/api/works/{id}',
+		toolName: 'update_work',
+		omitArgs: [
+			'mergePolicy',
+			'checkDefaults',
+			'checksPolicy',
+			'repoDeclaredCommands',
+			'taskIsolation',
+			'taskIsolationBaseBranch',
+			'taskIsolationTargetRepo'
+		]
+	},
 	{
 		method: 'POST',
 		path: '/api/works/{id}/delete',
@@ -54,7 +77,20 @@ export const WHITELIST: WhitelistEntry[] = [
 		// `confirm_slug`. Neither is advertised as a tool argument and neither is
 		// forwarded, so no agent can destroy stored data through MCP; the route stays
 		// useful without them (deleting the Work keeps the data).
-		omitArgs: ['delete_stored_data', 'confirm_slug'],
+		//
+		// Works-security lane 3a: the same goes for the owner's GitHub
+		// repositories — `delete_data_repository`, `delete_website_repository`,
+		// `delete_markdown_repository` — and `force_delete`. Deleting a Work
+		// through a tool keeps its repositories; the API refuses the flags for
+		// fleet-run tokens and integration keys as well.
+		omitArgs: [
+			'delete_stored_data',
+			'confirm_slug',
+			'delete_data_repository',
+			'delete_website_repository',
+			'delete_markdown_repository',
+			'force_delete'
+		],
 		annotations: { destructiveHint: true }
 	},
 	{
@@ -330,7 +366,19 @@ export const WHITELIST: WhitelistEntry[] = [
 	// the gate off and move to done without it. Both tools lose the field; a
 	// machine-created Task keeps the API default (`true`) and a person changes
 	// the policy in the app.
-	{ method: 'POST', path: '/api/tasks', toolName: 'create_task', omitArgs: ['requireAllApprovers'] },
+	//
+	// `acceptanceChecks` (works-security lane 3a) are shell commands a fleet
+	// node runs — `phase: 'setup'` entries before the model, the rest as the
+	// quality gate — and the planner treats them as owner-authored. A tool
+	// caller could plant the command the next run executes, so both tools lose
+	// the field too; the API refuses it for fleet-run tokens and integration
+	// keys, and a person adds checks in the app.
+	{
+		method: 'POST',
+		path: '/api/tasks',
+		toolName: 'create_task',
+		omitArgs: ['requireAllApprovers', 'acceptanceChecks']
+	},
 	{ method: 'POST', path: '/api/tasks/run-batch', toolName: 'run_tasks_batch' },
 	{
 		method: 'GET',
@@ -338,7 +386,12 @@ export const WHITELIST: WhitelistEntry[] = [
 		toolName: 'get_task',
 		annotations: { readOnlyHint: true }
 	},
-	{ method: 'PATCH', path: '/api/tasks/{id}', toolName: 'update_task', omitArgs: ['requireAllApprovers'] },
+	{
+		method: 'PATCH',
+		path: '/api/tasks/{id}',
+		toolName: 'update_task',
+		omitArgs: ['requireAllApprovers', 'acceptanceChecks']
+	},
 	{
 		method: 'DELETE',
 		path: '/api/tasks/{id}',

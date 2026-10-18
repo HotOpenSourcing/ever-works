@@ -114,6 +114,13 @@ import { CommunityPrProcessorService } from '@ever-works/agent/community-pr';
 import { WorkRepository } from '@ever-works/agent/database';
 import { AuthService, CurrentUser, AuthSessionGuard } from '../auth';
 import { CaptchaVerifierService } from '../auth/services/captcha-verifier.service';
+import {
+    MACHINE_REFUSED_WORK_DELETE_FIELDS,
+    MACHINE_REFUSED_WORK_FIELDS,
+    refuseMachinePrincipalFields,
+    truthyFields,
+    type MachinePrincipalRequest,
+} from '../auth/machine-principal';
 import { ZeroFrictionFunnelService } from '@ever-works/agent/services';
 import { ZERO_FRICTION_FUNNEL_EVENTS } from '@ever-works/contracts/telemetry';
 // EW-P2-4 — validates the works-list `kind` filter.
@@ -536,7 +543,23 @@ export class WorksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id') id: string,
         @Body() updateWorkDto: UpdateWorkDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        // Works-security lane 3a — a Work-level merge policy overrides every
+        // broader scope, and the merge gate auto-merges on green CI when it
+        // allows; the check / command fields are shell commands a fleet node
+        // runs. A fleet-run token (the model on the owner's PC) or an
+        // integration key may not change any of them: a person does, here or
+        // in the app.
+        refuseMachinePrincipalFields(
+            auth,
+            req,
+            updateWorkDto as unknown as Record<string, unknown>,
+            MACHINE_REFUSED_WORK_FIELDS,
+            'a Work',
+            "the merge gate, the commands a node runs and the task-branch routing are the owner's decision; a person changes them in the Work settings.",
+        );
         const user = await this.authService.getUser(auth.userId);
         const result = await this.workLifecycleService.updateWork(id, updateWorkDto, user);
         this.activityLogService
@@ -562,8 +585,9 @@ export class WorksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id') id: string,
         @Body() updateWorkDto: UpdateWorkDto,
+        @Req() req?: MachinePrincipalRequest,
     ) {
-        return this.updateWork(auth, id, updateWorkDto);
+        return this.updateWork(auth, id, updateWorkDto, req);
     }
 
     @Post('works/:id/activity-sync/rotate-secret')
@@ -1703,7 +1727,24 @@ export class WorksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id') id: string,
         @Body() deleteWorkDto: DeleteWorkDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ): Promise<DeleteWorkResponseDto> {
+        // Works-security lane 3a — deleting the owner's GitHub repositories
+        // (or an App Work's stored data) is irreversible and never a machine
+        // principal's call. Only a flag set to TRUE asks for it: the DTO
+        // defaults every flag to `false`.
+        refuseMachinePrincipalFields(
+            auth,
+            req,
+            truthyFields(
+                deleteWorkDto as unknown as Record<string, unknown>,
+                MACHINE_REFUSED_WORK_DELETE_FIELDS,
+            ),
+            MACHINE_REFUSED_WORK_DELETE_FIELDS,
+            'a Work delete',
+            "deleting repositories or stored data is a person's decision; the Work itself can still be deleted without them.",
+        );
         const user = await this.authService.getUser(auth.userId);
         const result = await this.workLifecycleService.deleteWork(id, deleteWorkDto, user);
 

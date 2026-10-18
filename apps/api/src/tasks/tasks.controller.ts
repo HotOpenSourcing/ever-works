@@ -32,6 +32,7 @@ import {
     TaskPrStatusService,
     TaskBoardService,
     type TaskActorType,
+    type TaskAuthorType,
     type ListTasksFilter,
     type TaskBoardInput,
 } from '@ever-works/agent/tasks-domain';
@@ -70,6 +71,16 @@ import {
     isIntegrationPrincipal,
     writeAttribution,
 } from '../auth/integration/integration-attribution';
+import {
+    MACHINE_REFUSED_TASK_FIELDS,
+    fleetRunBindingOf,
+    isFleetRunRequest,
+    refuseMachinePrincipalAction,
+    refuseMachinePrincipalFields,
+    requireHumanSession,
+    widerAgentPermissions,
+    type MachinePrincipalRequest,
+} from '../auth/machine-principal';
 import {
     AddApproverDto,
     AddAssigneeDto,
@@ -159,6 +170,32 @@ function refuseRunTokenApproverPolicy(
     if (policy !== undefined && policy !== true) {
         throw new ForbiddenException(
             "A fleet-run credential cannot relax a Task's approver policy.",
+        );
+    }
+}
+
+/**
+ * Works-security lane 3a — a fleet-run token never starts autonomous work.
+ *
+ * The integrations rule (plan decision D9) applied to the model on a fleet
+ * node: a run token may file and shape Tasks, but it may not run one, run a
+ * batch, schedule one (`scheduledAt`, `/schedule`, `/recurring`) or record a
+ * reviewer rejection (the fix loop replays it into a new run). Otherwise one
+ * injected run could start the next, with instructions it wrote itself. The
+ * route allowlist already refuses most of these paths; the refusals here are
+ * the second, body-aware layer.
+ */
+const RUN_TOKEN_NO_DISPATCH =
+    'a fleet run never starts autonomous work; a person runs or schedules the Task in the app.';
+
+function refuseRunTokenSchedule(
+    body: { scheduledAt?: unknown } | null | undefined,
+    req: MachinePrincipalRequest | undefined,
+): void {
+    if (!isFleetRunRequest(req)) return;
+    if (body?.scheduledAt !== undefined && body.scheduledAt !== null) {
+        throw new ForbiddenException(
+            `A fleet-run credential cannot schedule a Task run (scheduledAt); ${RUN_TOKEN_NO_DISPATCH}`,
         );
     }
 }
@@ -259,6 +296,59 @@ export class TasksController {
         if (!isIntegrationPrincipal(auth)) return;
         const task = await this.service.getReadable(auth.userId, id, this.scopeContext.getScope());
         if (task.visibility === 'private') throw new NotFoundException(`Task ${id} not found.`);
+    }
+
+    /**
+     * Works-security lane 3a — a fleet run may hand a Task (as its agent, an
+     * assignee, a reviewer or an approver) only to an Agent whose permissions
+     * are within its OWN Agent's. Assigning does not start a run, but the
+     * next `→ in_progress`, review stage or a person's "Run" would run that
+     * Agent on text the injected run wrote — with grants the run never had.
+     * Its own Agent is always fine; a job that names no Agent may assign none.
+     */
+    private async refuseRunTokenWiderAgent(
+        req: MachinePrincipalRequest | undefined,
+        agentId: string | null | undefined,
+    ): Promise<void> {
+        const binding = fleetRunBindingOf(req);
+        if (!binding || !agentId) return;
+        const ownAgentId = binding.agentId ?? null;
+        if (ownAgentId && agentId === ownAgentId) return;
+        if (!ownAgentId) {
+            throw new ForbiddenException(
+                'A fleet-run credential whose job names no Agent cannot hand a Task to an Agent; a person assigns it in the app.',
+            );
+        }
+        const [own, target] = await Promise.all([
+            this.agents.findById(ownAgentId),
+            this.agents.findById(agentId),
+        ]);
+        // A missing target is left to the service (its own 404 / ownership
+        // rules); a missing OWN agent grants nothing, so any target is wider.
+        if (!target) return;
+        const wider = widerAgentPermissions(
+            target.permissions as unknown as Record<string, unknown>,
+            (own?.permissions ?? null) as unknown as Record<string, unknown> | null,
+        );
+        if (wider.length > 0) {
+            throw new ForbiddenException(
+                `A fleet-run credential cannot hand a Task to an Agent with wider permissions than its own (${wider.join(', ')}); a person assigns it in the app.`,
+            );
+        }
+    }
+
+    /**
+     * Who a write is attributed to. A fleet run's records are stamped as its
+     * Agent's work (`createdByType: 'agent'`) rather than the owner's, when
+     * the job names an Agent; otherwise the existing attribution applies.
+     */
+    private createdByFor(
+        auth: AuthenticatedUser,
+        req: MachinePrincipalRequest | undefined,
+    ): { type: TaskAuthorType; id: string } {
+        const ownAgentId = fleetRunBindingOf(req)?.agentId ?? null;
+        if (ownAgentId) return { type: 'agent', id: ownAgentId };
+        return writeAttribution(auth);
     }
 
     /**
@@ -405,13 +495,28 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Body() body: CreateTaskDto,
         // Appended LAST so positional callers (specs) keep their meaning.
-        @Req() req?: { fleetRunCredential?: unknown },
+        @Req() req?: MachinePrincipalRequest,
     ) {
         if (!body?.title) throw new BadRequestException('title is required.');
         refuseRunTokenApproverPolicy(body, req);
         refuseIntegrationCreateFields(body, auth);
+        // Works-security lane 3a — acceptance checks (and their `phase:
+        // 'setup'` steps) are shell commands a fleet node runs, which the
+        // planner treats as owner-authored; a machine principal never writes
+        // them. A run token also never schedules a run, and never hands the
+        // Task to an Agent with wider permissions than its own.
+        refuseMachinePrincipalFields(
+            auth,
+            req,
+            body as unknown as Record<string, unknown>,
+            MACHINE_REFUSED_TASK_FIELDS,
+            'a Task',
+            'acceptance checks and setup steps are commands a node runs; a person adds them in the app.',
+        );
+        refuseRunTokenSchedule(body, req);
+        await this.refuseRunTokenWiderAgent(req, body.agentId);
         if (body.parentTaskId) await this.refuseIntegrationPrivateTask(auth, body.parentTaskId);
-        const createdBy = writeAttribution(auth);
+        const createdBy = this.createdByFor(auth, req);
         return this.service.create(
             auth.userId,
             {
@@ -452,7 +557,13 @@ export class TasksController {
     })
     @HttpCode(HttpStatus.OK)
     @Throttle({ long: { limit: 20, ttl: 60_000 } })
-    async runBatch(@CurrentUser() auth: AuthenticatedUser, @Body() body: RunTasksBatchDto) {
+    async runBatch(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Body() body: RunTasksBatchDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
+    ) {
+        refuseMachinePrincipalAction(auth, req, 'run Tasks', RUN_TOKEN_NO_DISPATCH, ['fleet-run']);
         if (!Array.isArray(body?.items)) {
             throw new BadRequestException('items must be an array.');
         }
@@ -552,9 +663,21 @@ export class TasksController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: UpdateTaskDto,
         // Appended LAST so positional callers (specs) keep their meaning.
-        @Req() req?: { fleetRunCredential?: unknown },
+        @Req() req?: MachinePrincipalRequest,
     ) {
         refuseRunTokenApproverPolicy(body, req);
+        // Works-security lane 3a — same refusals as create (checks / setup
+        // steps, schedule, a wider Agent).
+        refuseMachinePrincipalFields(
+            auth,
+            req,
+            body as unknown as Record<string, unknown>,
+            MACHINE_REFUSED_TASK_FIELDS,
+            'a Task',
+            'acceptance checks and setup steps are commands a node runs; a person changes them in the app.',
+        );
+        refuseRunTokenSchedule(body, req);
+        await this.refuseRunTokenWiderAgent(req, body.agentId);
         // `scheduledAt` arrives as an ISO string on the wire and the
         // service works in `Date` (the column is a timestamptz). The
         // three states are distinct: absent = untouched, null = clear
@@ -615,7 +738,12 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: SetTaskRecurringDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        refuseMachinePrincipalAction(auth, req, 'make a Task recurring', RUN_TOKEN_NO_DISPATCH, [
+            'fleet-run',
+        ]);
         if (!body?.recurrenceRule && !body?.recurrenceCron) {
             throw new BadRequestException('recurrenceRule or recurrenceCron is required.');
         }
@@ -643,7 +771,12 @@ export class TasksController {
     async runRecurringNow(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        refuseMachinePrincipalAction(auth, req, 'fire a recurring Task', RUN_TOKEN_NO_DISPATCH, [
+            'fleet-run',
+        ]);
         return this.service.runRecurringNow(auth.userId, id, this.scopeContext.getScope());
     }
 
@@ -660,7 +793,12 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: ScheduleTaskDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        refuseMachinePrincipalAction(auth, req, 'schedule a Task run', RUN_TOKEN_NO_DISPATCH, [
+            'fleet-run',
+        ]);
         if (!body?.runAt) throw new BadRequestException('runAt is required.');
         return this.service.scheduleTask(
             auth.userId,
@@ -734,7 +872,7 @@ export class TasksController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: TransitionTaskDto,
         // Appended LAST so positional callers (specs) keep their meaning.
-        @Req() req?: { fleetRunCredential?: unknown },
+        @Req() req?: MachinePrincipalRequest,
     ) {
         if (!Object.values(TaskStatus).includes(body?.to)) {
             throw new BadRequestException(`Invalid target status: ${body?.to}`);
@@ -771,12 +909,19 @@ export class TasksController {
             }
             await this.refuseIntegrationPrivateTask(auth, id);
         }
+        // Works-security lane 3a — a fleet run moves a Task without starting
+        // anything: no `→ in_progress` agent fan-out and no `→ in_review`
+        // reviewer runs (the integrations' sync-mode rule, D9), and it moves
+        // as an AGENT, so the red-gate refusal on `→ in_review` applies to it.
+        const runTokenOptions = isFleetRunRequest(req)
+            ? { suppressAgentDispatch: true, actorType: 'agent' as const }
+            : {};
         if (body.mode === 'sync') {
             const result = await this.service.syncTransition(
                 auth.userId,
                 id,
                 body.to,
-                { force: body.force === true },
+                { force: body.force === true, ...runTokenOptions },
                 this.scopeContext.getScope(),
             );
             return result.task;
@@ -785,7 +930,7 @@ export class TasksController {
             auth.userId,
             id,
             body.to,
-            { force: body.force === true },
+            { force: body.force === true, ...runTokenOptions },
             this.scopeContext.getScope(),
         );
     }
@@ -822,7 +967,10 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: RunTaskDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        refuseMachinePrincipalAction(auth, req, 'run a Task', RUN_TOKEN_NO_DISPATCH, ['fleet-run']);
         return this.service.runTask(
             auth.userId,
             id,
@@ -942,8 +1090,12 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: AddAssigneeDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
         this.assertActorType(body.assigneeType);
+        if (body.assigneeType === 'agent')
+            await this.refuseRunTokenWiderAgent(req, body.assigneeId);
         return this.service.addAssignee(
             auth.userId,
             id,
@@ -976,8 +1128,12 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: AddReviewerDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
         this.assertActorType(body.reviewerType);
+        if (body.reviewerType === 'agent')
+            await this.refuseRunTokenWiderAgent(req, body.reviewerId);
         return this.service.addReviewer(
             auth.userId,
             id,
@@ -1008,7 +1164,19 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: RejectTaskDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
+        // Works-security lane 3a — a rejection is replayed into the next run
+        // as instructions and the fix loop starts that run: a fleet run that
+        // could record one would write the next run's prompt.
+        refuseMachinePrincipalAction(
+            auth,
+            req,
+            'record a reviewer rejection',
+            'the fix loop replays it into a new run; a person rejects in the app.',
+            ['fleet-run'],
+        );
         await this.service.getOne(auth.userId, id, this.scopeContext.getScope());
         const row = await this.rejections.rejectTask(auth.userId, id, body.feedback, {
             runId: body.runId ?? null,
@@ -1054,6 +1222,8 @@ export class TasksController {
         @Param('escalationId', ParseUUIDPipe) escalationId: string,
         @Body() body: ResolveEscalationDto,
     ) {
+        // Works-security lane 3a — resolving an escalation is a human gate.
+        requireHumanSession(auth, 'resolve an escalation');
         const task = await this.service.getOne(auth.userId, id, this.scopeContext.getScope());
         const resolved = await this.escalations.resolveForTask(
             escalationId,
@@ -1079,8 +1249,12 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: AddApproverDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
         this.assertActorType(body.approverType);
+        if (body.approverType === 'agent')
+            await this.refuseRunTokenWiderAgent(req, body.approverId);
         return this.service.addApprover(
             auth.userId,
             id,
@@ -1325,6 +1499,8 @@ export class TasksController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: PostTaskChatDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ) {
         if (typeof body?.body !== 'string') {
             throw new BadRequestException('body is required.');
@@ -1340,10 +1516,13 @@ export class TasksController {
         // EW-P1-2 / D9 — an integration's comment never fans out to an agent:
         // with no agent lookups an `@agent` token is stripped like any unknown
         // mention, so no `agent-chat-reply` run (autonomous spend) is started.
-        const lookups = isIntegrationPrincipal(auth)
-            ? {}
-            : await this.buildMentionLookups(auth.userId, scope);
-        const author = writeAttribution(auth);
+        // Works-security lane 3a — the same for a fleet run: an `@agent` it
+        // writes would start (or steer) another Agent's run on its own words.
+        const lookups =
+            isIntegrationPrincipal(auth) || isFleetRunRequest(req)
+                ? {}
+                : await this.buildMentionLookups(auth.userId, scope);
+        const author = this.createdByFor(auth, req);
         return this.chat.post(
             auth.userId,
             {
