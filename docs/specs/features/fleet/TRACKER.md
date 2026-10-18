@@ -14,7 +14,7 @@ on `origin/develop` `e4334baf7`). The design (README §4) was approved by the ow
 | ID    | Epic                                 | Wave | Spec  | Impl | Branch / PR | Notes                                                       |
 | ----- | ------------------------------------ | ---- | ----- | ---- | ----------- | ----------------------------------------------------------- |
 | FL-01 | Fleet hub & navigation               | 0    | Draft | —    |             | Owns the sidebar entry and the organisation-role derivation |
-| FL-02 | Node link & runtime foundations      | 0    | Draft | —    |             | Owns `--manage`, the link protocol, the relay bus           |
+| FL-02 | Node link & runtime foundations      | 0    | Draft | In progress |             | Owns `--manage`, the link protocol, the relay bus           |
 | FL-03 | Computer health & inventory          | 0    | Draft | —    |             |                                                             |
 | FL-04 | Sessions on computers                | 1    | Draft | —    |             | Flagship; owns the session daemon and terminal recording    |
 | FL-05 | Session status, attention & board    | 1    | Draft | —    |             | Owns Activity → Sessions and Fleet → Sessions               |
