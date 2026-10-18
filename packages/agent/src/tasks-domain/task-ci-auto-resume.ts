@@ -470,7 +470,9 @@ export function composeCiFailureFeedback(input: {
         // on the ESCAPED form — which holds no `<`, so fencing it again is a
         // no-op and a cut can never leave half a tag behind.
         let escaped = neutralizeFenceText(input.outputSummary.trim());
-        if (escaped.length > room) escaped = room > 1 ? `${escaped.slice(0, room - 1)}…` : '';
+        // ASCII `...`, not `…`: the fence NFKC-folds its content, and U+2026
+        // would grow back to three characters past the cap.
+        if (escaped.length > room) escaped = room > 3 ? `${escaped.slice(0, room - 3)}...` : '';
         if (escaped.length > 0) head.push(...outputLabel, fenceReviewFeedback(escaped, 'ci'));
     }
     return [...head, ...tail].join('\n');

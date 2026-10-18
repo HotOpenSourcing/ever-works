@@ -146,7 +146,7 @@ export function composeRejectionFeedbackMessage(
     }
     // F5 — what a fenced block is, said BEFORE the first one, and only when
     // there is one.
-    if (rows.some((row) => row.kind === 'bot' || row.kind === 'ci')) {
+    if (rows.some((row) => row.kind === 'bot' || row.kind === 'ci' || row.kind === 'ci-composed')) {
         lines.push(REVIEW_FEEDBACK_DATA_NOTICE, '');
     }
     if (rows.some((row) => row.rejection.reviewerKind === 'bot')) {
