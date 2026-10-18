@@ -545,7 +545,21 @@ export async function buildMissionSnapshot(
             .find({ where: { missionId }, order: { createdAt: 'ASC' } }),
     ]);
     const teamIds = unique(resourceTeams);
+    // Review 2026-10-17 F51: a private Goal's id never reaches an integration, nor
+    // through the Missions it is linked to (`GET /goals/:id` answers 404 for it).
+    const goalIds = goalLinks.map((link) => link.goalId);
+    const privateGoals = new Set(
+        goalIds.length === 0
+            ? []
+            : (
+                  await manager.getRepository(Goal).find({
+                      where: { id: In(goalIds), visibility: 'private' as Goal['visibility'] },
+                      select: { id: true },
+                  })
+              ).map((row) => row.id),
+    );
     const goals = [...goalLinks]
+        .filter((link) => !privateGoals.has(link.goalId))
         .sort((a, b) => Number(b.isPrimary) - Number(a.isPrimary))
         .map((link) => ({ goalId: link.goalId, isPrimary: link.isPrimary === true }));
     const dto: IntegrationMissionDto = {

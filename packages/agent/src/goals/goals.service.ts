@@ -226,8 +226,11 @@ export class GoalsService {
         scope?: OwnershipScope,
     ): Promise<GoalMetricSampleDto[]> {
         await this.findOrThrow(userId, goalId, scope);
+        // Review 2026-10-17 F48: the Goal's OWN metric only (`criterionId IS NULL`); an
+        // external per-criterion sample (`POST /goals/:id/samples {criterionId}`) is another
+        // series with its own unit and target, not a point of this one.
         const rows = await this.samples.find({
-            where: { goalId },
+            where: { goalId, criterionId: IsNull() },
             order: { sampledAt: 'DESC' },
             take: Math.min(500, Math.max(1, limit)),
         });
