@@ -163,16 +163,55 @@ function normalizeUntrusted(value: string): string {
 }
 
 /** Normalised, control tokens stripped, reserved headings and fence look-alikes broken. */
-function neutralizeUntrustedText(value: string): string {
-    return neutralizeControlTokens(normalizeUntrusted(value))
+/** A whole line that is just a reserved section name \u2014 the first line of a setext heading. */
+const RESERVED_NAME_ONLY_LINE = new RegExp(
+    `^[\\p{Zs}\\t>]*(?:${RESERVED_SECTION_NAMES})${SPACE}*$`,
+    'iu',
+);
+/** A setext underline (`===` / `---`) on its own line. */
+const SETEXT_UNDERLINE_LINE = /^([\p{Zs}\t>]*)([=-]{2,})[\p{Zs}\t]*$/u;
+
+/** Break every reserved structure in an already-normalised line. */
+function defuseStructure(line: string): string {
+    return line
         .replace(OWN_FENCE_WORD, (word: string) => `${word[0]}\u200b${word.slice(1)}`)
         .replace(RESERVED_SECTION_HEADING, '$1$2\u200b')
-        .replace(RESERVED_SETEXT_HEADING, '$1\u200b$2')
         .replace(
             FENCE_MARKER_LOOKALIKE,
             (_match: string, indent: string, run: string) =>
                 `${indent}${run[0]}\u200b${run.slice(1)}`,
         );
+}
+
+/**
+ * Control tokens stripped, reserved headings and fence look-alikes broken \u2014
+ * and EVERYTHING ELSE BYTE-IDENTICAL.
+ *
+ * Detection runs on a normalised SHADOW of each line (NFKC, format
+ * characters removed), so fullwidth letters or a hidden character before
+ * `#` cannot dodge it; but only a line whose shadow actually matches is
+ * rewritten (as its defused shadow). Every other line is passed through
+ * untouched: folding the whole brief would turn `10\u2079` into `109`, `m\u00b2` into
+ * `m2` and break emoji and ZWNJ sequences in text an agent may copy into a
+ * file (round-2 review of #2761, which applies to this planner too).
+ */
+function neutralizeUntrustedText(value: string): string {
+    const lines = neutralizeControlTokens(value).split('\n');
+    const shadows = lines.map((line) => normalizeUntrusted(line).replace(/\r$/, ''));
+    return lines
+        .map((line, index) => {
+            const shadow = shadows[index];
+            if (
+                index > 0 &&
+                SETEXT_UNDERLINE_LINE.test(shadow) &&
+                RESERVED_NAME_ONLY_LINE.test(shadows[index - 1])
+            ) {
+                return shadow.replace(SETEXT_UNDERLINE_LINE, '$1\u200b$2');
+            }
+            const defused = defuseStructure(shadow);
+            return defused === shadow ? line : defused;
+        })
+        .join('\n');
 }
 
 /**
@@ -1462,9 +1501,7 @@ function ownerMessagesOf(run: AgentRun | null): string[] {
             // Cut FIRST, then neutralise: a cut made after defusing could
             // remove the character that kept a reserved heading or fence word
             // from matching (`# OWNER ANSWERX` → `# OWNER ANSWER`).
-            neutralizeUntrustedText(
-                truncateToBytes(normalizeUntrusted(entry.trim()), OWNER_MESSAGE_MAX_BYTES),
-            ),
+            neutralizeUntrustedText(truncateToBytes(entry.trim(), OWNER_MESSAGE_MAX_BYTES)),
         );
     return fitOwnerMessages(messages);
 }

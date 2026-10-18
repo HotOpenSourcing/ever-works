@@ -1125,6 +1125,18 @@ describe('FleetAgentTaskPlannerService', () => {
             expect(body).toContain('# System requirements');
         });
 
+        it('works-security: leaves every line that is not reserved structure byte-identical (no NFKC fold of real text)', async () => {
+            const legit = [
+                'Budget: 10⁹ USD for the m² calculation',
+                'Family emoji: \u{1F468}\u200d\u{1F469}\u200d\u{1F467}',
+                'Persian: می\u200cخواهم',
+                'Ligature ﬁle and trademark ™ and ellipsis …',
+            ].join('\n');
+            tasks.findById.mockResolvedValue(task({ description: legit } as never));
+            const text = await instructionsFor();
+            expect(text).toContain(`Description: ${legit}`);
+        });
+
         it('works-security: every plan gets its own fence code', async () => {
             const first = /--- BEGIN TASK BRIEF \[([0-9a-f]{12})\] ---/.exec(
                 await instructionsFor(),
