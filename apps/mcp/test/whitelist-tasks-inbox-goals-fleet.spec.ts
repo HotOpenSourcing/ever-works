@@ -213,7 +213,7 @@ describe('WHITELIST — self-build program (Tasks / Inbox / Goals / Fleet / Agen
 	 * unlisted `omitArgs` here would be a silent surface change.
 	 */
 	const OMITTED_ARGS: Record<string, string[]> = {
-		transition_task: ['force'],
+		transition_task: ['force', 'mode'],
 		create_task: ['requireAllApprovers', 'acceptanceChecks'],
 		update_task: ['requireAllApprovers', 'acceptanceChecks']
 	};

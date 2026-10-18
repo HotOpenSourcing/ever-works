@@ -260,7 +260,7 @@ describe('a fleet run never starts autonomous work', () => {
         expect(rejections.rejectTask).not.toHaveBeenCalled();
     });
 
-    it('moves a Task without dispatch, as an agent, in either mode', async () => {
+    it('moves a Task one hop at a time without fan-out, as an agent, and refuses sync mode', async () => {
         const { controller, service } = build();
         await controller.transition(session, TASK_ID, { to: 'in_progress' } as never, runToken);
         expect(service.transition).toHaveBeenCalledWith(
@@ -270,19 +270,16 @@ describe('a fleet run never starts autonomous work', () => {
             { force: false, suppressAgentFanOut: true, actorType: 'agent' },
             scope,
         );
-        await controller.transition(
-            session,
-            TASK_ID,
-            { to: 'in_progress', mode: 'sync' } as never,
-            runToken,
-        );
-        expect(service.syncTransition).toHaveBeenCalledWith(
-            USER_ID,
-            TASK_ID,
-            'in_progress',
-            { force: false, suppressAgentFanOut: true, actorType: 'agent' },
-            scope,
-        );
+        // A sync walk would suppress ALL dispatch per hop (the reviewer too).
+        await expect(
+            controller.transition(
+                session,
+                TASK_ID,
+                { to: 'in_review', mode: 'sync' } as never,
+                runToken,
+            ),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(service.syncTransition).not.toHaveBeenCalled();
     });
 
     it('posts chat with NO agent lookups, attributed to the run’s Agent', async () => {

@@ -415,7 +415,15 @@ export const WHITELIST: WhitelistEntry[] = [
 	// `force` skips the approver gate on `→ done` (and the quality-gate
 	// refusal on `→ in_review`); that override belongs to a person, so the
 	// tool keeps the ordinary state-machine move and loses the flag.
-	{ method: 'POST', path: '/api/tasks/{id}/transition', toolName: 'transition_task', omitArgs: ['force'] },
+	// `mode` (works-security lane 3a): `sync` is the integrations' mirror walk,
+	// which starts no agent work at all — for an agent's move that would also
+	// cancel the reviewer stage. The tool moves one status at a time.
+	{
+		method: 'POST',
+		path: '/api/tasks/{id}/transition',
+		toolName: 'transition_task',
+		omitArgs: ['force', 'mode']
+	},
 	{
 		method: 'GET',
 		path: '/api/tasks/{id}/run-candidates',

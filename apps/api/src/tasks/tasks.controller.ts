@@ -893,6 +893,14 @@ export class TasksController {
                 'A fleet-run credential cannot force a Task transition past its approver gate.',
             );
         }
+        // Works-security lane 3a — a fleet run moves one hop at a time. A sync
+        // walk is the integrations' mirror mode: it starts no agent work at all,
+        // which for a run would also cancel the reviewer stage it owes.
+        if (body.mode === 'sync' && isFleetRunRequest(req)) {
+            throw new ForbiddenException(
+                "A fleet-run credential cannot move a Task with mode 'sync'; move it one status at a time.",
+            );
+        }
         // EW-P1-6 — an integration mirrors a status: it moves in sync mode only
         // (no agent work started, D9) and can never force the approver gate.
         if (isIntegrationPrincipal(auth)) {
