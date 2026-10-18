@@ -164,7 +164,11 @@ describe('mission recording points', () => {
         });
         expect(titler.generateTitle).not.toHaveBeenCalled();
         const [created, ...rest] = await events();
-        expect(rest).toHaveLength(0);
+        // Review 2026-10-17 F34: the Team's own side follows the record's event.
+        expect(rest.map((event) => [event.type, event.aggregateId])).toEqual([
+            ['team.resource.added', team.id],
+        ]);
+        expectValid(rest[0]);
         expect(created).toMatchObject({
             type: 'mission.created',
             aggregateVersion: 1,
