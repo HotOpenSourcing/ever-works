@@ -34,9 +34,13 @@ function oneLine(value: string | null | undefined): string {
     return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-/** `<` → `&lt;`, so fenced text cannot close (or open) a tag fence. */
+/**
+ * `<` → `&lt;`, after NFKC normalization, so fenced text cannot close (or
+ * open) a tag fence — including with a fullwidth (U+FF1C) or small-form
+ * (U+FE64) look-alike, which NFKC folds to `<` first.
+ */
 function neutralizeTags(value: string): string {
-    return value.split('<').join('&lt;');
+    return value.normalize('NFKC').split('<').join('&lt;');
 }
 
 /**
@@ -45,7 +49,10 @@ function neutralizeTags(value: string): string {
  */
 export function codeFenceFor(content: string): string {
     let longest = 0;
-    for (const run of content.matchAll(/`+/g)) {
+    // Counted on the NFKC form, so a run of fullwidth grave accents (U+FF40,
+    // which NFKC folds to a backtick) that a model may read as a fence is as
+    // long as an ASCII one. The diff itself is left byte-for-byte.
+    for (const run of content.normalize('NFKC').matchAll(/`+/g)) {
         if (run[0].length > longest) longest = run[0].length;
     }
     return '`'.repeat(Math.max(3, longest + 1));
@@ -210,6 +217,7 @@ export class PrReviewService {
                                 memoryBlock,
                                 diff,
                                 instruction: request.instruction,
+                                privateContextWithheld,
                             }),
                         },
                     ],
@@ -433,6 +441,13 @@ export class PrReviewService {
         memoryBlock: string;
         diff: string;
         instruction?: string;
+        /**
+         * F2 — the author is untrusted: the Work's DESCRIPTION is the owner's
+         * private text too, and is withheld with the knowledge base and
+         * memory. The Work's name stays (the public comment's footer already
+         * carries it).
+         */
+        privateContextWithheld?: boolean;
     }): string {
         const { pr, owner, repo, prNumber, work } = input;
         const sections: string[] = [];
@@ -463,7 +478,9 @@ export class PrReviewService {
                 [
                     '# Work context',
                     `This repository belongs to the Ever Works Work "${work.name}".`,
-                    ...(work.description ? [`Description: ${work.description}`] : []),
+                    ...(work.description && !input.privateContextWithheld
+                        ? [`Description: ${work.description}`]
+                        : []),
                 ].join('\n'),
             );
         }
