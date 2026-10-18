@@ -275,8 +275,9 @@ export default {
 	/**
 	 * Signs in through the web app's sign-in page, as a person would (e-mail and password), and
 	 * ends signed in: a page behind the sign-in must open without landing back on it. In
-	 * `positive_stats` the statistics section must also render (Settings → Ever Platform answers
-	 * 200), so the positive walk is known to have reached the module's page.
+	 * `positive_stats` the operator's statistics section must also render (Settings → Ever Platform
+	 * answers 200 and shows the section, not its "unavailable" notice), so the positive walk is known
+	 * to have reached the module's page with the module answering.
 	 */
 	async uiLogin(page, ctx) {
 		// The web app starts next to the API; wait until it answers before the first page is opened.
@@ -320,6 +321,13 @@ export default {
 			});
 			if (stats?.status() !== 200)
 				throw new Error(`with statistics on, ${STATS_SETTINGS_PAGE} answered ${stats?.status() ?? 'nothing'}`);
+			// A 200 alone is not enough: the page also answers 200 with its "unavailable" notice when the web
+			// app cannot read the module's status. The operator's section renders only from a real answer.
+			if ((await page.locator('[data-testid="usage-statistics-unavailable"]').count()) > 0)
+				throw new Error(`with statistics on, ${STATS_SETTINGS_PAGE} shows the "unavailable" notice`);
+			await page
+				.locator('[data-testid="usage-statistics-operator"]')
+				.waitFor({ state: 'visible', timeout: 30_000 });
 		}
 		ctx.log(`adapter: signed in through ${SIGN_IN_ROUTE}; ${SIGNED_IN_CHECK_PAGE} opened signed in`);
 	},

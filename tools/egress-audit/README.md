@@ -49,7 +49,7 @@ This directory holds only Works' inputs:
   walk; for `loaded_off` switch statistics off in Settings; in the off modes, call all six
   statistics routes with their own method (the
   harness's probe sends GET only) and require 404 from each; sign in through the web app's sign-in
-  page and prove the session holds (in `positive_stats`, Settings → Ever Platform must render); per
+  page and prove the session holds (in `positive_stats`, the operator's statistics section on Settings → Ever Platform must render, not its "unavailable" notice); per
   mode, `CI=true` so the module honours the modes' short send interval (otherwise raised to one
   hour);
 - `compose.egress-audit.yml` — the images built from the commit, fake test-only values the
@@ -67,21 +67,23 @@ This directory holds only Works' inputs:
 
 ## Modes
 
-| Mode             | The API                                                             | Passes when                                                                                     | Browser walk                                                |
-| ---------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `default_off`    | nothing about statistics configured (off by default)                | no Ever host or unlisted name looked up, no connection attempt out, `/api/instance-stats/*` 404 | —                                                           |
-| `off`            | `EVER_STATS_ENABLED=false` in the container environment             | the same                                                                                        | every page, no Ever host                                    |
-| `off_env_file`   | the same switch written ONLY in the API's `.env` file (`/app/.env`) | the same                                                                                        | —                                                           |
-| `loaded_off`     | module loaded (`EVER_STATS_ENABLED=true`), switched off in Settings | no request at all                                                                               | every page, no Ever host                                    |
-| `positive_stats` | module on (`EVER_STATS_ENABLED=true`), `EVER_STATS_API_URL` = mock  | reports accepted (`202`), and no call but the statistics report                                 | every page, no Ever host; Settings → Ever Platform rendered |
-| control          | `positive_stats` with the mock platform left out                    | must **fail** (exit 1): a green run is not a blind one                                          | as `positive_stats`                                         |
+| Mode             | The API                                                             | Passes when                                                                                     | Browser walk                                                         |
+| ---------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| `default_off`    | nothing about statistics configured (off by default)                | no Ever host or unlisted name looked up, no connection attempt out, `/api/instance-stats/*` 404 | —                                                                    |
+| `off`            | `EVER_STATS_ENABLED=false` in the container environment             | the same                                                                                        | every page, no Ever host                                             |
+| `off_env_file`   | the same switch written ONLY in the API's `.env` file (`/app/.env`) | the same                                                                                        | —                                                                    |
+| `loaded_off`     | module loaded (`EVER_STATS_ENABLED=true`), switched off in Settings | no request at all                                                                               | every page, no Ever host                                             |
+| `positive_stats` | module on (`EVER_STATS_ENABLED=true`), `EVER_STATS_API_URL` = mock  | reports accepted (`202`), and no call but the statistics report                                 | every page, no Ever host; the operator's statistics section rendered |
+| control          | `positive_stats` with the mock platform left out                    | must **fail** (exit 1): a green run is not a blind one                                          | as `positive_stats`                                                  |
 
-In every mode the send interval is a few seconds, so a module that should be silent but is not
-would try to send inside the watched window (two minutes after the scenario).
+The send interval is a few seconds in every mode but `loaded_off`, where it is 60 seconds (the
+first send is due a minute after first boot, after the operator's switch-off), so a module that
+should be silent but is not would try to send inside the watched window (two minutes after the
+scenario).
 
 ## The route list
 
-`ui-routes.json` is generated from the app router, and CI fails when a page is added without it:
+`ui-routes.json` is generated from the app router. CI fails when a page is added, moved or removed without regenerating it: on the pull request (`.github/workflows/egress-audit-routes.yml`, which runs on every pull request that touches `apps/web/src/app`) and on every push (the `routes` job of the audit):
 
 ```sh
 tools/egress-audit/node_modules/.bin/ever-egress-audit ui-routes --framework next-app --entry apps/web/src/app --out tools/egress-audit/ui-routes.json
