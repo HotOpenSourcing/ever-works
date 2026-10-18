@@ -35,8 +35,9 @@ export class NodeExecutionPolicyError extends Error {
 
 /** How to change the policy, quoted in every refusal so the owner is never left guessing. */
 export const NODE_POLICY_COMMAND_HINT =
-	'The machine owner can allow it on this PC with `ever-works-node policy <flag> on` (then restart the node); ' +
-	'the platform cannot change this setting';
+	'The machine owner can allow it on this PC with `ever-works-node policy <flag> on` (then restart the node; for the ' +
+	'desktop app, run the command with EVER_WORKS_NODE_CONFIG set to the app’s node-config.json); the platform cannot ' +
+	'change this setting';
 
 /** One sentence naming a command phase and how many commands it carries. */
 function describePhase(name: string, count: number): string | null {

@@ -135,7 +135,11 @@ const OFF = DEFAULT_NODE_EXECUTION_POLICY;
 
 describe('control 18 — the node’s local execution policy (agent-task)', () => {
 	it('OFF/OFF is the default a machine enforces', () => {
-		expect(DEFAULT_NODE_EXECUTION_POLICY).toEqual({ allowSkipPermissions: false, allowShellCommands: false });
+		expect(DEFAULT_NODE_EXECUTION_POLICY).toEqual({
+			allowSkipPermissions: false,
+			allowShellCommands: false,
+			restrictedMode: true
+		});
 	});
 
 	it('refuses a skip-permissions job before provisioning or spawning anything', async () => {

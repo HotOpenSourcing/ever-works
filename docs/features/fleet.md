@@ -322,10 +322,15 @@ A job is the platform's plan, and the platform is one more party a prompt inject
 | `--allow-skip-permissions` | A job that asks to run the model CLI with its permission checks off (`--dangerously-skip-permissions` / `--dangerously-bypass-approvals-and-sandbox`) is refused before anything is provisioned. | Such jobs run. The model then has an unrestricted shell as your account, with no filesystem or network boundary (trust model gaps 12–13).                                                                      |
 | `--allow-shell-commands`   | A job carrying a setup phase, command steps or acceptance checks is refused, and `acceptance-checks` jobs are not leased at all. Model runs and the node's own Git work still run.               | The node runs those commands. They execute repository code as your account — after a model step, code the model may just have written (an edited `package.json` script or test file makes `pnpm test` run it). |
 
+A third switch, `--restricted-mode` (default **on**), starts Claude Code with `--restricted` when the installed CLI supports it: no command-running built-ins, no WebFetch, and no settings files at all — including your own `~/.claude/settings.json`. Turn it off only if this PC authenticates Claude Code through settings `env` / `apiKeyHelper` (Bedrock, Vertex, a proxy base URL).
+
+**Upgrading to 0.2.6:** with the default policy, a job that carries setup, command steps or acceptance checks now fails on this machine with a message naming `--allow-shell-commands`, and `acceptance-checks` jobs stay with nodes that allow them. Works with checks off (the default for repository Works) are unaffected. The desktop app has no policy screen yet: run `ever-works-node policy …` with `EVER_WORKS_NODE_CONFIG` set to the app's `node-config.json`.
+
 ```bash
 ever-works-node policy                                  # show
 ever-works-node policy --allow-shell-commands on        # opt in on THIS machine
 ever-works-node policy --allow-shell-commands off       # back to the default
+ever-works-node policy --restricted-mode off             # only if the CLI authenticates via settings env/apiKeyHelper
 ```
 
 Restart the node service after a change. `ever-works-node status` prints the policy on its `policy` line. A refused job fails with a message naming the switch, so the Task shows why it did not run on this machine.

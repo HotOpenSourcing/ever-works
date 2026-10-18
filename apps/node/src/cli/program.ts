@@ -532,17 +532,27 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		// Written directly (not via a conditional spread) so excess-property
 		// checking keeps this name tied to the runtime option it feeds.
 		agentTaskWorkspaceRoot: workspaceRoot,
-		persistUnsafe: async (unsafe) =>
-			saveConfig(
+		// Re-read before writing: the file may have changed since this service
+		// started (`ever-works-node policy` run meanwhile), and a quarantine must
+		// record `unsafe` without reverting anything else in it.
+		persistUnsafe: async (unsafe) => {
+			const current =
+				(await loadConfig(deps.fs, deps.configPath, {
+					platform: deps.platform,
+					secrets: deps.secrets ?? null,
+					logger: deps.io.logger
+				}).catch(() => null)) ?? config;
+			await saveConfig(
 				deps.fs,
 				deps.configPath,
-				{ ...config, unsafe },
+				{ ...current, unsafe },
 				{
 					platform: deps.platform,
 					secrets: deps.secrets ?? null,
 					logger: deps.io.logger
 				}
-			),
+			);
+		},
 		workerSafetyGate: createConfigWorkerSafetyGate(deps.fs, deps.configPath, { platform: deps.platform }),
 		// Node lifecycle (slice AR): what the platform last said about this
 		// daemon's version, recorded beside the config for `status`/`doctor`.
@@ -792,13 +802,15 @@ export interface PauseCommandOptions {
 export interface PolicyCommandOptions {
 	allowSkipPermissions?: string;
 	allowShellCommands?: string;
+	restrictedMode?: string;
 }
 
 /** One line: both control-18 switches, in words. */
 export function describeExecutionPolicy(policy: NodeExecutionPolicy): string {
 	return (
 		`skip-permissions ${policy.allowSkipPermissions ? 'ALLOWED' : 'refused'}, ` +
-		`node-run shell commands ${policy.allowShellCommands ? 'ALLOWED' : 'refused'}`
+		`node-run shell commands ${policy.allowShellCommands ? 'ALLOWED' : 'refused'}, ` +
+		`Claude Code restricted mode ${policy.restrictedMode ? 'on' : 'OFF'}`
 	);
 }
 
@@ -823,16 +835,18 @@ export async function runPolicy(deps: CliDeps, options: PolicyCommandOptions): P
 	const current = resolveNodeExecutionPolicy(config.executionPolicy);
 	const skip = parsePolicySwitch('--allow-skip-permissions', options.allowSkipPermissions);
 	const shell = parsePolicySwitch('--allow-shell-commands', options.allowShellCommands);
-	if (skip === undefined && shell === undefined) {
+	const restricted = parsePolicySwitch('--restricted-mode', options.restrictedMode);
+	if (skip === undefined && shell === undefined && restricted === undefined) {
 		deps.out(`policy       ${describeExecutionPolicy(current)}`);
 		deps.out(
-			'Change it with `ever-works-node policy --allow-skip-permissions on|off --allow-shell-commands on|off`.'
+			'Change it with `ever-works-node policy --allow-skip-permissions on|off --allow-shell-commands on|off --restricted-mode on|off`.'
 		);
 		return;
 	}
 	const next: NodeExecutionPolicy = {
 		allowSkipPermissions: skip ?? current.allowSkipPermissions,
-		allowShellCommands: shell ?? current.allowShellCommands
+		allowShellCommands: shell ?? current.allowShellCommands,
+		restrictedMode: restricted ?? current.restrictedMode
 	};
 	await saveConfig(
 		deps.fs,
@@ -852,6 +866,12 @@ export async function runPolicy(deps: CliDeps, options: PolicyCommandOptions): P
 		deps.out(
 			'WARNING: jobs may now make this node run shell commands (setup, acceptance checks). They execute ' +
 				'repository code as this account — after a model step, code the model may have written.'
+		);
+	}
+	if (!next.restrictedMode) {
+		deps.out(
+			'Note: Claude Code restricted mode is OFF — runs keep the baseline isolation (no repository settings, no ' +
+				'hooks) but get the command-running built-ins back and read your ~/.claude/settings.json.'
 		);
 	}
 	deps.out('Restart the node service for a running worker to apply the change.');
@@ -1733,6 +1753,10 @@ export function buildProgram(deps: CliDeps): Command {
 		.option(
 			'--allow-shell-commands <on|off>',
 			'Let jobs make this node run shell commands: setup, command steps, acceptance checks. Default off.'
+		)
+		.option(
+			'--restricted-mode <on|off>',
+			'Run Claude Code with --restricted when it supports it (no shell tools, no settings files). Default on.'
 		)
 		.action(async (options: PolicyCommandOptions) => {
 			await runPolicy(deps, options);

@@ -359,16 +359,24 @@ describe('policy — the machine owner’s local execution policy (control 18)',
 	it('shows OFF/OFF on a machine that never set it, and status says the same', async () => {
 		const h = harness({ files: { [CONFIG_PATH]: storedConfig } });
 		expect(await runCli(['policy'], h.deps)).toBe(EXIT_OK);
-		expect(h.output()).toContain('skip-permissions refused, node-run shell commands refused');
+		expect(h.output()).toContain(
+			'skip-permissions refused, node-run shell commands refused, Claude Code restricted mode on'
+		);
 		expect(await runCli(['status'], h.deps)).toBe(EXIT_OK);
-		expect(h.output()).toMatch(/policy {7}skip-permissions refused, node-run shell commands refused/);
+		expect(h.output()).toMatch(
+			/policy {7}skip-permissions refused, node-run shell commands refused, Claude Code restricted mode on/
+		);
 	});
 
 	it('persists a change locally, warns about what it allows, and makes no platform call', async () => {
 		const h = harness({ files: { [CONFIG_PATH]: storedConfig } });
 		expect(await runCli(['policy', '--allow-shell-commands', 'on'], h.deps)).toBe(EXIT_OK);
 		const saved = JSON.parse(h.files.get(CONFIG_PATH) ?? '{}');
-		expect(saved.executionPolicy).toEqual({ allowSkipPermissions: false, allowShellCommands: true });
+		expect(saved.executionPolicy).toEqual({
+			allowSkipPermissions: false,
+			allowShellCommands: true,
+			restrictedMode: true
+		});
 		expect(h.output()).toContain('WARNING: jobs may now make this node run shell commands');
 		expect(h.output()).toContain('Restart the node service');
 		expect(h.leases).toHaveLength(0);
@@ -376,8 +384,18 @@ describe('policy — the machine owner’s local execution policy (control 18)',
 		expect(await runCli(['policy', '--allow-shell-commands', 'off'], h.deps)).toBe(EXIT_OK);
 		expect(JSON.parse(h.files.get(CONFIG_PATH) ?? '{}').executionPolicy).toEqual({
 			allowSkipPermissions: false,
-			allowShellCommands: false
+			allowShellCommands: false,
+			restrictedMode: true
 		});
+	});
+
+	it('switches Claude Code restricted mode off and back on, saying what that changes', async () => {
+		const h = harness({ files: { [CONFIG_PATH]: storedConfig } });
+		expect(await runCli(['policy', '--restricted-mode', 'off'], h.deps)).toBe(EXIT_OK);
+		expect(JSON.parse(h.files.get(CONFIG_PATH) ?? '{}').executionPolicy.restrictedMode).toBe(false);
+		expect(h.output()).toContain('Claude Code restricted mode OFF');
+		expect(await runCli(['policy', '--restricted-mode', 'on'], h.deps)).toBe(EXIT_OK);
+		expect(JSON.parse(h.files.get(CONFIG_PATH) ?? '{}').executionPolicy.restrictedMode).toBe(true);
 	});
 
 	it('refuses a value that is not on/off rather than guessing', async () => {

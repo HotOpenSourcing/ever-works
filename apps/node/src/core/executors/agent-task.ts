@@ -1686,6 +1686,9 @@ function supportsRestrictedMode(
 	io: AgentTaskIo
 ): boolean {
 	if (execution.provider !== 'claude-code' || execution.skipPermissions === true) return false;
+	// The machine owner can switch restricted mode off locally (control 18);
+	// an embedder that passes no policy keeps the default (on when supported).
+	if (io.executionPolicy?.restrictedMode === false) return false;
 	const supported = compat?.supportedFlags?.has('--restricted') === true;
 	if (!supported && compat?.supportedFlags) {
 		io.logger?.info(

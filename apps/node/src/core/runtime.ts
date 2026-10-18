@@ -809,8 +809,7 @@ export function createNodeRuntime(config: NodeConfig, io: NodeIo, options: Creat
 			...(io.monotonicNow ? { monotonicNow: io.monotonicNow } : {}),
 			// Agent computers: on an attended machine, live views belong to the
 			// attended lane alone — never parked in (or holding a slot of) the
-			// work lane. Sent only under `--attend`, so a work-only node's lease
-			// body is exactly what it always was.
+			// work lane (only under `--attend`).
 			//
 			// Control 18: a machine whose owner has not allowed node-run shell
 			// commands does not lease `acceptance-checks` jobs at all (every one

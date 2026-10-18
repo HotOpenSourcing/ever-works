@@ -387,22 +387,39 @@ export interface NodeExecutionPolicy {
 	 * permission mode) and the node's own Git work still run.
 	 */
 	allowShellCommands: boolean;
+	/**
+	 * Start Claude Code with `--restricted` when the pinned binary supports it
+	 * (control 17): no command-running built-ins and no WebFetch, no settings
+	 * files at all (the owner's `~/.claude/settings.json` included), file
+	 * tools confined to the granted directories, and writes to settings, git
+	 * and tool-configuration files never auto-approved. ON by default; an
+	 * owner who authenticates the CLI through settings `env` / `apiKeyHelper`
+	 * (Bedrock, Vertex, a proxy base URL) turns it off here. The baseline
+	 * isolation (`--setting-sources user` + no hooks) applies either way.
+	 */
+	restrictedMode: boolean;
 }
 
-/** OFF / OFF — what a machine that never ran `ever-works-node policy` enforces. */
+/** What a machine that never ran `ever-works-node policy` enforces: both escalations OFF, restricted mode ON. */
 export const DEFAULT_NODE_EXECUTION_POLICY: NodeExecutionPolicy = Object.freeze({
 	allowSkipPermissions: false,
-	allowShellCommands: false
+	allowShellCommands: false,
+	restrictedMode: true
 });
 
-/** The stored policy, with anything that is not a literal `true` read as OFF. */
+/**
+ * The stored policy, always resolved toward the SAFER value: the two
+ * escalations need a literal `true`, and restricted mode is off only on a
+ * literal `false`.
+ */
 export function resolveNodeExecutionPolicy(
 	input: Partial<NodeExecutionPolicy> | null | undefined
 ): NodeExecutionPolicy {
 	if (!input || typeof input !== 'object') return { ...DEFAULT_NODE_EXECUTION_POLICY };
 	return {
 		allowSkipPermissions: input.allowSkipPermissions === true,
-		allowShellCommands: input.allowShellCommands === true
+		allowShellCommands: input.allowShellCommands === true,
+		restrictedMode: input.restrictedMode !== false
 	};
 }
 

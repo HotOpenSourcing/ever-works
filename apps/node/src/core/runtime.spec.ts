@@ -541,7 +541,7 @@ describe('createNodeRuntime', () => {
 			enrolledAt: '2026-07-25T10:00:00.000Z',
 			// This job carries a command step; control 18 refuses those unless the
 			// machine owner allowed node-run shell commands locally.
-			executionPolicy: { allowSkipPermissions: false, allowShellCommands: true }
+			executionPolicy: { allowSkipPermissions: false, allowShellCommands: true, restrictedMode: true }
 		};
 
 		const runtime = createNodeRuntime(
@@ -1053,7 +1053,10 @@ describe('createNodeRuntime — the attended live-view lane (Agent computers)', 
 		const { calls, fetchFn } = recording();
 		const { io: deps } = io(fetchFn);
 		const runtime = createNodeRuntime(
-			{ ...config(), executionPolicy: { allowSkipPermissions: false, allowShellCommands: true } },
+			{
+				...config(),
+				executionPolicy: { allowSkipPermissions: false, allowShellCommands: true, restrictedMode: true }
+			},
 			deps,
 			{ workerEnabled: true, terminalHost: null }
 		);

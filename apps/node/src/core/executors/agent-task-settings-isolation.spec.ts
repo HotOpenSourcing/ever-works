@@ -209,6 +209,25 @@ describe('runAgentTaskJob — control 17: the repository’s Claude Code setting
 		expect(commands[0]).toMatch(SETTINGS_PAIR);
 	});
 
+	it('leaves --restricted off when the machine owner switched restricted mode off locally', async () => {
+		stub.dropSettings = false;
+		const { commands, spawnFn } = recordingSpawn();
+
+		await runAgentTaskJob(
+			job(basePayload),
+			io({
+				spawnFn,
+				scratchFs: scratchFs().fs,
+				modelCliCompat: compat(['-p', '--restricted']),
+				executionPolicy: { allowSkipPermissions: false, allowShellCommands: false, restrictedMode: false }
+			})
+		);
+
+		expect(commands[0]).not.toContain('--restricted');
+		// The baseline isolation is not part of that switch.
+		expect(commands[0]).toMatch(SETTINGS_PAIR);
+	});
+
 	it('never passes --restricted to a binary that does not advertise it, or whose help was not recognised', async () => {
 		stub.dropSettings = false;
 		for (const flags of [['-p', '--settings'], null]) {

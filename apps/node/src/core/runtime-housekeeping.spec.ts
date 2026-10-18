@@ -56,7 +56,7 @@ const config: NodeConfig = {
 	limits: clampResourceLimits({ maxConcurrentJobs: 1 }),
 	// These jobs carry command steps; control 18 refuses those unless the
 	// machine owner allowed node-run shell commands locally.
-	executionPolicy: { allowSkipPermissions: false, allowShellCommands: true }
+	executionPolicy: { allowSkipPermissions: false, allowShellCommands: true, restrictedMode: true }
 };
 
 const scheduler = { setTimeout: () => ({ scheduled: true }), clearTimeout: () => undefined };

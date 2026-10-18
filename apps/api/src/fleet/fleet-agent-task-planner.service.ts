@@ -82,7 +82,16 @@ const CHAT_TEMPLATE_MARKER_PATTERN =
     /\[INST\]|\[\/INST\]|<<\/?SYS>>|<\|(?:im_start|im_end|system|user|assistant|eot_id|start_header_id|end_header_id|endoftext)\|>/gi;
 
 function neutralizeControlTokens(value: string): string {
-    return value.replace(CHAT_TEMPLATE_MARKER_PATTERN, '');
+    // Repeated until nothing changes: a single pass would let a token split
+    // around another one (`<|im<|eot_id|>_start|>`) reassemble itself.
+    let current = value;
+    for (let pass = 0; pass < 8; pass += 1) {
+        const next = current.replace(CHAT_TEMPLATE_MARKER_PATTERN, '');
+        if (next === current) return next;
+        current = next;
+    }
+    // Still changing after eight passes: break every remaining opener instead.
+    return current.replace(/<\|/g, '<​|').replace(/\[(\/?)INST\]/gi, '[​$1INST]');
 }
 
 /**
@@ -98,22 +107,81 @@ function neutralizeControlTokens(value: string): string {
  * needed: every fence the planner emits carries a per-plan random code the
  * author of that text cannot know ({@link newFenceNonce}), and the
  * look-alikes below are broken with a zero-width space so they no longer
- * read as structure. Ordinary Markdown headings in a description are left
- * alone; only the reserved section names are touched.
+ * read as structure.
+ *
+ * Untrusted text is first NORMALISED (NFKC, format characters such as
+ * zero-width spaces and BOMs removed, exotic line breaks mapped to `\n`) so
+ * fullwidth letters, a hidden character before `#` or a non-breaking space
+ * between the words cannot dodge the patterns. Only the reserved section
+ * names are touched, and only when the heading is exactly that name
+ * (optionally followed by `(…)` or `:`); `## Task list` is left alone.
  */
-const RESERVED_SECTION_HEADING =
-    /^([ \t]*)(#{1,6})(?=[ \t]*(?:TASK|OWNER ANSWER|OWNER MESSAGES|EARLIER QUESTIONS AND ANSWERS|EARLIER ANSWERS|WORKSPACE|ACCEPTANCE CHECKS|OUTPUT CONTRACT|CONTINUE|IDENTITY|ROLE|ACTIVE SKILLS|SYSTEM)\b)/gim;
-const FENCE_MARKER_LOOKALIKE = /^([ \t]*)(-{3,}|={3,})(?=[ \t]*(?:BEGIN|END)\b)/gim;
+const FORMAT_CHARACTERS = /\p{Cf}/gu;
+const EXOTIC_LINE_BREAKS = /[\v\f\u0085  ]/g;
+const SPACE = '[\\p{Zs}\\t]';
+const RESERVED_SECTION_NAMES = [
+    'TASK',
+    `TASK${SPACE}+BRIEF`,
+    `OWNER${SPACE}+ANSWER`,
+    `OWNER${SPACE}+MESSAGES`,
+    `EARLIER${SPACE}+QUESTIONS${SPACE}+AND${SPACE}+ANSWERS`,
+    `EARLIER${SPACE}+ANSWERS`,
+    'WORKSPACE',
+    `ACCEPTANCE${SPACE}+CHECKS`,
+    `OUTPUT${SPACE}+CONTRACT`,
+    'CONTINUE',
+    'IDENTITY',
+    'ROLE',
+    `ACTIVE${SPACE}+SKILLS`,
+    'SYSTEM',
+].join('|');
+const RESERVED_NAME_LINE_END = `${SPACE}*(?:\\(|:|$)`;
+/** `# OWNER ANSWER`, `> ## Workspace (fleet node)` — ATX headings naming a reserved section. */
+const RESERVED_SECTION_HEADING = new RegExp(
+    `^([\\p{Zs}\\t>]*)(#{1,6})(?=${SPACE}*(?:${RESERVED_SECTION_NAMES})${RESERVED_NAME_LINE_END})`,
+    'gimu',
+);
+/** `OWNER ANSWER` underlined with `===` / `---` — the setext spelling of the same heading. */
+const RESERVED_SETEXT_HEADING = new RegExp(
+    `^([\\p{Zs}\\t>]*(?:${RESERVED_SECTION_NAMES})${SPACE}*\\r?\\n[\\p{Zs}\\t>]*)([=\\-]{2,})`,
+    'gimu',
+);
+/** `BEGIN`/`END` naming one of THIS planner's fences, anywhere on a line, whatever dashes surround it. */
+const OWN_FENCE_WORD = new RegExp(
+    `\\b(?:BEGIN|END)(?=${SPACE}+(?:TASK${SPACE}+BRIEF|OWNER${SPACE}+MESSAGES|EARLIER${SPACE}+ANSWERS)\\b)`,
+    'giu',
+);
+/** A line opening with a rule (`---`, `===`, `***`, `___`, `~~~`, dashes, `- - -`) and then BEGIN/END. */
+const FENCE_MARKER_LOOKALIKE = new RegExp(
+    `^([\\p{Zs}\\t>]*)([-=_*~\\u2010-\\u2015](?:${SPACE}?[-=_*~\\u2010-\\u2015]){2,})(?=${SPACE}*(?:BEGIN|END)\\b)`,
+    'gimu',
+);
 
-/** Control tokens stripped, reserved headings and fence look-alikes broken. */
+/** NFKC, format characters removed, exotic line breaks as `\n`. */
+function normalizeUntrusted(value: string): string {
+    return value.normalize('NFKC').replace(FORMAT_CHARACTERS, '').replace(EXOTIC_LINE_BREAKS, '\n');
+}
+
+/** Normalised, control tokens stripped, reserved headings and fence look-alikes broken. */
 function neutralizeUntrustedText(value: string): string {
-    return neutralizeControlTokens(value)
-        .replace(RESERVED_SECTION_HEADING, '$1$2\u200b')
+    return neutralizeControlTokens(normalizeUntrusted(value))
+        .replace(OWN_FENCE_WORD, (word: string) => `${word[0]}​${word.slice(1)}`)
+        .replace(RESERVED_SECTION_HEADING, '$1$2​')
+        .replace(RESERVED_SETEXT_HEADING, '$1​$2')
         .replace(
             FENCE_MARKER_LOOKALIKE,
             (_match: string, indent: string, run: string) =>
-                `${indent}${run[0]}\u200b${run.slice(1)}`,
+                `${indent}${run[0]}​${run.slice(1)}`,
         );
+}
+
+/**
+ * A command shown to the model on one line: newlines spelled `\n`, so a
+ * multi-line check reads as what the node runs rather than as two lines of
+ * prompt.
+ */
+function neutralizeUntrustedCommand(value: string): string {
+    return neutralizeUntrustedText(value).replace(/\r?\n/g, '\\n');
 }
 
 /** One line: newlines collapsed — for names, paths and labels interpolated into a sentence. */
@@ -1118,7 +1186,7 @@ export class FleetAgentTaskPlannerService implements FleetAgentTaskPlanner {
         // "the repository root" when half of it runs somewhere else — and
         // is left guessing whether dependencies are present.
         const describeCommand = (check: TaskAcceptanceCheck): string =>
-            `- ${neutralizeUntrustedLine(check.name || check.id)}: \`${neutralizeUntrustedLine(check.command)}\`` +
+            `- ${neutralizeUntrustedLine(check.name || check.id)}: \`${neutralizeUntrustedCommand(check.command)}\`` +
             (check.mountDir ? ` (in \`.mounts/${neutralizeUntrustedLine(check.mountDir)}\`)` : '') +
             (check.cwd ? ` (in ${neutralizeUntrustedLine(check.cwd)})` : '') +
             (check.required === false ? ' — informational' : '');
@@ -1208,7 +1276,9 @@ export class FleetAgentTaskPlannerService implements FleetAgentTaskPlanner {
         }
         return {
             instructions: system ? `${system}\n\n${tail}` : tail,
-            continuation: ownerSection ? composeContinuation(ownerSection, outputContract) : null,
+            continuation: ownerSection
+                ? composeContinuation(ownerSection, outputContract, fenceNonce)
+                : null,
         };
     }
 
@@ -1460,12 +1530,13 @@ function composeAnswerTrailSection(trail: AnsweredQuestion[], nonce: string): st
  * are what the node parses, and a long session is exactly where a model
  * drifts from them.
  */
-function composeContinuation(ownerSection: string, outputContract: string): string {
+function composeContinuation(ownerSection: string, outputContract: string, nonce: string): string {
     return [
         ownerSection,
         '# CONTINUE',
         'You are continuing your own earlier session of this Task, on the same machine and in the same worktree. ' +
             'Everything you were told when it started still applies — the Task, the workspace, the acceptance checks and the rules below. ' +
+            `One thing changes: the owner's words now arrive between markers carrying the code \`${nonce}\`, which replaces the code you were given when the session started. ` +
             'Pick up from the owner’s answer above; do not start over.',
         '# OUTPUT CONTRACT',
         outputContract,
