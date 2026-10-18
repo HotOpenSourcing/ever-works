@@ -282,6 +282,48 @@ describe('DefaultInboundEmailDispatcher', () => {
             });
             expect(sent.senderTrusted).toBe(true);
 
+            // CodeRabbit on #2769: a REPLAY — the address already received this
+            // platform Message-ID (an earlier inbound row, not this delivery's
+            // own `msg-1`) — earns no trust.
+            const sentAnd = (inbound: Record<string, unknown>) => (svc: any) => {
+                void svc;
+                messages.findByMessageIdHeaders.mockImplementation(async () => [
+                    {
+                        id: 'sent-1',
+                        direction: 'outbound',
+                        sentAt: new Date(),
+                        from: OTHER,
+                        toAddresses: [RECEIVING],
+                        messageIdHeader: 'm-1@agents.acme.test',
+                    },
+                    {
+                        direction: 'inbound',
+                        emailAddressId: 'addr-1',
+                        from: OTHER,
+                        messageIdHeader: 'm-1@agents.acme.test',
+                        ...inbound,
+                    },
+                ]);
+            };
+            const replay = await spawnFrom(OTHER, sentAnd({ id: 'in-earlier' }), {
+                messageIdHeader: 'm-1@agents.acme.test',
+            });
+            expect(replay.senderTrusted).toBe(false);
+
+            // This delivery's OWN stored row is not a replay of itself.
+            const own = await spawnFrom(OTHER, sentAnd({ id: 'msg-1' }), {
+                messageIdHeader: 'm-1@agents.acme.test',
+            });
+            expect(own.senderTrusted).toBe(true);
+
+            // A copy another of the owner's addresses received is not a replay here.
+            const elsewhere = await spawnFrom(
+                OTHER,
+                sentAnd({ id: 'in-other', emailAddressId: 'addr-2' }),
+                { messageIdHeader: 'm-1@agents.acme.test' },
+            );
+            expect(elsewhere.senderTrusted).toBe(true);
+
             // Same Message-ID, a different From: not the message the platform sent.
             const forged = await spawnFrom('mallory@evil.test', sentRow, {
                 messageIdHeader: 'm-1@agents.acme.test',

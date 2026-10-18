@@ -282,6 +282,8 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
     private async senderTrusted(
         payload: AgentInboundEmailDispatchPayload,
         address: TenantEmailAddress,
+        /** The row this very delivery was stored as (excluded from the replay check). */
+        currentMessageId?: string,
     ): Promise<boolean> {
         const ownerAddresses: string[] = [];
         try {
@@ -304,7 +306,7 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
             from: payload.from,
             ownerAddresses,
             metadata: payload.metadata,
-            platformSent: await this.sentByPlatform(payload, address),
+            platformSent: await this.sentByPlatform(payload, address, currentMessageId),
         });
     }
 
@@ -313,10 +315,16 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
      * the receiving address (agent-to-agent mail): its `Message-ID` matches an
      * OUTBOUND row of the owner that went out (`sentAt` set), from the same
      * address as this message's `From`, addressed to the receiving address.
+     *
+     * Once per receiving address: a platform message the address already
+     * RECEIVED (an earlier inbound row with this `Message-ID`, other than this
+     * delivery's own) is a replay — a captured copy re-sent under a new provider
+     * message id — and earns no trust (CodeRabbit on #2769).
      */
     private async sentByPlatform(
         payload: AgentInboundEmailDispatchPayload,
         address: TenantEmailAddress,
+        currentMessageId?: string,
     ): Promise<boolean> {
         const id = typeof payload.messageIdHeader === 'string' ? payload.messageIdHeader : '';
         if (!id) return false;
@@ -324,6 +332,13 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         const receiving = normalizeEmailAddress(address.address);
         try {
             const rows = await this.messages.findByMessageIdHeaders(address.userId, [id]);
+            const replayed = rows.some(
+                (row) =>
+                    row.direction === 'inbound' &&
+                    row.id !== currentMessageId &&
+                    row.emailAddressId === address.id,
+            );
+            if (replayed) return false;
             return rows.some(
                 (row) =>
                     row.direction === 'outbound' &&
@@ -449,7 +464,7 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
                 bodyText: payload.bodyText,
                 from: payload.from,
                 // One trusted-sender rule for new emails and replies alike.
-                senderTrusted: await this.senderTrusted(payload, address),
+                senderTrusted: await this.senderTrusted(payload, address, message.id),
                 // EW-P4-3 — the Task lives where the receiving address does.
                 tenantId: address.tenantId ?? null,
                 organizationId: address.organizationId ?? null,
