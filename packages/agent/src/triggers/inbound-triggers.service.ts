@@ -110,13 +110,13 @@ const TRUSTED_GITHUB_AUTHOR_ASSOCIATIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Dedupe-key namespace for the webhook path's DELIVERY-ID marker: a second
- * ledger row taken next to the signature claim (the fire itself) so a
- * sender retry under the same `x-everworks-delivery` id still dedupes when
- * it re-signs with a new timestamp. Marker rows are bookkeeping, not
- * fires — `listFires` hides them.
+ * Dedupe-key namespace for the webhook path's SIGNATURE marker: a second
+ * ledger row taken next to the fire's own claim (the delivery id when the
+ * sender supplies one, else the signature) so the exact signed request can
+ * never fire twice inside the window, whatever delivery id it carries.
+ * Marker rows are bookkeeping, not fires — `listFires` hides them.
  */
-const WEBHOOK_DELIVERY_MARKER_PREFIX = 'wh:idmark:';
+const WEBHOOK_SIGNATURE_MARKER_PREFIX = 'wh:sigmark:';
 
 /** Fire-log reason for a signed request replayed under a different delivery id. */
 export const WEBHOOK_REPLAY_REASON =
@@ -508,53 +508,51 @@ export class InboundTriggersService {
         };
         // Replay/duplicate suppression: a retry of the SAME delivery
         // inside the trigger's window returns the original fire's Task
-        // instead of creating a second one.
+        // instead of creating a second one. The fire's own claim is the
+        // sender's delivery id when supplied (a sender retry that re-signs
+        // with a new timestamp re-uses the same ledger row), else the
+        // signature — a byte-identical replay signs identically.
         //
-        // Security (replay amplification): BOTH identities are claimed and
-        // losing EITHER makes the request a duplicate.
-        //   - the sender's delivery id (when supplied) — a sender retry that
-        //     re-signs with a new timestamp is still the same delivery;
-        //   - the request SIGNATURE — HMAC over `${timestamp}.${rawBody}`.
-        // The id alone used to decide, and it is NOT covered by the HMAC:
-        // one captured request re-sent with a fresh `x-everworks-delivery`
-        // per attempt fired again every time inside the window (a Task,
-        // and an agent run, per replay). The signature cannot be re-minted
-        // without the secret, so it is now the fire's identity, and the id
-        // rides along as a hidden marker row. The signing protocol is
-        // unchanged.
-        let deliveryMarker: InboundTriggerFire | null = null;
-        const deliveryId = this.webhookDeliveryId(input.deliveryHeader);
-        if (this.fires && deliveryId) {
-            const marker = await this.fires.claim(
-                row.id,
-                `${WEBHOOK_DELIVERY_MARKER_PREFIX}${deliveryId}`,
-                'webhook',
-                replayWindowMs,
-            );
-            if (!marker.won) {
-                return { ok: true, taskId: marker.fire.taskId, taskSlug: null, duplicate: true };
-            }
-            deliveryMarker = marker.fire;
-        }
+        // Security (replay amplification): the delivery id is NOT covered by
+        // the HMAC (only `${timestamp}.${rawBody}` is), so keyed on the id
+        // alone one captured request re-sent with a fresh
+        // `x-everworks-delivery` per attempt fired again every time inside
+        // the window (a Task, and an agent run, per replay). Every fire
+        // therefore ALSO claims a hidden signature marker; losing it means
+        // these exact signed bytes already fired, so the request is a
+        // duplicate whatever id it carries. The signing protocol is unchanged.
         const claim = this.fires
             ? await this.fires.claim(
                   row.id,
-                  this.webhookSignatureKey(providedHex),
+                  this.webhookDedupeKey(input.deliveryHeader, providedHex),
                   'webhook',
                   replayWindowMs,
               )
             : null;
         if (claim && !claim.won) {
-            // The id was new but the signed bytes were not: a replay under
-            // a fresh delivery id. Release the marker we just took so the
-            // fire log stays clean and the id is not burned.
-            await this.closeFire(deliveryMarker, 'refused', { reason: WEBHOOK_REPLAY_REASON });
             return { ok: true, taskId: claim.fire.taskId, taskSlug: null, duplicate: true };
+        }
+        let signatureMarker: InboundTriggerFire | null = null;
+        if (claim && this.fires) {
+            const marker = await this.fires.claim(
+                row.id,
+                `${WEBHOOK_SIGNATURE_MARKER_PREFIX}${providedHex.slice(0, 64)}`,
+                'webhook',
+                replayWindowMs,
+            );
+            if (!marker.won) {
+                // A new identity for already-delivered signed bytes: a replay.
+                // Settle the fresh claim as refused (it produced nothing, so
+                // it stays re-claimable) with a reason the fire log shows.
+                await this.closeFire(claim.fire, 'refused', { reason: WEBHOOK_REPLAY_REASON });
+                return { ok: true, taskId: marker.fire.taskId, taskSlug: null, duplicate: true };
+            }
+            signatureMarker = marker.fire;
         }
 
         const task = await this.executeFire(row, {
             fire: claim?.fire ?? null,
-            linkedFires: deliveryMarker ? [deliveryMarker] : [],
+            linkedFires: signatureMarker ? [signatureMarker] : [],
             event: webhookEvent,
             fallbackDescription: () => this.buildTaskDescription(row, input.rawBody),
         });
@@ -591,12 +589,12 @@ export class InboundTriggersService {
     async listFires(scope: InboundTriggerScope, id: string): Promise<InboundTriggerFireView[]> {
         const row = await this.findOwn(scope, id);
         if (!this.fires) return [];
-        // Webhook delivery-id markers are dedupe bookkeeping that ride next
+        // Webhook signature markers are dedupe bookkeeping that ride next
         // to a real fire row — over-fetch so hiding them never shortens the
         // log the owner sees.
         const rows = await this.fires.listRecent(row.id, RECENT_FIRES_LIMIT * 2);
         return rows
-            .filter((fire) => !(fire.dedupeKey ?? '').startsWith(WEBHOOK_DELIVERY_MARKER_PREFIX))
+            .filter((fire) => !(fire.dedupeKey ?? '').startsWith(WEBHOOK_SIGNATURE_MARKER_PREFIX))
             .slice(0, RECENT_FIRES_LIMIT)
             .map((fire) => this.toFireView(fire));
     }
@@ -1324,19 +1322,20 @@ export class InboundTriggersService {
     }
 
     /**
-     * The fire identity for the webhook path: the request signature — a
-     * hash over `${timestamp}.${body}` keyed with the trigger secret, so a
-     * byte-identical replay collides, two genuinely different deliveries
-     * never do, and nobody without the secret can mint a new one.
+     * The fire's own delivery identity for the webhook path: the sender's
+     * delivery id when supplied, else the request signature — a hash over
+     * `${timestamp}.${body}`, so a byte-identical replay collides and two
+     * genuinely different deliveries never do. (The signature is ALSO
+     * claimed as a hidden marker on every fire — see `fire()`.)
      */
-    private webhookSignatureKey(signatureHex: string): string {
-        return `wh:sig:${signatureHex.slice(0, 64)}`;
-    }
-
-    /** The sender's own delivery id (unsigned), trimmed and capped — or null. */
-    private webhookDeliveryId(deliveryHeader: string | undefined): string | null {
+    private webhookDedupeKey(deliveryHeader: string | undefined, signatureHex: string): string {
         const supplied = (deliveryHeader ?? '').trim();
-        return supplied.length > 0 ? supplied.slice(0, 100) : null;
+        if (supplied.length > 0) {
+            // Prefix-separated so a sender cannot forge a collision with
+            // some other trigger's signature-derived key.
+            return `wh:id:${supplied.slice(0, 100)}`;
+        }
+        return `wh:sig:${signatureHex.slice(0, 64)}`;
     }
 
     private normalizeVariables(

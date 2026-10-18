@@ -866,7 +866,45 @@ describe('InboundTriggersService — modes, contracts and the fire log', () => {
             expect(tasks.create).toHaveBeenCalledTimes(1);
         });
 
-        it('delivery-id marker rows never show in the fire log', async () => {
+        it('a retry after a FAILED fire that re-signs with a NEW timestamp re-uses the ledger row', async () => {
+            const { service, tasks } = makeService();
+            const { trigger, secret } = await service.create(SCOPE, { name: 'Flaky' });
+            const now = Math.floor(Date.now() / 1000);
+            tasks.create.mockRejectedValueOnce(new Error('db down'));
+
+            await expect(
+                service.fire(trigger.id, {
+                    ...signed(secret, '{"a":1}', now - 3),
+                    deliveryHeader: 'gh-9',
+                }),
+            ).rejects.toThrow('db down');
+            const retry = await service.fire(trigger.id, {
+                ...signed(secret, '{"a":1}', now),
+                deliveryHeader: 'gh-9',
+            });
+
+            expect(retry.duplicate).toBeUndefined();
+            expect(tasks.create).toHaveBeenCalledTimes(2);
+            const log = await service.listFires(SCOPE, trigger.id);
+            expect(log).toHaveLength(1);
+            expect(log[0]).toMatchObject({ status: 'done', taskId: 'task-1' });
+        });
+
+        it('a replay under a fresh delivery id is logged as a refused duplicate', async () => {
+            const { service } = makeService();
+            const { trigger, secret } = await service.create(SCOPE, { name: 'Replay log' });
+            const captured = signed(secret, '{"a":1}');
+            await service.fire(trigger.id, { ...captured, deliveryHeader: 'd-1' });
+            await service.fire(trigger.id, { ...captured, deliveryHeader: 'd-2' });
+
+            const log = await service.listFires(SCOPE, trigger.id);
+            expect(log.map((entry) => entry.status).sort()).toEqual(['done', 'refused']);
+            expect(log.find((entry) => entry.status === 'refused')?.reason).toMatch(
+                /already delivered/,
+            );
+        });
+
+        it('signature marker rows never show in the fire log', async () => {
             const { service } = makeService();
             const { trigger, secret } = await service.create(SCOPE, { name: 'Log' });
             await service.fire(trigger.id, {
