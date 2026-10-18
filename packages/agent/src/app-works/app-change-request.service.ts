@@ -358,9 +358,10 @@ export class AppChangeRequestService {
             providerId: work.gitProvider || 'github',
             workId: work.id,
         };
+        let branch: string | undefined;
         try {
             const configured = work.taskIsolationBaseBranch?.trim();
-            const branch =
+            branch =
                 configured ||
                 (await this.git.getRepository(target.owner, target.repo, gitOptions))
                     ?.defaultBranch;
@@ -377,7 +378,7 @@ export class AppChangeRequestService {
         } catch (error) {
             if (error instanceof AppSpecUnreadableError && error.status === 'missing') {
                 return (
-                    `This App Work has no App spec (\`.works/works.yml\`) on \`${error.branch}\` yet, ` +
+                    `This App Work has no App spec (\`.works/works.yml\`) on \`${branch || error.branch}\` yet, ` +
                     "so a change cannot be checked against its rules. Merge the App Work's setup pull " +
                     'request (or add the App spec), then ask again.'
                 );

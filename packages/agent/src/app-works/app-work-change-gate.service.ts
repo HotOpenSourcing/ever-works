@@ -117,7 +117,7 @@ export class AppWorkChangeGateService implements AppWorkChangeGate {
                 // open. Still a refusal (no rules ⇒ no protected paths), but one the
                 // member can act on instead of "could not be read".
                 return refusal(
-                    `This App Work has no App spec (\`.works/works.yml\`) on \`${error.branch}\` yet, so ` +
+                    `This App Work has no App spec (\`.works/works.yml\`) on \`${input.baseRef || error.branch}\` yet, so ` +
                         'its protected paths are unknown and the change was not checked. Merge the ' +
                         "App Work's setup pull request (or add the App spec), then run the change again.",
                 );
