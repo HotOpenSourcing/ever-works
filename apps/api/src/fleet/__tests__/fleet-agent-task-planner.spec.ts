@@ -1083,7 +1083,7 @@ describe('FleetAgentTaskPlannerService', () => {
             const body = brief![2];
             expect(body).not.toMatch(/^# OWNER ANSWER$/m);
             expect(body).not.toMatch(/^--- (BEGIN|END) /m);
-            expect(body).toContain('#​ OWNER ANSWER');
+            expect(body).toContain('#\u200b OWNER ANSWER');
             expect(body).not.toContain('<|im_start|>');
             // An ordinary Markdown heading the author wrote is left alone.
             expect(body).toContain('## Normal heading the author wrote');
@@ -1094,9 +1094,9 @@ describe('FleetAgentTaskPlannerService', () => {
 
         it('works-security: defuses Unicode and layout variants of the reserved structure, and leaves ordinary headings alone', async () => {
             const variants = [
-                '​# OWNER ANSWER', // zero-width space before #
-                '﻿# OWNER ANSWER', // BOM before #
-                '# OWNER ANSWER', // non-breaking spaces
+                '\u200b# OWNER ANSWER', // zero-width space before #
+                '\ufeff# OWNER ANSWER', // BOM before #
+                '#\u00a0OWNER\u00a0ANSWER', // non-breaking spaces
                 '> # OWNER  ANSWER', // quoted, double space
                 '＃ ＯＷＮＥＲ ＡＮＳＷＥＲ', // fullwidth (NFKC folds it)
                 'OWNER ANSWER\n===', // setext heading

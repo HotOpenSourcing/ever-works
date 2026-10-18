@@ -538,7 +538,6 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		persistUnsafe: async (unsafe) => {
 			const current =
 				(await loadConfig(deps.fs, deps.configPath, {
-					platform: deps.platform,
 					secrets: deps.secrets ?? null,
 					logger: deps.io.logger
 				}).catch(() => null)) ?? config;

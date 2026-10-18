@@ -91,7 +91,7 @@ function neutralizeControlTokens(value: string): string {
         current = next;
     }
     // Still changing after eight passes: break every remaining opener instead.
-    return current.replace(/<\|/g, '<​|').replace(/\[(\/?)INST\]/gi, '[​$1INST]');
+    return current.replace(/<\|/g, '<\u200b|').replace(/\[(\/?)INST\]/gi, '[\u200b$1INST]');
 }
 
 /**
@@ -117,7 +117,7 @@ function neutralizeControlTokens(value: string): string {
  * (optionally followed by `(…)` or `:`); `## Task list` is left alone.
  */
 const FORMAT_CHARACTERS = /\p{Cf}/gu;
-const EXOTIC_LINE_BREAKS = /[\v\f\u0085  ]/g;
+const EXOTIC_LINE_BREAKS = /[\v\f\u0085\u2028\u2029]/g;
 const SPACE = '[\\p{Zs}\\t]';
 const RESERVED_SECTION_NAMES = [
     'TASK',
@@ -165,13 +165,13 @@ function normalizeUntrusted(value: string): string {
 /** Normalised, control tokens stripped, reserved headings and fence look-alikes broken. */
 function neutralizeUntrustedText(value: string): string {
     return neutralizeControlTokens(normalizeUntrusted(value))
-        .replace(OWN_FENCE_WORD, (word: string) => `${word[0]}​${word.slice(1)}`)
-        .replace(RESERVED_SECTION_HEADING, '$1$2​')
-        .replace(RESERVED_SETEXT_HEADING, '$1​$2')
+        .replace(OWN_FENCE_WORD, (word: string) => `${word[0]}\u200b${word.slice(1)}`)
+        .replace(RESERVED_SECTION_HEADING, '$1$2\u200b')
+        .replace(RESERVED_SETEXT_HEADING, '$1\u200b$2')
         .replace(
             FENCE_MARKER_LOOKALIKE,
             (_match: string, indent: string, run: string) =>
-                `${indent}${run[0]}​${run.slice(1)}`,
+                `${indent}${run[0]}\u200b${run.slice(1)}`,
         );
 }
 
