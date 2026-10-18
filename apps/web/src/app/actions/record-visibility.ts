@@ -68,6 +68,9 @@ async function asResult(
         return { ok: true, view: await work() };
     } catch (err) {
         if (err instanceof ApiResponseError) return { ok: false, message: err.message };
+        // Not an answer of the API (transport, unexpected): logged here, the control shows
+        // its generic message.
+        console.error('record visibility change failed', err);
         return { ok: false, message: '' };
     }
 }

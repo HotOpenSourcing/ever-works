@@ -117,6 +117,9 @@ export async function updateTaskPlanningAction(
         return { ok: true, task };
     } catch (err) {
         if (err instanceof ApiResponseError) return { ok: false, message: err.message };
+        // Not an answer of the API (transport, unexpected): logged here, the section shows
+        // its generic message.
+        console.error('task planning save failed', err);
         return { ok: false, message: '' };
     }
 }

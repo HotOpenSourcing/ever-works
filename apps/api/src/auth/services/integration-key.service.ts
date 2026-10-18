@@ -291,7 +291,14 @@ export class IntegrationKeyService {
     async recordRotation(userId: string, keyId: string): Promise<void> {
         if (!UUID_RE.test(keyId)) return;
         try {
-            const row = await this.apiKeys.findByIdAndUserId(keyId, userId);
+            let row = await this.apiKeys.findByIdAndUserId(keyId, userId);
+            if (!row) {
+                // Review 2026-10-17 U7 (F117): the Tenant owner rotating an admin's key, as
+                // `revoke` allows; the audit row still names the caller.
+                const tenant = await this.ownedTenant(userId);
+                const candidate = tenant ? await this.apiKeys.findById(keyId) : null;
+                row = candidate && candidate.tenantId === tenant?.id ? candidate : null;
+            }
             if (!row || row.kind !== INTEGRATION_API_KEY_KIND) return;
             await this.audit(
                 userId,

@@ -279,6 +279,26 @@ describe('integration keys and organization admins (EW-P2-6)', () => {
             tenantId: TENANT,
         };
 
+        it("audits the Tenant owner's rotation of an admin's key (the caller is the actor)", async () => {
+            const activityLog = { log: jest.fn().mockResolvedValue(undefined) };
+            const service = new IntegrationKeyService(
+                {
+                    findByIdAndUserId: jest.fn(async () => null),
+                    findById: jest.fn(async () => adminKey),
+                } as never,
+                tenants as never,
+                { findByTenantId: jest.fn().mockResolvedValue([]) } as never,
+                { findById: jest.fn(async (id: string) => ({ id, tenantId: TENANT })) } as never,
+                activityLog as never,
+                undefined,
+                members as never,
+            );
+            await service.recordRotation(OWNER, KEY_ID);
+            expect(activityLog.log).toHaveBeenCalledWith(
+                expect.objectContaining({ userId: OWNER }),
+            );
+        });
+
         it("answers the creator when the Tenant owner rotates an admin's key", async () => {
             await expect(make(adminKey).rotationOwnerOf(KEY_ID, OWNER)).resolves.toBe(ADMIN);
         });
