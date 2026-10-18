@@ -97,9 +97,11 @@ describe('resolve_escalation — proposes, never resolves', () => {
         });
     });
 
-    it('both gated tools sit in access.grant, whose ceiling is Ask (never Auto)', () => {
-        expect(classifyAction('resolve_escalation')).toBe('access.grant');
-        expect(classifyAction('editAgentFile')).toBe('access.grant');
+    it('both gated tools stay write.internal — the approval proposal is the gate', () => {
+        // A held `access.grant` rung would stop the call before any proposal
+        // is filed, leaving the owner nothing to approve.
+        expect(classifyAction('resolve_escalation')).toBe('write.internal');
+        expect(classifyAction('editAgentFile')).toBe('write.internal');
     });
 });
 
