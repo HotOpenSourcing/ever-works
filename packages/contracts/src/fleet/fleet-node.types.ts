@@ -33,6 +33,7 @@ import type { FleetJobView } from './fleet-jobs.types';
 
 import type { FleetNodeLoadView } from './fleet-jobs.types.js';
 import type { FleetNodeModelThrottleView } from './fleet-model-usage-limit.types.js';
+import type { FleetNodeHealthSnapshot, FleetNodeHealthStored } from './fleet-node-health.types.js';
 
 import type { ComputerControlPolicy } from '../computer/computer-session.types.js';
 
@@ -323,6 +324,19 @@ export interface FleetNodeSelfDescription {
 	maxConcurrentJobs?: number;
 	maxCpuPercent?: number | null;
 	maxMemoryMb?: number | null;
+	/**
+	 * Computer health (FL-03) — this beat's health snapshot: CPU, memory,
+	 * disk, load, uptime, GPU, pending reboot, failed services. Every field
+	 * inside is optional and absent when its probe failed (see
+	 * `fleet-node-health.types.ts`).
+	 *
+	 * Heartbeat only, and in the NEWEST optional tier of the node's beat: a
+	 * platform older than the field 400s it, and the node drops that tier and
+	 * keeps beating (FR-3, U9). Enrolment never carries it — enrolment has no
+	 * strip-and-retry fallback. The platform stamps it with its own receipt
+	 * time; the machine's clock is never stored (U12).
+	 */
+	health?: FleetNodeHealthSnapshot;
 }
 
 /** Wire view of one fleet node — never carries credentials or hashes. */
@@ -478,6 +492,15 @@ export interface FleetNodeView {
 	 * nobody does. At most one person at a time, across every live view.
 	 */
 	controlHolder?: FleetNodeControlHolderView | null;
+
+	/**
+	 * Computer health (FL-03) — the latest snapshot the node reported, stamped
+	 * with the platform's receipt time, or null when this node has never
+	 * reported one (a daemon older than the field). Read from the row, so a
+	 * list of computers never joins the history table. Judge staleness with
+	 * `isFleetNodeHealthStale` before showing it as current.
+	 */
+	health?: FleetNodeHealthStored | null;
 }
 
 /** The current holder of a node's control lock. */

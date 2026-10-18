@@ -351,7 +351,41 @@ const COMMIT_MESSAGE_EXPORTS = [
 	'retypeFleetCommitMessage'
 ] as const;
 
+// Computer health (FL-03) — `fleet-node-health.types.ts`, pinned in
+// `fleet-node-health.spec.ts`; and the "needs a look" item shape (seam owned
+// by FL-01) — `fleet-needs-a-look.types.ts`, pinned in `fleet-needs-a-look.spec.ts`.
+const HEALTH_EXPORTS = [
+	'FLEET_HEALTH_PROBE_TIMEOUT_MS',
+	'FLEET_HEALTH_SAMPLE_MIN_INTERVAL_MS',
+	'FLEET_HEALTH_RAW_RETENTION_MS',
+	'FLEET_HEALTH_HOURLY_RETENTION_MS',
+	'FLEET_HEALTH_MAX_HISTORY_POINTS',
+	'FLEET_HEALTH_DISK_CRITICAL_MARGIN_BYTES',
+	'FLEET_HEALTH_DISK_WARN_FREE_FRACTION',
+	'FLEET_HEALTH_BYTES_PER_MIB',
+	'FLEET_HEALTH_MAX_GPU_MODEL_LENGTH',
+	'FLEET_HEALTH_MAX_MIB',
+	'FLEET_HEALTH_MAX_LOAD_AVG',
+	'FLEET_HEALTH_MAX_CORES',
+	'FLEET_HEALTH_MAX_UPTIME_SEC',
+	'FLEET_HEALTH_MAX_FAILED_SERVICES',
+	'FLEET_NODE_CLEAR_QUARANTINE_COMMAND',
+	'FLEET_NODE_GPU_VENDORS',
+	'FLEET_NODE_HEALTH_RESOLUTIONS',
+	'FLEET_NODE_HEALTH_RANGES',
+	'COMPUTER_STATES',
+	'sanitizeFleetNodeHealthSnapshot',
+	'isFleetNodeHealthStale',
+	'diskLowSeverity',
+	'fleetNodeDiskLowInput',
+	'resolveComputerState',
+	'NEEDS_A_LOOK_KINDS',
+	'NEEDS_A_LOOK_SEVERITIES',
+	'sortNeedsALook'
+] as const;
+
 const ALL_EXPORTS = [
+	...HEALTH_EXPORTS,
 	...CREDENTIAL_EXPORTS,
 	...EXECUTION_PREFERENCE_EXPORTS,
 	...JOB_EXPORTS,
@@ -433,7 +467,13 @@ const FUNCTION_EXPORTS = [
 	'isFleetCommitType',
 	'composeFleetTaskCommitMessage',
 	'classifyFleetChangedPaths',
-	'retypeFleetCommitMessage'
+	'retypeFleetCommitMessage',
+	'sanitizeFleetNodeHealthSnapshot',
+	'isFleetNodeHealthStale',
+	'diskLowSeverity',
+	'fleetNodeDiskLowInput',
+	'resolveComputerState',
+	'sortNeedsALook'
 ] as const;
 
 const bag = fleet as unknown as Record<string, unknown>;
@@ -502,8 +542,12 @@ describe('fleet barrel', () => {
 		// symbols of `fleet-model-usage-limit.types.ts` and the seven of
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
+		// → 260 with computer health (FL-03): the twenty-four symbols of
+		// `fleet-node-health.types.ts` and the three of
+		// `fleet-needs-a-look.types.ts` (seam owned by FL-01) — two NEW
+		// modules, so the witness table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		expect(Object.keys(fleet)).toHaveLength(233);
+		expect(Object.keys(fleet)).toHaveLength(260);
 	});
 
 	it.each([
@@ -518,7 +562,9 @@ describe('fleet barrel', () => {
 		['fleet-run-credential.types.js', 'FLEET_RUN_TOKEN_PREFIX'],
 		['fleet-push-credential.types.js', 'FLEET_PUSH_CAPABILITY'],
 		['fleet-model-usage-limit.types.js', 'FLEET_JOB_FAILURE_KIND_MODEL_USAGE_LIMIT'],
-		['fleet-commit-message.types.js', 'FLEET_COMMIT_TYPES']
+		['fleet-commit-message.types.js', 'FLEET_COMMIT_TYPES'],
+		['fleet-node-health.types.js', 'COMPUTER_STATES'],
+		['fleet-needs-a-look.types.js', 'NEEDS_A_LOOK_KINDS']
 	])('keeps the %s module represented via %s', (_module, sentinel) => {
 		// One distinctive symbol per source module, so a whole missing
 		// `export * from` line is named in the failure rather than showing up
