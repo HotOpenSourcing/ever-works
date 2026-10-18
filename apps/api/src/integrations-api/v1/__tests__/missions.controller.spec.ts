@@ -11,7 +11,9 @@ jest.mock('@ever-works/agent/missions', () => ({
     MissionsService: class MissionsService {},
 }));
 
-import { IntegrationMissionsController } from '../missions.controller';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import { IntegrationMissionsController, IntegrationUpdateMissionDto } from '../missions.controller';
 
 /**
  * Missions of `/api/integrations/v1` (EW-P2-5): creates go through
@@ -389,5 +391,27 @@ describe('IntegrationMissionsController', () => {
             [{ workId: 'work-1', relation: 'improves' }],
             expect.anything(),
         );
+    });
+});
+
+// Review 2026-10-17 F39: `null` only where the contract allows it (else 400 validation_failed,
+// not a NOT NULL write or a `.trim()` on null answering 500).
+describe('IntegrationUpdateMissionDto null fields', () => {
+    const properties = async (body: Record<string, unknown>) =>
+        (await validate(plainToInstance(IntegrationUpdateMissionDto, body))).map(
+            (error) => error.property,
+        );
+
+    it('refuses null on the fields the contract does not make nullable', async () => {
+        for (const field of ['title', 'description', 'status', 'teamIds', 'visibility']) {
+            expect(await properties({ [field]: null })).toContain(field);
+        }
+    });
+
+    it('still takes null on the nullable ones, and never validates an absent field', async () => {
+        for (const field of ['outcome']) {
+            expect(await properties({ [field]: null })).not.toContain(field);
+        }
+        expect(await properties({})).toEqual([]);
     });
 });
