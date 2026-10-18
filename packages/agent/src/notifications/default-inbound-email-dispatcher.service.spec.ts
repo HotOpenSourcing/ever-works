@@ -211,10 +211,42 @@ describe('DefaultInboundEmailDispatcher', () => {
         assignments.findByEmailAddress.mockResolvedValue([
             { agentId: 'agent-1', dispatchMode: 'conversation' },
         ]);
-        conversations.findByThreadKey.mockResolvedValue({ id: 'conv-existing' });
+        conversations.findByThreadKey.mockResolvedValue({
+            id: 'conv-existing',
+            participants: [{ address: 'Human <HUMAN@example.com>' }],
+        });
         const res = await svc.dispatch(basePayload);
         expect(res.conversationId).toBe('conv-existing');
         expect(conversations.save).not.toHaveBeenCalled();
+        // The participant matched on the plain subject key — one lookup.
+        expect(conversations.findByThreadKey).toHaveBeenCalledTimes(1);
+    });
+
+    it('conversation mode never mixes a DIFFERENT sender into a subject-matched thread', async () => {
+        // Prompt-injection hardening: a subject is not an identity.
+        const svc = await build(false);
+        addresses.findById.mockResolvedValue(inboundAddress);
+        assignments.findByEmailAddress.mockResolvedValue([
+            { agentId: 'agent-1', dispatchMode: 'conversation' },
+        ]);
+        conversations.findByThreadKey
+            .mockResolvedValueOnce({
+                id: 'conv-someone-else',
+                participants: [{ address: 'victim@client.test' }],
+            })
+            .mockResolvedValueOnce(null);
+
+        const res = await svc.dispatch(basePayload);
+
+        expect(res.conversationId).not.toBe('conv-someone-else');
+        const [, scopedKey] = conversations.findByThreadKey.mock.calls[1];
+        expect(scopedKey).toMatch(/^need help with x #[0-9a-f]{16}$/);
+        expect(conversations.save).toHaveBeenCalledWith(
+            expect.objectContaining({
+                threadKey: scopedKey,
+                participants: [{ address: 'human@example.com' }],
+            }),
+        );
     });
 
     // EW-P4-3 — the spawned Task is written back onto the message.
@@ -295,6 +327,7 @@ describe('DefaultInboundEmailDispatcher', () => {
                 {
                     id: 'msg-out-1',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     taskId: 'task-original',
                     messageIdHeader: 'out-1@acme.test',
                 },
@@ -320,18 +353,61 @@ describe('DefaultInboundEmailDispatcher', () => {
             expect(messages.linkTask).toHaveBeenCalledWith('msg-1', 'task-original');
         });
 
+        it('task-spawn: a sender who is NOT a participant of the thread never joins it', async () => {
+            // Prompt-injection hardening: In-Reply-To is the sender's to write.
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'msg-out-1',
+                    agentId: 'agent-1',
+                    toAddresses: ['customer@client.test'],
+                    ccAddresses: ['cc@client.test'],
+                    from: 'agent@acme.test',
+                    taskId: 'task-original',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+
+            const res = await svc.dispatch({ ...reply, from: 'Mallory <mallory@evil.test>' });
+
+            expect(res).toMatchObject({ handled: true, taskId: 'task-1' });
+            expect(res.threaded).toBeUndefined();
+            expect(taskSpawner.appendInboundEmailToTask).not.toHaveBeenCalled();
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+        });
+
+        it('task-spawn: a cc participant may join (case and display name do not matter)', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    id: 'msg-out-1',
+                    agentId: 'agent-1',
+                    toAddresses: ['customer@client.test'],
+                    ccAddresses: ['Human@Example.com'],
+                    taskId: 'task-original',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+            ]);
+            await expect(svc.dispatch(reply)).resolves.toMatchObject({
+                taskId: 'task-original',
+                threaded: true,
+            });
+        });
+
         it('task-spawn: prefers the In-Reply-To match over an older References match', async () => {
             const svc = await taskSpawnAgent(true);
             messages.findByMessageIdHeaders.mockResolvedValue([
                 {
                     id: 'm-root',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     taskId: 'task-root',
                     messageIdHeader: 'root@client.test',
                 },
                 {
                     id: 'm-out',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     taskId: 'task-out',
                     messageIdHeader: 'out-1@acme.test',
                 },
@@ -362,6 +438,7 @@ describe('DefaultInboundEmailDispatcher', () => {
                 {
                     id: 'm-out',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     taskId: 'task-original',
                     messageIdHeader: 'out-1@acme.test',
                 },
@@ -382,6 +459,7 @@ describe('DefaultInboundEmailDispatcher', () => {
                 {
                     id: 'm-out',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     taskId: 'task-original',
                     messageIdHeader: 'out-1@acme.test',
                 },
@@ -409,6 +487,7 @@ describe('DefaultInboundEmailDispatcher', () => {
                 {
                     id: 'm-out',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     conversationId: 'conv-thread',
                     messageIdHeader: 'out-1@acme.test',
                 },
@@ -435,6 +514,7 @@ describe('DefaultInboundEmailDispatcher', () => {
                 {
                     id: 'm-out',
                     agentId: 'agent-1',
+                    toAddresses: ['Human <human@example.com>'],
                     conversationId: 'conv-foreign',
                     messageIdHeader: 'out-1@acme.test',
                 },

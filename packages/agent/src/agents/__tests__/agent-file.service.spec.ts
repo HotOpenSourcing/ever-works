@@ -272,4 +272,50 @@ describe('AgentFileService', () => {
             expect(r1.newHash).not.toBe(r2.newHash);
         });
     });
+
+    describe('validateProposedWrite (prompt-injection hardening)', () => {
+        it('runs the write checks and describes the change WITHOUT writing anything', async () => {
+            repo.findByIdAndUser.mockResolvedValueOnce(
+                makeAgent({ soulMd: '# Old', contentHash: 'h0' } as Partial<Agent>),
+            );
+            const result = await svc.validateProposedWrite({
+                userId: 'u1',
+                agentId: 'a1',
+                name: 'SOUL.md',
+                body: '# Old and new',
+                expectedHash: 'h0',
+            });
+            expect(result).toMatchObject({ baseHash: 'h0', changed: true, previousChars: 5 });
+            expect(repo.updateById).not.toHaveBeenCalled();
+            expect(activity.log).not.toHaveBeenCalled();
+        });
+
+        it('refuses what write would refuse: bad name, a secret, a stale hash', async () => {
+            await expect(
+                svc.validateProposedWrite({ userId: 'u1', agentId: 'a1', name: 'X.md' as any, body: 'x' }),
+            ).rejects.toThrow(BadRequestException);
+
+            repo.findByIdAndUser.mockResolvedValueOnce(makeAgent());
+            await expect(
+                svc.validateProposedWrite({
+                    userId: 'u1',
+                    agentId: 'a1',
+                    name: 'TOOLS.md',
+                    body: 'GH=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+                }),
+            ).rejects.toThrow(/Secret-like value/);
+
+            repo.findByIdAndUser.mockResolvedValueOnce(makeAgent({ contentHash: 'h1' } as Partial<Agent>));
+            await expect(
+                svc.validateProposedWrite({
+                    userId: 'u1',
+                    agentId: 'a1',
+                    name: 'SOUL.md',
+                    body: '# v2',
+                    expectedHash: 'stale',
+                }),
+            ).rejects.toThrow(/etag mismatch/);
+            expect(repo.updateById).not.toHaveBeenCalled();
+        });
+    });
 });
