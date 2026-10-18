@@ -26,7 +26,7 @@ import {
 } from './deploy.tools';
 import {
     addItemTool,
-    removeItemTool,
+    createRemoveItemTool,
     updateItemTool,
     generateItemsTool,
     checkItemHealthTool,
@@ -47,7 +47,7 @@ import {
     pauseMission,
     resumeMission,
     completeMission,
-    deleteMission,
+    createDeleteMissionTool,
     runMissionNow,
     cloneMission,
     // PR-2 (domain-model evolution) — Mission ↔ Work relations.
@@ -127,7 +127,7 @@ export function buildChatTools(model: LanguageModel, options: GeneratedToolsOpti
 
         // Items
         addItem: addItemTool,
-        removeItem: removeItemTool,
+        removeItem: createRemoveItemTool(options.userConfirmed),
         updateItem: updateItemTool,
         generateItems: generateItemsTool,
         checkItemHealth: checkItemHealthTool,
@@ -161,7 +161,7 @@ export function buildChatTools(model: LanguageModel, options: GeneratedToolsOpti
         pauseMission,
         resumeMission,
         completeMission,
-        deleteMission,
+        deleteMission: createDeleteMissionTool(options.userConfirmed),
         runMissionNow,
         cloneMission,
 

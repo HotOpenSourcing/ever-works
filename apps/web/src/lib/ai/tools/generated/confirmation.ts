@@ -17,8 +17,9 @@ import { getToolName, isToolUIPart, type UIMessage } from 'ai';
  *  2. the call's arguments are the card's arguments (the card is what the
  *     user saw — confirming `update_agent` on `a1` does not allow `a2`);
  *  3. the user's latest message — which no tool output can change — is
- *     either the card's Confirm-button message naming that tool, or a bare
- *     affirmative and nothing else ("yes", "ok", "go ahead");
+ *     either the card's Confirm-button message naming that tool AND that
+ *     card's call id, or a bare affirmative and nothing else ("yes", "ok",
+ *     "go ahead") while exactly one card is waiting;
  *  4. the card has not been used yet in this turn (single use).
  *
  * Anything else re-shows the card, so a refused call costs the user one
@@ -30,16 +31,37 @@ export interface PendingConfirmation {
     toolName: string;
     target?: string;
     args: Record<string, unknown>;
+    /** The tool call that produced the card — the Confirm button names it. */
+    toolCallId?: string;
 }
 
 export type UserConfirmationCheck = (toolName: string, args: Record<string, unknown>) => boolean;
 
-/** The WHOLE message must be one of these (optionally followed by `.`/`!`). */
-const AFFIRMATIVE_RE = /^\s*(?:yes|y|ok|okay|sure|confirm(?:ed)?|go ahead|do it)\s*[.!]*\s*$/i;
+/** A typed confirmation longer than this is not a bare affirmative (and is never regex-scanned). */
+const MAX_AFFIRMATIVE_LENGTH = 64;
 
-/** Exactly what `ConfirmCard`'s Confirm button sends. */
+/**
+ * The WHOLE message must be one of these, optionally followed by
+ * whitespace / `.` / `!`. One trailing character class — no adjacent
+ * `\s*` / `[.!]*` / `\s*` runs that backtrack quadratically on long input.
+ */
+const AFFIRMATIVE_RE = /^\s*(?:yes|y|ok|okay|sure|confirm(?:ed)?|go ahead|do it)[\s.!]*$/i;
+
+/** The Confirm button's text is short; anything longer is not it. */
+const MAX_CARD_TEXT_LENGTH = 512;
+
+/**
+ * Exactly what `ConfirmCard`'s Confirm button sends:
+ * `Yes, I confirm — proceed with <tool>[ for <target>] (confirmed: true, card <toolCallId>).`
+ * (the `, card …` part is absent only for cards without a call id).
+ */
 const CARD_CONFIRM_RE =
-    /^\s*Yes, I confirm — proceed with ([A-Za-z][A-Za-z0-9_]{0,79})(?: for ([^\n]{1,200}))? \(confirmed: true\)\.\s*$/;
+    /^\s*Yes, I confirm — proceed with ([A-Za-z][A-Za-z0-9_]{0,79})(?: for ([^\n]{1,200}?))? \(confirmed: true(?:, card ([A-Za-z0-9_-]{1,100}))?\)\.\s*$/;
+
+/** Same sanitizing the Confirm button applies to the call id it embeds. */
+export function sanitizeCardId(raw: string | undefined): string {
+    return (raw ?? '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 100);
+}
 
 /** Mirrors `sanitizeConfirmRef` in `ChatToolResult` so card targets compare equal. */
 function sanitizeRef(raw: string | undefined): string {
@@ -98,13 +120,15 @@ export function pendingConfirmationsFrom(messages: UIMessage[]): PendingConfirma
             if (!isToolUIPart(part) || part.state !== 'output-available') continue;
             const output = part.output;
             if (!isRecord(output) || output.__confirmationRequired !== true) continue;
-            const toolName =
-                typeof output.toolName === 'string' ? output.toolName : getToolName(part);
-            if (!toolName) continue;
+            const partTool = getToolName(part);
+            // A card only counts for the tool that actually produced it.
+            if (!partTool || (output.toolName !== undefined && output.toolName !== partTool))
+                continue;
             pending.push({
-                toolName,
+                toolName: partTool,
                 target: typeof output.target === 'string' ? output.target : undefined,
                 args: isRecord(output.args) ? output.args : {},
+                toolCallId: sanitizeCardId(part.toolCallId) || undefined,
             });
         }
         return pending;
@@ -125,11 +149,19 @@ export function createUserConfirmationCheck(input: {
     const pending = input.pending ?? [];
     if (!text || pending.length === 0) return () => false;
 
-    const card = CARD_CONFIRM_RE.exec(text);
-    const affirmative = !card && AFFIRMATIVE_RE.test(text);
+    const card = text.length <= MAX_CARD_TEXT_LENGTH ? CARD_CONFIRM_RE.exec(text) : null;
+    const affirmative = !card && text.length <= MAX_AFFIRMATIVE_LENGTH && AFFIRMATIVE_RE.test(text);
     if (!card && !affirmative) return () => false;
+    // A bare "yes" is only unambiguous when exactly ONE card is waiting.
+    if (affirmative && pending.length !== 1) return () => false;
     const cardTool = card ? card[1] : null;
     const cardTarget = card?.[2] ? sanitizeRef(card[2]) : null;
+    const cardId = card?.[3] ?? null;
+    // A Confirm text without a call id (older client) is only unambiguous
+    // when exactly one card for that tool is waiting.
+    if (card && !cardId && pending.filter((entry) => entry.toolName === cardTool).length !== 1) {
+        return () => false;
+    }
 
     const used = new Set<number>();
     return (toolName, args) => {
@@ -139,6 +171,7 @@ export function createUserConfirmationCheck(input: {
             (entry, i) =>
                 !used.has(i) &&
                 entry.toolName === toolName &&
+                (cardId === null || entry.toolCallId === cardId) &&
                 (cardTarget === null || sanitizeRef(entry.target) === cardTarget) &&
                 canonical(entry.args) === wanted,
         );

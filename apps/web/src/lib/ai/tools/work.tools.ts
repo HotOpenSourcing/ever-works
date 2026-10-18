@@ -14,8 +14,8 @@ import {
     importWork,
 } from '@/app/actions/dashboard/works';
 import { resolveGenerationConfig } from './utils';
-import type { ConfirmationRequired } from './generated/factory';
 import type { UserConfirmationCheck } from './generated/confirmation';
+import { requireUserConfirmation } from './confirm-gate';
 
 // Work-kind chip vocabulary (mirrors `InitialWorkKind` in
 // works/new/new-work-client.tsx and the server action's aiWorkKindSchema).
@@ -371,23 +371,15 @@ export function createDeleteWorkTool(userConfirmed?: UserConfirmationCheck) {
             // (factory.ts) so the mutation never runs until the user clicks Confirm
             // in the UI and the model re-calls with `confirmed: true` — and, with a
             // user-turn check, only for the card the user actually confirmed.
-            const backed =
-                confirmed === true && (!userConfirmed || userConfirmed('deleteWork', { workId }));
-            if (!backed) {
-                const confirmation: ConfirmationRequired = {
-                    __confirmationRequired: true,
-                    toolName: 'deleteWork',
-                    action: 'Delete a Work',
-                    target: workId,
-                    args: { workId },
-                    confirmationKind: 'destructive',
-                };
-                if (confirmed === true) {
-                    confirmation.confirmationNote =
-                        'Not run: the user has not confirmed deleting this Work in their own latest message.';
-                }
-                return confirmation;
-            }
+            const card = requireUserConfirmation({
+                toolName: 'deleteWork',
+                action: 'Delete a Work',
+                target: workId,
+                args: { workId },
+                confirmed,
+                userConfirmed,
+            });
+            if (card) return card;
             const result = await deleteWork(workId);
             return { success: result.success, message: result.message, error: result.error };
         },
