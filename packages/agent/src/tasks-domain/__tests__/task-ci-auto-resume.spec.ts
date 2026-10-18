@@ -295,6 +295,54 @@ describe('decideCiHead', () => {
             ).toBe('advanced');
         });
     });
+
+    /**
+     * F1 (2026-10-18): a delivery that reached the Task by BRANCH NAME alone
+     * — no pull request named at all, as on every fork pull request — rests
+     * on a name anybody can give a fork branch. It may confirm the head the
+     * Task already has; it is never evidence that the head moved.
+     */
+    describe('branch-only evidence (F1)', () => {
+        it('⭐ never advances — not on a fresher clock, not with a half-written pair', () => {
+            expect(
+                decideCiHead(
+                    { ciHeadSha: 'aaa', ciHeadSeenAt: seenAt },
+                    {
+                        headSha: 'bbb',
+                        reportedAt: new Date('2026-09-09T00:00:00Z'),
+                        branchOnly: true,
+                    },
+                ),
+            ).toBe('stale');
+            expect(
+                decideCiHead(
+                    { ciHeadSha: 'aaa', ciHeadSeenAt: null },
+                    { headSha: 'bbb', reportedAt: seenAt, branchOnly: true },
+                ),
+            ).toBe('stale');
+            // …and a pointer smuggled in alongside changes nothing.
+            expect(
+                decideCiHead(
+                    { ciHeadSha: 'aaa', ciHeadSeenAt: seenAt },
+                    { headSha: 'bbb', prHeadSha: 'bbb', reportedAt: seenAt, branchOnly: true },
+                ),
+            ).toBe('stale');
+        });
+
+        it('still confirms the recorded head, and still adopts a first head', () => {
+            expect(
+                decideCiHead(
+                    { ciHeadSha: 'aaa', ciHeadSeenAt: seenAt },
+                    { headSha: 'AAA', reportedAt: seenAt, branchOnly: true },
+                ),
+            ).toBe('current');
+            // (The evaluator only lets a branch-only delivery this far when
+            // its commit is one the Task already knows — see the service.)
+            expect(
+                decideCiHead(null, { headSha: 'aaa', reportedAt: seenAt, branchOnly: true }),
+            ).toBe('first-seen');
+        });
+    });
 });
 
 describe('isPullRequestFinished', () => {

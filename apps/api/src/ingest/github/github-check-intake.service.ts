@@ -62,6 +62,13 @@ export const CHECK_OUTPUT_SUMMARY_MAX_CHARS = 2000;
 
 // ── payload shapes ──────────────────────────────────────────────────
 
+/** The minimal repository stub GitHub puts on a check payload's PR entries. */
+interface CheckPullRequestRepoRef {
+    id?: number;
+    url?: string;
+    name?: string;
+}
+
 interface CheckPullRequestRef {
     number?: number;
     /**
@@ -71,7 +78,9 @@ interface CheckPullRequestRef {
      * the branch has already moved past" without commit ancestry — see
      * `decideCiHead`.
      */
-    head?: { sha?: string; ref?: string };
+    head?: { sha?: string; ref?: string; repo?: CheckPullRequestRepoRef | null };
+    /** The repository the pull request targets. */
+    base?: { sha?: string; ref?: string; repo?: CheckPullRequestRepoRef | null };
 }
 
 /** One pull request a delivery names, plus where that PR's head is now. */
@@ -115,6 +124,13 @@ export interface GitHubCheckWebhookBody extends GitHubWebhookBody {
         conclusion?: string | null;
         head_sha?: string;
         head_branch?: string | null;
+        /**
+         * The repository the workflow run's head commit lives in. For a
+         * pull request opened FROM A FORK this is the fork, and
+         * `head_branch` is the FORK's branch name — chosen by whoever owns
+         * the fork. See {@link normalizeGitHubCheck}.
+         */
+        head_repository?: { full_name?: string } | null;
         run_attempt?: number;
         html_url?: string;
         event?: string;
@@ -130,6 +146,64 @@ export interface NormalizedGitHubCheck {
     envelope: IngestedEventEnvelope;
     /** Everything the fix loop needs, minus the owner it resolves later. */
     signal: Omit<CiCheckResultInput, 'userId'>;
+    /**
+     * The GitHub App that REPORTED the result (`check_run.app.slug` /
+     * `check_suite.app.slug`; `github-actions` for a `workflow_run`, which
+     * only Actions emits), or `null` when the delivery named none. The
+     * fix loop only acts on allow-listed apps — see
+     * {@link isTrustedCheckApp}.
+     */
+    appSlug: string | null;
+}
+
+/** GitHub logins / slugs and `owner/repo` names compare case-insensitively. */
+function sameRepoName(a: string | null | undefined, b: string | null | undefined): boolean {
+    const left = (a ?? '').trim().toLowerCase();
+    return left.length > 0 && left === (b ?? '').trim().toLowerCase();
+}
+
+/**
+ * Does this check delivery PROVE that its head branch lives in the
+ * repository the delivery is about?
+ *
+ * The head branch is the fix loop's fallback coordinate (a Task is found by
+ * its worktree branch name when no pull request number resolves), and a
+ * branch NAME says nothing about which repository it is in: anybody can
+ * fork a public repository and name a branch `task/t-42-9f3c1a2b`. So the
+ * branch is kept only when one of the delivery's own `pull_requests[]`
+ * entries states a head repository that IS its base repository (by id, or
+ * by API url). GitHub lists only same-repository pull requests there and
+ * sends an empty list for forks, so an entry without repository stubs —
+ * or no entry at all — proves nothing and the branch is dropped.
+ */
+function provesSameRepoHead(refs: CheckPullRequestRef[] | undefined): boolean {
+    return (Array.isArray(refs) ? refs : []).some((ref) => {
+        const head = ref?.head?.repo;
+        const base = ref?.base?.repo;
+        if (!head || !base) return false;
+        if (
+            typeof head.id === 'number' &&
+            typeof base.id === 'number' &&
+            Number.isFinite(head.id)
+        ) {
+            return head.id === base.id;
+        }
+        return sameRepoName(head.url, base.url);
+    });
+}
+
+/**
+ * The GitHub Apps whose check results may drive the fix loop (finding F8).
+ *
+ * `github-actions` always, plus `GITHUB_TRUSTED_CHECK_APPS` (comma-separated
+ * app slugs). Any GitHub App installed on the repository can post a check
+ * run, and a failing one's name, title and summary are replayed to the agent
+ * as "CI is red" — so an app nobody vouched for is ingested for the board
+ * and the trigger matcher, but never resumes a run.
+ */
+export function isTrustedCheckApp(appSlug: string | null | undefined): boolean {
+    const slug = (appSlug ?? '').trim().toLowerCase();
+    return slug.length > 0 && config.githubChecks.trustedApps().includes(slug);
 }
 
 function prHeads(refs: CheckPullRequestRef[] | undefined): CheckPullRequestHead[] {
@@ -191,13 +265,29 @@ export function normalizeGitHubCheck(
     let outputTitle: string | undefined;
     let outputSummary: string | undefined;
     let pulls: CheckPullRequestHead[];
+    let appSlug: string | null;
 
+    // ## The head branch is kept only when the delivery PROVES it is ours
+    //
+    // The fix loop falls back to the branch name when no pull request
+    // number resolves, and a branch name is chosen by whoever pushed it.
+    // For a pull request from a FORK, GitHub reports the fork's branch name
+    // (`workflow_run.head_branch`, with `head_repository` = the fork), so an
+    // outsider could name a fork branch exactly like a Task branch and have
+    // their failing CI — job names, output text, URLs they control — replayed
+    // into an auto-resumed fleet run. Every branch below therefore needs a
+    // same-repository proof from the delivery itself, and is dropped without
+    // one; the PR numbers (same-repository only, by GitHub's own rule) and
+    // the head commit are untouched.
     if (eventName === 'check_run') {
         const run = body.check_run;
         if (!run) return null;
         granularity = 'check_run';
         headSha = nonEmpty(run.head_sha);
-        headBranch = nonEmpty(run.check_suite?.head_branch) ?? null;
+        headBranch = provesSameRepoHead(run.pull_requests)
+            ? (nonEmpty(run.check_suite?.head_branch) ?? null)
+            : null;
+        appSlug = nonEmpty(run.app?.slug)?.toLowerCase() ?? null;
         status = nonEmpty(run.status);
         conclusion = nonEmpty(run.conclusion ?? undefined);
         checkName = nonEmpty(run.name) ?? 'check';
@@ -217,7 +307,10 @@ export function normalizeGitHubCheck(
         if (!suite) return null;
         granularity = 'check_suite';
         headSha = nonEmpty(suite.head_sha);
-        headBranch = nonEmpty(suite.head_branch ?? undefined) ?? null;
+        headBranch = provesSameRepoHead(suite.pull_requests)
+            ? (nonEmpty(suite.head_branch ?? undefined) ?? null)
+            : null;
+        appSlug = nonEmpty(suite.app?.slug)?.toLowerCase() ?? null;
         status = nonEmpty(suite.status);
         conclusion = nonEmpty(suite.conclusion ?? undefined);
         checkName = nonEmpty(suite.app?.slug) ?? 'check suite';
@@ -232,7 +325,14 @@ export function normalizeGitHubCheck(
         if (!workflow) return null;
         granularity = 'workflow_run';
         headSha = nonEmpty(workflow.head_sha);
-        headBranch = nonEmpty(workflow.head_branch ?? undefined) ?? null;
+        // `head_repository` is the repository the head commit (and branch)
+        // lives in: the fork, for a fork pull request. A branch from any
+        // other repository — or a delivery that does not say — is dropped.
+        headBranch = sameRepoName(workflow.head_repository?.full_name, fullName)
+            ? (nonEmpty(workflow.head_branch ?? undefined) ?? null)
+            : null;
+        // Only GitHub Actions emits `workflow_run`.
+        appSlug = 'github-actions';
         status = nonEmpty(workflow.status);
         conclusion = nonEmpty(workflow.conclusion ?? undefined);
         checkName = nonEmpty(workflow.name) ?? 'workflow';
@@ -307,6 +407,7 @@ export function normalizeGitHubCheck(
                 ...(conclusion ? { conclusion } : {}),
                 verdict,
                 name: capped(checkName, INGESTED_EVENT_TITLE_MAX_CHARS),
+                ...(appSlug ? { app: capped(appSlug, INGESTED_EVENT_TITLE_MAX_CHARS) } : {}),
                 ...(pulls.length > 0 ? { pullRequests: pulls.map((pull) => pull.number) } : {}),
                 ...(url ? { url } : {}),
                 ...(outputTitle
@@ -349,6 +450,7 @@ export function normalizeGitHubCheck(
                       })
                     : null,
         },
+        appSlug,
     };
 }
 
@@ -380,13 +482,13 @@ export function isReviewFeedbackDelivery(
     if (eventName === 'pull_request_review_comment') {
         if (body.action !== 'created' || typeof body.pull_request?.number !== 'number')
             return false;
-        return isDoorbellComment(body, policy);
+        return isDoorbellComment(eventName, body, policy);
     }
     if (eventName === 'issue_comment') {
         // GitHub reports PR threads as issues; only those carry
         // `issue.pull_request`, and only they can be a Task's PR.
         if (body.action !== 'created' || !body.issue?.pull_request) return false;
-        return isDoorbellComment(body, policy);
+        return isDoorbellComment(eventName, body, policy);
     }
     return false;
 }
@@ -406,18 +508,24 @@ export function isReviewFeedbackDelivery(
  * the call, so the two halves cannot disagree. A collaborator's comment
  * rings it exactly as before.
  */
-function isDoorbellComment(body: GitHubWebhookBody, policy: ReviewBotPolicy): boolean {
+function isDoorbellComment(
+    eventName: 'issue_comment' | 'pull_request_review_comment',
+    body: GitHubWebhookBody,
+    policy: ReviewBotPolicy,
+): boolean {
     if (!isDoorbellAuthor(body.comment, policy)) return false;
     if (classifyReviewer(body.comment?.user, policy) !== 'trusted-bot') return true;
-    // `inReplyTo` too, exactly as the bridge passes it (#2632): a bot's
-    // in-thread reply ("Thanks for the fix…") with no severity marker of its
-    // own is not a finding, so it must not ring the doorbell either.
+    // The event and `inReplyTo` too, exactly as the bridge passes them: a
+    // bot's in-thread reply, or a chat answer on the PR conversation, is not
+    // a finding whatever it says (#2632, F3) — somebody asked the bot for
+    // it, and that somebody can be anyone — so it must not ring either.
     const inReplyTo = (body.comment as { in_reply_to_id?: number | null } | undefined)
         ?.in_reply_to_id;
     return (
         classifyReviewBotComment({
             action: body.action,
             body: body.comment?.body,
+            event: eventName,
             inReplyTo: typeof inReplyTo === 'number' ? inReplyTo : null,
         }).kind === 'findings'
     );
@@ -560,6 +668,17 @@ export class GitHubCheckIntakeService implements OnModuleInit, GitHubWebhookCons
             return { ingested };
         }
         if (!this.autoResume) return { ingested };
+        // F8 — only an allow-listed GitHub App's result may resume a run (or
+        // move the Task's recorded CI head). Any App installed on the
+        // repository can post a check run, and a red one's name, title and
+        // summary become the resumed agent's instructions. The envelope above
+        // is still ingested, so the board and the trigger matcher see it.
+        if (!isTrustedCheckApp(normalized.appSlug)) {
+            this.logger.debug(
+                `CI result from GitHub App '${normalized.appSlug ?? 'unknown'}' on ${normalized.signal.owner}/${normalized.signal.repo}@${normalized.signal.headSha} is not on GITHUB_TRUSTED_CHECK_APPS; not offered to the fix loop`,
+            );
+            return { ingested };
+        }
 
         const outcome = await this.autoResume.onCheckResult({
             userId: binding.userId,

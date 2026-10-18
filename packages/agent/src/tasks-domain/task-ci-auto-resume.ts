@@ -189,6 +189,16 @@ export interface CiHeadEvidence {
      * look like a fresh push.
      */
     reportedAt?: Date | null;
+    /**
+     * The delivery reached the Task through its BRANCH NAME alone — it named
+     * no pull request at all. A branch name is chosen by whoever pushed
+     * it (a fork can be named exactly like a Task branch), so such a
+     * delivery can confirm a head the platform already holds but is never
+     * evidence that the head has MOVED: with this set, a commit that differs
+     * from the recorded head is `stale`, never `advanced`, and the clock is
+     * not consulted.
+     */
+    branchOnly?: boolean;
 }
 
 /**
@@ -238,6 +248,9 @@ export function decideCiHead(
     const eventSha = sha(event.headSha);
     if (!storedSha) return 'first-seen';
     if (storedSha === eventSha) return 'current';
+
+    // (0) Branch-only evidence never moves the head (see `branchOnly`).
+    if (event.branchOnly === true) return 'stale';
 
     // (1) The provider's own pointer to the pull request head. Decisive
     //     in both directions, and available on every same-repo delivery.
@@ -308,6 +321,14 @@ export type AutoResumeOutcomeReason =
     | 'halted'
     /** The repo/branch/PR resolved to no Task this owner holds. */
     | 'no-task'
+    /**
+     * The delivery matched a Task by BRANCH NAME only — it named no pull
+     * request at all, as every fork pull request's deliveries do — and its
+     * commit is not one the platform already knows for that Task
+     * (`ciHeadSha` / `prHeadSha`). A fork can name a branch anything, so
+     * nothing is recorded and nothing is resumed (F1).
+     */
+    | 'unverified-branch'
     /** A review delivery arrived but the Task has no unconsumed rejection. */
     | 'no-feedback'
     /** The Task is `done` or `cancelled`. */

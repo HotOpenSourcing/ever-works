@@ -50,6 +50,12 @@ export const DEFAULT_TRUSTED_REVIEW_BOTS = [
     'greptile-apps[bot]',
 ] as const;
 
+/**
+ * GitHub App slugs whose check results always count as CI for the fix loop
+ * (F8). Operators ADD to this with `GITHUB_TRUSTED_CHECK_APPS`.
+ */
+export const DEFAULT_TRUSTED_CHECK_APPS = ['github-actions'] as const;
+
 export enum AuthProvider {
     LOCAL = 'local',
     GITHUB = 'github',
@@ -272,6 +278,46 @@ export const config = {
                 .toLowerCase();
             return [`${slug}[bot]`];
         },
+    },
+
+    /**
+     * CI check results that may drive the autonomous fix loop (security
+     * finding F8, 2026-10-18).
+     *
+     * `trustedApps()` — the GitHub App slugs whose `check_run` /
+     * `check_suite` results are offered to `TaskCiAutoResumeService`:
+     * `github-actions` ALWAYS, plus `GITHUB_TRUSTED_CHECK_APPS`
+     * (comma-separated, trimmed, lower-cased, de-duplicated). Any App
+     * installed on a repository can post a check run, and a failing one's
+     * name, title and summary are replayed to the resumed agent, so an App
+     * nobody listed is still ingested (board, Activity, triggers) but never
+     * resumes a run. `workflow_run` deliveries are GitHub Actions by
+     * definition.
+     */
+    githubChecks: {
+        trustedApps: (): string[] => {
+            const extra = (process.env.GITHUB_TRUSTED_CHECK_APPS ?? '')
+                .split(',')
+                .map((value) => value.trim().toLowerCase())
+                .filter((value) => value.length > 0);
+            return Array.from(new Set([...DEFAULT_TRUSTED_CHECK_APPS, ...extra]));
+        },
+    },
+
+    /**
+     * GitHub issue intake (security finding F6, 2026-10-18).
+     *
+     * `fileOutsiderIssues()` — `GITHUB_ISSUE_INTAKE_OUTSIDERS=true` restores
+     * the previous behaviour of filing a triage Task for an issue opened by
+     * ANYONE. Default OFF: on a public repository any GitHub account can open
+     * an issue, and every one used to become a Task in the owner's Work,
+     * filed as the owner, with no rate limit. Off, an issue from an author
+     * who is not an OWNER, MEMBER or COLLABORATOR of the repository is still
+     * ingested (Activity, inbound triggers) but files no Task.
+     */
+    githubIssueIntake: {
+        fileOutsiderIssues: (): boolean =>
+            (process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS ?? '').trim().toLowerCase() === 'true',
     },
 
     /**

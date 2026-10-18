@@ -33,6 +33,30 @@ import type { TaskAutoResumeTrigger } from '../entities/task-ci-auto-resume-atte
 import type { AgentRun } from '../entities/agent-run.entity';
 import { isAgentReviewRunScope } from './task-agent-review';
 import { resolveTaskDispatchAgentIds } from './task-dispatch-agents';
+import {
+    REVIEW_FEEDBACK_DATA_NOTICE,
+    fenceReviewFeedback,
+    safeReviewerLabel,
+} from './review-feedback-fence';
+
+/**
+ * The CI failure handed to `resume` as its MESSAGE — used only when the
+ * durable rejection row will not be replayed (the replay window is full, or
+ * the row could not be written). The replayed row is fenced by
+ * `composeRejectionFeedbackMessage`; this path bypasses it, so it fences
+ * itself the same way (F5): a check's name, title and output are provider
+ * text, and arrive here framed as something to act on.
+ */
+export function fencedCiFallbackMessage(feedback: { text: string; reviewerLabel: string }): string {
+    return [
+        'Continuous integration is red for this task. Fix the failure described below, then finish.',
+        '',
+        REVIEW_FEEDBACK_DATA_NOTICE,
+        '',
+        `Failing check: ${safeReviewerLabel(feedback.reviewerLabel, 'CI')}`,
+        fenceReviewFeedback(feedback.text, 'ci'),
+    ].join('\n');
+}
 
 /** One completed (or in-flight) check result, already normalized. */
 export interface CiCheckResultInput {
@@ -271,7 +295,31 @@ export class TaskCiAutoResumeService {
 
         const resolved = await this.resolveTask(input);
         if (!resolved) return { reason: 'no-task' };
-        const { task, prNumber } = resolved;
+        const { task, prNumber, via } = resolved;
+
+        // F1 — a Task found by its BRANCH NAME, in a delivery that names NO
+        // pull request at all, rests on nothing but that name: a fork can
+        // name its branch exactly like a Task branch, and a fork pull
+        // request's deliveries carry an empty `pull_requests[]`. Such a
+        // delivery may only speak about a commit the platform ALREADY knows
+        // for this Task — the CI head it recorded, or the pull request head
+        // the provider poll reported — and can never move the head. Anything
+        // else is refused before a single write: no head recorded, no
+        // attempt, no resume.
+        //
+        // A branch match in a delivery that DOES name pull requests is
+        // different: GitHub lists only same-repository pull requests there,
+        // and the intake keeps the branch only when one of those entries
+        // proves its head repository is this one — the branch was pushed by
+        // somebody with write access (a Task whose pull request a person
+        // opened, so its number was never recorded).
+        const branchOnly = via === 'branch' && (input.prNumbers ?? []).length === 0;
+        if (branchOnly && !this.isKnownTaskCommit(task, headSha)) {
+            this.logger.debug(
+                `Task ${task.id}: CI result for ${input.owner}/${input.repo}@${headSha} matched only by branch name and names a commit this Task has never reported — ignored`,
+            );
+            return { reason: 'unverified-branch', taskId: task.id };
+        }
 
         const failing = input.verdict === 'failing';
         const decision = decideCiHead(task, {
@@ -279,8 +327,10 @@ export class TaskCiAutoResumeService {
             // The pull request THIS Task owns, never simply the first entry
             // in the delivery: a commit that heads two pull requests lists
             // both, and the other one's head says nothing about this Task.
-            prHeadSha: this.prHeadFor(input, prNumber ?? task.prNumber ?? null),
+            prHeadSha: branchOnly ? null : this.prHeadFor(input, prNumber ?? task.prNumber ?? null),
             reportedAt: input.observedAt,
+            // Branch-only evidence can confirm a head; it never advances one.
+            branchOnly,
         });
 
         // ── the ingest half: the provider's own verdict, onto the Task ──
@@ -629,7 +679,7 @@ export class TaskCiAutoResumeService {
                 // whole run that does not know what broke.
                 replayWindowHasRoom = false;
             }
-            if (!replayWindowHasRoom) fallbackMessage = ctx.feedback.text;
+            if (!replayWindowHasRoom) fallbackMessage = fencedCiFallbackMessage(ctx.feedback);
             try {
                 await this.rejections.record({
                     taskId: task.id,
@@ -651,7 +701,7 @@ export class TaskCiAutoResumeService {
                         error instanceof Error ? error.message : String(error)
                     }`,
                 );
-                fallbackMessage = ctx.feedback.text;
+                fallbackMessage = fencedCiFallbackMessage(ctx.feedback);
             }
         }
 
@@ -815,7 +865,7 @@ export class TaskCiAutoResumeService {
      */
     private async resolveTask(
         input: CiCheckResultInput,
-    ): Promise<{ task: Task; prNumber: number | null } | null> {
+    ): Promise<{ task: Task; prNumber: number | null; via: 'pull-request' | 'branch' } | null> {
         const base = { userId: input.userId, owner: input.owner, repo: input.repo };
         const prNumbers = [...(input.prNumbers ?? [])];
         if (prNumbers.length > 0) {
@@ -827,18 +877,34 @@ export class TaskCiAutoResumeService {
             // so never recorded) the branch below still finds.
             if (link && link.isTaskRepo !== false) {
                 const task = await this.tasks.findById(link.taskId);
-                return task ? { task, prNumber: link.prNumber } : null;
+                return task ? { task, prNumber: link.prNumber, via: 'pull-request' } : null;
             }
         }
         // Fork pull requests report an EMPTY `pull_requests[]`, so the
-        // branch is the only remaining coordinate — and it is `null` for
-        // forks too, which is why both are tried and neither is assumed.
+        // branch is the only remaining coordinate. The intake drops a branch
+        // it cannot prove is in this repository, but a branch NAME is still
+        // only a claim, so the caller treats a branch match as such (see
+        // `handleCheckResult`: it must name a commit the Task already knows).
         const branch = (input.headBranch ?? '').trim();
         if (!branch) return null;
         const link = await this.links.findByBranch({ ...base, branch });
         if (!link || link.isTaskRepo === false) return null;
         const task = await this.tasks.findById(link.taskId);
-        return task ? { task, prNumber: null } : null;
+        return task ? { task, prNumber: null, via: 'branch' } : null;
+    }
+
+    /**
+     * Is `headSha` a commit the platform already holds for this Task — the
+     * CI head this loop recorded (`ciHeadSha`) or the pull request head the
+     * provider poll reported (`prHeadSha`)? Case-insensitive, like every
+     * other commit comparison in this loop.
+     */
+    private isKnownTaskCommit(task: Task, headSha: string): boolean {
+        const wanted = headSha.trim().toLowerCase();
+        if (!wanted) return false;
+        return [task.ciHeadSha, task.prHeadSha].some(
+            (known) => (known ?? '').trim().toLowerCase() === wanted,
+        );
     }
 
     /**
