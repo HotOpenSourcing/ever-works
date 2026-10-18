@@ -16,6 +16,7 @@ import {
 	sanitizeFleetNodeHealthSnapshot,
 	type ComputerStateInput
 } from '../fleet-node-health.types.js';
+import { normalizeNeedsALookItem } from '../fleet-needs-a-look.types.js';
 import { FLEET_NODE_UPGRADE_COMMAND } from '../fleet-node.types.js';
 
 const GIB = 1024 ** 3;
@@ -140,9 +141,21 @@ describe('hasFleetNodeHealthReading', () => {
 });
 
 describe('FLEET_CLEAR_MODEL_THROTTLE_COMMAND', () => {
-	it('is a named command a needs-a-look action may carry (CONTRACTS §4.6 pattern)', () => {
+	it('is a named command a needs-a-look action may carry (CONTRACTS §4.6)', () => {
 		expect(FLEET_CLEAR_MODEL_THROTTLE_COMMAND).toBe('fleet.clear-model-throttle');
-		expect(FLEET_CLEAR_MODEL_THROTTLE_COMMAND).toMatch(/^[a-z][a-z0-9-]*(.[a-z][a-z0-9-]*)*$/);
+		// Judged by the REAL normaliser, not a copy of its pattern: an action
+		// whose command it refused would be dropped from the row.
+		const item = {
+			id: 'node-throttled:n1',
+			nodeId: 'n1',
+			severity: 'warn' as const,
+			kind: 'node-throttled' as const,
+			title: "Waiting for Claude Code's limit to reset",
+			detail: '',
+			action: { label: 'Clear limit now', command: FLEET_CLEAR_MODEL_THROTTLE_COMMAND },
+			since: '2026-10-18T09:00:00.000Z'
+		};
+		expect(normalizeNeedsALookItem(item)?.action).toEqual(item.action);
 	});
 });
 
