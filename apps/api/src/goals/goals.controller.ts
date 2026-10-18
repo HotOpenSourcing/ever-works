@@ -32,6 +32,7 @@ import {
 import { CurrentUser } from '../auth/decorators/user.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import {
+    machinePrincipalKind,
     refuseMachinePrincipalAction,
     refuseMachinePrincipalFields,
     requireHumanSession,
@@ -145,7 +146,22 @@ export class GoalsController {
     async create(
         @CurrentUser() auth: AuthenticatedUser,
         @Body() body: CreateGoalDto,
+        // Appended LAST so positional callers (specs) keep their meaning.
+        @Req() req?: MachinePrincipalRequest,
     ): Promise<GoalDto> {
+        // Works-security lane 3a — a machine principal's criteria are born
+        // PROPOSALS: open, `proposed: true`, `source: 'planner'`. Otherwise a
+        // fleet run could create a Goal whose definition of done is already
+        // approved (or already met / waived) — the sign-off a person owns.
+        // A delivery Goal then needs a person to approve one criterion first.
+        if (machinePrincipalKind(auth, req) && Array.isArray(body.dodCriteria)) {
+            body.dodCriteria = body.dodCriteria.map((criterion) => ({
+                ...criterion,
+                status: 'open' as typeof criterion.status,
+                proposed: true,
+                source: 'planner' as typeof criterion.source,
+            }));
+        }
         return this.service.create(
             auth.userId,
             {

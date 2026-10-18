@@ -139,11 +139,14 @@ describe('KbController — machine-written documents are review-gated', () => {
 
     it('stores a fleet run’s document as the agent’s, proposed, with its run id', async () => {
         await controller.createDocument(auth, WORK_ID, body as never, runToken);
+        expect(kb.createDocument.mock.calls[0][0].generatedByAgentRunId).toBeUndefined();
         expect(kb.createDocument).toHaveBeenCalledWith(
             expect.objectContaining({
                 source: 'agent',
                 reviewState: 'proposed',
-                generatedByAgentRunId: 'run-9',
+                // An agent_runs id: never `generatedByAgentRunId` (a relation
+                // to work_agent_runs), so it travels in metadata.
+                metadata: { authoredByAgentRunId: 'run-9' },
             }),
         );
     });

@@ -22,6 +22,7 @@ const runToken = { fleetRunCredential: { jobId: 'j1', organizationId: null } };
 
 function build() {
     const service = {
+        create: jest.fn().mockResolvedValue({ id: GOAL }),
         update: jest.fn().mockResolvedValue({ id: GOAL }),
         getForUser: jest.fn().mockResolvedValue({ id: GOAL }),
     };
@@ -112,5 +113,26 @@ describe('GoalsController — machine principals', () => {
         expect(orchestrator.approveDodCriteria).not.toHaveBeenCalled();
         await controller.approveDod(session, GOAL, {} as never);
         expect(orchestrator.approveDodCriteria).toHaveBeenCalledWith('u1', GOAL, null);
+    });
+
+    it('creates a machine principal’s DoD criteria as open proposals, a person’s as given', async () => {
+        const { controller, service } = build();
+        const criteria = [
+            { id: 'ship', text: 'Ship it', status: 'done', proposed: false, source: 'operator' },
+        ];
+        await controller.create(
+            personalKey,
+            { title: 'G', goalKind: 'delivery', dodCriteria: criteria } as never,
+            runToken,
+        );
+        expect(service.create.mock.calls[0][1].dodCriteria).toEqual([
+            { id: 'ship', text: 'Ship it', status: 'open', proposed: true, source: 'planner' },
+        ]);
+        await controller.create(personalKey, {
+            title: 'G',
+            goalKind: 'delivery',
+            dodCriteria: criteria.map((c) => ({ ...c })),
+        } as never);
+        expect(service.create.mock.calls[1][1].dodCriteria).toEqual(criteria);
     });
 });

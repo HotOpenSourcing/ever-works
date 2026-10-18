@@ -66,7 +66,7 @@ function build(opts: { permissions?: Record<string, Record<string, boolean>> } =
     controller: TasksController;
     service: Record<string, jest.Mock>;
     chat: { post: jest.Mock };
-    agents: { findById: jest.Mock; findByUserIdScoped: jest.Mock };
+    agents: { findByIdAndUser: jest.Mock; findByUserIdScoped: jest.Mock };
     rejections: { rejectTask: jest.Mock };
     escalations: { resolveForTask: jest.Mock };
 } {
@@ -92,8 +92,9 @@ function build(opts: { permissions?: Record<string, Record<string, boolean>> } =
     };
     const chat = { post: jest.fn().mockResolvedValue({ id: 'm1' }) };
     const agents = {
-        findById: jest.fn(async (id: string) =>
-            permissions[id] ? { id, permissions: permissions[id] } : null,
+        // Owner-scoped (works-security lane 3a review): a foreign id answers null.
+        findByIdAndUser: jest.fn(async (id: string, userId: string) =>
+            userId === USER_ID && permissions[id] ? { id, permissions: permissions[id] } : null,
         ),
         findByUserIdScoped: jest
             .fn()
@@ -148,6 +149,22 @@ describe('acceptance checks / setup steps — never written by a machine princip
             error: { code: 'domain_rule', details: { fields: ['acceptanceChecks'] } },
         });
         expect(service.create).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['extraRepos', [{ connectionId: 'c1', mountDir: 'lib' }]],
+        ['isolationMode', 'off'],
+        ['maxGateAttempts', 5],
+    ])('refuses %s from a fleet run on create and update', async (field, value) => {
+        const { controller, service } = build();
+        await expect(
+            controller.create(session, { title: 'x', [field]: value } as never, runToken),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(
+            controller.update(session, TASK_ID, { [field]: value } as never, runToken),
+        ).rejects.toBeInstanceOf(ForbiddenException);
+        expect(service.create).not.toHaveBeenCalled();
+        expect(service.update).not.toHaveBeenCalled();
     });
 
     it('keeps acceptance checks for a person — session or personal key', async () => {
@@ -383,6 +400,18 @@ describe('a fleet run never hands a Task to a wider Agent', () => {
         expect(service.addAssignee).toHaveBeenCalled();
     });
 
+    it('never answers with the permissions of an Agent the owner cannot reach', async () => {
+        const { controller, service, agents } = build();
+        const FOREIGN = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
+        agents.findByIdAndUser.mockImplementation(async (id: string) =>
+            id === OWN_AGENT ? { id, permissions: { canCommitToRepo: true } } : null,
+        );
+        await controller.update(session, TASK_ID, { agentId: FOREIGN } as never, runToken);
+        // The lookup is scoped to the owner, and the service's own rules decide.
+        expect(agents.findByIdAndUser).toHaveBeenCalledWith(FOREIGN, USER_ID, scope);
+        expect(service.update).toHaveBeenCalled();
+    });
+
     it('refuses every agent when the job names none', async () => {
         const { controller, service } = build();
         await expect(
@@ -399,7 +428,7 @@ describe('a fleet run never hands a Task to a wider Agent', () => {
     it('does not consult permissions for a person', async () => {
         const { controller, service, agents } = build();
         await controller.create(session, { title: 'x', agentId: OTHER_AGENT } as never, {});
-        expect(agents.findById).not.toHaveBeenCalled();
+        expect(agents.findByIdAndUser).not.toHaveBeenCalled();
         expect(service.create).toHaveBeenCalled();
     });
 });

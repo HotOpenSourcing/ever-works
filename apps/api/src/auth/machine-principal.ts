@@ -157,9 +157,17 @@ export function refuseMachinePrincipalFieldsOutside(
  * Task fields a machine principal may not set on create or update: the
  * acceptance checks are shell commands (`phase: 'setup'` entries are the
  * setup steps) a fleet node runs with `shell: true`, and the planner treats
- * them as owner-authored.
+ * them as owner-authored; `extraRepos` mounts further repositories into a
+ * run (and opens pull requests there); `isolationMode` decides whether a run
+ * works on a task branch at all; `maxGateAttempts` is how many times a red
+ * gate is retried.
  */
-export const MACHINE_REFUSED_TASK_FIELDS: readonly string[] = Object.freeze(['acceptanceChecks']);
+export const MACHINE_REFUSED_TASK_FIELDS: readonly string[] = Object.freeze([
+    'acceptanceChecks',
+    'extraRepos',
+    'isolationMode',
+    'maxGateAttempts',
+]);
 
 /**
  * `DeleteWorkDto` flags that destroy something beyond the Work row: the

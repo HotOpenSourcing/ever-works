@@ -168,6 +168,14 @@ describe('isFleetRunTokenRouteAllowed — refused surface', () => {
 		expect(isFleetRunTokenRouteAllowed('GET', '/api//tasks')).toBe(false);
 	});
 
+	it('refuses a dot SEGMENT (literal or encoded) but not dots inside a segment', () => {
+		expect(isFleetRunTokenRouteAllowed('GET', '/api/tasks/..')).toBe(false);
+		expect(isFleetRunTokenRouteAllowed('GET', '/api/tasks/%2e%2E')).toBe(false);
+		expect(isFleetRunTokenRouteAllowed('GET', '/api/tasks/./t1')).toBe(false);
+		expect(isFleetRunTokenRouteAllowed('GET', '/api/works/w1/kb/documents/notes..md')).toBe(true);
+		expect(isFleetRunTokenRouteAllowed('GET', '/api/works/w1/kb/documents/brand%2Fv1.2')).toBe(true);
+	});
+
 	it('matches the METHOD, not just the path', () => {
 		// A granted path is not a granted family: DELETE on a Task, POST on a
 		// read route and PATCH on a PUT route are different routes.

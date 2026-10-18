@@ -69,18 +69,17 @@ import type {
 function machineAuthoredKbFields(
     auth: AuthenticatedUser,
     req: MachinePrincipalRequest | undefined,
-): {
-    source?: KbDocumentSource;
-    reviewState?: KbReviewState;
-    generatedByAgentRunId?: string | null;
-} {
+): { source?: KbDocumentSource; reviewState?: KbReviewState; metadata?: Record<string, unknown> } {
     const kind = machinePrincipalKind(auth, req);
     if (!kind) return {};
     if (kind === 'fleet-run') {
+        // The run id is an `agent_runs` id: `generatedByAgentRunId` is a
+        // relation to `work_agent_runs`, so it travels in metadata instead.
+        const runId = fleetRunBindingOf(req)?.runId ?? null;
         return {
             source: 'agent' as KbDocumentSource,
             reviewState: 'proposed' as KbReviewState,
-            generatedByAgentRunId: fleetRunBindingOf(req)?.runId ?? null,
+            ...(runId ? { metadata: { authoredByAgentRunId: runId } } : {}),
         };
     }
     return { reviewState: 'proposed' as KbReviewState };

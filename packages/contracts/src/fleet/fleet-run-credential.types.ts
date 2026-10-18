@@ -426,10 +426,11 @@ const FLEET_RUN_TOKEN_ROUTE_SHAPES: readonly { method: string; shape: readonly s
  * normalised away before matching, so `/api/tasks/x?y=1` and `/api/tasks/x/`
  * are judged as `/api/tasks/x`.
  *
- * `..` is refused outright rather than resolved: a path that needs
- * resolving to be judged is a path the caller should not be sending, and
- * resolving it here would be a second, subtly different normaliser
- * sitting in front of the router's own.
+ * A `..` (or `.`) SEGMENT is refused outright rather than resolved: a path
+ * that needs resolving to be judged is a path the caller should not be
+ * sending, and resolving it here would be a second, subtly different
+ * normaliser sitting in front of the router's own. Dots inside a segment
+ * (a KB path such as `notes..md`) are ordinary characters.
  */
 export function isFleetRunTokenRouteAllowed(method: unknown, path: unknown): boolean {
 	if (typeof method !== 'string' || typeof path !== 'string') return false;
@@ -465,14 +466,22 @@ function underPrefix(path: string, prefix: string): boolean {
 	return path === prefix || path.startsWith(`${prefix}/`);
 }
 
+/** `.` / `..`, literal or percent-encoded (`%2e`), as one whole path segment. */
+function isDotSegment(segment: string): boolean {
+	const decoded = segment.replace(/%2e/gi, '.');
+	return decoded === '.' || decoded === '..';
+}
+
 /** Strip query/hash, collapse a trailing slash; `null` when unusable. */
 function normalizeRoutePath(path: string): string | null {
 	const trimmed = path.trim();
 	if (!trimmed.startsWith('/')) return null;
 	const withoutQuery = trimmed.split('?')[0]?.split('#')[0] ?? '';
 	if (!withoutQuery.startsWith('/')) return null;
-	if (withoutQuery.includes('..')) return null;
 	if (withoutQuery.includes('//')) return null;
+	// A dot SEGMENT (`..` or `.`, also percent-encoded) is refused outright;
+	// dots inside a segment (`notes..md`, `v1.2`) are ordinary characters.
+	if (withoutQuery.split('/').some(isDotSegment)) return null;
 	if (withoutQuery.length > 1 && withoutQuery.endsWith('/')) {
 		return withoutQuery.slice(0, -1);
 	}

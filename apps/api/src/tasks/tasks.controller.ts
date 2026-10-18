@@ -307,6 +307,7 @@ export class TasksController {
      * Its own Agent is always fine; a job that names no Agent may assign none.
      */
     private async refuseRunTokenWiderAgent(
+        auth: AuthenticatedUser,
         req: MachinePrincipalRequest | undefined,
         agentId: string | null | undefined,
     ): Promise<void> {
@@ -319,12 +320,16 @@ export class TasksController {
                 'A fleet-run credential whose job names no Agent cannot hand a Task to an Agent; a person assigns it in the app.',
             );
         }
+        // Both lookups are scoped to the owner the run acts for: a foreign
+        // Agent id must never answer with its permission names.
+        const scope = this.scopeContext.getScope();
         const [own, target] = await Promise.all([
-            this.agents.findById(ownAgentId),
-            this.agents.findById(agentId),
+            this.agents.findByIdAndUser(ownAgentId, auth.userId, scope),
+            this.agents.findByIdAndUser(agentId, auth.userId, scope),
         ]);
-        // A missing target is left to the service (its own 404 / ownership
-        // rules); a missing OWN agent grants nothing, so any target is wider.
+        // A target the owner cannot reach is left to the service (its own
+        // 404 / ownership rules); a missing OWN agent grants nothing, so any
+        // target is wider.
         if (!target) return;
         const wider = widerAgentPermissions(
             target.permissions as unknown as Record<string, unknown>,
@@ -514,7 +519,7 @@ export class TasksController {
             'acceptance checks and setup steps are commands a node runs; a person adds them in the app.',
         );
         refuseRunTokenSchedule(body, req);
-        await this.refuseRunTokenWiderAgent(req, body.agentId);
+        await this.refuseRunTokenWiderAgent(auth, req, body.agentId);
         if (body.parentTaskId) await this.refuseIntegrationPrivateTask(auth, body.parentTaskId);
         const createdBy = this.createdByFor(auth, req);
         return this.service.create(
@@ -677,7 +682,7 @@ export class TasksController {
             'acceptance checks and setup steps are commands a node runs; a person changes them in the app.',
         );
         refuseRunTokenSchedule(body, req);
-        await this.refuseRunTokenWiderAgent(req, body.agentId);
+        await this.refuseRunTokenWiderAgent(auth, req, body.agentId);
         // `scheduledAt` arrives as an ISO string on the wire and the
         // service works in `Date` (the column is a timestamptz). The
         // three states are distinct: absent = untouched, null = clear
@@ -1096,7 +1101,7 @@ export class TasksController {
     ) {
         this.assertActorType(body.assigneeType);
         if (body.assigneeType === 'agent')
-            await this.refuseRunTokenWiderAgent(req, body.assigneeId);
+            await this.refuseRunTokenWiderAgent(auth, req, body.assigneeId);
         return this.service.addAssignee(
             auth.userId,
             id,
@@ -1134,7 +1139,7 @@ export class TasksController {
     ) {
         this.assertActorType(body.reviewerType);
         if (body.reviewerType === 'agent')
-            await this.refuseRunTokenWiderAgent(req, body.reviewerId);
+            await this.refuseRunTokenWiderAgent(auth, req, body.reviewerId);
         return this.service.addReviewer(
             auth.userId,
             id,
@@ -1255,7 +1260,7 @@ export class TasksController {
     ) {
         this.assertActorType(body.approverType);
         if (body.approverType === 'agent')
-            await this.refuseRunTokenWiderAgent(req, body.approverId);
+            await this.refuseRunTokenWiderAgent(auth, req, body.approverId);
         return this.service.addApprover(
             auth.userId,
             id,

@@ -21,6 +21,7 @@ import { IntegrationResourcesService } from '@ever-works/agent/integrations-api'
 import { CurrentUser } from '../../auth/decorators/user.decorator';
 import type { AuthenticatedUser } from '../../auth/types/auth.types';
 import { RequireScopes } from '../../auth/integration/integration.decorators';
+import { IntegrationHttpException } from '../../auth/integration/integration-http.exception';
 import { ScopeContextService } from '../../scope/scope-context.service';
 import { IntegrationOnlyGuard } from './integration-only.guard';
 import { IntegrationExceptionFilter } from './integration-exception.filter';
@@ -108,6 +109,28 @@ export class IntegrationTaskSetsController {
         const rows = await this.assigneeRows.findByTaskId(id);
         const key = (type: string, actorId: string) => `${type}:${actorId}`;
         const wanted = new Set(dto.assignees.map((ref) => key(ref.type, ref.id)));
+        // Works-security lane 3a — the AGENT assignees of a recurring template
+        // are who runs at every future fire, with no person in between: an
+        // integration may not change them (user assignees stay open).
+        const agentsBefore = rows
+            .filter((row) => row.assigneeType === 'agent')
+            .map((row) => key('agent', row.assigneeId))
+            .sort();
+        const agentsAfter = dto.assignees
+            .filter((ref) => ref.type === 'agent')
+            .map((ref) => key('agent', ref.id))
+            .sort();
+        if (agentsBefore.join(',') !== [...new Set(agentsAfter)].join(',')) {
+            const task = await this.tasks.getOne(user.userId, id, scope);
+            if (task.isRecurring) {
+                throw new IntegrationHttpException(
+                    422,
+                    'domain_rule',
+                    "An integration cannot change a recurring Task template's agent assignees: every run it starts goes to them. A person changes them in Ever Works.",
+                    { field: 'assignees', reason: 'recurring_template' },
+                );
+            }
+        }
         for (const row of rows) {
             if (!wanted.has(key(row.assigneeType, row.assigneeId))) {
                 await this.tasks.removeAssignee(user.userId, id, row.id, scope);
