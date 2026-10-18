@@ -628,7 +628,9 @@ export class FleetNode {
      * node's owner. Read and written from FL-03's wake phase; the column
      * ships with the slot. Migration: `1796030100000-AddFleetNodeWakeFields`.
      */
-    @Column({ type: 'varchar', length: 17, nullable: true })
+    // `text` as CONTRACTS §4.1 types it: no length that a notation other than
+    // `aa:bb:cc:dd:ee:ff` (EUI-64, a dash form) would overflow.
+    @Column({ type: 'text', nullable: true })
     macAddress?: string | null;
 
     /**
@@ -636,7 +638,7 @@ export class FleetNode {
      * node is on, so siblings on the same network can be matched without
      * storing an address. Migration: `1796030100000-AddFleetNodeWakeFields`.
      */
-    @Column({ type: 'varchar', length: 16, nullable: true })
+    @Column({ type: 'text', nullable: true })
     lanId?: string | null;
 
     /** Computer health (FL-03, wake) — the last wake attempt on this node. */

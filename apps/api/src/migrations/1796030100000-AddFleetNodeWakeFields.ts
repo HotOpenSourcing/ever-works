@@ -8,9 +8,9 @@ import { MigrationInterface, QueryRunner, TableColumn } from 'typeorm';
  *    with the platform's receipt time, so every list of computers reads one
  *    row per computer and never joins the history table. NULL = the node
  *    never reported one (a daemon older than the field); no backfill.
- *  - `macAddress` (varchar 17) — the node's primary hardware address,
+ *  - `macAddress` (text, CONTRACTS §4.1) — the node's primary hardware address,
  *    reported only with `--manage`, returned masked and to the owner only.
- *  - `lanId` (varchar 16) — an opaque identity of the node's network, so a
+ *  - `lanId` (text) — an opaque identity of the node's network, so a
  *    sibling on the same network can be matched without storing an address.
  *  - `lastWakeAttemptAt` (timestamp) — the last wake attempt on this node.
  *
@@ -30,13 +30,8 @@ export class AddFleetNodeWakeFields1796030100000 implements MigrationInterface {
     public async up(queryRunner: QueryRunner): Promise<void> {
         const columns: TableColumn[] = [
             new TableColumn({ name: 'health', type: 'text', isNullable: true }),
-            new TableColumn({
-                name: 'macAddress',
-                type: 'varchar',
-                length: '17',
-                isNullable: true,
-            }),
-            new TableColumn({ name: 'lanId', type: 'varchar', length: '16', isNullable: true }),
+            new TableColumn({ name: 'macAddress', type: 'text', isNullable: true }),
+            new TableColumn({ name: 'lanId', type: 'text', isNullable: true }),
             new TableColumn({ name: 'lastWakeAttemptAt', type: 'timestamp', isNullable: true }),
         ];
         for (const column of columns) {

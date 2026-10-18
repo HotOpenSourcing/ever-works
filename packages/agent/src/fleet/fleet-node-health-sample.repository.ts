@@ -101,6 +101,9 @@ export function rollUpHour(
  * range, and roll-up rows are inserted with insert-or-ignore on the unique
  * `(nodeId, resolution, at)` key, which is what makes a re-run a no-op.
  */
+/** Hourly rows per INSERT statement (see `insertHourly`): 500 × ~18 parameters stays under both engines' caps. */
+export const FLEET_HEALTH_HOURLY_INSERT_CHUNK = 500;
+
 @Injectable()
 export class FleetNodeHealthSampleRepository {
     constructor(
@@ -163,14 +166,19 @@ export class FleetNodeHealthSampleRepository {
 
     /** Insert hourly rows; a row whose `(nodeId, hourly, at)` already exists is left alone. */
     async insertHourly(rows: readonly FleetNodeHealthHourlyRow[]): Promise<void> {
-        if (rows.length === 0) return;
-        await this.repository
-            .createQueryBuilder()
-            .insert()
-            .into(FleetNodeHealthSample)
-            .values(rows.map((row) => ({ ...row, resolution: 'hourly' as const, gpu: null })))
-            .orIgnore()
-            .execute();
+        // In chunks: one multi-row insert binds ~18 parameters a row, and both
+        // engines cap a statement's parameters (Postgres 65 535, sqlite 32 766),
+        // which one hour of a large fleet would otherwise exceed.
+        for (let index = 0; index < rows.length; index += FLEET_HEALTH_HOURLY_INSERT_CHUNK) {
+            const chunk = rows.slice(index, index + FLEET_HEALTH_HOURLY_INSERT_CHUNK);
+            await this.repository
+                .createQueryBuilder()
+                .insert()
+                .into(FleetNodeHealthSample)
+                .values(chunk.map((row) => ({ ...row, resolution: 'hourly' as const, gpu: null })))
+                .orIgnore()
+                .execute();
+        }
     }
 
     /** Delete rows of one resolution older than `cutoff`. Idempotent. Answers how many went. */

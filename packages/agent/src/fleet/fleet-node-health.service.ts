@@ -111,21 +111,30 @@ export class FleetNodeHealthService {
 
         let rolledHours = 0;
         let hourlyRows = 0;
-        // Oldest first: an hour about to lose its raw rows to retention is
-        // rolled before a recent one, which the next pass can still reach.
-        for (let start = oldestStart; start + HOUR_MS <= newestEnd; start += HOUR_MS) {
-            if (rolledHours >= FLEET_HEALTH_ROLLUP_MAX_HOURS_PER_RUN) break;
-            const hour = new Date(start);
-            if (await this.samples.hasHourly(hour)) continue;
-            const raws = await this.samples.rawInHour(hour);
-            if (raws.length === 0) continue;
-            const rows = rollUpByNode(hour, raws);
-            await this.samples.insertHourly(rows);
-            rolledHours += 1;
-            hourlyRows += rows.length;
+        let rollError: unknown = null;
+        try {
+            // Oldest first: an hour about to lose its raw rows to retention is
+            // rolled before a recent one, which the next pass can still reach.
+            for (let start = oldestStart; start + HOUR_MS <= newestEnd; start += HOUR_MS) {
+                if (rolledHours >= FLEET_HEALTH_ROLLUP_MAX_HOURS_PER_RUN) break;
+                const hour = new Date(start);
+                if (await this.samples.hasHourly(hour)) continue;
+                const raws = await this.samples.rawInHour(hour);
+                if (raws.length === 0) continue;
+                const rows = rollUpByNode(hour, raws);
+                await this.samples.insertHourly(rows);
+                rolledHours += 1;
+                hourlyRows += rows.length;
+            }
+        } catch (error) {
+            // Retention still runs: a roll-up that fails on every pass must not
+            // also let the raw table grow without bound. The failure is then
+            // re-thrown, so the run is marked failed and someone looks.
+            rollError = error;
         }
 
-        // Retention AFTER the roll-up, so a raw hour is never pruned unrolled.
+        // Retention AFTER the roll-up, so a raw hour that CAN be rolled is
+        // rolled before it is pruned.
         const prunedRaw = await this.samples.deleteBefore(
             'raw',
             new Date(nowMs - FLEET_HEALTH_RAW_RETENTION_MS),
@@ -134,6 +143,7 @@ export class FleetNodeHealthService {
             'hourly',
             new Date(nowMs - FLEET_HEALTH_HOURLY_RETENTION_MS),
         );
+        if (rollError !== null) throw rollError;
         return { enabled: true, rolledHours, hourlyRows, prunedRaw, prunedHourly };
     }
 

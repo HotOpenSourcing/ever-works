@@ -181,4 +181,24 @@ describe('fleet node health history (better-sqlite3)', () => {
         expect(await repository.hasHourly(at('2026-10-18T05:00:00.000Z'))).toBe(true);
         expect(await repository.hasHourly(at('2026-10-18T06:00:00.000Z'))).toBe(false);
     });
+
+    it('writes an hour for a large fleet in chunks — past one statement’s parameter cap — and stays idempotent', async () => {
+        // 2 500 nodes × ~18 bound parameters is ~45 000: one statement would
+        // pass sqlite's 32 766 cap; five chunks of 500 never come near it.
+        const hour = at('2026-10-18T04:00:00.000Z');
+        const fleet = Array.from({ length: 2_500 }, (_, index) =>
+            rollUpHour(`00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, hour, [
+                {
+                    cpuPercent: index % 100,
+                    memPercent: 50,
+                    diskPercent: 40,
+                } as FleetNodeHealthSample,
+            ]),
+        );
+        await repository.insertHourly(fleet);
+        expect(await rows.count({ where: { resolution: 'hourly' } })).toBe(2_500);
+        // A re-run (a second replica, a retried task) inserts nothing new.
+        await repository.insertHourly(fleet);
+        expect(await rows.count({ where: { resolution: 'hourly' } })).toBe(2_500);
+    });
 });

@@ -138,5 +138,65 @@ describe('FleetNodeHealthService', () => {
             expect(hours[hours.length - 1]).toBe('2026-10-18T08:00:00.000Z');
             expect(hours).not.toContain('2026-10-18T09:00:00.000Z');
         });
+
+        const lastHourAsked = async (at: string) => {
+            samples.hasHourly.mockReset().mockResolvedValue(false);
+            await build().rollupAndPrune(new Date(at));
+            const hours = samples.hasHourly.mock.calls.map(([hour]) =>
+                (hour as Date).toISOString(),
+            );
+            return hours[hours.length - 1];
+        };
+
+        it('waits the settle margin past the hour: at 09:03 the 08:00 hour is still settling, at 09:06 it rolls', async () => {
+            // A beat stamped 08:59:58 may still be in flight at 09:00:01; five
+            // minutes past the hour every replica has written it.
+            expect(await lastHourAsked('2026-10-18T09:03:00.000Z')).toBe(
+                '2026-10-18T07:00:00.000Z',
+            );
+            expect(await lastHourAsked('2026-10-18T09:04:59.999Z')).toBe(
+                '2026-10-18T07:00:00.000Z',
+            );
+            expect(await lastHourAsked('2026-10-18T09:05:00.000Z')).toBe(
+                '2026-10-18T08:00:00.000Z',
+            );
+            expect(await lastHourAsked('2026-10-18T09:06:00.000Z')).toBe(
+                '2026-10-18T08:00:00.000Z',
+            );
+        });
+
+        it('rolls at most 48 hours a run, OLDEST first, so a backlog drains over several runs', async () => {
+            samples.hasHourly.mockResolvedValue(false);
+            samples.rawInHour.mockImplementation(async (hour: Date) => [
+                {
+                    nodeId: 'n1',
+                    at: hour,
+                    resolution: 'raw',
+                    cpuPercent: 10,
+                    memPercent: 20,
+                    diskPercent: 30,
+                },
+            ]);
+            const summary = await build().rollupAndPrune(NOW);
+            expect(summary.rolledHours).toBe(48);
+            expect(samples.insertHourly).toHaveBeenCalledTimes(48);
+            const rolled = samples.rawInHour.mock.calls.map(([hour]) => (hour as Date).getTime());
+            // The first hour rolled is the oldest whose raw rows retention keeps.
+            const oldestKept =
+                Math.floor((NOW.getTime() - 7 * 24 * 3_600_000) / 3_600_000) * 3_600_000 +
+                3_600_000;
+            expect(rolled[0]).toBe(oldestKept);
+            expect([...rolled].sort((a, b) => a - b)).toEqual(rolled);
+            // Retention still ran after the capped roll.
+            expect(samples.deleteBefore).toHaveBeenCalledTimes(2);
+        });
+
+        it('a roll-up that throws still runs retention, then fails the run', async () => {
+            samples.hasHourly.mockResolvedValue(false);
+            samples.rawInHour.mockRejectedValue(new Error('database went away'));
+            await expect(build().rollupAndPrune(NOW)).rejects.toThrow('database went away');
+            expect(samples.deleteBefore).toHaveBeenCalledWith('raw', expect.any(Date));
+            expect(samples.deleteBefore).toHaveBeenCalledWith('hourly', expect.any(Date));
+        });
     });
 });
