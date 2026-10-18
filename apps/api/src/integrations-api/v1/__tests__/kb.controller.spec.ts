@@ -81,6 +81,7 @@ describe('IntegrationKbController', () => {
                 .mockResolvedValue({ data: [], nextCursor: null, hasMore: false }),
             getFolder: jest.fn(async () => ({ dto: { id: FOLDER, version: 1 }, etag: '"1"' })),
             claimVersion: jest.fn().mockResolvedValue(true),
+            releaseClaimedVersion: jest.fn().mockResolvedValue(undefined),
         };
         // As the Knowledge Base: `withinCreate` runs in the create's transaction.
         const createWith =
@@ -264,6 +265,25 @@ describe('IntegrationKbController', () => {
         kb.claimVersion.mockClear();
         await controller.updateDocument(user(), 'doc-1', { title: 'T' }, undefined, res());
         expect(kb.claimVersion).not.toHaveBeenCalled();
+    });
+
+    // Review 2026-10-17 F53: a claim no recorded change took is given back, so the row never
+    // keeps a version no event carries (the next If-Match on the old one would 412).
+    it('releases an If-Match claim that the write did not use (refused, or nothing changed)', async () => {
+        const { controller, kb, knowledgeBase } = setup();
+        // These doubles record nothing, so the claim is never taken: released.
+        await controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res());
+        expect(kb.releaseClaimedVersion).toHaveBeenCalledWith('kb_document', 'doc-1', 1);
+        kb.releaseClaimedVersion.mockClear();
+        knowledgeBase.updateOrgDocument.mockRejectedValueOnce(new Error('locked'));
+        await expect(
+            controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res()),
+        ).rejects.toThrow('locked');
+        expect(kb.releaseClaimedVersion).toHaveBeenCalledWith('kb_document', 'doc-1', 1);
+        kb.releaseClaimedVersion.mockClear();
+        // No If-Match: nothing was claimed, nothing is released.
+        await controller.updateDocument(user(), 'doc-1', { title: 'T' }, undefined, res());
+        expect(kb.releaseClaimedVersion).not.toHaveBeenCalled();
     });
 
     it('a refused write claims nothing: a non-admin is refused before the If-Match claim', async () => {
