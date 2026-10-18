@@ -1073,6 +1073,195 @@ describe('retry', () => {
     });
 });
 
+/**
+ * Lane aw-deps-api — an explicit Deploy request retries the dependencies that failed for a
+ * reason that can heal on its own (prod 2026-10-18: `clusterUnreachable` after 3 attempts on a
+ * worker without a plugin registry), and nothing else.
+ */
+describe('retryTransientFailures', () => {
+    it('resets and re-dispatches failed clusterUnreachable / deadlineExceeded rows', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres'), declared('smtp')]),
+            rows: [
+                row({
+                    id: 'row-pg',
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'clusterUnreachable',
+                    statusDetail: { error: 'TypeError' },
+                    attempts: 3,
+                }),
+                row({
+                    id: 'row-smtp',
+                    kind: 'smtp',
+                    providerPluginId: 'k8s',
+                    providerId: 'k8s-inline-mailpit',
+                    status: 'failed',
+                    statusReason: 'deadlineExceeded',
+                    attempts: 3,
+                }),
+            ],
+        });
+
+        const answer = await h.service.retryTransientFailures(WORK_ID);
+
+        expect(answer).toEqual({
+            retried: ['postgres', 'smtp'],
+            leaseHeld: [],
+            undispatched: [],
+        });
+        for (const kind of ['postgres', 'smtp'] as const) {
+            expect(h.store.stored(kind)).toMatchObject({
+                status: 'pending',
+                statusReason: null,
+                statusDetail: null,
+                attempts: 0,
+            });
+        }
+        expect(h.dispatches).toEqual([
+            { workId: WORK_ID, kind: 'postgres', mode: 'provision' },
+            { workId: WORK_ID, kind: 'smtp', mode: 'provision' },
+        ]);
+    });
+
+    it('leaves a definite failure, a healthy row and an out-of-spec row alone', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres'), declared('redis')]),
+            rows: [
+                row({
+                    id: 'row-pg',
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'noDefaultStorageClass',
+                    attempts: 1,
+                }),
+                row({ id: 'row-redis', kind: 'redis', status: 'ready' }),
+                row({
+                    id: 'row-s3',
+                    kind: 'objectStorage',
+                    status: 'failed',
+                    statusReason: 'clusterUnreachable',
+                    attempts: 3,
+                    inSpec: false,
+                }),
+            ],
+        });
+
+        const answer = await h.service.retryTransientFailures(WORK_ID);
+
+        expect(answer).toEqual({ retried: [], leaseHeld: [], undispatched: [] });
+        expect(h.store.updates).toEqual([]);
+        expect(h.dispatches).toEqual([]);
+        expect(h.store.stored('postgres')).toMatchObject({
+            status: 'failed',
+            statusReason: 'noDefaultStorageClass',
+        });
+    });
+
+    it('respects a lease another worker holds', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres')]),
+            rows: [
+                row({
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'clusterUnreachable',
+                    attempts: 3,
+                    provisionLeaseUntil: new Date(Date.now() + 60_000),
+                }),
+            ],
+        });
+
+        const answer = await h.service.retryTransientFailures(WORK_ID);
+
+        expect(answer).toEqual({ retried: [], leaseHeld: ['postgres'], undispatched: [] });
+        expect(h.store.updates).toEqual([]);
+        expect(h.dispatches).toEqual([]);
+    });
+
+    it('puts the row back exactly as it was when the dispatch does not reach the queue', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres')]),
+            rows: [
+                row({
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'deadlineExceeded',
+                    statusDetail: { error: 'AbortError' },
+                    attempts: 3,
+                }),
+            ],
+        });
+        // A bound dispatcher that queues nothing — the API without an isolated worker.
+        (
+            h.service as unknown as {
+                dispatcher: { dispatchAppDependencyProvision: () => Promise<null> };
+            }
+        ).dispatcher = { dispatchAppDependencyProvision: async () => null };
+
+        const answer = await h.service.retryTransientFailures(WORK_ID);
+
+        expect(answer).toEqual({ retried: [], leaseHeld: [], undispatched: ['postgres'] });
+        // The card keeps saying WHY it failed instead of a `pending` nothing works on.
+        expect(h.store.stored('postgres')).toMatchObject({
+            status: 'failed',
+            statusReason: 'deadlineExceeded',
+            statusDetail: { error: 'AbortError' },
+            attempts: 3,
+        });
+    });
+
+    it('does nothing at all without a dispatcher', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres')]),
+            withDispatcher: false,
+            rows: [
+                row({
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'clusterUnreachable',
+                    attempts: 3,
+                }),
+            ],
+        });
+
+        const answer = await h.service.retryTransientFailures(WORK_ID);
+
+        expect(answer).toEqual({ retried: [], leaseHeld: [], undispatched: [] });
+        expect(h.store.updates).toEqual([]);
+    });
+
+    it('never throws when the store cannot be read', async () => {
+        const h = harness({ snapshot: snapshot([declared('postgres')]) });
+        jest.spyOn(h.repository, 'findActiveByWork').mockRejectedValueOnce(new Error('db down'));
+
+        await expect(h.service.retryTransientFailures(WORK_ID)).resolves.toEqual({
+            retried: [],
+            leaseHeld: [],
+            undispatched: [],
+        });
+    });
+
+    it('lists the attempts so the card can say how many were spent', async () => {
+        const h = harness({
+            snapshot: snapshot([declared('postgres')]),
+            rows: [
+                row({
+                    kind: 'postgres',
+                    status: 'failed',
+                    statusReason: 'clusterUnreachable',
+                    attempts: 3,
+                }),
+            ],
+        });
+
+        const [entry] = await h.service.list(WORK_ID);
+
+        expect(entry?.attempts).toBe(3);
+        expect(entry?.statusReason).toBe('clusterUnreachable');
+    });
+});
+
 describe('requestDataDeletion', () => {
     it('refuses when the typed slug does not match (FR-46)', async () => {
         const h = harness({

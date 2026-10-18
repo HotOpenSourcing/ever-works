@@ -9538,6 +9538,38 @@
                         "specUnavailable": "This app has no usable App spec yet.",
                         "failed": "The value couldn't be saved. Try again."
                     }
+                },
+                "dependencies": {
+                    "title": "Dependencies",
+                    "description": "The databases, caches, storage and mail this app needs. They're provisioned on its deploy target before it starts.",
+                    "loading": "Reading dependencies…",
+                    "unavailable": "Dependencies can't be managed on this instance yet.",
+                    "error": "Couldn't read the dependencies. Reload the page to try again.",
+                    "empty": "This app's App spec declares no dependencies.",
+                    "provider": "Provider: {label}",
+                    "size": "{size} GiB",
+                    "attempts": "{count, plural, one {# attempt} other {# attempts}}",
+                    "noReason": "No reason was recorded.",
+                    "deployRetries": "Deploying again retries it automatically — or press Retry now.",
+                    "retry": "Retry",
+                    "retryAria": "Retry {kind}",
+                    "retried": "{kind}: a new attempt is scheduled.",
+                    "retryQueued": "{kind}: a new attempt will start as soon as the worker is available.",
+                    "leaseHeld": "{kind} is being provisioned right now. Try again in a moment.",
+                    "retryFailed": "Couldn't retry {kind}. Try again.",
+                    "deleteData": "Delete data",
+                    "deleteDataAria": "Delete the data of {kind}",
+                    "deleteDialog": {
+                        "title": "Delete the {kind} data?",
+                        "description": "This destroys the volumes, databases and buckets this dependency holds. It can't be undone.",
+                        "resources": "Will be deleted:",
+                        "noResources": "No resources are recorded for this dependency.",
+                        "confirmLabel": "Type {slug} to confirm",
+                        "cancel": "Cancel",
+                        "confirm": "Delete data",
+                        "requested": "Deleting the {kind} data.",
+                        "failed": "The data couldn't be deleted. {reason}"
+                    }
                 }
             }
         },

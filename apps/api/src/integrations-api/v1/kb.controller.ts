@@ -32,7 +32,10 @@ import {
     ValidateIf,
     ValidateNested,
 } from 'class-validator';
-import { runWithClaimedAggregateVersion } from '@ever-works/agent/domain-events';
+import {
+    claimedAggregateVersionTaken,
+    runWithClaimedAggregateVersion,
+} from '@ever-works/agent/domain-events';
 import {
     KnowledgeBaseService,
     KnowledgeLibraryService,
@@ -924,10 +927,27 @@ export class IntegrationKbController {
                     : await this.kb.getFolder(organizationId, id);
             throw new VersionMismatchError(expected, now.dto.version);
         }
-        return runWithClaimedAggregateVersion(
-            { aggregateType: kind, id, version: expected + 1 },
-            write,
-        );
+        // Review 2026-10-17 F53: the claim committed on its own. A write that is refused
+        // (no edit access, a locked document) or changes nothing records no event, so its
+        // claimed version is released; otherwise the row kept a version no event carries
+        // and the integration's next If-Match on the old one answered 412.
+        let taken = false;
+        try {
+            return await runWithClaimedAggregateVersion(
+                { aggregateType: kind, id, version: expected + 1 },
+                async () => {
+                    try {
+                        return await write();
+                    } finally {
+                        taken = claimedAggregateVersionTaken() === true;
+                    }
+                },
+            );
+        } finally {
+            if (!taken) {
+                await this.kb.releaseClaimedVersion(kind, id, expected).catch(() => undefined);
+            }
+        }
     }
 
     private sendDocument(res: Response, doc: IntegrationKbDocument): IntegrationKbDocumentDto {
