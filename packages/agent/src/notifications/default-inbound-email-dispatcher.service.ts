@@ -594,21 +594,35 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
                 (candidate) => candidate.agentId === agentId,
             );
             if (referenced.length === 0) return null;
-            // Prompt-injection hardening: only a PARTICIPANT of the referenced
-            // thread may join it. A sender who merely quotes a Message-ID gets
-            // a fresh Task / conversation instead — never the owner's thread.
+            const candidates = referenced.filter((candidate) => accept(candidate));
+            let parent: EmailMessage | null = null;
+            for (const id of ids) {
+                parent = candidates.find((candidate) => candidate.messageIdHeader === id) ?? null;
+                if (parent) break;
+            }
+            if (!parent) return null;
+            // Prompt-injection hardening: only a PARTICIPANT of the thread the
+            // reply would JOIN may join it — judged on the selected parent's own
+            // Task / conversation, never on the union of every message the
+            // headers name (a sender of one thread must not reach another by
+            // also quoting its Message-ID; CodeRabbit on #2769). A sender who
+            // merely quotes a Message-ID gets a fresh Task / conversation.
+            const chosen = parent;
+            const sameThread = referenced.filter((message) =>
+                chosen.taskId
+                    ? message.taskId === chosen.taskId
+                    : chosen.conversationId
+                      ? message.conversationId === chosen.conversationId
+                      : message.id === chosen.id,
+            );
             const sender = normalizeEmailAddress(payload.from);
-            if (!sender || !threadParticipants(referenced).has(sender)) {
+            if (!sender || !threadParticipants(sameThread).has(sender)) {
                 this.logger.warn(
                     `Inbound ${payload.pluginId} message names a thread of agent ${agentId} but its sender is not a participant; not joining it.`,
                 );
                 return null;
             }
-            const candidates = referenced.filter((candidate) => accept(candidate));
-            for (const id of ids) {
-                const match = candidates.find((candidate) => candidate.messageIdHeader === id);
-                if (match) return match;
-            }
+            return parent;
         } catch (error) {
             this.logger.warn(
                 `Thread lookup failed for inbound ${payload.pluginId} message; falling back to the subject — ${

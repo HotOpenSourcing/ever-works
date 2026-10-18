@@ -537,6 +537,38 @@ describe('DefaultInboundEmailDispatcher', () => {
             expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
         });
 
+        // CodeRabbit on #2769: participation is judged on the thread the reply
+        // would JOIN, not on the union of every message its headers name.
+        it('task-spawn: a participant of ANOTHER referenced thread cannot join the selected one', async () => {
+            const svc = await taskSpawnAgent(true);
+            messages.findByMessageIdHeaders.mockResolvedValue([
+                {
+                    // In-Reply-To target (selected first): the victim's thread.
+                    id: 'm-victim',
+                    agentId: 'agent-1',
+                    from: 'agent@acme.test',
+                    toAddresses: ['victim@client.test'],
+                    taskId: 'task-victim',
+                    messageIdHeader: 'out-1@acme.test',
+                },
+                {
+                    // Also referenced: a thread Mallory really is part of.
+                    id: 'm-mallory',
+                    agentId: 'agent-1',
+                    from: 'agent@acme.test',
+                    toAddresses: ['mallory@evil.test'],
+                    taskId: 'task-mallory',
+                    messageIdHeader: 'root@client.test',
+                },
+            ]);
+
+            const res = await svc.dispatch({ ...reply, from: 'mallory@evil.test' });
+
+            expect(res.threaded).toBeUndefined();
+            expect(taskSpawner.appendInboundEmailToTask).not.toHaveBeenCalled();
+            expect(taskSpawner.spawnTaskForInboundEmail).toHaveBeenCalledTimes(1);
+        });
+
         it('task-spawn: a cc participant may join (case and display name do not matter)', async () => {
             const svc = await taskSpawnAgent(true);
             messages.findByMessageIdHeaders.mockResolvedValue([
