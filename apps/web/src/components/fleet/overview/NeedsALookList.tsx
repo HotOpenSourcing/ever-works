@@ -6,6 +6,7 @@ import { AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { sortNeedsALook, type FleetNodeView, type NeedsALookItem } from '@ever-works/contracts';
 import { Link } from '@/i18n/navigation';
 import { cn } from '@/lib/utils/cn';
+import { useMounted } from '@/lib/hooks/use-mounted';
 import type { FleetNeedsALookResult } from '@/lib/api/fleet';
 import { fetchFleetNeedsALookAction, type FleetActionResult } from '@/app/actions/settings/fleet';
 import { absoluteTime, relativeTime } from '../fleet-hub.shared';
@@ -59,19 +60,29 @@ export function NeedsALookList({
     const [error, setError] = useState<string | null>(initial ? null : initialError);
     const [running, setRunning] = useState<string | null>(null);
     const [isPending, startTransition] = useTransition();
+    // Times are the browser's: the absolute tooltip only once mounted (the
+    // server's time zone is not the reader's), the relative text re-rendered
+    // after hydration (its server copy is allowed to differ by a minute).
+    const mounted = useMounted();
     const now = new Date();
 
     const names = useMemo(() => new Map(nodes.map((node) => [node.id, node.name])), [nodes]);
     const items = useMemo(() => sortNeedsALook(result?.items ?? []), [result]);
 
+    // Never let a failure leave the list: a rejected read or command is said
+    // here, beside the rows, instead of reaching the page's error boundary.
     const reload = () => {
         startTransition(async () => {
-            const next = await reloadAction();
-            if (next.success) {
-                setResult(next.data);
-                setError(null);
-            } else {
-                setError(next.error);
+            try {
+                const next = await reloadAction();
+                if (next.success) {
+                    setResult(next.data);
+                    setError(null);
+                } else {
+                    setError(next.error || t('failed'));
+                }
+            } catch {
+                setError(t('failed'));
             }
         });
     };
@@ -85,8 +96,19 @@ export function NeedsALookList({
             properties: { kind: item.kind, action: 'command' },
         });
         startTransition(async () => {
-            await handler(item);
-            setRunning(null);
+            let failure: string | null = null;
+            try {
+                const outcome = await handler(item);
+                if (!outcome.ok) failure = outcome.error || t('commandFailed');
+            } catch {
+                failure = t('commandFailed');
+            } finally {
+                setRunning(null);
+            }
+            if (failure !== null) {
+                setError(failure);
+                return;
+            }
             reload();
         });
     };
@@ -109,7 +131,13 @@ export function NeedsALookList({
                 >
                     {t('heading')}
                     {!failed && items.length > 0 && <span className="ml-1">({items.length})</span>}
-                    <span className="sr-only">{`. ${t('regionLabel', { count: items.length })}`}</span>
+                    {/* Never "nothing" for a read that failed or was cut short. */}
+                    {!failed && (
+                        <span className="sr-only">{`. ${t(
+                            result?.partial ? 'regionLabelPartial' : 'regionLabel',
+                            { count: items.length },
+                        )}`}</span>
+                    )}
                 </h2>
             </div>
 
@@ -140,7 +168,23 @@ export function NeedsALookList({
                         {t('tryAgain')}
                     </button>
                 </div>
-            ) : items.length === 0 ? (
+            ) : (
+                error !== null && (
+                    <p
+                        role="alert"
+                        className="flex items-center gap-2 text-sm text-text dark:text-text-dark"
+                        data-testid="fleet-needs-a-look-error"
+                    >
+                        <AlertTriangle
+                            className="w-4 h-4 text-warning shrink-0"
+                            aria-hidden="true"
+                        />
+                        {error}
+                    </p>
+                )
+            )}
+
+            {failed ? null : items.length === 0 ? (
                 <p
                     className="flex items-center gap-2 text-sm text-text-muted dark:text-text-muted-dark"
                     data-testid="fleet-needs-a-look-empty"
@@ -185,8 +229,12 @@ export function NeedsALookList({
                                             {item.detail && ' · '}
                                             <span
                                                 title={
-                                                    absoluteTime(item.since, locale) ?? undefined
+                                                    mounted
+                                                        ? (absoluteTime(item.since, locale) ??
+                                                          undefined)
+                                                        : undefined
                                                 }
+                                                suppressHydrationWarning
                                             >
                                                 {t('since', {
                                                     time:

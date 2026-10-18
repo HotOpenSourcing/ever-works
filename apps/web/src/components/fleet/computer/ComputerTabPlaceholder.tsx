@@ -67,7 +67,7 @@ export function ComputerTabPlaceholder({
             {state.kind === 'not-shipped' && (
                 <>
                     <p className="text-sm font-medium text-text dark:text-text-dark">
-                        {t('placeholder.notShipped', { tab: label, epic: state.epic })}
+                        {t('placeholder.notShipped', { tab: label, epic: state.epic, tabId: tab })}
                     </p>
                     <a
                         href={FLEET_PROGRAM_TRACKER_URL}
@@ -81,7 +81,7 @@ export function ComputerTabPlaceholder({
             )}
             {state.kind === 'switched-off' && (
                 <p className="text-sm font-medium text-text dark:text-text-dark">
-                    {t('placeholder.switchedOff', { tab: label })}
+                    {t('placeholder.switchedOff', { tab: label, tabId: tab })}
                 </p>
             )}
             {state.kind === 'kind-cannot' && (

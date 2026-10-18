@@ -140,6 +140,10 @@ export interface FleetComputerGroup<T extends FleetNodeView = FleetNodeView> {
  * whose children are all offline still shows them; a child whose host is
  * not in the list (not visible to this viewer) is listed on its own.
  * Top-level order is {@link orderComputers}'.
+ *
+ * One level of nesting is drawn. A computer whose host is itself nested (a
+ * Container on a VM on a host), or that sits in a host cycle, is never
+ * dropped: it is listed on its own, with its host's name.
  */
 export function groupComputersByHost<T extends FleetNodeView>(
     nodes: readonly T[],
@@ -157,10 +161,26 @@ export function groupComputersByHost<T extends FleetNodeView>(
             top.push(node);
         }
     }
-    return orderComputers(top).map((node) => ({
-        node,
-        children: (children.get(node.id) ?? []).sort((a, b) => a.name.localeCompare(b.name)),
-    }));
+    const topIds = new Set(top.map((node) => node.id));
+    const drawn = new Set(topIds);
+    for (const id of topIds) {
+        for (const child of children.get(id) ?? []) drawn.add(child.id);
+    }
+    const unreachable = nodes.filter((node) => !drawn.has(node.id));
+    return orderComputers([...top, ...unreachable]).map((node) =>
+        topIds.has(node.id)
+            ? {
+                  node,
+                  children: (children.get(node.id) ?? []).sort((a, b) =>
+                      a.name.localeCompare(b.name),
+                  ),
+              }
+            : {
+                  node,
+                  children: [],
+                  hostName: node.hostNodeId ? (byId.get(node.hostNodeId)?.name ?? null) : null,
+              },
+    );
 }
 
 /** The host a nested computer runs on, for its "VM on build-01" subtitle. */

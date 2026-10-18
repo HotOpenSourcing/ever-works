@@ -27,6 +27,8 @@ export interface FleetComputersTableFavorites {
     renderToggle: (node: FleetNodeView) => ReactNode;
     /** The name cell, when the hub links it to the computer's page. */
     renderName?: (node: FleetNodeView) => ReactNode;
+    /** An "Open page" action beside Details (spec §5.6). */
+    renderOpen?: (node: FleetNodeView) => ReactNode;
 }
 
 interface FleetComputersTableProps {
@@ -261,6 +263,7 @@ export function FleetComputersTable({
                             </td>
                             <td className="px-4 py-3">
                                 <div className="flex items-center justify-end gap-1">
+                                    {favorites?.renderOpen?.(node)}
                                     <Button
                                         variant="ghost"
                                         onClick={() => onDetails(node)}

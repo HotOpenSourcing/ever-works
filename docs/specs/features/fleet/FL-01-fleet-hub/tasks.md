@@ -99,6 +99,8 @@
       `ROUTES.DASHBOARD_FLEET` when the prop is on.
       **Test**: `apps/web/src/components/dashboard/DashboardSidebar.unit.spec.tsx` (new) — entry
       present/absent, index = Teams index + 1; extend `apps/web/e2e/flow-fleet-runner-pill.spec.ts`.
+      _As built:_ `DashboardSidebar.fleet.unit.spec.tsx` (new, beside the existing sidebar spec); the
+      pill's Manage → hub in `apps/web/e2e/fleet-hub.spec.ts` (the existing pill spec is untouched).
 - [x] **T-13**. Palette: add `fleet`, `fleet.computers`, `fleet.sessions`, `fleet.checkouts`,
       `fleet.commands`, `fleet.usage` screens to `apps/web/src/components/command-palette/registry/screens.ts`
       (after `teams` `:96`), gated on the hub flag the way `settings.fleet` is gated on fleet.
@@ -110,6 +112,9 @@
 - [x] **T-15**. Playwright `apps/web/e2e/flow-fleet-hub.spec.ts` — sidebar, six tabs, four
       placeholders naming their epics, card ordering, kill-switch banner, flag-off 404.
       **Test**: itself; green on a cold database.
+      _As built:_ `apps/web/e2e/fleet-hub.spec.ts`. The kill-switch banner and note are covered by
+      `components/fleet/hub/FleetHubFrame.unit.spec.tsx`, not the browser walk: stopping the fleet
+      is platform-wide, and a walk that stops it would stop every e2e spec running beside it.
 
 ## P2.A — Roles, families, favourites (API + schema)
 

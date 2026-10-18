@@ -5,9 +5,12 @@ import { Component, lazy, Suspense, type ComponentType, type ReactNode } from 'r
 /** One lazily-loaded component per registration id (React.lazy must be created once). */
 const cache = new Map<string, ComponentType<object>>();
 
+/** What renders in a failed component's place: a node, or one given a way to try again. */
+type FailedFallback = ReactNode | ((retry: () => void) => ReactNode);
+
 /** Keeps one failing registered component from taking the page down (spec §6 Reliability). */
 class RegisteredBoundary extends Component<
-    { fallback: ReactNode; children: ReactNode },
+    { fallback: FailedFallback; children: ReactNode },
     { failed: boolean }
 > {
     state = { failed: false };
@@ -16,16 +19,39 @@ class RegisteredBoundary extends Component<
         return { failed: true };
     }
 
+    private retry = () => this.setState({ failed: false });
+
     render() {
-        return this.state.failed ? this.props.fallback : this.props.children;
+        if (!this.state.failed) return this.props.children;
+        const { fallback } = this.props;
+        return typeof fallback === 'function' ? fallback(this.retry) : fallback;
     }
+}
+
+/**
+ * React.lazy remembers a rejected import for good, so a chunk that failed to
+ * load once (a deploy, a dropped connection) would stay failed until a full
+ * reload. A failed load forgets its cache entry instead: the next render —
+ * the boundary's retry, or the next visit — loads it again.
+ */
+function lazyOnce<P extends object>(
+    id: string,
+    load: () => Promise<{ default: ComponentType<P> }>,
+): ComponentType<P> {
+    return lazy(() =>
+        load().catch((error: unknown) => {
+            cache.delete(id);
+            throw error;
+        }),
+    ) as unknown as ComponentType<P>;
 }
 
 /**
  * Fleet hub (FL-01, README D9) — render a component another epic registered
  * (an Overview block, a computer action): code-split (its bundle loads only
  * when it renders), with `loading` shown while it loads and `failed` shown in
- * its place if it throws — never taking the surrounding page with it.
+ * its place if it throws — never taking the surrounding page with it. `failed`
+ * may be a function given `retry`, for a fallback that offers to try again.
  */
 export function RegisteredComponent<P extends object>({
     id,
@@ -38,11 +64,11 @@ export function RegisteredComponent<P extends object>({
     load: () => Promise<{ default: ComponentType<P> }>;
     props: P;
     loading: ReactNode;
-    failed: ReactNode;
+    failed: FailedFallback;
 }) {
     let Loaded = cache.get(id) as ComponentType<P> | undefined;
     if (!Loaded) {
-        Loaded = lazy(load);
+        Loaded = lazyOnce(id, load);
         cache.set(id, Loaded as ComponentType<object>);
     }
     return (

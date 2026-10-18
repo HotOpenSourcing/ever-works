@@ -71,9 +71,11 @@ export function FleetHubTabs({ active }: { active: FleetHubTabId }) {
                             ref={(element: HTMLAnchorElement | null) => {
                                 refs.current[index] = element;
                             }}
+                            id={`fleet-hub-tab-${tab.id}`}
                             href={tab.href}
                             role="tab"
                             aria-selected={selected}
+                            aria-controls={selected ? 'fleet-hub-panel' : undefined}
                             aria-current={selected ? 'page' : undefined}
                             tabIndex={selected ? 0 : -1}
                             onKeyDown={(event: KeyboardEvent<HTMLAnchorElement>) =>

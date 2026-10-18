@@ -7,6 +7,7 @@ import type { FleetNodeView } from '@ever-works/contracts';
 import { Link } from '@/i18n/navigation';
 import { ROUTES } from '@/lib/constants';
 import { cn } from '@/lib/utils/cn';
+import { useMounted } from '@/lib/hooks/use-mounted';
 import { Tooltip } from '@/components/ui/tooltip';
 import {
     FLEET_TONE_DOT_CLASS,
@@ -56,6 +57,9 @@ export function ComputerHeader({
 }) {
     const t = useTranslations('fleet');
     const locale = useLocale();
+    // The tooltip is the reader's time zone, so it waits for the browser; the
+    // relative words re-render after hydration.
+    const mounted = useMounted();
     const now = new Date();
     const state = computerStateKey(node);
     const checked = relativeTime(node.lastHeartbeatAt, now, locale);
@@ -122,7 +126,9 @@ export function ComputerHeader({
                                 )}
                                 aria-hidden="true"
                             />
-                            <span data-testid="fleet-computer-state">{stateWord}</span>
+                            <span data-testid="fleet-computer-state" suppressHydrationWarning>
+                                {stateWord}
+                            </span>
                         </span>
                         <span aria-hidden="true">·</span>
                         <span>
@@ -134,7 +140,13 @@ export function ComputerHeader({
                             <>
                                 <span aria-hidden="true">·</span>
                                 <span
-                                    title={absoluteTime(node.lastHeartbeatAt, locale) ?? undefined}
+                                    title={
+                                        mounted
+                                            ? (absoluteTime(node.lastHeartbeatAt, locale) ??
+                                              undefined)
+                                            : undefined
+                                    }
+                                    suppressHydrationWarning
                                 >
                                     {t('overview.computers.checked', { time: checked })}
                                 </span>

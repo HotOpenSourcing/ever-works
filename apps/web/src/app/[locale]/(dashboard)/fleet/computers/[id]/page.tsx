@@ -1,4 +1,5 @@
 import '@/components/fleet/modules/server';
+import { cache } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getTranslations } from 'next-intl/server';
@@ -16,8 +17,12 @@ import { ComputerTabs } from '@/components/fleet/computer/ComputerTabs';
 import { ComputerTabPlaceholder } from '@/components/fleet/computer/ComputerTabPlaceholder';
 import { FleetTelemetryOnMount } from '@/components/fleet/FleetTelemetryOnMount';
 
-/** One read of the computer, or null when the caller may not see it (404, identical to unknown). */
-async function loadComputer(id: string): Promise<FleetNodeDetailView | null> {
+/**
+ * One read of the computer, or null when the caller may not see it (404,
+ * identical to unknown). Cached for the render, so the title and the page
+ * share one read.
+ */
+const loadComputer = cache(async (id: string): Promise<FleetNodeDetailView | null> => {
     try {
         return await fleetAPI.nodeDetail(id);
     } catch (error) {
@@ -29,7 +34,7 @@ async function loadComputer(id: string): Promise<FleetNodeDetailView | null> {
         }
         throw error;
     }
-}
+});
 
 export async function generateMetadata({
     params,

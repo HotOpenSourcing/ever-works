@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, useTransition, type ComponentProps } from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
-import { Star } from 'lucide-react';
+import { ArrowUpRight, Star } from 'lucide-react';
 import type { FleetEnrollableNodeKind } from '@ever-works/contracts';
 import { Link, usePathname, useRouter } from '@/i18n/navigation';
 import { ROUTES } from '@/lib/constants';
@@ -45,8 +45,17 @@ export function FleetComputersPanel({
         Object.fromEntries(initialNodes.map((node) => [node.id, Boolean(node.isFavorite)])),
     );
     const [isPending, startTransition] = useTransition();
-    // Favourites first, then online by most recent check (FR-7, FR-24).
-    const ordered = useMemo(() => orderComputers(initialNodes), [initialNodes]);
+    // Favourites first, then online by most recent check (FR-7, FR-24) —
+    // with the live stars, so a toggle re-sorts at once.
+    const orderNodes = useCallback(
+        (rows: FleetNodeView[]) =>
+            orderComputers(
+                rows.map((row) =>
+                    row.id in favourites ? { ...row, isFavorite: favourites[row.id] } : row,
+                ),
+            ),
+        [favourites],
+    );
 
     const toggle = useCallback(
         (node: FleetNodeView) => {
@@ -99,6 +108,17 @@ export function FleetComputersPanel({
                 </button>
             );
         },
+        renderOpen: (node) => (
+            <Link
+                href={ROUTES.DASHBOARD_FLEET_COMPUTER(node.id)}
+                aria-label={t('openPageFor', { name: node.name })}
+                title={t('openPage')}
+                className="inline-flex items-center justify-center w-9 h-9 rounded-md text-text-muted dark:text-text-muted-dark hover:bg-surface-secondary dark:hover:bg-surface-secondary-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+                data-testid={`fleet-node-open-page-${node.id}`}
+            >
+                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
+            </Link>
+        ),
         renderName: (node) => (
             <Link
                 href={ROUTES.DASHBOARD_FLEET_COMPUTER(node.id)}
@@ -118,7 +138,8 @@ export function FleetComputersPanel({
     return (
         <FleetSettings
             {...props}
-            initialNodes={ordered}
+            initialNodes={initialNodes}
+            orderNodes={orderNodes}
             view="computers"
             openAddKind={openAddKind}
             onAddOpened={onAddOpened}

@@ -51,6 +51,7 @@ export function ComputerTabs({ nodeId, active }: { nodeId: string; active: Fleet
                     return (
                         <Link
                             key={tab.id}
+                            id={`fleet-computer-tab-${tab.id}`}
                             ref={(element: HTMLAnchorElement | null) => {
                                 refs.current[index] = element;
                             }}

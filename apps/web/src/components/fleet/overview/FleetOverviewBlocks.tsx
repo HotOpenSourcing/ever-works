@@ -45,14 +45,22 @@ export function FleetOverviewBlocks({
                             {t('blockLoading')}
                         </p>
                     }
-                    failed={
+                    failed={(retry) => (
                         <p
                             role="status"
-                            className="text-sm text-text-muted dark:text-text-muted-dark"
+                            className="flex items-center gap-2 text-sm text-text-muted dark:text-text-muted-dark"
                         >
                             {t('blockFailed')}
+                            <button
+                                type="button"
+                                onClick={retry}
+                                className="underline underline-offset-2 hover:text-text dark:hover:text-text-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 rounded"
+                                data-testid={`fleet-overview-block-retry-${block.id}`}
+                            >
+                                {t('needsALook.tryAgain')}
+                            </button>
                         </p>
-                    }
+                    )}
                 />
             ))}
         </div>

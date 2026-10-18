@@ -6,6 +6,7 @@ import type { FleetNodeView } from '@ever-works/contracts';
 import { Link } from '@/i18n/navigation';
 import { ROUTES } from '@/lib/constants';
 import { cn } from '@/lib/utils/cn';
+import { useMounted } from '@/lib/hooks/use-mounted';
 import {
     FLEET_TONE_DOT_CLASS,
     absoluteTime,
@@ -74,7 +75,7 @@ export function ComputerCards({ nodes }: ComputerCardsProps) {
 function ComputerCardGroup({ group }: { group: FleetComputerGroup }) {
     return (
         <li>
-            <ComputerCard node={group.node} />
+            <ComputerCard node={group.node} hostName={group.hostName ?? undefined} />
             {group.children.length > 0 && (
                 <ul className="mt-2 ml-6 space-y-2 border-l border-border dark:border-border-dark pl-3">
                     {group.children.map((child) => (
@@ -95,12 +96,17 @@ function ComputerCardGroup({ group }: { group: FleetComputerGroup }) {
 function ComputerCard({ node, hostName }: { node: FleetNodeView; hostName?: string }) {
     const t = useTranslations('fleet');
     const locale = useLocale();
+    // The absolute tooltips are the reader's time zone, so they wait for the
+    // browser; the relative words re-render after hydration.
+    const mounted = useMounted();
     const now = new Date();
     const state = computerStateKey(node);
     const tone = computerStateTone(state);
     const health = readHealthCells(node as FleetNodeView & { health?: unknown });
     const checked = relativeTime(node.lastHeartbeatAt, now, locale);
-    const checkedAbsolute = absoluteTime(node.lastHeartbeatAt, locale) ?? undefined;
+    const checkedAbsolute = mounted
+        ? (absoluteTime(node.lastHeartbeatAt, locale) ?? undefined)
+        : undefined;
     const os = osKeyOf(node.platform);
     const shared = node.viewerRole !== undefined && node.viewerRole !== 'owner';
     const stateWord =
@@ -160,7 +166,9 @@ function ComputerCard({ node, hostName }: { node: FleetNodeView; hostName?: stri
                         className={cn('w-1.5 h-1.5 rounded-full', FLEET_TONE_DOT_CLASS[tone])}
                         aria-hidden="true"
                     />
-                    <span data-testid="fleet-computer-card-state">{stateWord}</span>
+                    <span data-testid="fleet-computer-card-state" suppressHydrationWarning>
+                        {stateWord}
+                    </span>
                 </span>
                 <span className="text-xs text-text-muted dark:text-text-muted-dark">
                     {os === 'other'
@@ -184,7 +192,7 @@ function ComputerCard({ node, hostName }: { node: FleetNodeView; hostName?: stri
                             ? health.stale
                                 ? t('overview.computers.staleHealth', {
                                       time:
-                                          absoluteTime(health.at, locale) ??
+                                          (mounted ? absoluteTime(health.at, locale) : null) ??
                                           t('overview.computers.noValue'),
                                   })
                                 : undefined
@@ -198,6 +206,7 @@ function ComputerCard({ node, hostName }: { node: FleetNodeView; hostName?: stri
                 <span
                     className="ml-auto text-xs text-text-muted dark:text-text-muted-dark whitespace-nowrap"
                     title={checkedAbsolute}
+                    suppressHydrationWarning
                 >
                     {checked
                         ? state === 'offline'

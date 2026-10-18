@@ -102,6 +102,12 @@ interface FleetSettingsProps {
     onAddOpened?: () => void;
     /** `computers` view: the star column (the hub supplies it; Settings never does). */
     favorites?: FleetComputersTableFavorites;
+    /**
+     * `computers` view: the order of the machine rows (the hub's favourites
+     * first, applied to the rows this component keeps, so a star re-sorts at
+     * once). Without it the rows keep the order they arrived in.
+     */
+    orderNodes?: (nodes: FleetNodeView[]) => FleetNodeView[];
     /** `policies` view: the card that points at the hub. */
     hubLinkCard?: ReactNode;
 }
@@ -155,6 +161,7 @@ export function FleetSettings({
     openAddKind = null,
     onAddOpened,
     favorites,
+    orderNodes,
     hubLinkCard,
 }: FleetSettingsProps) {
     const showMachines = view !== 'policies';
@@ -163,7 +170,10 @@ export function FleetSettings({
     const [nodes, setNodes] = useState<FleetNodeView[]>(initialNodes);
     const [isPending, startTransition] = useTransition();
 
-    const enrolledNodes = useMemo(() => nodes.filter((node) => node.persisted), [nodes]);
+    const enrolledNodes = useMemo(() => {
+        const persisted = nodes.filter((node) => node.persisted);
+        return orderNodes ? orderNodes(persisted) : persisted;
+    }, [nodes, orderNodes]);
     const clusterNodes = useMemo(
         () => nodes.filter((node) => !node.persisted && node.kind === 'k8s'),
         [nodes],
@@ -529,7 +539,9 @@ export function FleetSettings({
             {/* Fleet hub (FL-01, FR-11): where the table was, a card that says where it went. */}
             {view === 'policies' && hubLinkCard}
 
-            {showMachines && loadError && (
+            {/* Every view: the panic controls read these nodes too, so a failed read
+                must never pass for "nothing to drain". */}
+            {loadError && (
                 <div className="flex items-start gap-2 p-3 bg-warning/10 border border-warning/20 rounded-lg">
                     <AlertTriangle className="w-5 h-5 text-warning flex-shrink-0 mt-0.5" />
                     <p className="text-sm text-text dark:text-text-dark">{loadError}</p>

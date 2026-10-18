@@ -16,16 +16,33 @@ vi.mock('next-intl', () => ({
 
 describe('ComputerTabPlaceholder', () => {
     it('names the epic a tab arrives with, with the tracker link', () => {
-        render(<ComputerTabPlaceholder tab="logs" nodeName="build-01" state={{ kind: 'not-shipped', epic: 'FL-08' }} />);
+        render(
+            <ComputerTabPlaceholder
+                tab="logs"
+                nodeName="build-01"
+                state={{ kind: 'not-shipped', epic: 'FL-08' }}
+            />,
+        );
         const status = screen.getByRole('status');
         expect(status).toHaveAttribute('data-state', 'not-shipped');
-        expect(status).toHaveTextContent('placeholder.notShipped:tabs.logs,FL-08');
-        expect(screen.getByRole('link', { name: 'placeholder.tracker' })).toHaveAttribute('target', '_blank');
+        expect(status).toHaveTextContent('placeholder.notShipped:tabs.logs,FL-08,logs');
+        expect(screen.getByRole('link', { name: 'placeholder.tracker' })).toHaveAttribute(
+            'target',
+            '_blank',
+        );
     });
 
     it('says a shipped tab is switched off on this deployment', () => {
-        render(<ComputerTabPlaceholder tab="logs" nodeName="build-01" state={{ kind: 'switched-off', epic: 'FL-08' }} />);
-        expect(screen.getByRole('status')).toHaveTextContent('placeholder.switchedOff:tabs.logs');
+        render(
+            <ComputerTabPlaceholder
+                tab="logs"
+                nodeName="build-01"
+                state={{ kind: 'switched-off', epic: 'FL-08' }}
+            />,
+        );
+        expect(screen.getByRole('status')).toHaveTextContent(
+            'placeholder.switchedOff:tabs.logs,logs',
+        );
     });
 
     it('names the missing consent and offers the exact command to copy', async () => {
@@ -35,18 +52,36 @@ describe('ComputerTabPlaceholder', () => {
             <ComputerTabPlaceholder
                 tab="logs"
                 nodeName="build-01"
-                state={{ kind: 'consent-missing', consent: 'manage', command: 'ever-works-node start --manage' }}
+                state={{
+                    kind: 'consent-missing',
+                    consent: 'manage',
+                    command: 'ever-works-node start --manage',
+                }}
             />,
         );
-        expect(screen.getByRole('status')).toHaveTextContent('placeholder.consentMissing:--manage,build-01,tabs.logs');
-        expect(screen.getByTestId('fleet-computer-consent-command')).toHaveTextContent('ever-works-node start --manage');
+        expect(screen.getByRole('status')).toHaveTextContent(
+            'placeholder.consentMissing:--manage,build-01,tabs.logs',
+        );
+        expect(screen.getByTestId('fleet-computer-consent-command')).toHaveTextContent(
+            'ever-works-node start --manage',
+        );
         await userEvent.click(screen.getByTestId('fleet-computer-consent-copy'));
-        await waitFor(() => expect(writeText).toHaveBeenCalledWith('ever-works-node start --manage'));
-        expect(screen.getByTestId('fleet-computer-consent-copy')).toHaveTextContent('placeholder.copied');
+        await waitFor(() =>
+            expect(writeText).toHaveBeenCalledWith('ever-works-node start --manage'),
+        );
+        expect(screen.getByTestId('fleet-computer-consent-copy')).toHaveTextContent(
+            'placeholder.copied',
+        );
     });
 
     it('says a kind of computer cannot do it yet (R-10)', () => {
-        render(<ComputerTabPlaceholder tab="desktop" nodeName="design-mac" state={{ kind: 'kind-cannot' }} />);
+        render(
+            <ComputerTabPlaceholder
+                tab="desktop"
+                nodeName="design-mac"
+                state={{ kind: 'kind-cannot' }}
+            />,
+        );
         expect(screen.getByRole('status')).toHaveTextContent('placeholder.kindCannot');
     });
 });

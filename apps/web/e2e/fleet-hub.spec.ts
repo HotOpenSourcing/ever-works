@@ -60,7 +60,10 @@ async function freshUser(request: APIRequestContext): Promise<RegisteredUser> {
     return u;
 }
 
-async function signedIn(browser: Browser, u: RegisteredUser): Promise<{ page: Page; close: () => Promise<void> }> {
+async function signedIn(
+    browser: Browser,
+    u: RegisteredUser,
+): Promise<{ page: Page; close: () => Promise<void> }> {
     const context = await browser.newContext({ storageState: { cookies: [], origins: [] } });
     await context.addCookies([{ name: 'sidebar-collapsed', value: '0', url: ORIGIN }]);
     const page = await context.newPage();
@@ -71,7 +74,10 @@ async function signedIn(browser: Browser, u: RegisteredUser): Promise<{ page: Pa
 test.describe('Fleet hub — flag off', () => {
     test.skip(HUB_ON, 'the hub is on for this run');
 
-    test('/fleet answers 404 and the sidebar has no Fleet entry (FR-15, U2)', async ({ browser, request }) => {
+    test('/fleet answers 404 and the sidebar has no Fleet entry (FR-15, U2)', async ({
+        browser,
+        request,
+    }) => {
         const u = await freshUser(request);
         const { page, close } = await signedIn(browser, u);
         try {
@@ -103,7 +109,14 @@ test.describe('Fleet hub', () => {
             await page.locator('nav a[href$="/fleet"]').first().click({ timeout: CLICK_TIMEOUT });
             await expect(page).toHaveURL(/\/fleet$/);
             const tabs = page.getByTestId('fleet-hub-tabs').getByRole('tab');
-            await expect(tabs).toHaveText(['Overview', 'Computers', 'Sessions', 'Checkouts', 'Commands', 'Usage']);
+            await expect(tabs).toHaveText([
+                'Overview',
+                'Computers',
+                'Sessions',
+                'Checkouts',
+                'Commands',
+                'Usage',
+            ]);
             await expect(page.getByTestId('fleet-hub-empty')).toBeVisible();
 
             for (const [tab, epic] of [
@@ -138,15 +151,29 @@ test.describe('Fleet hub', () => {
         const { page, close } = await signedIn(browser, u);
         try {
             await page.goto('/en/fleet', { waitUntil: 'networkidle' });
-            await expect(page.getByTestId('fleet-needs-a-look-empty')).toHaveText(/Nothing needs a look/);
-            await expect(page.getByTestId('fleet-spends-nothing')).toHaveText('Spends no tokens or credits');
+            await expect(page.getByTestId('fleet-needs-a-look-empty')).toHaveText(
+                /Nothing needs a look/,
+            );
+            await expect(page.getByTestId('fleet-spends-nothing')).toHaveText(
+                'Spends no tokens or credits',
+            );
             const cards = page.locator('[data-testid^="fleet-computer-card-"][data-state]');
             await expect(cards).toHaveCount(2);
-            await expect(cards.nth(0)).toHaveAttribute('data-testid', `fleet-computer-card-${second.nodeId}`);
-            await expect(cards.nth(1)).toHaveAttribute('data-testid', `fleet-computer-card-${first.nodeId}`);
-            await expect(cards.nth(0).getByTestId('fleet-computer-card-state')).toHaveText('Online');
+            await expect(cards.nth(0)).toHaveAttribute(
+                'data-testid',
+                `fleet-computer-card-${second.nodeId}`,
+            );
+            await expect(cards.nth(1)).toHaveAttribute(
+                'data-testid',
+                `fleet-computer-card-${first.nodeId}`,
+            );
+            await expect(cards.nth(0).getByTestId('fleet-computer-card-state')).toHaveText(
+                'Online',
+            );
             // No health snapshot yet: dashes, never a number.
-            await expect(cards.nth(0).getByTestId('fleet-computer-card-health')).not.toContainText('%');
+            await expect(cards.nth(0).getByTestId('fleet-computer-card-health')).not.toContainText(
+                '%',
+            );
         } finally {
             await close();
         }
@@ -162,27 +189,44 @@ test.describe('Fleet hub', () => {
         try {
             await page.goto('/en/fleet/computers', { waitUntil: 'networkidle' });
             await expect(page.getByTestId('fleet-nodes-table')).toBeVisible();
-            await expect(page.getByTestId(`fleet-node-row-${node.nodeId}`)).toContainText(node.name);
+            await expect(page.getByTestId(`fleet-node-row-${node.nodeId}`)).toContainText(
+                node.name,
+            );
 
             const star = page.getByTestId(`fleet-node-favourite-${node.nodeId}`);
             await expect(star).toHaveAttribute('aria-pressed', 'false');
+            // The star turns on at once (optimistic); reload only once the
+            // server action that stores it has answered.
+            const saved = page.waitForResponse(
+                (response) =>
+                    response.request().method() === 'POST' &&
+                    response.request().headers()['next-action'] !== undefined,
+            );
             await star.click({ timeout: CLICK_TIMEOUT });
             await expect(star).toHaveAttribute('aria-pressed', 'true');
+            await saved;
             await page.reload({ waitUntil: 'networkidle' });
             await expect(page.getByTestId(`fleet-node-favourite-${node.nodeId}`)).toHaveAttribute(
                 'aria-pressed',
                 'true',
             );
 
-            await page.getByRole('button', { name: 'Add a computer' }).click({ timeout: CLICK_TIMEOUT });
-            await page.getByTestId('fleet-add-computer-desktop-node').click({ timeout: CLICK_TIMEOUT });
+            await page
+                .getByRole('button', { name: 'Add computer' })
+                .click({ timeout: CLICK_TIMEOUT });
+            await page
+                .getByTestId('fleet-add-computer-desktop-node')
+                .click({ timeout: CLICK_TIMEOUT });
             await expect(page.getByTestId('fleet-add-name')).toBeVisible();
         } finally {
             await close();
         }
     });
 
-    test('Settings → Fleet keeps the policies and points at the hub (FR-11)', async ({ browser, request }) => {
+    test('Settings → Fleet keeps the policies and points at the hub (FR-11)', async ({
+        browser,
+        request,
+    }) => {
         const u = await freshUser(request);
         await enrollNode(request, u.access_token);
         const { page, close } = await signedIn(browser, u);
@@ -253,7 +297,9 @@ test.describe('Fleet hub', () => {
             const foreign = await page.goto(`/en/fleet/computers/${node.nodeId}`);
             expect(foreign?.status()).toBe(404);
             await expect(page.getByTestId('fleet-computer-not-found')).toBeVisible();
-            const unknown = await page.goto('/en/fleet/computers/00000000-0000-4000-8000-000000000000');
+            const unknown = await page.goto(
+                '/en/fleet/computers/00000000-0000-4000-8000-000000000000',
+            );
             expect(unknown?.status()).toBe(404);
         } finally {
             await close();

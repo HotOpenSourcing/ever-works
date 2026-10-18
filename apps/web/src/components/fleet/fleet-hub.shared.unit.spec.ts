@@ -135,6 +135,35 @@ describe('groupComputersByHost (FR-9, ACC-FL01-05)', () => {
         ]);
     });
 
+    it('never drops a computer nested deeper than one level: it is listed on its own, with its host', () => {
+        const groups = groupComputersByHost([
+            node({ id: 'h', name: 'build-01' }),
+            node({ id: 'v', name: 'win-11-vm', hostNodeId: 'h', virtualKind: 'vm' }),
+            node({ id: 'c', name: 'redis', hostNodeId: 'v', virtualKind: 'container' }),
+        ]);
+        expect(
+            groups.map((group) => [
+                group.node.name,
+                group.children.map((child) => child.name),
+                group.hostName ?? null,
+            ]),
+        ).toEqual([
+            ['build-01', ['win-11-vm'], null],
+            ['redis', [], 'win-11-vm'],
+        ]);
+    });
+
+    it('never drops computers caught in a host cycle', () => {
+        const groups = groupComputersByHost([
+            node({ id: 'a', name: 'alpha', hostNodeId: 'b' }),
+            node({ id: 'b', name: 'beta', hostNodeId: 'a' }),
+        ]);
+        expect(groups.map((group) => [group.node.name, group.children.length])).toEqual([
+            ['alpha', 0],
+            ['beta', 0],
+        ]);
+    });
+
     it('names the host for the subtitle', () => {
         const nodes = [node({ id: 'h', name: 'build-01' })];
         expect(hostNameOf({ hostNodeId: 'h' }, nodes)).toBe('build-01');

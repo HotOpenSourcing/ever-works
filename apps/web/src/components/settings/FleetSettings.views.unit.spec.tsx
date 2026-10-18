@@ -35,13 +35,19 @@ vi.mock('@/app/actions/settings/fleet', () => ({
     setFleetNodeLimitCeilingAction: vi.fn(),
     clearFleetNodeModelThrottleAction: vi.fn(),
 }));
-vi.mock('./FleetKillSwitchBanner', () => ({ FleetKillSwitchBanner: () => <div data-testid="stub-kill-switch" /> }));
-vi.mock('./FleetPanicControls', () => ({ FleetPanicControls: () => <div data-testid="stub-panic" /> }));
+vi.mock('./FleetKillSwitchBanner', () => ({
+    FleetKillSwitchBanner: () => <div data-testid="stub-kill-switch" />,
+}));
+vi.mock('./FleetPanicControls', () => ({
+    FleetPanicControls: () => <div data-testid="stub-panic" />,
+}));
 vi.mock('./FleetExecutionPreferences', () => ({
     FleetExecutionPreferences: () => <div data-testid="stub-preferences" />,
 }));
 vi.mock('./FleetCostCeiling', () => ({ FleetCostCeiling: () => <div data-testid="stub-cost" /> }));
-vi.mock('./FleetTokensSection', () => ({ FleetTokensSection: () => <div data-testid="stub-tokens" /> }));
+vi.mock('./FleetTokensSection', () => ({
+    FleetTokensSection: () => <div data-testid="stub-tokens" />,
+}));
 vi.mock('./FleetNodeDrawer', () => ({ FleetNodeDrawer: () => null }));
 vi.mock('./FleetEnrollHandoff', () => ({ FleetEnrollHandoff: () => null }));
 
@@ -85,7 +91,13 @@ describe('FleetSettings views', () => {
     });
 
     it('policies: every policy and the link card where the table was, no machines (FR-11)', () => {
-        render(<FleetSettings {...base} view="policies" hubLinkCard={<div data-testid="link-card" />} />);
+        render(
+            <FleetSettings
+                {...base}
+                view="policies"
+                hubLinkCard={<div data-testid="link-card" />}
+            />,
+        );
         expect(screen.getByTestId('link-card')).toBeInTheDocument();
         expect(screen.getByTestId('stub-kill-switch')).toBeInTheDocument();
         for (const id of POLICY_SECTIONS) expect(screen.getByTestId(id)).toBeInTheDocument();
@@ -122,9 +134,57 @@ describe('FleetSettings views', () => {
     it('computers: ?add= opens the Add flow and tells the page so it can drop the parameter', async () => {
         const onAddOpened = vi.fn();
         render(
-            <FleetSettings {...base} view="computers" openAddKind="node" onAddOpened={onAddOpened} />,
+            <FleetSettings
+                {...base}
+                view="computers"
+                openAddKind="node"
+                onAddOpened={onAddOpened}
+            />,
         );
         await waitFor(() => expect(onAddOpened).toHaveBeenCalledTimes(1));
         expect(screen.getByTestId('fleet-add-name')).toBeInTheDocument();
+    });
+});
+
+describe('FleetSettings views — review of PR 2', () => {
+    it('policies: says a failed machine read, so the panic controls never pass it for "nothing to drain"', () => {
+        render(<FleetSettings {...base} loadError="Could not load nodes" view="policies" />);
+        expect(screen.getByText('Could not load nodes')).toBeInTheDocument();
+    });
+
+    it('computers: orders the rows it keeps through the hub’s orderNodes (a star re-sorts at once)', () => {
+        const second: FleetNodeView = { ...node, id: 'n2', name: 'design-mac' };
+        const { rerender } = render(
+            <FleetSettings {...base} initialNodes={[node, second]} view="computers" />,
+        );
+        const rowIds = () =>
+            screen.getAllByTestId(/^fleet-node-row-/).map((row) => row.getAttribute('data-testid'));
+        expect(rowIds()).toEqual(['fleet-node-row-n1', 'fleet-node-row-n2']);
+        rerender(
+            <FleetSettings
+                {...base}
+                initialNodes={[node, second]}
+                view="computers"
+                orderNodes={(rows) => [...rows].reverse()}
+            />,
+        );
+        expect(rowIds()).toEqual(['fleet-node-row-n2', 'fleet-node-row-n1']);
+    });
+
+    it('computers: renders the hub’s Open page action beside Details', () => {
+        render(
+            <FleetSettings
+                {...base}
+                view="computers"
+                favorites={{
+                    columnLabel: 'Favourite',
+                    renderToggle: () => null,
+                    renderOpen: (row) => (
+                        <a data-testid={`open-${row.id}`} href={`/fleet/computers/${row.id}`} />
+                    ),
+                }}
+            />,
+        );
+        expect(screen.getByTestId('open-n1')).toHaveAttribute('href', '/fleet/computers/n1');
     });
 });

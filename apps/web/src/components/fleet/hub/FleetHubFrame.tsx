@@ -76,7 +76,9 @@ export async function FleetHubFrame({
                 )}
             </div>
             <FleetHubTabs active={active} />
-            {children}
+            <div id="fleet-hub-panel" role="tabpanel" aria-labelledby={`fleet-hub-tab-${active}`}>
+                {children}
+            </div>
         </div>
     );
 }

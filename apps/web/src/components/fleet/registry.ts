@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react';
 import type { FleetActionFamily, FleetNodeView } from '@ever-works/contracts';
+import { isNeedsALookRoute } from '@ever-works/contracts';
 import { ROUTES } from '@/lib/constants';
 
 /**
@@ -339,7 +340,7 @@ const computerActions = new Map<string, FleetComputerActionRegistration>();
 
 /** Add an entry to the hub's "Add computer ▾" menu. */
 export function registerAddComputerItem(registration: FleetAddComputerItemRegistration): void {
-    if (!registration.href.startsWith('/') || registration.href.startsWith('//')) {
+    if (!isNeedsALookRoute(registration.href)) {
         throw new Error(`Fleet Add computer item "${registration.id}" must link to an app route`);
     }
     addComputerItems.set(registration.id, registration);

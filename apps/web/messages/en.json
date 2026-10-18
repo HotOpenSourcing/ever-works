@@ -12718,7 +12718,7 @@
             "title": "Fleet",
             "subtitle": "The computers you run Ever Works on — which are up, and which need a look.",
             "addComputer": "Add computer",
-            "addComputerMenuLabel": "Add a computer",
+            "addComputerMenuLabel": "Add computer: choose a kind",
             "addKinds": {
                 "node": "Computer (command-line node)",
                 "desktopNode": "Desktop app"
@@ -12766,6 +12766,8 @@
             "needsALook": {
                 "heading": "Needs a look",
                 "regionLabel": "Needs a look: {count, plural, =0 {nothing} one {# item} other {# items}}",
+                "regionLabelPartial": "Needs a look: {count, plural, =0 {nothing found} one {# item found} other {# items found}}, but some checks could not run",
+                "commandFailed": "That did not work. Try again in a moment.",
                 "empty": "Nothing needs a look.",
                 "failed": "Could not load what needs a look.",
                 "tryAgain": "Try again",
@@ -12834,7 +12836,9 @@
             "favourite": "Favourite",
             "addFavourite": "Add {name} to favourites",
             "removeFavourite": "Remove {name} from favourites",
-            "favouriteFailed": "Could not change the favourite."
+            "favouriteFailed": "Could not change the favourite.",
+            "openPage": "Open page",
+            "openPageFor": "Open the page of {name}"
         },
         "settingsLink": {
             "title": "Computers are under Fleet",
@@ -12865,8 +12869,8 @@
                 "uptime": "up {duration}"
             },
             "placeholder": {
-                "notShipped": "{tab}: arriving with {epic}.",
-                "switchedOff": "{tab} is switched off on this deployment.",
+                "notShipped": "{tabId, select, desktop {{tab} arrives} docker {{tab} arrives} other {{tab} arrive}} with {epic}.",
+                "switchedOff": "{tabId, select, desktop {{tab} is} docker {{tab} is} other {{tab} are}} switched off on this deployment.",
                 "consentMissing": "Start the node with {flag} on {node} to use {tab}.",
                 "kindCannot": "Not available on this kind of computer yet.",
                 "copy": "Copy",
