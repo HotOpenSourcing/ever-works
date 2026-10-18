@@ -1,13 +1,24 @@
 'use client';
 
 import { useTranslations } from 'next-intl';
-import { isFleetNodeHealthStale, type FleetNodeView } from '@ever-works/contracts';
+import {
+    FLEET_DEFAULT_NODE_OFFLINE_AFTER_MS,
+    hasFleetNodeHealthReading,
+    isFleetNodeHealthStale,
+    type FleetNodeView,
+} from '@ever-works/contracts';
 import { cn } from '@/lib/utils/cn';
 import { relativeTimeParts } from '@/components/dashboard/runner-status.shared';
 import { useNow } from './use-now';
 
-/** The offline threshold the platform sweeps by, so "stale" and "offline" agree (FR-5). */
-export const HEALTH_STALE_AFTER_MS = 5 * 60_000;
+/**
+ * The platform's DEFAULT offline threshold, so "stale" and "offline" agree
+ * (FR-5). A deployment that sets `FLEET_NODE_OFFLINE_AFTER_MS` judges with its
+ * own value on the server; where the web holds the server's answer (the
+ * health read's `stale`) that answer wins, and this is only the fallback for a
+ * row the web judges on its own.
+ */
+export const HEALTH_STALE_AFTER_MS = FLEET_DEFAULT_NODE_OFFLINE_AFTER_MS;
 
 export interface HealthCellsProps {
     node: FleetNodeView;
@@ -33,7 +44,8 @@ export function HealthCells({
     const t = useTranslations('fleet.health');
     const ticking = useNow();
     const now = nowProp ?? ticking;
-    const health = node.health ?? null;
+    // A row holding only the platform's disk-low marker is not a reading.
+    const health = hasFleetNodeHealthReading(node.health) ? (node.health ?? null) : null;
     const dash = t('notReported');
 
     if (!health) {

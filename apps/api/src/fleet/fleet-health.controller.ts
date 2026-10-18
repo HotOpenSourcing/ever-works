@@ -11,6 +11,7 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { FleetJobService, FleetNodeHealthService, FleetService } from '@ever-works/agent/fleet';
 import {
+    hasFleetNodeHealthReading,
     isFleetNodeHealthStale,
     resolveComputerState,
     type FleetNodeHealthView,
@@ -33,9 +34,17 @@ export type FleetNodeHealthResponse = FleetNodeHealthView;
  * function the cards, the header and the Agent tool use, so no two surfaces
  * can disagree about what state a machine is in.
  *
- * Family: `view` (CONTRACTS §2.1). Until FL-01's role derivation lands every
- * fleet read is owner-scoped, and another account's node id answers 404,
- * exactly like an unknown one. Reads are not audited (§2.3).
+ * Family: `view` (CONTRACTS §2.1, default org-members; spec §7 "Read health").
+ * Visibility is FL-01's `getVisibleForUser`: the owner, and anyone the node is
+ * shared with through an Organization, may read it; anyone else gets the 404
+ * of an unknown id. A shared reader gets the shared view (no free-text
+ * reasons) and no job count — the jobs are the owner's ledger. Reads are not
+ * audited (§2.3).
+ *
+ * The state is judged against the offline window: this read does not run the
+ * offline sweep, so a computer silent for longer than
+ * `FLEET_NODE_OFFLINE_AFTER_MS` reads `offline` here even while its row still
+ * says `online` (FR-30).
  *
  * Refresh now (`POST`), the history and wake arrive in FL-03's next phase on
  * FL-02's link.
@@ -53,7 +62,7 @@ export class FleetHealthController {
     @Get('nodes/:id/health')
     @ApiOperation({
         summary:
-            "One computer's health: the latest snapshot (CPU, memory, disk, load, uptime, GPU, pending reboot, failed services) stamped with the platform's receipt time, whether it is stale, and its plain-language state with its one fix. Owner-scoped: another account's node id answers 404.",
+            "One computer's health: the latest snapshot (CPU, memory, disk, load, uptime, GPU, pending reboot, failed services) stamped with the platform's receipt time, whether it is stale, and its plain-language state with its one fix. Readable by anyone who can see the computer (the `view` family); a computer outside my view answers 404, exactly like an unknown id.",
     })
     @HttpCode(HttpStatus.OK)
     @Throttle({ long: { limit: 120, ttl: 60_000 } })
@@ -61,16 +70,19 @@ export class FleetHealthController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
     ): Promise<FleetNodeHealthResponse> {
-        // Ownership first: a 404 here means nothing else is read.
-        const node = await this.service.getForUser(auth.userId, id);
-        const withLoad = await this.withLoad(auth.userId, node);
+        // Visibility first: a 404 here means nothing else is read.
+        const { view: node, role } = await this.service.getVisibleForUser(auth.userId, id);
+        const withLoad = role === 'owner' ? await this.withLoad(auth.userId, node) : node;
         const now = Date.now();
-        const snapshot = node.health ?? null;
+        const offlineAfterMs = offlineThresholdMs();
+        // A row holding only the platform's disk-low marker (an older daemon)
+        // has no reading: it answers "no snapshot", never a page of dashes.
+        const snapshot = hasFleetNodeHealthReading(node.health) ? (node.health ?? null) : null;
         return {
             nodeId: node.id,
             snapshot,
-            stale: isFleetNodeHealthStale(snapshot, now, offlineThresholdMs()),
-            state: resolveComputerState(withLoad, { now }),
+            stale: isFleetNodeHealthStale(snapshot, now, offlineAfterMs),
+            state: resolveComputerState(withLoad, { now, offlineAfterMs }),
             historyEnabled: this.history.isHistoryEnabled(),
         };
     }

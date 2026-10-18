@@ -210,3 +210,53 @@ describe('computer-state.shared', () => {
         expect(cliDisplayName('gemini')).toBe('gemini');
     });
 });
+
+/**
+ * The footer runner pill (`runnerRowState`) and the Fleet state
+ * (`resolveComputerState`) must name the same state for the same registry
+ * facts — both real functions, imported, so changing either one fails here.
+ */
+describe('resolveComputerState agrees with the footer runner pill', () => {
+    it('for every registry status, idle and busy, when no worker fact overrides it', async () => {
+        const { resolveComputerState } = await import('@ever-works/contracts');
+        const { runnerRowState } = await import('@/components/dashboard/runner-status.shared');
+        const statuses: FleetNodeView['status'][] = [
+            'enrolling',
+            'online',
+            'offline',
+            'paused',
+            'disabled',
+        ];
+        let compared = 0;
+        for (const status of statuses) {
+            for (const busy of [false, true]) {
+                // A disabled node still holding jobs is the one deliberate refinement: draining.
+                if (status === 'disabled' && busy) continue;
+                const pill = runnerRowState({
+                    id: 'n1',
+                    name: 'build-01',
+                    kind: 'node',
+                    status,
+                    lastHeartbeatAt: null,
+                    daemonVersion: null,
+                    cliVersion: null,
+                    diskFreeBytes: null,
+                    busy,
+                } as Parameters<typeof runnerRowState>[0]);
+                const state = resolveComputerState(
+                    node({
+                        status,
+                        load: {
+                            activeJobCount: busy ? 1 : 0,
+                            currentJobKind: null,
+                            currentJobId: null,
+                        },
+                    }),
+                ).state;
+                expect(state, `${status}${busy ? ' busy' : ''}`).toBe(pill);
+                compared += 1;
+            }
+        }
+        expect(compared).toBe(9);
+    });
+});

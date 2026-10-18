@@ -12,7 +12,7 @@ import { computerRoute, firstInstant, reportingNodes } from './health-producer.s
  */
 export function helperUntrustedItems(
     nodes: readonly FleetNodeView[],
-    context: NeedsALookContext,
+    context: Pick<NeedsALookContext, 'now'>,
 ): NeedsALookItem[] {
     const items: NeedsALookItem[] = [];
     for (const node of reportingNodes(nodes)) {
@@ -21,14 +21,11 @@ export function helperUntrustedItems(
         items.push({
             id: `helper-untrusted:${node.id}`,
             nodeId: node.id,
-            nodeName: node.name,
             severity: 'warn',
             kind: 'helper-untrusted',
             title: `${node.name}'s screen helper runs with reduced trust`,
-            detail: null,
-            messageKey: 'helperUntrusted',
-            params: { name: node.name },
-            action: { label: 'Open', labelKey: 'open', route: computerRoute(node.id) },
+            detail: 'It is admitted by its hash, not by a signature.',
+            action: { label: 'Open', route: computerRoute(node.id) },
             since: firstInstant(context.now, node.createdAt, node.lastHeartbeatAt),
         });
     }
@@ -37,7 +34,7 @@ export function helperUntrustedItems(
 
 @Injectable()
 export class HelperUntrustedProducer implements NeedsALookProducer {
-    readonly id = 'fl03.helper-untrusted';
+    readonly id = 'fl-03.helper-untrusted';
     produce(nodes: readonly FleetNodeView[], context: NeedsALookContext): NeedsALookItem[] {
         return helperUntrustedItems(nodes, context);
     }

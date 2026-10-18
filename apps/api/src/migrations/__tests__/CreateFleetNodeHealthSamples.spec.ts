@@ -34,12 +34,10 @@ describe('FL-03 migrations', () => {
         });
         await metadataSource.initialize();
         try {
-            return metadataSource
-                .getMetadata(target)
-                .columns.map((column) => ({
-                    name: column.databaseName,
-                    nullable: column.isNullable,
-                }));
+            return metadataSource.getMetadata(target).columns.map((column) => ({
+                name: column.databaseName,
+                nullable: column.isNullable,
+            }));
         } finally {
             await metadataSource.destroy();
         }

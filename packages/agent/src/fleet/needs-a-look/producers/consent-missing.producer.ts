@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { FleetNodeView, NeedsALookItem } from '@ever-works/contracts';
 import type { NeedsALookContext, NeedsALookProducer } from '../needs-a-look.producer';
-import { firstInstant, reportingNodes } from './health-producer.shared';
+import { computerRoute, firstInstant, reportingNodes } from './health-producer.shared';
 
 /**
  * The consents a node reports in its heartbeat (CONTRACTS §1.1), read
@@ -15,7 +15,7 @@ interface ReportedConsents {
     manage?: unknown;
 }
 
-/** The command the item offers: the commonest next consent. The sentence names all three. */
+/** The command the item names: the commonest next consent. The sentence names all three. */
 export const CONSENT_MISSING_START_COMMAND = 'ever-works-node start --work';
 
 /**
@@ -27,31 +27,23 @@ export const CONSENT_MISSING_START_COMMAND = 'ever-works-node start --work';
  */
 export function consentMissingItems(
     nodes: readonly FleetNodeView[],
-    context: NeedsALookContext,
+    context: Pick<NeedsALookContext, 'now'>,
 ): NeedsALookItem[] {
     const items: NeedsALookItem[] = [];
     for (const node of reportingNodes(nodes)) {
         const consents = (node as FleetNodeView & { consents?: ReportedConsents | null }).consents;
         if (!consents || typeof consents !== 'object') continue;
-        if (consents.work === true || consents.attend === true || consents.manage === true)
+        if (consents.work !== false || consents.attend !== false || consents.manage !== false) {
             continue;
-        if (consents.work !== false || consents.attend !== false || consents.manage !== false)
-            continue;
+        }
         items.push({
             id: `consent-missing:${node.id}`,
             nodeId: node.id,
-            nodeName: node.name,
             severity: 'info',
             kind: 'consent-missing',
             title: `${node.name} only reports health. Start it with --work, --attend or --manage to do more.`,
-            detail: null,
-            messageKey: 'consentMissing',
-            params: { name: node.name },
-            action: {
-                label: 'Show command',
-                labelKey: 'showCommand',
-                command: CONSENT_MISSING_START_COMMAND,
-            },
+            detail: `For example, on ${node.name} run: ${CONSENT_MISSING_START_COMMAND}`,
+            action: { label: 'Show command', route: computerRoute(node.id) },
             since: firstInstant(context.now, node.createdAt, node.lastHeartbeatAt),
         });
     }
@@ -60,7 +52,7 @@ export function consentMissingItems(
 
 @Injectable()
 export class ConsentMissingProducer implements NeedsALookProducer {
-    readonly id = 'fl03.consent-missing';
+    readonly id = 'fl-03.consent-missing';
     produce(nodes: readonly FleetNodeView[], context: NeedsALookContext): NeedsALookItem[] {
         return consentMissingItems(nodes, context);
     }

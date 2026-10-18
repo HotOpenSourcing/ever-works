@@ -1,7 +1,7 @@
 import { createHash } from 'crypto';
-import type { FleetNodeHealthStored } from '@ever-works/contracts';
+import { hasFleetNodeHealthReading, type FleetNodeHealthStored } from '@ever-works/contracts';
 import { FleetNode } from '../../entities/fleet-node.entity';
-import { buildStoredHealth, FleetService } from '../fleet.service';
+import { buildDiskLowMarker, buildStoredHealth, FleetService } from '../fleet.service';
 import type { FleetNodeHealthService } from '../fleet-node-health.service';
 
 const sha256 = (value: string) => createHash('sha256').update(value, 'utf8').digest('hex');
@@ -66,10 +66,11 @@ describe('FleetService — computer health on the heartbeat (FL-03)', () => {
     const build = (withHistory = true) =>
         new FleetService(
             repository as never,
-            undefined,
-            undefined,
-            undefined,
-            undefined,
+            undefined, // pluginRegistry
+            undefined, // pluginSettings
+            undefined, // inbox
+            undefined, // audit
+            undefined, // access (FL-01)
             withHistory ? (history as unknown as FleetNodeHealthService) : undefined,
         );
 
@@ -188,6 +189,36 @@ describe('FleetService — computer health on the heartbeat (FL-03)', () => {
         expect(result?.node.health).toMatchObject({ cpuPercent: 5 });
     });
 
+    it('an older daemon (free disk, no snapshot) gets one stable disk-low marker, cleared on recovery and never sampled', async () => {
+        history.shouldSample.mockReturnValue(true);
+        const lowBeat = { diskFreeBytes: 6 * GIB, minFreeDiskBytes: 5 * GIB };
+        await build().heartbeat(NODE_ID, SECRET, lowBeat);
+        const marker = patchOf().health as FleetNodeHealthStored;
+        expect(Object.keys(marker).sort()).toEqual(['at', 'diskLowSince']);
+        expect(marker.diskLowSince).toBe(marker.at);
+        expect(hasFleetNodeHealthReading(marker)).toBe(false);
+        expect(history.record).not.toHaveBeenCalled();
+
+        // Still low a minute later: the SAME instant, so the item does not move.
+        repository.update.mockClear();
+        repository.findById.mockResolvedValue(node({ health: marker }));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await build().heartbeat(NODE_ID, SECRET, lowBeat);
+        const kept = patchOf().health as FleetNodeHealthStored;
+        expect(kept.diskLowSince).toBe(marker.diskLowSince);
+        expect(kept.at).not.toBe(marker.at);
+
+        // Recovered: the marker is cleared, not left to say "low" forever.
+        repository.update.mockClear();
+        repository.findById.mockResolvedValue(node({ health: kept }));
+        await build().heartbeat(NODE_ID, SECRET, {
+            diskFreeBytes: 60 * GIB,
+            minFreeDiskBytes: 5 * GIB,
+        });
+        expect(patchOf().health).toBeNull();
+        expect(history.record).not.toHaveBeenCalled();
+    });
+
     it('serves a row holding junk as "no snapshot", never as one', async () => {
         repository.findById.mockResolvedValue(node({ health: 'garbage' as never }));
         const result = await build().heartbeat(NODE_ID, SECRET, {});
@@ -222,5 +253,36 @@ describe('buildStoredHealth — the disk-low marker (FR-17)', () => {
     it('answers null for nothing usable', () => {
         expect(buildStoredHealth(undefined, t0, null, low)).toBeNull();
         expect(buildStoredHealth({ junk: 1 }, t0, null, low)).toBeNull();
+    });
+});
+
+describe('buildDiskLowMarker — the marker for a beat without a snapshot (FR-17)', () => {
+    const t0 = new Date('2026-10-18T09:00:00.000Z');
+    const t1 = new Date('2026-10-18T09:01:00.000Z');
+    const low = { diskFreeBytes: 6 * GIB, minFreeDiskBytes: 5 * GIB };
+    const fine = { diskFreeBytes: 60 * GIB, minFreeDiskBytes: 5 * GIB };
+
+    it('marks, keeps and clears by the floor rule', () => {
+        const first = buildDiskLowMarker(t0, null, low);
+        expect(first).toEqual({ at: t0.toISOString(), diskLowSince: t0.toISOString() });
+        expect(buildDiskLowMarker(t1, first ?? null, low)).toEqual({
+            at: t1.toISOString(),
+            diskLowSince: t0.toISOString(),
+        });
+        expect(buildDiskLowMarker(t1, first ?? null, fine)).toBeNull();
+        // Nothing stored and nothing low: nothing to write.
+        expect(buildDiskLowMarker(t1, null, fine)).toBeUndefined();
+    });
+
+    it('never touches a row that holds a real reading — that snapshot carries its own marker', () => {
+        const reading: FleetNodeHealthStored = { at: t0.toISOString(), cpuPercent: 12 };
+        expect(buildDiskLowMarker(t1, reading, low)).toBeUndefined();
+        expect(buildDiskLowMarker(t1, reading, fine)).toBeUndefined();
+    });
+
+    it('without a floor there is no rule to judge by (the percentage rule needs the snapshot)', () => {
+        expect(
+            buildDiskLowMarker(t0, null, { diskFreeBytes: GIB, minFreeDiskBytes: null }),
+        ).toBeUndefined();
     });
 });

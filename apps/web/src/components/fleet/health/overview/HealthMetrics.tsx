@@ -2,7 +2,11 @@
 
 import { useId, type ReactNode } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { isFleetNodeHealthStale, type FleetNodeView } from '@ever-works/contracts';
+import {
+    hasFleetNodeHealthReading,
+    isFleetNodeHealthStale,
+    type FleetNodeView,
+} from '@ever-works/contracts';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils/cn';
 import { relativeTimeParts } from '@/components/dashboard/runner-status.shared';
@@ -21,6 +25,13 @@ export interface HealthMetricsProps {
     historyEnabled?: boolean;
     now?: number;
     staleAfterMs?: number;
+    /**
+     * The server's own judgement (the health read's `stale`, made with the
+     * deployment's configured offline threshold). `true` dims the block
+     * whatever the local clock says; absent, the block judges by
+     * `staleAfterMs`.
+     */
+    stale?: boolean;
     onRetry?: () => void;
     /** Where "Change limits" leads. */
     limitsHref?: string;
@@ -82,6 +93,7 @@ export function HealthMetrics({
     historyEnabled,
     now: nowProp,
     staleAfterMs = HEALTH_STALE_AFTER_MS,
+    stale: staleProp,
     onRetry,
     limitsHref,
     onActionDone,
@@ -92,7 +104,8 @@ export function HealthMetrics({
     const refreshReasonId = useId();
     const ticking = useNow();
     const now = nowProp ?? ticking;
-    const health = node.health ?? null;
+    // A row holding only the platform's disk-low marker is not a reading.
+    const health = hasFleetNodeHealthReading(node.health) ? (node.health ?? null) : null;
     const dash = t('notReported');
     const missing = t('notReportedHint');
 
@@ -141,7 +154,8 @@ export function HealthMetrics({
     }
 
     const offline = node.status === 'offline';
-    const stale = offline || isFleetNodeHealthStale(health, now, staleAfterMs);
+    const stale =
+        offline || staleProp === true || isFleetNodeHealthStale(health, now, staleAfterMs);
     const percent = (value: number | undefined) =>
         typeof value === 'number' ? t('percentValue', { value: Math.round(value) }) : dash;
     const relative = health ? relativeTimeParts(health.at, now) : null;

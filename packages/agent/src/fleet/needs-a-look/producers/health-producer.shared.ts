@@ -1,15 +1,55 @@
-import type { FleetNodeView } from '@ever-works/contracts';
+import {
+    FLEET_CLEAR_MODEL_THROTTLE_COMMAND,
+    resolveComputerState,
+    type ComputerStateResolution,
+    type FleetNodeView,
+} from '@ever-works/contracts';
+import { config } from '../../../config';
 
 /**
  * Shared pieces of FL-03's five "needs a look" producers: which computers a
- * producer looks at, the routes their actions open, and the ENGLISH renderings
- * Agents, MCP and the CLI show (the web renders each item's `messageKey` and
- * `params` in the viewer's language instead).
+ * producer looks at, the routes and named commands their actions use, and the
+ * English sentences of their items. An item is exactly CONTRACTS §4.6 — the
+ * renderer (FL-01) shows `title` and `detail` as they are and resolves the
+ * computer's name from `nodeId` — so the sentences are written to be read
+ * as is, by a person on the hub and by an Agent through MCP or the CLI.
  */
 
-/** The computer page (CONTRACTS §11.1 `/fleet/computers/[id]?tab=`). */
-export function computerRoute(nodeId: string, tab: 'overview' | 'settings' = 'overview'): string {
-    return `/fleet/computers/${encodeURIComponent(nodeId)}?tab=${tab}`;
+/** The computer page's Overview tab (CONTRACTS §11.1 `/fleet/computers/[id]?tab=`). */
+export function computerRoute(nodeId: string): string {
+    return `/fleet/computers/${encodeURIComponent(nodeId)}?tab=overview`;
+}
+
+/**
+ * Where a computer's resource limits are changed today: Settings → Fleet
+ * (`PUT /api/fleet/nodes/:id/limits`). The computer page's own Settings tab
+ * is FL-01's and still a placeholder, so "Change limits" leads where the
+ * limits can actually be changed — the same place the computer page's own
+ * Change limits link goes.
+ */
+export const CHANGE_LIMITS_ROUTE = '/settings/fleet';
+
+/** The named web command behind "Clear limit now" — see {@link FLEET_CLEAR_MODEL_THROTTLE_COMMAND}. */
+export const CLEAR_MODEL_THROTTLE_COMMAND = FLEET_CLEAR_MODEL_THROTTLE_COMMAND;
+
+/**
+ * The computer's state as the cards, the header and the health read judge
+ * it — WITH the platform's offline window. The hub's list read sweeps only
+ * `online` rows, and a single-computer read does not sweep at all, so a
+ * machine silent for hours can still carry a stored `online`, `paused` or
+ * `disabled`; its last report (quarantine, throttle, disk) is then stale and
+ * must not raise an item as if current (FR-30).
+ */
+export function stateOf(node: FleetNodeView, now: Date): ComputerStateResolution {
+    return resolveComputerState(node, {
+        now,
+        offlineAfterMs: config.fleet.getNodeOfflineAfterMs(),
+    });
+}
+
+/** True when the computer reads `offline` — by its status, or by its silence. */
+export function isOfflineNow(node: FleetNodeView, now: Date): boolean {
+    return stateOf(node, now).state === 'offline';
 }
 
 /**
@@ -46,7 +86,7 @@ export function formatBinaryBytes(bytes: number): string {
     return `${Math.round(bytes / MIB)} MiB`;
 }
 
-/** An unambiguous instant for a sentence an Agent reads: `Sun 19 Oct 01:00 UTC`. */
+/** An unambiguous instant for a sentence an Agent reads: `Mon 19 Oct 01:00 UTC`. */
 export function formatUtcInstant(iso: string): string {
     const date = new Date(iso);
     if (!Number.isFinite(date.getTime())) return iso;

@@ -7,14 +7,16 @@ import {
 	FLEET_HEALTH_MAX_GPU_MODEL_LENGTH,
 	FLEET_HEALTH_MAX_GPUS,
 	FLEET_HEALTH_ROLLUP_CRON,
+	FLEET_CLEAR_MODEL_THROTTLE_COMMAND,
 	FLEET_NODE_CLEAR_QUARANTINE_COMMAND,
 	fleetNodeDiskLowInput,
+	hasFleetNodeHealthReading,
 	isFleetNodeHealthStale,
 	resolveComputerState,
 	sanitizeFleetNodeHealthSnapshot,
 	type ComputerStateInput
 } from '../fleet-node-health.types.js';
-import { FLEET_NODE_UPGRADE_COMMAND, type FleetNodeStatus } from '../fleet-node.types.js';
+import { FLEET_NODE_UPGRADE_COMMAND } from '../fleet-node.types.js';
 
 const GIB = 1024 ** 3;
 const NOW = Date.parse('2026-10-18T09:41:00Z');
@@ -120,6 +122,27 @@ describe('sanitizeFleetNodeHealthSnapshot', () => {
 		expect(sanitizeFleetNodeHealthSnapshot([1, 2])).toBeNull();
 		expect(sanitizeFleetNodeHealthSnapshot('cpu 31')).toBeNull();
 		expect(sanitizeFleetNodeHealthSnapshot(null)).toBeNull();
+	});
+});
+
+describe('hasFleetNodeHealthReading', () => {
+	it('is true for any fact the node reported — "no GPU" included — and false for none', () => {
+		const at = '2026-10-18T09:40:00.000Z';
+		expect(hasFleetNodeHealthReading({ cpuPercent: 0 })).toBe(true);
+		expect(hasFleetNodeHealthReading({ pendingReboot: false })).toBe(true);
+		expect(hasFleetNodeHealthReading({ gpu: null })).toBe(true);
+		// The platform's own disk-low marker for an older daemon is not a reading.
+		expect(hasFleetNodeHealthReading({ at, diskLowSince: at } as never)).toBe(false);
+		expect(hasFleetNodeHealthReading({})).toBe(false);
+		expect(hasFleetNodeHealthReading(null)).toBe(false);
+		expect(hasFleetNodeHealthReading(undefined)).toBe(false);
+	});
+});
+
+describe('FLEET_CLEAR_MODEL_THROTTLE_COMMAND', () => {
+	it('is a named command a needs-a-look action may carry (CONTRACTS §4.6 pattern)', () => {
+		expect(FLEET_CLEAR_MODEL_THROTTLE_COMMAND).toBe('fleet.clear-model-throttle');
+		expect(FLEET_CLEAR_MODEL_THROTTLE_COMMAND).toMatch(/^[a-z][a-z0-9-]*(.[a-z][a-z0-9-]*)*$/);
 	});
 });
 
@@ -351,19 +374,31 @@ describe('resolveComputerState (FR-7, FR-8) — the truth table', () => {
 		expect(resolve(node({ workerState: 'working', modelThrottles: [throttle('claude-code')] })).state).toBe('busy');
 	});
 
-	it('agrees with the footer runner pill for every registry status when no worker fact overrides it', () => {
-		// Mirror of `runnerRowState` (apps/web/src/components/dashboard/runner-status.shared.ts).
-		const runnerRowState = (status: FleetNodeStatus, busy: boolean) =>
-			status === 'online' ? (busy ? 'busy' : 'online') : status;
-		const statuses: FleetNodeStatus[] = ['enrolling', 'online', 'offline', 'paused', 'disabled'];
-		for (const status of statuses) {
-			for (const busy of [false, true]) {
-				// A disabled node still holding jobs is the one deliberate refinement: draining.
-				if (status === 'disabled' && busy) continue;
-				const state = resolve(node({ status, load: { activeJobCount: busy ? 1 : 0 } })).state;
-				expect(state).toBe(runnerRowState(status, busy));
-			}
+	it('reads offline once the last beat is older than the offline window, whatever the stored status says', () => {
+		const window = 5 * 60_000;
+		const at = (msAgo: number) => new Date(NOW - msAgo).toISOString();
+		const judge = (input: ComputerStateInput) =>
+			resolveComputerState(input, { now: NOW, offlineAfterMs: window, canWake: true });
+		// The sweep only flips online rows, and only on the owner's list read:
+		// a single-computer read must not say "online" for a machine silent for an hour.
+		for (const status of ['online', 'paused', 'disabled'] as const) {
+			expect(judge(node({ status, lastHeartbeatAt: at(60 * 60_000) }))).toEqual({
+				state: 'offline',
+				params: { lastSeenAt: at(60 * 60_000) },
+				action: { kind: 'wake' }
+			});
 		}
+		// Its last report is stale too: no quarantine, throttle or busy is claimed.
+		expect(judge(node({ workerState: 'quarantined', lastHeartbeatAt: at(window + 1) })).state).toBe('offline');
+		expect(judge(node({ lastHeartbeatAt: null })).state).toBe('offline');
+		expect(judge(node({ lastHeartbeatAt: 'not a date' })).state).toBe('offline');
+		// At the boundary, and inside it, the stored facts stand.
+		expect(judge(node({ lastHeartbeatAt: at(window) })).state).toBe('online');
+		expect(judge(node({ status: 'paused', lastHeartbeatAt: at(1_000) })).state).toBe('paused');
+		// An enrolling row has never beaten by definition and stays enrolling.
+		expect(judge(node({ status: 'enrolling', lastHeartbeatAt: null })).state).toBe('enrolling');
+		// Without a window the stored status is trusted (the caller just swept).
+		expect(resolve(node({ lastHeartbeatAt: at(60 * 60_000) })).state).toBe('online');
 	});
 });
 

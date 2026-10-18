@@ -35,7 +35,11 @@ const node: FleetNodeView = {
 
 /** Computer health (FL-03) — the registry block reads the health view once and offers Try again. */
 describe('HealthMetricsBlock', () => {
-    beforeEach(() => fetchHealth.mockReset());
+    // A block body, not an expression: a function returned from beforeEach is
+    // run as its cleanup, and this one is the mock itself.
+    beforeEach(() => {
+        fetchHealth.mockReset();
+    });
 
     it('loads, then shows the fresh snapshot and the history footprint', async () => {
         fetchHealth.mockResolvedValue({
@@ -49,7 +53,7 @@ describe('HealthMetricsBlock', () => {
             },
             error: null,
         });
-        render(<HealthMetricsBlock node={node} />);
+        render(<HealthMetricsBlock nodes={[node]} flags={{}} />);
         expect(screen.getByTestId('fleet-health-loading')).toBeTruthy();
         await waitFor(() =>
             expect(screen.getAllByTestId('fleet-health-card')[0].textContent).toBe('CPU12%'),
@@ -62,7 +66,7 @@ describe('HealthMetricsBlock', () => {
 
     it('a failed read says so and Try again reads once more', async () => {
         fetchHealth.mockResolvedValueOnce({ success: false, data: null, error: 'down' });
-        render(<HealthMetricsBlock node={node} />);
+        render(<HealthMetricsBlock nodes={[node]} flags={{}} />);
         await waitFor(() => expect(screen.getByTestId('fleet-health-error')).toBeTruthy());
         fetchHealth.mockResolvedValueOnce({
             success: true,
@@ -78,5 +82,88 @@ describe('HealthMetricsBlock', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
         await waitFor(() => expect(screen.getByTestId('fleet-health-no-snapshot')).toBeTruthy());
         expect(fetchHealth).toHaveBeenCalledTimes(2);
+    });
+
+    it('never lays one computer’s snapshot over another when the page swaps computers', async () => {
+        let resolveSecond: (value: unknown) => void = () => undefined;
+        fetchHealth.mockImplementation((id: string) =>
+            id === 'n1'
+                ? Promise.resolve({
+                      success: true,
+                      data: {
+                          nodeId: 'n1',
+                          snapshot: { at: new Date().toISOString(), cpuPercent: 12 },
+                          stale: false,
+                          state: { state: 'online', params: {}, action: null },
+                          historyEnabled: false,
+                      },
+                      error: null,
+                  })
+                : new Promise((resolve) => {
+                      resolveSecond = resolve;
+                  }),
+        );
+        const { rerender } = render(<HealthMetricsBlock nodes={[node]} flags={{}} />);
+        await waitFor(() =>
+            expect(screen.getAllByTestId('fleet-health-card')[0].textContent).toBe('CPU12%'),
+        );
+        // Same block instance, another computer: until its own answer lands
+        // the block is loading — never build-01's 12 % under build-02's name.
+        rerender(
+            <HealthMetricsBlock nodes={[{ ...node, id: 'n2', name: 'build-02' }]} flags={{}} />,
+        );
+        expect(screen.getByTestId('fleet-health-loading')).toBeTruthy();
+        expect(screen.queryByText('CPU12%')).toBeNull();
+        resolveSecond({
+            success: true,
+            data: {
+                nodeId: 'n2',
+                snapshot: { at: new Date().toISOString(), cpuPercent: 77 },
+                stale: false,
+                state: { state: 'online', params: {}, action: null },
+                historyEnabled: false,
+            },
+            error: null,
+        });
+        await waitFor(() =>
+            expect(screen.getAllByTestId('fleet-health-card')[0].textContent).toBe('CPU77%'),
+        );
+        expect(fetchHealth).toHaveBeenLastCalledWith('n2');
+    });
+
+    it('the server’s stale verdict dims a snapshot the local clock would call fresh', async () => {
+        fetchHealth.mockResolvedValue({
+            success: true,
+            data: {
+                nodeId: 'n1',
+                snapshot: { at: new Date().toISOString(), cpuPercent: 12 },
+                stale: true,
+                state: { state: 'online', params: {}, action: null },
+                historyEnabled: false,
+            },
+            error: null,
+        });
+        render(<HealthMetricsBlock nodes={[node]} flags={{}} />);
+        await waitFor(() =>
+            expect(
+                screen
+                    .getByTestId('fleet-health-metrics')
+                    .querySelector('[data-stale]')
+                    ?.getAttribute('data-stale'),
+            ).toBe('true'),
+        );
+    });
+
+    it('falls back to the page flags for the history line until the read answers', () => {
+        fetchHealth.mockReturnValue(new Promise(() => undefined));
+        render(
+            <HealthMetricsBlock nodes={[node]} flags={{ FLEET_HEALTH_HISTORY_ENABLED: true }} />,
+        );
+        expect(screen.getByTestId('fleet-health-loading')).toBeTruthy();
+    });
+
+    it('renders nothing without a computer', () => {
+        const { container } = render(<HealthMetricsBlock nodes={[]} flags={{}} />);
+        expect(container.innerHTML).toBe('');
     });
 });

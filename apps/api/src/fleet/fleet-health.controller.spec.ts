@@ -8,10 +8,6 @@ import type {
 } from '@ever-works/agent/fleet';
 import type { FleetNodeView } from '@ever-works/contracts';
 import { FleetHealthController } from './fleet-health.controller';
-import {
-    FleetNeedsALookController,
-    NEEDS_A_LOOK_PARTIAL_HEADER,
-} from './fleet-needs-a-look.controller';
 
 const USER = { userId: 'user-1' } as never;
 const NODE_ID = '11111111-1111-4111-8111-111111111111';
@@ -34,19 +30,22 @@ function view(overrides: Partial<FleetNodeView> = {}): FleetNodeView {
 }
 
 /**
- * Computer health (FL-03) — the read routes: `GET /api/fleet/nodes/:id/health`
- * and the needs-a-look list (seam owned by FL-01). Both are owner-scoped until
- * FL-01's role derivation lands: a foreign node id is a 404, exactly like an
- * unknown one, and nothing else is read for it.
+ * Computer health (FL-03) — `GET /api/fleet/nodes/:id/health`, a `view`-family
+ * read: visibility is FL-01's `getVisibleForUser` (the owner, or someone the
+ * node is shared with); anyone else gets the 404 of an unknown id and nothing
+ * else is read. The "needs a look" routes are FL-01's (`fleet.controller.ts`);
+ * FL-03's producers behind them are tested in the agent package.
  */
 describe('FleetHealthController — GET /api/fleet/nodes/:id/health', () => {
-    let service: { getForUser: jest.Mock };
+    let service: { getVisibleForUser: jest.Mock };
     let jobs: { loadByNodeForUser: jest.Mock };
     let history: { isHistoryEnabled: jest.Mock };
     let controller: FleetHealthController;
 
     beforeEach(() => {
-        service = { getForUser: jest.fn(async () => view()) };
+        service = {
+            getVisibleForUser: jest.fn(async () => ({ view: view(), role: 'owner' })),
+        };
         jobs = { loadByNodeForUser: jest.fn(async () => ({})) };
         history = { isHistoryEnabled: jest.fn(() => false) };
         controller = new FleetHealthController(
@@ -68,9 +67,10 @@ describe('FleetHealthController — GET /api/fleet/nodes/:id/health', () => {
 
     it('answers the stored snapshot, fresh, with the computer’s state', async () => {
         const at = new Date(Date.now() - 48_000).toISOString();
-        service.getForUser.mockResolvedValue(
-            view({ health: { at, cpuPercent: 31, memPercent: 58 } }),
-        );
+        service.getVisibleForUser.mockResolvedValue({
+            view: view({ health: { at, cpuPercent: 31, memPercent: 58 } }),
+            role: 'owner',
+        });
         history.isHistoryEnabled.mockReturnValue(true);
         expect(await controller.health(USER, NODE_ID)).toEqual({
             nodeId: NODE_ID,
@@ -83,9 +83,15 @@ describe('FleetHealthController — GET /api/fleet/nodes/:id/health', () => {
 
     it('marks a 2 h-old snapshot stale and a node without one as "no snapshot" (ACC-FL03-02)', async () => {
         const old = new Date(Date.now() - 2 * 3_600_000).toISOString();
-        service.getForUser.mockResolvedValue(view({ health: { at: old, cpuPercent: 3 } }));
+        service.getVisibleForUser.mockResolvedValue({
+            view: view({ health: { at: old, cpuPercent: 3 } }),
+            role: 'owner',
+        });
         expect((await controller.health(USER, NODE_ID)).stale).toBe(true);
-        service.getForUser.mockResolvedValue(view({ health: null }));
+        service.getVisibleForUser.mockResolvedValue({
+            view: view({ health: null }),
+            role: 'owner',
+        });
         const none = await controller.health(USER, NODE_ID);
         expect(none.snapshot).toBeNull();
         expect(none.stale).toBe(true);
@@ -105,69 +111,44 @@ describe('FleetHealthController — GET /api/fleet/nodes/:id/health', () => {
     });
 
     it('a stranger’s node id is a 404 and nothing else is read', async () => {
-        service.getForUser.mockRejectedValue(new NotFoundException('Fleet node not found'));
+        service.getVisibleForUser.mockRejectedValue(new NotFoundException('Fleet node not found'));
         await expect(controller.health(USER, NODE_ID)).rejects.toBeInstanceOf(NotFoundException);
         expect(jobs.loadByNodeForUser).not.toHaveBeenCalled();
     });
-});
 
-describe('FleetNeedsALookController (seam owned by FL-01)', () => {
-    let service: { listForUser: jest.Mock; getForUser: jest.Mock };
-    let jobs: { loadByNodeForUser: jest.Mock };
-    let needsALook: { forNodes: jest.Mock };
-    let response: { setHeader: jest.Mock };
-    let controller: FleetNeedsALookController;
-
-    beforeEach(() => {
-        service = {
-            listForUser: jest.fn(async () => [view()]),
-            getForUser: jest.fn(async () => view()),
-        };
-        jobs = { loadByNodeForUser: jest.fn(async () => ({})) };
-        needsALook = { forNodes: jest.fn(async () => ({ items: [], partial: false })) };
-        response = { setHeader: jest.fn() };
-        controller = new FleetNeedsALookController(
-            service as unknown as FleetService,
-            jobs as unknown as FleetJobService,
-            needsALook as never,
-        );
-    });
-
-    it('is mounted at the two CONTRACTS §11.2 paths', () => {
-        expect(Reflect.getMetadata(PATH_METADATA, FleetNeedsALookController.prototype.list)).toBe(
-            'needs-a-look',
-        );
-        expect(
-            Reflect.getMetadata(PATH_METADATA, FleetNeedsALookController.prototype.forNode),
-        ).toBe('nodes/:id/needs-a-look');
-    });
-
-    it('answers [] with nothing to report, and no partial header', async () => {
-        expect(await controller.list(USER, response)).toEqual([]);
-        expect(response.setHeader).not.toHaveBeenCalled();
-    });
-
-    it('hands the producers every visible computer once, with its job count', async () => {
-        jobs.loadByNodeForUser.mockResolvedValue({
-            [NODE_ID]: { activeJobCount: 1, currentJobKind: 'agent-task', currentJobId: 'j' },
+    it('answers someone the computer is shared with, from the shared view and without the owner’s job ledger', async () => {
+        const at = new Date(Date.now() - 30_000).toISOString();
+        service.getVisibleForUser.mockResolvedValue({
+            view: view({ health: { at, cpuPercent: 40 }, viewerRole: 'org-member' }),
+            role: 'org-member',
         });
-        await controller.list(USER, response);
-        const [nodes] = needsALook.forNodes.mock.calls[0];
-        expect(nodes).toHaveLength(1);
-        expect(nodes[0].load).toMatchObject({ activeJobCount: 1 });
+        jobs.loadByNodeForUser.mockResolvedValue({
+            [NODE_ID]: { activeJobCount: 3, currentJobKind: 'agent-task', currentJobId: 'j' },
+        });
+        const answer = await controller.health(USER, NODE_ID);
+        expect(answer.snapshot).toEqual({ at, cpuPercent: 40 });
+        // Not "Busy · 3 jobs": the jobs are the owner's ledger, not the reader's.
+        expect(answer.state.state).toBe('online');
+        expect(jobs.loadByNodeForUser).not.toHaveBeenCalled();
     });
 
-    it('flags a partial answer when a producer failed (U14)', async () => {
-        needsALook.forNodes.mockResolvedValue({ items: [], partial: true });
-        await controller.list(USER, response);
-        expect(response.setHeader).toHaveBeenCalledWith(NEEDS_A_LOOK_PARTIAL_HEADER, 'true');
-    });
-
-    it('a stranger’s node id is a 404 and no producer ever sees it', async () => {
-        service.getForUser.mockRejectedValue(new NotFoundException('Fleet node not found'));
-        await expect(controller.forNode(USER, NODE_ID, response)).rejects.toBeInstanceOf(
-            NotFoundException,
-        );
-        expect(needsALook.forNodes).not.toHaveBeenCalled();
+    it('a computer silent past the offline window reads offline even while its row still says online', async () => {
+        const silentSince = new Date(Date.now() - 60 * 60_000).toISOString();
+        service.getVisibleForUser.mockResolvedValue({
+            view: view({
+                status: 'online',
+                workerState: 'quarantined',
+                lastHeartbeatAt: silentSince,
+                health: { at: silentSince, cpuPercent: 99 },
+            }),
+            role: 'owner',
+        });
+        const answer = await controller.health(USER, NODE_ID);
+        expect(answer.state).toEqual({
+            state: 'offline',
+            params: { lastSeenAt: silentSince },
+            action: null,
+        });
+        expect(answer.stale).toBe(true);
     });
 });

@@ -10,6 +10,7 @@ import {
     computerRoute,
     firstInstant,
     formatBinaryBytes,
+    isOfflineNow,
     reportingNodes,
 } from './health-producer.shared';
 
@@ -21,18 +22,19 @@ import {
  * heartbeat's `diskLowSince` marker so the item's `since` is the instant the
  * platform first saw the disk low (FR-17).
  *
- * Offline computers are skipped: their last figure may be hours old, and a
- * stale snapshot is never presented as current (FR-30). The percentage is
+ * Offline computers are skipped — by status, or by a silence longer than the
+ * offline window (the stored status lags it): their last figure may be hours
+ * old, and a stale snapshot is never presented as current (FR-30). The percentage is
  * the one the node reported; when it reported none, the sentence says only
  * what is left.
  */
 export function diskLowItems(
     nodes: readonly FleetNodeView[],
-    context: NeedsALookContext,
+    context: Pick<NeedsALookContext, 'now'>,
 ): NeedsALookItem[] {
     const items: NeedsALookItem[] = [];
     for (const node of reportingNodes(nodes)) {
-        if (node.status === 'offline') continue;
+        if (isOfflineNow(node, context.now)) continue;
         const input = fleetNodeDiskLowInput(node);
         const severity = diskLowSeverity(input);
         if (!severity || typeof input.freeBytes !== 'number') continue;
@@ -51,18 +53,14 @@ export function diskLowItems(
         items.push({
             id: `disk-low:${node.id}`,
             nodeId: node.id,
-            nodeName: node.name,
             severity,
             kind: 'disk-low',
             title,
-            detail: null,
-            messageKey: severity === 'critical' ? 'diskLowCritical' : 'diskLowWarn',
-            params: {
-                percent,
-                freeBytes: input.freeBytes,
-                floorBytes: typeof input.floorBytes === 'number' ? input.floorBytes : null,
-            },
-            action: { label: 'Open', labelKey: 'open', route: computerRoute(node.id) },
+            detail:
+                severity === 'critical'
+                    ? 'Below its floor the node refuses new work. Free up space on the workspace volume.'
+                    : 'Less than a tenth of the workspace volume is free.',
+            action: { label: 'Open', route: computerRoute(node.id) },
             since: firstInstant(
                 context.now,
                 node.health?.diskLowSince,
@@ -76,7 +74,7 @@ export function diskLowItems(
 
 @Injectable()
 export class DiskLowProducer implements NeedsALookProducer {
-    readonly id = 'fl03.disk-low';
+    readonly id = 'fl-03.disk-low';
     produce(nodes: readonly FleetNodeView[], context: NeedsALookContext): NeedsALookItem[] {
         return diskLowItems(nodes, context);
     }

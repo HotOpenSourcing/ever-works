@@ -29,7 +29,6 @@ import {
 } from './node-job-runtime.providers';
 import { FleetHealthController } from './fleet-health.controller';
 import { FleetHealthRollupCronService } from './fleet-health-rollup-cron.service';
-import { FleetNeedsALookController } from './fleet-needs-a-look.controller';
 import { FleetEnabledGuard } from './guards/fleet-enabled.guard';
 import { FleetNodeAuthGuard } from './guards/fleet-node-auth.guard';
 
@@ -124,7 +123,6 @@ import { FleetNodeAuthGuard } from './guards/fleet-node-auth.guard';
         // Computer health (FL-03): a computer's health, and the needs-a-look
         // list (seam owned by FL-01) its producers feed.
         FleetHealthController,
-        FleetNeedsALookController,
     ],
     providers: [
         ...buildNodeJobRuntimeProviders(),

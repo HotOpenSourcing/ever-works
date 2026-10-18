@@ -12815,32 +12815,6 @@
                 "minutes": "{minutes} min"
             },
             "checkedAgo": "checked {relative}"
-        },
-        "needsALook": {
-            "kinds": {
-                "diskLowCritical": "Disk is {percent}% full · {free} left, the node stops at {floor}",
-                "diskLowCriticalNoPercent": "{free} left on the disk, the node stops at {floor}",
-                "diskLowWarn": "Disk is {percent}% full · {free} left",
-                "diskLowWarnNoPercent": "{free} left on the disk",
-                "limited": "Waiting for {cli}'s limit to reset at {time}",
-                "limitedMany": "Waiting for model limits to reset — the first, {cli}, at {time}",
-                "throttledCpu": "Pausing new work — CPU is above its ceiling ({value}% of {limit}%)",
-                "throttledMemory": "Pausing new work — memory is above its ceiling ({value} MB of {limit} MB)",
-                "throttledDisk": "Pausing new work — free disk is below its floor ({value} of {limit})",
-                "throttled": "Pausing new work — {reason}",
-                "throttledNoReason": "Pausing new work",
-                "quarantined": "{name} stopped itself: {reason}",
-                "quarantinedNoReason": "{name} stopped itself",
-                "consentMissing": "{name} only reports health. Start it with --work, --attend or --manage to do more.",
-                "helperUntrusted": "{name}'s screen helper runs with reduced trust"
-            },
-            "actions": {
-                "open": "Open",
-                "clearLimitNow": "Clear limit now",
-                "clearLimitsNow": "Clear limits now",
-                "changeLimits": "Change limits",
-                "showCommand": "Show command"
-            }
         }
     }
 }

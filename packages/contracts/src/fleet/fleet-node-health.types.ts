@@ -91,6 +91,16 @@ export const FLEET_HEALTH_MAX_FAILED_SERVICES = 10_000;
  */
 export const FLEET_NODE_CLEAR_QUARANTINE_COMMAND = 'ever-works-node clear-quarantine --confirm-process-tree-stopped';
 
+/**
+ * The named command a "needs a look" row runs for **Clear limit now**
+ * (CONTRACTS §4.6: an action navigates to a route or runs a named command the
+ * web tier knows). The web maps it to the existing, audited
+ * `POST /api/fleet/nodes/:id/clear-model-throttle` for the row's node, with
+ * no provider: every usage limit in force on that computer, which is what
+ * the row says.
+ */
+export const FLEET_CLEAR_MODEL_THROTTLE_COMMAND = 'fleet.clear-model-throttle';
+
 // ─── Snapshot ───────────────────────────────────────────────────────────────
 
 /** GPU vendors the node classifies (mirrors the node's `gpu-probe`). */
@@ -137,6 +147,38 @@ export interface FleetNodeHealthSnapshot {
 	pendingReboot?: boolean;
 	/** Services the service manager reports as failed. Absent where not cheaply knowable. */
 	failedServices?: number;
+}
+
+/** Every field a node reports in a snapshot — what {@link hasFleetNodeHealthReading} looks for. */
+const SNAPSHOT_FIELDS: readonly (keyof FleetNodeHealthSnapshot)[] = [
+	'cpuPercent',
+	'memPercent',
+	'memTotalMiB',
+	'memUsedMiB',
+	'diskPercent',
+	'diskFreeMiB',
+	'diskTotalMiB',
+	'loadAvg1',
+	'cpuCores',
+	'uptimeSec',
+	'gpu',
+	'pendingReboot',
+	'failedServices'
+];
+
+/**
+ * True when a stored health value holds at least one fact the NODE reported.
+ *
+ * A row can also hold only the platform's own disk-low marker: a daemon
+ * older than the snapshot reports free disk and its floor but no snapshot,
+ * and the platform still needs one stable instant for its `disk-low` item
+ * (FR-17). Such a value is `{ at, diskLowSince }` and is NOT a reading — every
+ * surface that shows metrics, or answers "this version reports no health",
+ * asks this first. `gpu: null` counts: it means "asked, no GPU".
+ */
+export function hasFleetNodeHealthReading(stored: FleetNodeHealthSnapshot | null | undefined): boolean {
+	if (!stored || typeof stored !== 'object') return false;
+	return SNAPSHOT_FIELDS.some((field) => stored[field] !== undefined);
 }
 
 /** The snapshot as the platform stores and serves it: stamped with the platform's RECEIPT time. */
@@ -487,6 +529,25 @@ export interface ResolveComputerStateOptions {
 	now?: number | Date;
 	/** FL-03 P2: whether Wake is possible for this computer (offline only). */
 	canWake?: boolean;
+	/**
+	 * The silence after which a computer is offline (the platform's
+	 * `FLEET_NODE_OFFLINE_AFTER_MS`). When given, a computer whose last beat is
+	 * older than this — or that never beat — reads `offline` whatever its stored
+	 * `status` says: the offline sweep runs only on the owner's list reads and
+	 * flips only `online` rows, so a single-computer read, or a paused or
+	 * disabled row, can still say `online` / `paused` / `disabled` hours after
+	 * the machine went silent (FR-30: a stale fact is never shown as current).
+	 * Omit it only where the caller has just swept.
+	 */
+	offlineAfterMs?: number;
+}
+
+/** True when a threshold is given and the last beat is older than it (or absent / unparseable). */
+function isSilent(lastHeartbeatAt: string | null | undefined, nowMs: number, thresholdMs: number | undefined): boolean {
+	if (thresholdMs === undefined || !Number.isFinite(thresholdMs)) return false;
+	const at = typeof lastHeartbeatAt === 'string' ? Date.parse(lastHeartbeatAt) : NaN;
+	if (!Number.isFinite(at)) return true;
+	return nowMs - at > thresholdMs;
 }
 
 /** Model CLIs a node advertises as capability tags, which are also the throttle provider ids. */
@@ -570,7 +631,7 @@ export function resolveComputerState(
 	const jobs = finiteNonNegative(input.load?.activeJobCount ?? null);
 
 	if (input.status === 'enrolling') return { state: 'enrolling', params: {}, action: null };
-	if (input.status === 'offline') {
+	if (input.status === 'offline' || isSilent(input.lastHeartbeatAt, nowMs, options.offlineAfterMs)) {
 		return {
 			state: 'offline',
 			params: { lastSeenAt: input.lastHeartbeatAt ?? null },

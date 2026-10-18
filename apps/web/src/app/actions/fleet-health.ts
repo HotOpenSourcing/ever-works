@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { ROUTES } from '@/lib/constants';
 import { getAuthFromCookie } from '@/lib/auth';
 import { ApiResponseError } from '@/lib/api/server-api';
-import { fleetAPI, type FleetNodeHealthView, type NeedsALookItem } from '@/lib/api/fleet';
+import { fleetAPI, type FleetNodeHealthView } from '@/lib/api/fleet';
 import type { FleetActionResult } from './settings/fleet';
 
 /**
@@ -44,22 +44,5 @@ export async function fetchFleetNodeHealthAction(
         return { success: true, data, error: null };
     } catch (error) {
         return { success: false, data: null, error: errorMessage(error, 'Failed to load health') };
-    }
-}
-
-/** What wants a look on one computer. */
-export async function fetchFleetNodeNeedsALookAction(
-    nodeId: string,
-): Promise<FleetActionResult<NeedsALookItem[]>> {
-    await ensureAuth();
-    try {
-        const data = await fleetAPI.nodeNeedsALook(nodeId);
-        return { success: true, data: data ?? [], error: null };
-    } catch (error) {
-        return {
-            success: false,
-            data: null,
-            error: errorMessage(error, 'Failed to load what needs a look'),
-        };
     }
 }

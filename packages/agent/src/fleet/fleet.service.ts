@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import {
     BadRequestException,
+    ForbiddenException,
     Inject,
     Injectable,
     Logger,
@@ -10,6 +11,11 @@ import {
 import type { IPlugin } from '@ever-works/plugin';
 import {
     activeFleetNodeModelThrottles,
+    diffControlPolicyFamilies,
+    effectiveControlPolicy,
+    FLEET_ACTION_FAMILIES,
+    isFleetAudience,
+    normalizeControlPolicyFamilies,
     FLEET_DEFAULT_ENROLLMENT_TOKEN_TTL_MS,
     FLEET_DEFAULT_MAX_CAPABILITY_TAG_LENGTH,
     FLEET_DEFAULT_MAX_CAPABILITY_TAGS,
@@ -34,6 +40,7 @@ import {
     FLEET_MIN_NODE_NAME_LENGTH,
     diskLowSeverity,
     fleetNodeDiskLowInput,
+    hasFleetNodeHealthReading,
     isFleetNodeVersionBelowFloor,
     normalizeFleetNodeWorkerState,
     sanitizeFleetNodeHealthSnapshot,
@@ -41,10 +48,12 @@ import {
 import type {
     FleetAuditAction,
     FleetNodeHealthStored,
+    FleetControlPolicyFamiliesInput,
     FleetNodeLimitCeiling,
     FleetNodeView,
     FleetNodeLoadView,
     FleetNodeWorkerState,
+    FleetViewerRole,
 } from '@ever-works/contracts';
 import { config } from '../config';
 import { INBOX_PRODUCER, type InboxProducer } from '../inbox/inbox-producer.port';
@@ -61,6 +70,7 @@ import { redactSecrets } from '../utils/secret-scan';
 import { FleetNodeRepository } from './fleet-node.repository';
 import { FleetAuditService } from './fleet-audit.service';
 import { FleetNodeHealthService } from './fleet-node-health.service';
+import { FleetAccessService, fleetOwnerOnlyBody } from './fleet-access.service';
 import { normalizeDailyCeilingCents } from './fleet-cost-ceiling.shared';
 import {
     CREDENTIAL_MAX_LENGTH,
@@ -356,6 +366,10 @@ export class FleetService {
         // anywhere but last, or made required, would break them — and an
         // audit trail is not worth making the registry unbootable for.
         @Optional() private readonly audit?: FleetAuditService,
+        // Fleet hub (FL-01) — role derivation for the hub's widened reads and
+        // the owner-only acts. APPENDED and @Optional() for the same reason as
+        // `audit`: unbound, every read stays owner-scoped exactly as before.
+        @Optional() private readonly access?: FleetAccessService,
         // Computer health (FL-03) — the history writer. APPENDED and
         // @Optional() for the same positional-construction reason: without
         // it the snapshot is still stored on the row; only history is off.
@@ -630,19 +644,28 @@ export class FleetService {
         // the disk-low marker judges this beat's floor.
         const receivedAt = patch.lastHeartbeatAt as Date;
         const sampleThisBeat = this.healthHistory?.shouldSample(node.health, receivedAt) === true;
+        const beatDisk = {
+            diskFreeBytes:
+                patch.diskFreeBytes !== undefined ? patch.diskFreeBytes : node.diskFreeBytes,
+            minFreeDiskBytes:
+                'minFreeDiskBytes' in patch ? patch.minFreeDiskBytes : node.minFreeDiskBytes,
+        };
         const health = buildStoredHealth(
             refresh.health,
             receivedAt,
             node.health ?? null,
-            {
-                diskFreeBytes:
-                    patch.diskFreeBytes !== undefined ? patch.diskFreeBytes : node.diskFreeBytes,
-                minFreeDiskBytes:
-                    'minFreeDiskBytes' in patch ? patch.minFreeDiskBytes : node.minFreeDiskBytes,
-            },
+            beatDisk,
             sampleThisBeat,
         );
-        if (health) patch.health = health;
+        if (health) {
+            patch.health = health;
+        } else {
+            // A daemon older than the snapshot still reports free disk and its
+            // floor: keep the platform's disk-low marker for it, so its
+            // `disk-low` item has one stable `since` too (FR-17).
+            const marker = buildDiskLowMarker(receivedAt, node.health ?? null, beatDisk);
+            if (marker !== undefined) patch.health = marker;
+        }
         // Re-arm the offline notice markers on EVERY accepted beat, not
         // only on beats that happened to report a worker state. The beat
         // itself is the proof the machine is reachable, and the daemons
@@ -1052,6 +1075,136 @@ export class FleetService {
      */
     async getForUser(userId: string, nodeId: string): Promise<FleetNodeView> {
         return this.toView(await this.getOwnedNode(userId, nodeId));
+    }
+
+    /**
+     * Fleet hub (FL-01) — every Node the caller may SEE (`GET
+     * /api/fleet/nodes?scope=visible`): their own (exactly {@link listForUser},
+     * offline sweep and cluster merge included) followed by the Nodes other
+     * people own that are bound to an Organization where the caller derives a
+     * role admitted by the Node's `view` audience. Every row carries
+     * `viewerRole`.
+     *
+     * The owner-only {@link listForUser} is unchanged and is still what the
+     * runner pill, the panic controls, Settings → Fleet and the lease path
+     * read: a shared Node is never counted as the caller's runner.
+     */
+    async listVisibleForUser(
+        userId: string,
+        options: { includeClusters?: boolean } = {},
+    ): Promise<FleetNodeView[]> {
+        // `includeClusters: false` (the needs-a-look read) skips the live
+        // cluster merge, which talks to the user's Kubernetes API and whose rows
+        // no producer reads — the same reason the pill reads `listEnrolledForUser`.
+        const ownRows =
+            options.includeClusters === false
+                ? await this.listEnrolledForUser(userId)
+                : await this.listForUser(userId);
+        const own = ownRows.map((view) => ({
+            ...view,
+            viewerRole: 'owner' as const,
+        }));
+        if (!this.access) return own;
+        const shared = await this.access.listSharedWith(userId);
+        if (shared.length === 0) return own;
+        const cutoff = new Date(Date.now() - config.fleet.getNodeOfflineAfterMs());
+        return [
+            ...own,
+            ...shared.map(({ node, role }) => toSharedView(this.toView(node), node, role, cutoff)),
+        ];
+    }
+
+    /**
+     * Fleet hub (FL-01) — one Node the caller may see, with their role on it.
+     * A Node outside the caller's `view` audience answers the same 404 as an
+     * unknown id (FR-30). Without the access service this is exactly
+     * {@link getForUser} (owner-only).
+     */
+    async getVisibleForUser(
+        userId: string,
+        nodeId: string,
+    ): Promise<{ view: FleetNodeView; role: FleetViewerRole }> {
+        if (!this.access) {
+            return {
+                view: { ...(await this.getForUser(userId, nodeId)), viewerRole: 'owner' },
+                role: 'owner',
+            };
+        }
+        const { node, role } = await this.access.resolveVisible(nodeId, userId);
+        if (role === 'owner') return { view: { ...this.toView(node), viewerRole: 'owner' }, role };
+        const cutoff = new Date(Date.now() - config.fleet.getNodeOfflineAfterMs());
+        return { view: toSharedView(this.toView(node), node, role, cutoff), role };
+    }
+
+    /**
+     * Fleet hub (FL-01) — star or unstar a Node. The owner's mark alone
+     * (spec §7: owner only, `plain`, not audited — a personal preference,
+     * not a machine act): someone who may see the Node but does not own it
+     * gets `permission_denied`; anyone else the 404 of an unknown id.
+     * Last write wins (spec U12).
+     */
+    async setFavoriteForUser(
+        userId: string,
+        nodeId: string,
+        isFavorite: boolean,
+    ): Promise<FleetNodeView> {
+        if (typeof isFavorite !== 'boolean') {
+            throw new BadRequestException('isFavorite must be true or false');
+        }
+        const node = await this.getOwnedNodeForOwnerAct(userId, nodeId, 'view');
+        if (Boolean(node.isFavorite) !== isFavorite) {
+            await this.repository.update(node.id, { isFavorite });
+        }
+        return this.toView({ ...node, isFavorite } as FleetNode);
+    }
+
+    /**
+     * Fleet hub (FL-01) — change who may act in one or more action families
+     * (CONTRACTS §2.1). Owner only. `families` is a PARTIAL map: families it
+     * names change, the rest keep what they had.
+     *
+     * The legacy `controlPolicy` column is the `desktop` family's mirror:
+     * whenever this write names `desktop`, the column is written in the same
+     * UPDATE, so AW-11's take-over (which reads the column) and the map can
+     * never disagree. One `node.policy.change` audit row per family whose
+     * audience actually changed, details `{ family, from, to }` plus the
+     * CONTRACTS §2.3 fields; a write that changes nothing writes nothing.
+     */
+    async setControlPolicyFamiliesForUser(
+        userId: string,
+        nodeId: string,
+        families: unknown,
+        ctx: FleetNodeAuditContext = {},
+    ): Promise<FleetNodeView> {
+        const input = parseControlPolicyFamiliesInput(families);
+        const node = await this.getOwnedNodeForOwnerAct(userId, nodeId, 'view');
+        const stored = normalizeControlPolicyFamilies(node.controlPolicyFamilies) ?? {};
+        const merged: FleetControlPolicyFamiliesInput = { ...stored, ...input };
+        const before = effectiveControlPolicy(node);
+        const patch: Partial<FleetNode> = { controlPolicyFamilies: merged };
+        if (input.desktop) patch.controlPolicy = input.desktop;
+        const after = effectiveControlPolicy({ ...node, ...patch });
+        const changes = diffControlPolicyFamilies(before, after);
+        if (changes.length === 0) return this.toView(node);
+
+        await this.repository.update(node.id, patch);
+        const actor = ctx.actorUserId === undefined ? userId : ctx.actorUserId;
+        for (const change of changes) {
+            await this.auditLifecycle('node.policy.change', userId, node, ctx, {
+                before: { audience: change.from },
+                after: { audience: change.to },
+                extra: {
+                    family: change.family,
+                    from: change.from,
+                    to: change.to,
+                    target: change.family,
+                    requestedBy: actor ? `user:${actor}` : 'system:fleet',
+                    confirmationClass: 'plain',
+                    outcome: 'success',
+                },
+            });
+        }
+        return this.toView({ ...node, ...patch } as FleetNode);
     }
 
     /**
@@ -1651,6 +1804,25 @@ export class FleetService {
         }
     }
 
+    /**
+     * The Node, when the caller OWNS it; an owner-only act refused otherwise.
+     * Someone who may see the Node (`gate` family) is told "only the owner"
+     * (`permission_denied`); anyone else gets the 404 of an unknown id. Without
+     * the access service this is exactly {@link getOwnedNode}.
+     */
+    private async getOwnedNodeForOwnerAct(
+        userId: string,
+        nodeId: string,
+        gate: 'view',
+    ): Promise<FleetNode> {
+        if (!this.access) return this.getOwnedNode(userId, nodeId);
+        const { node, role } = await this.access.resolveForFamily(nodeId, userId, gate);
+        if (role !== 'owner') {
+            throw new ForbiddenException(fleetOwnerOnlyBody(node));
+        }
+        return node;
+    }
+
     private async getOwnedNode(userId: string, nodeId: string): Promise<FleetNode> {
         const node = await this.repository.findById(nodeId);
         // Other users' nodes are indistinguishable from missing ones.
@@ -1819,6 +1991,11 @@ export class FleetService {
             // Computer health (FL-03): the latest snapshot off the row — one
             // read per computer, never a join to the history.
             health: toStoredHealthView(node.health),
+            // Fleet hub (FL-01): the owner's star and the policy in force,
+            // every family filled in (the legacy column read through as
+            // `desktop` when the map has no entry for it).
+            isFavorite: Boolean(node.isFavorite),
+            controlPolicyFamilies: effectiveControlPolicy(node),
         };
     }
 }
@@ -1868,11 +2045,182 @@ export function buildStoredHealth(
     return stored;
 }
 
+/**
+ * Computer health (FL-03) — the disk-low marker for a beat that carried no
+ * usable snapshot, judged by the floor rule alone (the percentage rule needs
+ * the snapshot's volume size):
+ *
+ *   - a row holding a real reading is left alone (`undefined`): its snapshot
+ *     already carries the marker, and a beat that missed it changes nothing,
+ *     as every telemetry field does;
+ *   - disk low → `{ at, diskLowSince }`, `diskLowSince` carried from the
+ *     previous marker, so the `disk-low` item keeps its first instant;
+ *   - disk fine → `null` when a marker was stored (clear it), else
+ *     `undefined` (nothing to write).
+ *
+ * The value is a marker, not a reading: {@link hasFleetNodeHealthReading} is
+ * false for it, so no surface shows it as metrics, and nothing is sampled.
+ */
+export function buildDiskLowMarker(
+    receivedAt: Date,
+    previous: FleetNodeHealthStored | null,
+    disk: {
+        diskFreeBytes: string | number | null | undefined;
+        minFreeDiskBytes: string | number | null | undefined;
+    },
+): FleetNodeHealthStored | null | undefined {
+    if (hasFleetNodeHealthReading(previous)) return undefined;
+    const low = diskLowSeverity(
+        fleetNodeDiskLowInput({
+            diskFreeBytes: toOptionalNumber(disk.diskFreeBytes),
+            minFreeDiskBytes: toOptionalNumber(disk.minFreeDiskBytes),
+            health: null,
+        }),
+    );
+    if (!low) return previous ? null : undefined;
+    const at = receivedAt.toISOString();
+    return { at, diskLowSince: previous?.diskLowSince ?? at };
+}
+
 /** The stored snapshot as the view serves it, or null when the row holds none (or junk). */
 function toStoredHealthView(value: unknown): FleetNodeHealthStored | null {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
     const stored = value as FleetNodeHealthStored;
     return typeof stored.at === 'string' && stored.at.length > 0 ? stored : null;
+}
+
+/**
+ * Fleet hub (FL-01) — the view of a Node someone else owns, as an
+ * Organization member sees it (`view` grants listing only).
+ *
+ * An ALLOW-LIST, not a deny-list: only what the hub needs to list a computer
+ * and say its state in words is copied from the owner-shaped view; every
+ * other field is absent, or null where the wire type requires it. So a field
+ * added to `FleetNodeView` later is NOT shared until someone decides it
+ * should be. Withheld in particular: who holds control, the cost and limit
+ * ceilings, the recording settings, pending rotation, the housekeeping
+ * counters, the account the machine's CLI is signed in as, and the
+ * free-text reasons a node reports (quarantine reason, throttle reason).
+ *
+ * `viewerRole` is stamped and `isFavorite` is false (the star is the
+ * owner's). The status is judged at READ time: the offline sweep only runs on
+ * the owner's own reads, so a row still marked `online` whose last heartbeat
+ * is older than the offline window is SHOWN as `offline` (nothing is written
+ * — the owner's next read sweeps it for real).
+ *
+ * Takes the owner-shaped `view` (`toView`) so there is ONE entity → wire
+ * mapping; this only narrows it.
+ */
+function toSharedView(
+    view: FleetNodeView,
+    node: FleetNode,
+    role: FleetViewerRole,
+    offlineCutoff: Date,
+): FleetNodeView {
+    const lastBeat = node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).getTime() : NaN;
+    const stale =
+        view.status === 'online' &&
+        (!Number.isFinite(lastBeat) || lastBeat < offlineCutoff.getTime());
+    return {
+        id: view.id,
+        name: view.name,
+        kind: view.kind,
+        status: stale ? 'offline' : view.status,
+        platform: view.platform,
+        version: view.version,
+        capabilities: view.capabilities,
+        lastHeartbeatAt: view.lastHeartbeatAt,
+        createdAt: view.createdAt,
+        persisted: view.persisted,
+        cliVersion: view.cliVersion ?? null,
+        upgradeRequired: view.upgradeRequired,
+        diskFreeBytes: view.diskFreeBytes ?? null,
+        workerState: view.workerState ?? null,
+        workerStateChangedAt: view.workerStateChangedAt ?? null,
+        // The CLI and window that are out of quota say "throttled" in words;
+        // the node's own sentence about it stays the owner's.
+        modelThrottles: (view.modelThrottles ?? []).map((throttle) => ({
+            ...throttle,
+            reason: '',
+        })),
+        controlPolicy: view.controlPolicy,
+        controlPolicyFamilies: view.controlPolicyFamilies,
+        viewerRole: role,
+        isFavorite: false,
+        hostNodeId: view.hostNodeId ?? null,
+        virtualKind: view.virtualKind ?? null,
+        // Computer health (FL-03) — DECIDED shared: reading health is the `view`
+        // family (FL-03 spec §7, "Read health / history: view / org-members").
+        // The stored snapshot carries numbers, booleans, a failed-service COUNT
+        // and bounded GPU model names — no free text the node wrote, no path,
+        // no unit name. The disk floor and the resource ceilings stay withheld,
+        // so a shared reader's "disk low" is the percentage rule only.
+        health: view.health ?? null,
+    };
+}
+
+/** The fields a shared view carries (`toSharedView`) — pinned by the spec so a new one is a decision. */
+export const FLEET_SHARED_VIEW_FIELDS: readonly (keyof FleetNodeView)[] = [
+    'id',
+    'name',
+    'kind',
+    'status',
+    'platform',
+    'version',
+    'capabilities',
+    'lastHeartbeatAt',
+    'createdAt',
+    'persisted',
+    'cliVersion',
+    'upgradeRequired',
+    'diskFreeBytes',
+    'workerState',
+    'workerStateChangedAt',
+    'modelThrottles',
+    'controlPolicy',
+    'controlPolicyFamilies',
+    'viewerRole',
+    'isFavorite',
+    'hostNodeId',
+    'virtualKind',
+    'health',
+];
+
+/**
+ * Validate a family-map write: an object whose keys are families and whose
+ * values are audiences. Anything else is the caller's mistake (`invalid`),
+ * not something to drop silently — the owner asked for a change and must be
+ * told it was not made.
+ */
+function parseControlPolicyFamiliesInput(value: unknown): FleetControlPolicyFamiliesInput {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw invalidPolicy('controlPolicyFamilies must be a map of family → audience');
+    }
+    const out: FleetControlPolicyFamiliesInput = {};
+    for (const [family, audience] of Object.entries(value as Record<string, unknown>)) {
+        if (!(FLEET_ACTION_FAMILIES as readonly string[]).includes(family)) {
+            throw invalidPolicy(`Unknown action family: ${family}`);
+        }
+        if (!isFleetAudience(audience)) {
+            throw invalidPolicy(
+                `Audience for ${family} must be one of: owner, org-admins, org-members`,
+            );
+        }
+        out[family as keyof FleetControlPolicyFamiliesInput] = audience;
+    }
+    if (Object.keys(out).length === 0) {
+        throw invalidPolicy('controlPolicyFamilies must name at least one family');
+    }
+    return out;
+}
+
+/** A 400 in CONTRACTS §8's envelope (`invalid`, the hint naming the field), with `message` for existing clients. */
+function invalidPolicy(hint: string): BadRequestException {
+    return new BadRequestException({
+        statusCode: 400,
+        message: hint,
+        error: { code: 'invalid', hint, details: { field: 'controlPolicyFamilies' } },
+    });
 }
 
 /**
