@@ -479,18 +479,27 @@ export function composeCiFailureFeedback(input: {
     outputTitle?: string | null;
     outputSummary?: string | null;
 }): string {
+    // NFKC-fold and neutralize FIRST, cap LAST: folding can multiply a
+    // string's length (U+FDFA alone becomes 18 characters) and `<` becomes
+    // `&lt;`, so a cap applied before either would not bound what is
+    // written. The result holds no `<`, so fencing it again is a no-op; the
+    // truncation marker is ASCII so a later fold cannot grow it either.
     const oneLine = (value: string, max: number) => {
-        const flat = value.replace(/\s+/g, ' ').trim();
-        return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+        const flat = neutralizeFenceText(value).replace(/\s+/g, ' ').trim();
+        return flat.length > max ? `${flat.slice(0, max - 3)}...` : flat;
     };
     const head: string[] = [
         `Continuous integration is RED for ${oneLine(input.repoFullName, 200)} at commit ${oneLine(input.headSha, 64)}.`,
         '',
-        `Failing check (${neutralizeFenceText(oneLine(input.conclusion, 40))}) — its name as the CI provider reported it:`,
+        `Failing check (${oneLine(input.conclusion, 40)}) — its name as the CI provider reported it:`,
         fenceReviewFeedback(oneLine(input.checkName, CI_FEEDBACK_NAME_MAX_CHARS), 'ci'),
     ];
     if (input.prNumber) head.push(`Pull request: #${input.prNumber}.`);
-    if (input.url) head.push(`Details: ${oneLine(input.url, 500)}`);
+    // The run link sits OUTSIDE the fence, so it must be a real https URL —
+    // the webhook already validates its own; the poll hands over the raw
+    // `detailsUrl` a check reported. Anything else is dropped, not quoted.
+    const details = httpsLink(input.url);
+    if (details) head.push(`Details: ${details}`);
     if (input.outputTitle) {
         head.push(
             '',
@@ -519,6 +528,27 @@ export function composeCiFailureFeedback(input: {
     }
     return [...head, ...tail].join('\n');
 }
+
+/**
+ * `value` as an https URL with no credentials, normalized and capped, or
+ * `null`. `URL` percent-encodes anything that could break the line or open
+ * a tag (`<`, spaces, newlines).
+ */
+function httpsLink(value: string | null | undefined): string | null {
+    if (typeof value !== 'string' || value.trim().length === 0) return null;
+    let url: URL;
+    try {
+        url = new URL(value.trim());
+    } catch {
+        return null;
+    }
+    if (url.protocol !== 'https:' || url.username || url.password) return null;
+    const text = url.toString();
+    return text.length <= CI_FEEDBACK_URL_MAX_CHARS ? text : null;
+}
+
+/** Longest run link quoted into the CI feedback; a longer one is dropped. */
+export const CI_FEEDBACK_URL_MAX_CHARS = 500;
 
 /** Longest check name quoted into the CI feedback (one line). */
 export const CI_FEEDBACK_NAME_MAX_CHARS = 200;

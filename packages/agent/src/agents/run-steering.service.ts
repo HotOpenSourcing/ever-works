@@ -156,10 +156,19 @@ export function composeRejectionFeedbackMessage(
         );
     }
     for (const { rejection, kind } of rows) {
-        const who = safeReviewerLabel(
-            rejection.reviewerLabel ? neutralizeRejectionText(String(rejection.reviewerLabel)) : '',
-            'reviewer',
-        );
+        // A CI row's label is the provider's CHECK NAME — provider text, so it
+        // never sits outside a fence: the header says "CI", and the name is in
+        // the row's own fenced body (composed rows carry it there; a legacy row
+        // is fenced whole).
+        const who =
+            kind === 'ci' || kind === 'ci-composed'
+                ? 'CI'
+                : safeReviewerLabel(
+                      rejection.reviewerLabel
+                          ? neutralizeRejectionText(String(rejection.reviewerLabel))
+                          : '',
+                      'reviewer',
+                  );
         const where =
             rejection.source === 'pull-request'
                 ? `pull request${rejection.prNumber ? ` #${rejection.prNumber}` : ''}`

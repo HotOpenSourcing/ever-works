@@ -101,5 +101,15 @@ export function isComposedCiFeedback(text: string): boolean {
     const open = fenceOpen('ci');
     const folded = text.normalize('NFKC');
     if (!folded.includes(open)) return false;
-    return !folded.split(open).join('').split(FENCE_CLOSE).join('').includes('<');
+    // Every `<` must start an exact `ci` fence tag, and the tags must pair up
+    // in order — open, close, open, close — ending closed. An unbalanced row
+    // (an open with no close, a stray close, two opens in a row) would leave
+    // provider text outside a fence, so it is fenced whole instead.
+    let inside = false;
+    for (let at = folded.indexOf('<'); at !== -1; at = folded.indexOf('<', at + 1)) {
+        if (!inside && folded.startsWith(open, at)) inside = true;
+        else if (inside && folded.startsWith(FENCE_CLOSE, at)) inside = false;
+        else return false;
+    }
+    return !inside;
 }
