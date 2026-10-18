@@ -510,7 +510,11 @@ const SEGMENT_FENCE_TOKEN_PATTERN =
     /<\/?(?:skill|work-advanced-prompts|scope-context|recent-activity|recent-runs|message)\b/gi;
 
 function neutralizeInjectedBlock(value: string): string {
-    return neutralizeControlTokens(
-        value.replace(SEGMENT_FENCE_TOKEN_PATTERN, (token) => `${token[0]}\u200B${token.slice(1)}`),
+    // Strip chat-template markers (after folding look-alikes) FIRST, then
+    // defuse fence tags: the other order let `<[INST]/skill>` become a live
+    // `</skill>` once the marker in the middle was removed.
+    return neutralizeControlTokens(value).replace(
+        SEGMENT_FENCE_TOKEN_PATTERN,
+        (token) => `${token[0]}\u200B${token.slice(1)}`,
     );
 }

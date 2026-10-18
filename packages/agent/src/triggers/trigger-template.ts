@@ -49,8 +49,12 @@ export interface TriggerTemplateContext {
     event?: TriggerTemplateEvent | null;
 }
 
-/** Any `{{ … }}` occurrence, lazily matched. */
-const PLACEHOLDER_RE = /\{\{\s*([^{}]*?)\s*\}\}/g;
+/**
+ * Any `{{ … }}` occurrence. The inner text cannot contain a brace, and the
+ * surrounding whitespace is trimmed by the callers — not by `\s*…?\s*`
+ * around a lazy group, which backtracks polynomially on long whitespace runs.
+ */
+const PLACEHOLDER_RE = /\{\{([^{}]*)\}\}/g;
 
 const PAYLOAD_KEY_RE = /^[A-Za-z0-9_-]+$/;
 

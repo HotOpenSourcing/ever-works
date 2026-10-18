@@ -141,3 +141,12 @@ describe('renderTriggerTemplate — transformEventValue (prompt-injection harden
         expect(out).toBe('{{trigger.name}}');
     });
 });
+
+describe('renderTriggerTemplate — placeholder scan stays linear', () => {
+    it('handles long whitespace runs inside braces quickly and still trims', () => {
+        const started = Date.now();
+        renderTriggerTemplate(`{{${' '.repeat(200_000)}`, CONTEXT);
+        expect(Date.now() - started).toBeLessThan(500);
+        expect(renderTriggerTemplate('{{   trigger.name   }}', CONTEXT)).toBe('Deploy watcher');
+    });
+});
