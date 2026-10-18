@@ -35,6 +35,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Logger } from '@nestjs/common';
 import {
     APP_DEPENDENCY_PROVIDER_IDS,
     isAppDependencyReason,
@@ -1264,6 +1265,53 @@ describe('runAttempt', () => {
         const stored = h.store.stored('postgres');
         expect(stored).toMatchObject({ status: 'failed', attempts: 3 });
         expect(h.events.map((event) => event.name)).toEqual(['app.dependency.failed']);
+    });
+
+    it('records providerNotSupported on the row — and says which pair — when the stored provider does not resolve', async () => {
+        // Prod 2026-10-18 (worker 20261018.5): the stored `k8s-apps-tier/k8s-inline-postgres`
+        // pair did not resolve in the worker's (empty twin) registry. The attempt answered
+        // `providerNotSupported` but left the row `provisioning / clusterUnreachable` from the
+        // previous attempt, so the card and the Deploy refusal never named the real reason.
+        const h = harness({
+            snapshot: snapshot([declared('postgres')]),
+            rows: [
+                row({
+                    kind: 'postgres',
+                    status: 'provisioning',
+                    statusReason: 'clusterUnreachable',
+                    attempts: 1,
+                    deployTarget: 'ever-works-apps',
+                    providerPluginId: 'k8s-apps-tier',
+                }),
+            ],
+        });
+        const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+
+        try {
+            const result = await h.service.runAttempt(WORK_ID, 'postgres');
+
+            expect(result).toMatchObject({
+                state: 'failed',
+                reason: 'providerNotSupported',
+                transient: false,
+            });
+            expect(h.store.stored('postgres')).toMatchObject({
+                status: 'failed',
+                statusReason: 'providerNotSupported',
+                statusDetail: {
+                    providerPluginId: 'k8s-apps-tier',
+                    providerId: 'k8s-inline-postgres',
+                },
+                attempts: 2,
+            });
+            expect(h.provisionCalls).toEqual([]);
+            expect(h.events.map((event) => event.name)).toEqual(['app.dependency.failed']);
+            expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain(
+                "the stored provider 'k8s-apps-tier/k8s-inline-postgres' does not resolve",
+            );
+        } finally {
+            warn.mockRestore();
+        }
     });
 
     it('leaves a retryable row — never ready — when the provider throws', async () => {
