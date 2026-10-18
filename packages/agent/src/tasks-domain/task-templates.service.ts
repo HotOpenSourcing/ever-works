@@ -26,6 +26,7 @@ import { WorkProposalRepository } from '../user-research/work-proposal.repositor
 import { normalizeTaskExtraRepos } from './task-extra-repos';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
+import { protectedTaskBranchReason } from './task-isolation';
 
 export interface TaskTemplateStepInput {
     title: string;
@@ -335,6 +336,15 @@ export class TaskTemplatesService {
             ideaId: input.ideaId ?? null,
         };
         const branchRef = input.branchName?.trim() ? input.branchName.trim().slice(0, 200) : null;
+        // Prompt-injection hardening: a Task branch is where an agent's pushes
+        // land, so it may never pre-name a protected branch (main / master /
+        // develop / stage). Refused before anything is created.
+        const protectedReason = protectedTaskBranchReason(branchRef);
+        if (protectedReason) {
+            throw new BadRequestException(
+                `branchName: ${protectedReason}. A Task branch must be a new working branch.`,
+            );
+        }
 
         const result = await this.templates.withTransaction(async (manager: EntityManager) => {
             const parent = await manager.save(

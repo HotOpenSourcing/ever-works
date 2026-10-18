@@ -322,6 +322,17 @@ describe('TaskTemplatesService', () => {
             expect(parent.branchRef).toBe('feature/ship-x');
         });
 
+        it.each(['develop', 'main', 'Master', 'refs/heads/stage'])(
+            'refuses a protected branchName (%s) before anything is created',
+            async (branchName) => {
+                const { saved } = arm();
+                await expect(
+                    svc.instantiateTemplate('u1', 'tpl-1', { title: 'T', branchName }),
+                ).rejects.toThrow(/protected branch/);
+                expect(saved).toHaveLength(0);
+            },
+        );
+
         it('404s on a foreign template id', async () => {
             templates.findByIdAndUser.mockResolvedValue(null);
             await expect(

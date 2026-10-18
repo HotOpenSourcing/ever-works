@@ -47,7 +47,8 @@ import { TaskChatService } from './task-chat.service';
 import { MergePolicyService } from '../policy/merge-policy.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
-import { resolveTaskIsolation, taskBranchName } from './task-isolation';
+import { resolveTaskIsolation, protectedTaskBranchReason,
+    taskBranchName } from './task-isolation';
 import {
     mapAttachmentEdgesToRepos,
     resolveAttachedReposForAgent,
@@ -298,6 +299,16 @@ export class TaskWorkspaceService {
         // The branch is AUTHORITATIVE once written — reuse it verbatim on
         // re-runs; never recompute from a (possibly edited) slug.
         const branch = task.branchRef || taskBranchName({ id: task.id, slug: task.slug });
+        // Prompt-injection hardening: a Task branch is never a protected branch
+        // (nor the Work's base) — the agent's pushes land on it.
+        const protectedReason = protectedTaskBranchReason(branch, baseRef);
+        if (protectedReason) {
+            throw new Error(
+                `Task ${task.id} cannot run on its branch: ${protectedReason}. Agents work on a ` +
+                    'Task branch and reach protected branches only through a reviewed pull request. ' +
+                    'Clear or rename the Task branch.',
+            );
+        }
 
         // Repository registry (Feature G) — advisory only: today's
         // providers mount the primary repo and ignore this list; it rides
@@ -411,6 +422,15 @@ export class TaskWorkspaceService {
             (work.taskIsolationBaseBranch && work.taskIsolationBaseBranch.trim()) ||
             repository.defaultBranch;
         const branch = task.branchRef || taskBranchName({ id: task.id, slug: task.slug });
+        // Prompt-injection hardening — same rule as the cloud path above.
+        const protectedReason = protectedTaskBranchReason(branch, baseRef);
+        if (protectedReason) {
+            throw new Error(
+                `Task ${task.id} cannot run on its branch: ${protectedReason}. Agents work on a ` +
+                    'Task branch and reach protected branches only through a reviewed pull request. ' +
+                    'Clear or rename the Task branch.',
+            );
+        }
 
         // Persist the durable identity on the Task BEFORE the job leaves,
         // so the reconciler and every later run agree on the branch.
