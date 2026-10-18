@@ -52,7 +52,7 @@ on:
       - '.deploy/docker/api/**'
       - '.deploy/docker/web/**'
       # The web app's statistics surface: the settings page, its actions and its API client.
-      - 'apps/web/src/app/[[]locale]/(dashboard)/settings/ever-platform/**'
+      - 'apps/web/src/app/*/(dashboard)/settings/ever-platform/**'
       - 'apps/web/src/app/actions/settings/instance-stats.ts'
       - 'apps/web/src/components/settings/UsageStatisticsSettings.tsx'
       - 'apps/web/src/lib/api/instance-stats.ts'
