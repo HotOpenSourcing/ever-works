@@ -24,9 +24,16 @@ heartbeat fields (§1.1), `service-failed` (§4.6), tunnel close reasons and req
 FL-06 routes (§11.2), `node.session.pull-request.open` (§7), and §10 rows for logs, operations and
 the preview profile.
 
+**Revision 5 (2026-10-18)** — the audit of FL-11…FL-15: one confirmation mechanism for every caller,
+no tokens (§2.2); command and schedule messages (§3.3); operation states incl. `cancelled` and
+`interrupted` (§3.3); schedule-state columns, `cancelled-by-user` and `scheduledFor` (§4.4);
+`node.checkout.restore` (§7); command, schedule and transfer limits (§10) and rates (§10.1);
+FL-12…FL-15 routes (§11.2); R-41 (ready-only roots, `--code-folder`). Per-schedule grace and
+failure thresholds stay fixed (§6) until the owner asks for editors.
+
 ---
 
-## 0. Resolutions (R-1 … R-33)
+## 0. Resolutions (R-1 … R-41)
 
 Rulings that settle questions more than one epic would otherwise answer differently.
 
@@ -71,6 +78,7 @@ Rulings that settle questions more than one epic would otherwise answer differen
 | R-38 | **Owner sessions have no Run, so their action ledger is their audit rows.** Agent sessions keep the per-action ledger on their Run (`agent_run_logs`); an owner session's actions are read back from its `fleet_audit` rows (`node.session.*` with the action in `target`), and its cost shows as a session total only.                                                                 | FL-06, 20            |
 | R-39 | **One allowed-roots resolver on the node** (`apps/node/src/core/link/allowed-roots.ts`, R-18's rules) is used by logs (FL-08), files (FL-11) and checkouts (FL-14). Whichever of those lands first creates it; the others import it and never define a second one.                                                                                                                                        | FL-08, 11, 14        |
 | R-40 | **Node-side modules live under FL-02's registry**: `apps/node/src/core/link/modules/<family>.ts`, one entry each in `apps/node/src/core/link/modules/index.ts`. No epic creates `core/modules/` or `link/channels/`.                                                                                                                                                                           | all                  |
+| R-41 | **Allowed roots include only `ready` checkouts** (R-18's "every checkout path" means every checkout in state `ready`; `creating`, `missing` and `archived` ones are not roots). The machine owner lists code folders for discovery with the node option `--code-folder <path>` (repeatable); they are set on the machine only. | FL-08, 11, 14 |
 | R-37 | **Cancelling a GitHub workflow run** is worded "Cancel workflow run" everywhere (never "cancel run"); the tool is `fleet_runners_cancel_run`. The Jobs view is a hub Overview panel, not a seventh tab.                                                                                                                                                                                             | FL-18                |
 
 ## 1. Consents and capability tags
@@ -166,10 +174,14 @@ trust ladder → caps → node audience + consent; the first refusal is the one 
 | `confirm-destructive` | Dialog requires typing the target's name (destroy VM, remove runner, delete checkout with changes)          |
 | `blast-radius`        | `confirm` plus a sentence naming what could cut Ever Works off ("this stops the network service the node connects through"); the node computes the warning |
 
-Non-interactive callers (Agent tools, MCP, CLI) satisfy a class with explicit request fields:
-`confirm: true` (for `confirm`), `confirmName: "<target>"` (for `confirm-destructive`),
-`acknowledgeBlastRadius: true` (for `blast-radius`); without them the call returns
-`confirmation_required` with the class and, for `blast-radius`, the sentence.
+**Every caller — the web, Agent tools, MCP and the CLI — satisfies a class the same way**, with
+explicit request fields: `confirm: true` (for `confirm`), `confirmName: "<target>"` (for
+`confirm-destructive`), `acknowledgeBlastRadius: true` (for `blast-radius`). A call without them
+returns 409 `confirmation_required` with `details: { class, summary, preview?, sentence? }` — the
+web shows that as its dialog (counts, names, the blast-radius sentence) and repeats the call with
+the field; tools show it to the caller. **There are no confirmation tokens anywhere in this
+program** (no `confirmationToken`, no `/confirmations` route, no signed summaries). Existing
+endpoints that never required confirmation keep working without the fields (additive).
 
 ### 2.3 Audit
 
@@ -231,8 +243,8 @@ state-changing requests, leave processes running), `link.resume`, and `link.drai
 | `logs`      | `{ source, path?, unit?, container?, lines, sources?[] }`    | `logs.read`, `logs.follow`, `logs.pause`, `logs.resume`, `logs.earlier`; node→platform `logs.initial-done`, `logs.earlier-done`, `logs.notice`. `logs.sources` is a `machine` verb (a list needs no open channel) | manage |
 | `machine`   | (one per link, lazily)                                       | `services.list|action`, `docker.*`, `compose.*`, `processes.list|signal`, `ports.list|open|preview`, `checkouts.list|create|delete|sync|changes`, `git.identity|setIdentity`, `health.now`, `wake.send`, `vm.*`, `runner.*` | manage (see §2.1 for family) |
 | `files`     | `{ root, path }`                                             | `files.list`, `files.stat`, `files.pack` (DATA out), `files.unpack` (DATA in), `files.delete`  | manage       |
-| `command`   | `{ commandId, nodeId }`                                      | `command.run` → `DATA`/`EXIT`, `command.cancel`                                                | manage       |
-| `schedule`  | (one per link)                                               | `schedule.sync { definitions[] }`, `schedule.runs { since }`, `schedule.runNow`                | manage       |
+| `command`   | `{ commandId, nodeId }`                                      | `command.run` → `DATA`/`EXIT`, `command.cancel`; node→platform `command.output` (head/tail on finish), `command.truncated`, `command.timeout` | manage |
+| `schedule`  | (one per link)                                               | `schedule.sync { generation, definitions[] }` (the reply carries the applied `generation`; pause/resume re-send the full set), `schedule.runs { since }`, `schedule.runNow` | manage |
 | `tunnel`    | `{ tunnelId, port }`                                         | HTTP request/response bodies as `DATA` with a `JSON` envelope per request                      | manage       |
 | `clip`      | `{ viewId }`                                                 | `CLIP` frames                                                                                  | attend       |
 
@@ -240,6 +252,8 @@ Every request carries `requestId`; every reply carries `requestId` and either a 
 `{ error: { code, hint, details } }` (§8). Long operations reply immediately with
 `{ operationId }` and stream `operation.progress` / `operation.done` on channel 0; `operation.cancel`
 cancels one; FL-02 adds `GET /api/fleet/operations/:id` and `DELETE /api/fleet/operations/:id`.
+Operation states: `running · done · failed · cancelled · interrupted` (`interrupted` = the link or
+the node went away mid-operation; never reported as `done`).
 
 **Consent exceptions per verb.** The `machine` family needs `manage` except `health.now`, which is
 allowed on any open link (R-31). The link implementation keeps these exceptions in one table
@@ -358,12 +372,19 @@ allowed values validated in code, as existing fleet columns are.
 | `requestedBy`   | enum `user · agent`                                         |                                           |
 | `state`         | enum `queued · running · done · failed · cancelled`         | one-off commands                          |
 | `lastRunAt`, `nextRunAt` | timestamptz null                                   | schedules                                 |
+| `pausedAt`, `pausedReason` | timestamptz null, varchar null (`user · failures · breaker`) | schedules (FL-13 slot 00)        |
+| `syncGeneration`, `syncedGeneration` | integer                               | what the platform sent vs what the node applied (FL-13 slot 00) |
+| `deletedAt`     | timestamptz null                                            | soft delete of a schedule (FL-13 slot 00) |
+
+FL-12's `CreateFleetCommands` creates every column above the `pausedAt` row (including `cadence`,
+`name`, `enabled`, `lastRunAt`, `nextRunAt`); FL-13's slot 00 (`AddFleetCommandCadence`) adds the
+last three rows and `fleet_command_runs.scheduledFor`.
 
 `fleet_command_runs`: `commandId`, `nodeId`, `startedAt`, `endedAt`, `exitCode`, `status`
 (`running · done · failed · timeout · skipped-overlap · skipped-offline`), `failedReason`
-(enum null `link-lost · node-restart · kill-switch · drain · shell-failed`), `outputHead` /
-`outputTail` (first and last 64 KiB), `outputRef` (full output kept on the node for 30 runs),
-`truncated boolean`.
+(enum null `link-lost · node-restart · kill-switch · drain · shell-failed · cancelled-by-user`),
+`outputHead` / `outputTail` (first and last 64 KiB), `outputRef` (full output kept on the node for
+30 runs), `truncated boolean`, `scheduledFor` (timestamptz null; FL-13).
 
 ### 4.5 `FleetNodeHealthSample` (new, table `fleet_node_health_samples`, FL-03)
 
@@ -478,7 +499,7 @@ node.compose.up|down|restart|pull`
 `node.files.list|read|write|copy|delete`
 `node.command.run · node.command.cancel`
 `node.schedule.create|update|delete|run|pause|resume`
-`node.checkout.create|delete|sync|archive`
+`node.checkout.create|delete|sync|archive|restore`
 `node.git.identity.set`
 `node.wake`
 `node.vm.create|start|stop|destroy|resize|rebuild · node.vm.password.reveal`
@@ -569,6 +590,9 @@ Node-side there are no flags, only consents.
 | Machine operation hard cap                      | 60 min                                  | FL-09  |
 | Finished machine operations kept per Node       | 20                                      | FL-09  |
 | Preview-profile views per Node                  | 1, 60-min cap, 15 s grace after the viewer leaves | FL-10 |
+| Command text / targets / concurrent per owner   | 8 KiB / 50 computers / 8 Commands       | FL-12  |
+| Schedule name / command / Agent prompt          | 120 chars / 8 KiB / 16 KiB              | FL-13  |
+| Concurrent file transfers                       | 2 per Node, 4 per user                  | FL-11  |
 
 ### 10.1 Rates (per caller unless stated; `limit_exceeded` with the limit in `hint`)
 
@@ -586,6 +610,12 @@ Node-side there are no flags, only consents.
 | Session starts per user                         | 10 per minute                                      | FL-04  |
 | Session attaches per user                       | 30 per minute                                      | FL-04  |
 | Session answers per user                        | 60 per minute                                      | FL-05  |
+| File requests per user                          | 60 per minute                                      | FL-11  |
+| Clipboard pastes per user                       | 30 per minute                                      | FL-11  |
+| Command runs per user                           | 10 per minute                                      | FL-12  |
+| Schedule writes per user                        | 30 per minute                                      | FL-13  |
+| Checkout writes per user                        | 30 per minute                                      | FL-14  |
+| Git identity reads/sets per user                | 10 per minute                                      | FL-15  |
 
 ## 11. Routes, API paths, names
 
@@ -632,7 +662,9 @@ All under `/api/fleet` (existing controller root), authenticated, `FLEET_ENABLED
 `/sessions/:id/actions` (GET, POST), `/sessions/:id/actions/ledger`, `/sessions/:id/actions/:ledgerId/resend`,
 `/sessions/branch-proposal`, `/checkouts/:id/pull-request` (GET, POST),
 `/checkouts`, `/nodes/:id/checkouts`, `/checkouts/:id`, `/checkouts/:id/changes`,
-`/nodes/:id/git/identity`,
+`/nodes/:id/git/identity`, `/commands/:id/cancel`, `/commands/:id/runs/:runId/output`,
+`/nodes/:id/schedules/agent-session`, `/checkouts/:id/refresh`, `/checkouts/:id/sync`,
+`/checkouts/:id/archive`, `/checkouts/:id/restore`, `/tasks/:taskId/handoff-options`,
 `/nodes/:id/virtual`, `/providers`, `/providers/:plugin/options`, `/cloud`,
 `/nodes/:id/runners`, `/runners/jobs`, `/usage`, `/operations/:id` (GET, DELETE), `/link-token` (node credential).
 
