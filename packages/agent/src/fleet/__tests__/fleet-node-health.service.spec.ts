@@ -92,17 +92,29 @@ describe('FleetNodeHealthService', () => {
     });
 
     describe('rollupAndPrune', () => {
-        it('does nothing at all with the flag off (FR-22)', async () => {
+        it('with the flag off rolls nothing, but rows from before still age out (FR-22)', async () => {
             delete process.env.FLEET_HEALTH_HISTORY_ENABLED;
+            samples.deleteBefore.mockImplementation(async (resolution: string) =>
+                resolution === 'raw' ? 4 : 1,
+            );
             expect(await build().rollupAndPrune(NOW)).toEqual({
                 enabled: false,
                 rolledHours: 0,
                 hourlyRows: 0,
-                prunedRaw: 0,
-                prunedHourly: 0,
+                prunedRaw: 4,
+                prunedHourly: 1,
             });
             expect(samples.hasHourly).not.toHaveBeenCalled();
-            expect(samples.deleteBefore).not.toHaveBeenCalled();
+            expect(samples.rawInHour).not.toHaveBeenCalled();
+            expect(samples.insertHourly).not.toHaveBeenCalled();
+            expect(samples.deleteBefore).toHaveBeenCalledWith(
+                'raw',
+                new Date(NOW.getTime() - 7 * 24 * 3_600_000),
+            );
+            expect(samples.deleteBefore).toHaveBeenCalledWith(
+                'hourly',
+                new Date(NOW.getTime() - 90 * 24 * 3_600_000),
+            );
         });
 
         it('skips hours already rolled up and hours with no samples, and prunes 7 d raw / 90 d hourly', async () => {

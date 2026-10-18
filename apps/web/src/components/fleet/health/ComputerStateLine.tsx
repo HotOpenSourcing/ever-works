@@ -1,10 +1,15 @@
 'use client';
 
 import { useLocale, useTranslations } from 'next-intl';
-import type { FleetNodeView } from '@ever-works/contracts';
+import type { ComputerStateResolution, FleetNodeView } from '@ever-works/contracts';
 import { cn } from '@/lib/utils/cn';
 import { relativeTimeParts } from '@/components/dashboard/runner-status.shared';
-import { computerStateCopyFor, formatInstant, stateDotClass } from './computer-state.shared';
+import {
+    computerStateCopy,
+    formatInstant,
+    preferredStateResolution,
+    stateDotClass,
+} from './computer-state.shared';
 import { FixAction, type ClearModelThrottle } from './FixAction';
 import { useNow } from './use-now';
 
@@ -14,6 +19,11 @@ export interface ComputerStateLineProps {
     now?: number;
     /** FL-03 wake phase: whether Wake is possible for this offline computer. */
     canWake?: boolean;
+    /**
+     * The server's state for this computer (the health read's `state`), shown
+     * in preference to the browser's own reading — see `preferredStateResolution`.
+     */
+    resolution?: ComputerStateResolution | null;
     /** Where "Change limits" leads. */
     limitsHref?: string;
     /** Show the fix action beside the sentence (cards may show the word and sentence only). */
@@ -40,12 +50,13 @@ export function ComputerStateLine({
     withAction = true,
     onActionDone,
     clearModelThrottle,
+    resolution,
 }: ComputerStateLineProps) {
     const t = useTranslations('fleet');
     const locale = useLocale();
     const ticking = useNow();
     const now = nowProp ?? ticking;
-    const copy = computerStateCopyFor(node, { now, canWake });
+    const copy = computerStateCopy(preferredStateResolution(resolution, node, { now, canWake }));
 
     const values: Record<string, string | number> = { ...copy.values };
     let tooltip: string | undefined;

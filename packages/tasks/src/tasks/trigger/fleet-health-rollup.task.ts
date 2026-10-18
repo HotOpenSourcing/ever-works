@@ -24,8 +24,9 @@ export const FLEET_HEALTH_ROLLUP_CRON = '7 * * * *';
  * The real `FleetNodeHealthService` lives in the API (repositories wired
  * there); the worker only calls `rollupAndPrune()` over the internal RPC
  * channel — the same shape as `fleet-job-lease-sweeper`. With
- * `FLEET_HEALTH_HISTORY_ENABLED` off the call is a no-op that reports
- * `enabled: false`.
+ * `FLEET_HEALTH_HISTORY_ENABLED` off the call rolls nothing and reports
+ * `enabled: false`, but still ages out rows written before the history was
+ * switched off.
  *
  * ## On runtimes other than Trigger.dev
  *

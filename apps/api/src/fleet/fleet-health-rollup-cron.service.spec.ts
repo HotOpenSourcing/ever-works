@@ -71,10 +71,16 @@ describe('FleetHealthRollupCronService', () => {
         expect(health.rollupAndPrune).not.toHaveBeenCalled();
     });
 
-    it('does nothing with the history switched off', async () => {
+    it('still runs the pass with the history switched off — retention must keep ageing rows out', async () => {
         health.isHistoryEnabled.mockReturnValue(false);
+        health.rollupAndPrune.mockResolvedValueOnce({
+            ...summary({ prunedRaw: 12 }),
+            enabled: false,
+        });
         await service.runHourlyRollup();
-        expect(taskLockService.runExclusive).not.toHaveBeenCalled();
+        expect(taskLockService.runExclusive).toHaveBeenCalledTimes(1);
+        expect(health.rollupAndPrune).toHaveBeenCalledTimes(1);
+        expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('12 raw'));
     });
 
     it('runs one pass under the distributed lock, and logs counters only when something happened', async () => {

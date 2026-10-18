@@ -100,10 +100,14 @@ export class FleetNodeHealthService {
 
     /** The hourly roll-up and the retention sweep. See the class comment. */
     async rollupAndPrune(now: Date = new Date()): Promise<FleetHealthRollupSummary> {
-        if (!this.isHistoryEnabled()) {
-            return { enabled: false, rolledHours: 0, hourlyRows: 0, prunedRaw: 0, prunedHourly: 0 };
-        }
         const nowMs = now.getTime();
+        if (!this.isHistoryEnabled()) {
+            // Nothing is written or rolled with the history off — but rows from
+            // before it was switched off still age out: switching history off
+            // must never mean keeping what it held forever.
+            const { prunedRaw, prunedHourly } = await this.prune(nowMs);
+            return { enabled: false, rolledHours: 0, hourlyRows: 0, prunedRaw, prunedHourly };
+        }
         // The newest hour that has certainly ENDED, and the oldest whose raw
         // rows the retention below has not yet removed.
         const newestEnd = hourStart(nowMs - FLEET_HEALTH_ROLLUP_SETTLE_MS).getTime();
@@ -135,6 +139,13 @@ export class FleetNodeHealthService {
 
         // Retention AFTER the roll-up, so a raw hour that CAN be rolled is
         // rolled before it is pruned.
+        const { prunedRaw, prunedHourly } = await this.prune(nowMs);
+        if (rollError !== null) throw rollError;
+        return { enabled: true, rolledHours, hourlyRows, prunedRaw, prunedHourly };
+    }
+
+    /** Retention: raw rows past 7 days, hourly rows past 90 days. Idempotent. */
+    private async prune(nowMs: number): Promise<{ prunedRaw: number; prunedHourly: number }> {
         const prunedRaw = await this.samples.deleteBefore(
             'raw',
             new Date(nowMs - FLEET_HEALTH_RAW_RETENTION_MS),
@@ -143,8 +154,7 @@ export class FleetNodeHealthService {
             'hourly',
             new Date(nowMs - FLEET_HEALTH_HOURLY_RETENTION_MS),
         );
-        if (rollError !== null) throw rollError;
-        return { enabled: true, rolledHours, hourlyRows, prunedRaw, prunedHourly };
+        return { prunedRaw, prunedHourly };
     }
 
     private logDrop(nodeId: string, error: unknown, at: Date): void {

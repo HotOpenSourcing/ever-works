@@ -832,8 +832,18 @@ export class TriggerInternalController implements OnModuleInit {
             // calls `reclaimExpired()` here (allow-list auto-derived).
             FleetJobService: this.fleetJobService,
             // Computer health (FL-03) — `fleet-health-rollup` calls
-            // `rollupAndPrune()` here (allow-list auto-derived).
-            FleetNodeHealthService: this.fleetNodeHealthService,
+            // `rollupAndPrune()` here, and ONLY that: a one-member facade (the
+            // `AppBuildSweepService` rule below), so the derived allow-list is
+            // exactly `rollupAndPrune`. The service also carries `record` (a raw
+            // insert) and `shouldSample`, and `rollupAndPrune(now)` keeps a clock
+            // seam for the specs — over this hop a far-future `now` would move
+            // both retention cutoffs past every row and delete the whole history.
+            // The facade calls it with no argument whatever arrives, so the API
+            // reads its own clock. `undefined` (a loud "Unknown remote target")
+            // when the service is not bound.
+            FleetNodeHealthService: this.fleetNodeHealthService
+                ? { rollupAndPrune: () => this.fleetNodeHealthService!.rollupAndPrune() }
+                : undefined,
             // Memory consolidation cadence (memory upgrades M9) —
             // `memory-consolidation-tick` calls `dispatchDue()` here
             // (allow-list auto-derived).

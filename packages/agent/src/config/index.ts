@@ -626,9 +626,11 @@ export const config = {
         /**
          * Computer health (FL-03) — `FLEET_HEALTH_HISTORY_ENABLED` gates the
          * health HISTORY: the per-beat sample writer, the hourly roll-up and
-         * its retention, and the history endpoint. Default OFF (CONTRACTS §9):
-         * only the exact string `true` turns it on. The latest snapshot on the
-         * node row is telemetry and is stored with the flag off too.
+         * the history endpoint. Default OFF (CONTRACTS §9): only the exact
+         * string `true` turns it on. Retention is NOT gated: rows written
+         * while it was on still age out after it is switched off. The latest
+         * snapshot on the node row is telemetry and is stored with the flag
+         * off too.
          */
         isHealthHistoryEnabled(): boolean {
             return process.env.FLEET_HEALTH_HISTORY_ENABLED === 'true';

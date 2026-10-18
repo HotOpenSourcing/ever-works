@@ -166,19 +166,26 @@ export class FleetNodeHealthSampleRepository {
 
     /** Insert hourly rows; a row whose `(nodeId, hourly, at)` already exists is left alone. */
     async insertHourly(rows: readonly FleetNodeHealthHourlyRow[]): Promise<void> {
+        if (rows.length === 0) return;
         // In chunks: one multi-row insert binds ~18 parameters a row, and both
         // engines cap a statement's parameters (Postgres 65 535, sqlite 32 766),
-        // which one hour of a large fleet would otherwise exceed.
-        for (let index = 0; index < rows.length; index += FLEET_HEALTH_HOURLY_INSERT_CHUNK) {
-            const chunk = rows.slice(index, index + FLEET_HEALTH_HOURLY_INSERT_CHUNK);
-            await this.repository
-                .createQueryBuilder()
-                .insert()
-                .into(FleetNodeHealthSample)
-                .values(chunk.map((row) => ({ ...row, resolution: 'hourly' as const, gpu: null })))
-                .orIgnore()
-                .execute();
-        }
+        // which one hour of a large fleet would otherwise exceed. All chunks in
+        // ONE transaction: `hasHourly` treats an hour with any hourly row as
+        // done, so a half-written hour would never be completed by a later pass.
+        await this.repository.manager.transaction(async (manager) => {
+            for (let index = 0; index < rows.length; index += FLEET_HEALTH_HOURLY_INSERT_CHUNK) {
+                const chunk = rows.slice(index, index + FLEET_HEALTH_HOURLY_INSERT_CHUNK);
+                await manager
+                    .createQueryBuilder()
+                    .insert()
+                    .into(FleetNodeHealthSample)
+                    .values(
+                        chunk.map((row) => ({ ...row, resolution: 'hourly' as const, gpu: null })),
+                    )
+                    .orIgnore()
+                    .execute();
+            }
+        });
     }
 
     /** Delete rows of one resolution older than `cutoff`. Idempotent. Answers how many went. */

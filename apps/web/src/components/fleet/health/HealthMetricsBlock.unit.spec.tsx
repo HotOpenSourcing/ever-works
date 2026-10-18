@@ -162,6 +162,27 @@ describe('HealthMetricsBlock', () => {
         expect(screen.getByTestId('fleet-health-loading')).toBeTruthy();
     });
 
+    it('shows the server’s state, not the row’s: a computer the server judged offline reads Offline', async () => {
+        fetchHealth.mockResolvedValue({
+            success: true,
+            data: {
+                nodeId: 'n1',
+                snapshot: { at: new Date().toISOString(), cpuPercent: 12 },
+                stale: true,
+                state: { state: 'offline', params: { lastSeenAt: null }, action: null },
+                historyEnabled: false,
+            },
+            error: null,
+        });
+        // The row says online; the server’s offline window says otherwise.
+        render(<HealthMetricsBlock nodes={[node]} flags={{}} />);
+        await waitFor(() =>
+            expect(screen.getByTestId('fleet-computer-state').getAttribute('data-state')).toBe(
+                'offline',
+            ),
+        );
+    });
+
     it('renders nothing without a computer', () => {
         const { container } = render(<HealthMetricsBlock nodes={[]} flags={{}} />);
         expect(container.innerHTML).toBe('');

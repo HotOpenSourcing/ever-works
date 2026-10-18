@@ -13,6 +13,7 @@ import {
     formatBinaryBytes,
     formatInstant,
     formatMiB,
+    preferredStateResolution,
     stateDotClass,
     stateKey,
     uptimeCopy,
@@ -258,5 +259,51 @@ describe('resolveComputerState agrees with the footer runner pill', () => {
             }
         }
         expect(compared).toBe(9);
+    });
+});
+
+describe('preferredStateResolution — the server’s state, unless the clock alone has made it stale', () => {
+    const NOW = Date.parse('2026-10-18T09:41:00.000Z');
+
+    it('shows the server’s judgement over the browser’s own (offline window, job count)', () => {
+        const server: ComputerStateResolution = {
+            state: 'offline',
+            params: { lastSeenAt: '2026-10-18T08:00:00.000Z' },
+            action: null,
+        };
+        // The row the page holds still says online: the server knows better.
+        expect(preferredStateResolution(server, node(), { now: NOW })).toBe(server);
+    });
+
+    it('a limit whose reset has passed is the browser’s to judge — it drops the expired limit', () => {
+        const server: ComputerStateResolution = {
+            state: 'limited',
+            params: { provider: 'claude-code', until: '2026-10-18T09:00:00.000Z', limitedCount: 1 },
+            action: { kind: 'clear-model-throttle', provider: 'claude-code' },
+        };
+        const expired = node({
+            modelThrottles: [
+                {
+                    provider: 'claude-code',
+                    window: 'weekly',
+                    until: '2026-10-18T09:00:00.000Z',
+                    reason: 'weekly limit',
+                    since: '2026-10-18T03:00:00.000Z',
+                },
+            ],
+        });
+        expect(preferredStateResolution(server, expired, { now: NOW }).state).toBe('online');
+        // Still in force: the server’s answer stands.
+        expect(
+            preferredStateResolution(server, expired, {
+                now: Date.parse('2026-10-18T08:59:00.000Z'),
+            }),
+        ).toBe(server);
+    });
+
+    it('without a server answer, the browser’s own reading', () => {
+        expect(preferredStateResolution(null, node({ status: 'paused' }), { now: NOW }).state).toBe(
+            'paused',
+        );
     });
 });

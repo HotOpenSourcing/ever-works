@@ -1742,17 +1742,60 @@ describe('TriggerInternalController', () => {
                 prunedRaw: 0,
                 prunedHourly: 0,
             };
-            const health = { rollupAndPrune: jest.fn().mockResolvedValue(summary) };
+            const health = {
+                rollupAndPrune: jest.fn().mockResolvedValue(summary),
+                record: jest.fn(),
+                shouldSample: jest.fn(),
+            };
             (controller as any).fleetNodeHealthService = health;
             controller.onModuleInit();
 
-            expect((controller as any).remoteMap.FleetNodeHealthService).toBe(health);
             await controller.callRemote(VALID_SECRET, {
                 name: 'FleetNodeHealthService',
                 method: 'rollupAndPrune',
                 args: superjson.serialize([]) as any,
             });
             expect(health.rollupAndPrune).toHaveBeenCalledTimes(1);
+            expect(health.rollupAndPrune).toHaveBeenCalledWith();
+        });
+
+        it('never lets the hop pick the clock: a far-future "now" is dropped, not obeyed', async () => {
+            const health = {
+                rollupAndPrune: jest.fn().mockResolvedValue({ enabled: true }),
+            };
+            (controller as any).fleetNodeHealthService = health;
+            controller.onModuleInit();
+
+            await controller.callRemote(VALID_SECRET, {
+                name: 'FleetNodeHealthService',
+                method: 'rollupAndPrune',
+                args: superjson.serialize([new Date('2999-01-01T00:00:00Z')]) as any,
+            });
+            // Called with NO argument: the API reads its own clock, so the
+            // retention cutoffs cannot be moved past every row from the worker.
+            expect(health.rollupAndPrune).toHaveBeenCalledWith();
+        });
+
+        it('exposes rollupAndPrune ONLY — a raw insert is not reachable over the hop', async () => {
+            const health = {
+                rollupAndPrune: jest.fn().mockResolvedValue({ enabled: true }),
+                record: jest.fn(),
+                shouldSample: jest.fn(),
+            };
+            (controller as any).fleetNodeHealthService = health;
+            controller.onModuleInit();
+
+            for (const method of ['record', 'shouldSample']) {
+                await expect(
+                    controller.callRemote(VALID_SECRET, {
+                        name: 'FleetNodeHealthService',
+                        method,
+                        args: superjson.serialize([]) as any,
+                    }),
+                ).rejects.toBeDefined();
+            }
+            expect(health.record).not.toHaveBeenCalled();
+            expect(health.shouldSample).not.toHaveBeenCalled();
         });
     });
 });

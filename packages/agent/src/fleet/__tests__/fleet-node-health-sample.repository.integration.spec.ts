@@ -201,4 +201,20 @@ describe('fleet node health history (better-sqlite3)', () => {
         await repository.insertHourly(fleet);
         expect(await rows.count({ where: { resolution: 'hourly' } })).toBe(2_500);
     });
+
+    it('a failure in a LATER chunk writes nothing of the hour — it is never left half done', async () => {
+        const hour = at('2026-10-18T03:00:00.000Z');
+        const fleet = Array.from({ length: 900 }, (_, index) =>
+            rollUpHour(`00000000-0000-4000-8000-${String(index).padStart(12, '0')}`, hour, [
+                { cpuPercent: 10, memPercent: 50, diskPercent: 40 } as FleetNodeHealthSample,
+            ]),
+        );
+        // Row 700 sits in the second chunk and cannot be bound by the driver.
+        (fleet[700] as unknown as { cpuPercent: unknown }).cpuPercent = { not: 'a number' };
+        await expect(repository.insertHourly(fleet)).rejects.toThrow();
+        // The first chunk rolled back with it, so the next pass still sees the
+        // hour as not rolled and writes all of it.
+        expect(await rows.count({ where: { resolution: 'hourly' } })).toBe(0);
+        expect(await repository.hasHourly(hour)).toBe(false);
+    });
 });

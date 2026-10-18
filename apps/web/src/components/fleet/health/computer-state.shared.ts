@@ -207,6 +207,26 @@ export function computerStateCopy(resolution: ComputerStateResolution): Computer
     return { state, wordKey: stateKey(state), sentenceKey, values, action };
 }
 
+/**
+ * The state to show: the SERVER's judgement when one is in hand (it knows the
+ * deployment's offline window and the owner's job count, which the browser
+ * does not), else the browser's own. One exception: a `limited` answer whose
+ * reset time has passed is stale by the clock alone, so the browser's own
+ * reading — which drops expired limits — is shown instead.
+ */
+export function preferredStateResolution(
+    server: ComputerStateResolution | null | undefined,
+    node: FleetNodeView,
+    options: { now?: number; canWake?: boolean } = {},
+): ComputerStateResolution {
+    const now = options.now ?? Date.now();
+    if (server) {
+        const until = server.state === 'limited' ? Date.parse(server.params.until ?? '') : NaN;
+        if (!(server.state === 'limited' && Number.isFinite(until) && until <= now)) return server;
+    }
+    return resolveComputerState(node, { ...options, now });
+}
+
 /** Resolve and present in one call — what a card or header needs. */
 export function computerStateCopyFor(
     node: FleetNodeView,

@@ -47,8 +47,7 @@
       **Test**: extend `apps/node/src/core/heartbeat.spec.ts` (sent; dropped first on 400);
       `apps/api/src/fleet/__tests__/node-contract.conformance.spec.ts` fixture
       `packages/contracts/fixtures/fleet-node-contract.v1.json` updated.
-
-          **Status (FL-03 PR 1)**: P1 half ✓ (`health` in its own newest tier, enrolment never sends it). `macAddress`/`lanId` join a newer tier with T-19 … T-20.
+      **Status (FL-03 PR 1)**: P1 half ✓ (`health` in its own newest tier, enrolment never sends it). `macAddress`/`lanId` join a newer tier with T-19 … T-20.
 
 ## P1.B — Platform: store, derive, produce
 
@@ -82,8 +81,7 @@
       `POST nodes/:id/clear-model-throttle` (`apps/api/src/fleet/fleet.controller.ts:451`).
       **Test**: `apps/api/src/fleet/fleet-health.controller.spec.ts` — shape, 404 for strangers;
       extend `fleet.controller.spec.ts` (`:136` block) for the family check.
-
-          **Status (FL-03 PR 1)**: P1 half ✓ (`GET /nodes/:id/health` through FL-01's `getVisibleForUser` — the `view` family — with the job count for the owner only; `fleet-health.controller.spec.ts`). The clear route keeps its owner-only check, which is the `machines` default audience; the family check on it lands with P2's `machines` acts (wake).
+      **Status (FL-03 PR 1)**: P1 half ✓ (`GET /nodes/:id/health` through FL-01's `getVisibleForUser` — the `view` family — with the job count for the owner only; `fleet-health.controller.spec.ts`). The clear route keeps its owner-only check, which is the `machines` default audience; the family check on it lands with P2's `machines` acts (wake).
 
 ## P1.C — Web: cells, metric slot, sentences
 

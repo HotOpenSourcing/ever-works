@@ -38,7 +38,8 @@ export class FleetHealthRollupCronService {
             // The `fleet-health-rollup` Trigger.dev schedule owns the pass.
             return;
         }
-        if (!this.health.isHistoryEnabled()) return;
+        // Runs with the history switched off too: the pass then rolls nothing
+        // and only ages out rows written before it was switched off.
 
         await this.taskLockService.runExclusive(
             FLEET_HEALTH_ROLLUP_LOCK_KEY,

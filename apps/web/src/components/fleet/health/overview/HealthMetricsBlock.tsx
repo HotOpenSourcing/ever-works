@@ -72,6 +72,7 @@ export default function HealthMetricsBlock({ nodes, flags }: FleetOverviewBlockP
             node={view ? { ...node, health: view.snapshot } : node}
             status={status}
             stale={view?.stale}
+            resolution={view?.state}
             historyEnabled={view?.historyEnabled ?? flags.FLEET_HEALTH_HISTORY_ENABLED === true}
             onRetry={reload}
             onActionDone={reload}

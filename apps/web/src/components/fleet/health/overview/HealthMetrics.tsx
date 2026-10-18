@@ -5,6 +5,7 @@ import { useLocale, useTranslations } from 'next-intl';
 import {
     hasFleetNodeHealthReading,
     isFleetNodeHealthStale,
+    type ComputerStateResolution,
     type FleetNodeView,
 } from '@ever-works/contracts';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,8 @@ export interface HealthMetricsProps {
      * `staleAfterMs`.
      */
     stale?: boolean;
+    /** The server's state for this computer (the health read's `state`); see `ComputerStateLine`. */
+    resolution?: ComputerStateResolution | null;
     onRetry?: () => void;
     /** Where "Change limits" leads. */
     limitsHref?: string;
@@ -94,6 +97,7 @@ export function HealthMetrics({
     now: nowProp,
     staleAfterMs = HEALTH_STALE_AFTER_MS,
     stale: staleProp,
+    resolution,
     onRetry,
     limitsHref,
     onActionDone,
@@ -113,6 +117,7 @@ export function HealthMetrics({
         <ComputerStateLine
             node={node}
             now={now}
+            resolution={resolution}
             limitsHref={limitsHref}
             onActionDone={onActionDone}
             clearModelThrottle={clearModelThrottle}
