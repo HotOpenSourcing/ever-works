@@ -308,6 +308,35 @@ export interface FleetNodeAuditContext {
 }
 
 /**
+ * Fleet hub (FL-01, FR-22) — who a `machines`-family act (rename, pause /
+ * resume, disable / enable, drain / return, remove) runs as; see
+ * {@link FleetService.resolveMachinesActor}.
+ */
+export interface FleetMachinesActor {
+    /** The Node's owner: the registry row the act changes is theirs. */
+    ownerUserId: string;
+    /** The caller's role on the Node (never `stranger`: a stranger got a 404). */
+    role: FleetViewerRole;
+    /** The Node's name, for a refusal that names it. */
+    nodeName: string;
+    /**
+     * The audit context to hand the act. Empty for the owner (their rows stay
+     * exactly what they were); for anyone else it names the caller as the
+     * actor, with the family and role they acted through.
+     */
+    ctx: FleetNodeAuditContext;
+}
+
+/** Fleet hub (FL-01) — the optional typed-name confirmation of a remove (CONTRACTS §2.2). */
+export interface FleetRemoveConfirmation {
+    /**
+     * The computer's name as the person typed it. Checked only when sent: a
+     * remove without it works exactly as it always has (existing callers).
+     */
+    confirmName?: unknown;
+}
+
+/**
  * Result of a NODE-INITIATED credential rotation. The secret is returned
  * exactly once and, like every other Fleet credential, only its sha256 is
  * ever stored.
@@ -1182,6 +1211,42 @@ export class FleetService {
     }
 
     /**
+     * Fleet hub (FL-01, FR-22, ACC-FL01-16) — who a `machines`-family act
+     * (rename, pause / resume, disable / enable, drain / return, remove) runs
+     * as, answered server-side before the act.
+     *
+     * The owner acts as themselves, exactly as before. Someone else whose role
+     * the Node's `machines` audience admits acts on the OWNER's registry row
+     * (`ownerUserId`), with themselves recorded as the actor. Outside `view`:
+     * the 404 of an unknown id; inside `view` but outside `machines`:
+     * `permission_denied` naming the Lifecycle family. Without the access
+     * service this is the owner-only lookup the acts always made.
+     */
+    async resolveMachinesActor(callerId: string, nodeId: string): Promise<FleetMachinesActor> {
+        if (!this.access) {
+            const node = await this.getOwnedNode(callerId, nodeId);
+            return { ownerUserId: callerId, role: 'owner', nodeName: node.name, ctx: {} };
+        }
+        const { node, role } = await this.access.resolveForFamily(nodeId, callerId, 'machines');
+        if (role === 'owner') {
+            return { ownerUserId: node.userId, role, nodeName: node.name, ctx: {} };
+        }
+        return {
+            ownerUserId: node.userId,
+            role,
+            nodeName: node.name,
+            ctx: {
+                actorUserId: callerId,
+                details: {
+                    family: 'machines',
+                    viewerRole: role,
+                    requestedBy: `user:${callerId}`,
+                },
+            },
+        };
+    }
+
+    /**
      * Every OUTSTANDING enrollment token of this owner — i.e. every node
      * still sitting in `enrolling`, whether the token is fresh, about to
      * expire, or already expired.
@@ -1660,13 +1725,29 @@ export class FleetService {
         return true;
     }
 
-    /** Delete a node registration (owner-scoped, no existence leak). */
+    /**
+     * Delete a node registration (owner-scoped, no existence leak).
+     *
+     * Fleet hub (FL-01, CONTRACTS §2.2): `confirmation.confirmName` is the
+     * `confirm-destructive` field — when sent, it must be the computer's name
+     * or nothing is deleted (400 `invalid`). It is checked only AFTER the Node
+     * resolved, so a wrong name never tells anyone a Node exists. Without it
+     * the delete works exactly as it always has.
+     */
     async deleteForUser(
         userId: string,
         nodeId: string,
         ctx: FleetNodeAuditContext = {},
+        confirmation: FleetRemoveConfirmation = {},
     ): Promise<void> {
         const node = await this.getOwnedNode(userId, nodeId);
+        if (confirmation.confirmName !== undefined) {
+            assertConfirmName(node, confirmation.confirmName);
+            ctx = {
+                ...ctx,
+                details: { ...(ctx.details ?? {}), confirmationClass: 'confirm-destructive' },
+            };
+        }
         await this.repository.delete(node.id);
         await this.auditLifecycle('node.delete', userId, node, ctx, {
             before: { status: node.status, name: node.name, kind: node.kind },
@@ -2120,6 +2201,21 @@ function invalidPolicy(hint: string): BadRequestException {
         statusCode: 400,
         message: hint,
         error: { code: 'invalid', hint, details: { field: 'controlPolicyFamilies' } },
+    });
+}
+
+/**
+ * Fleet hub (FL-01) — the `confirm-destructive` check of a remove: the typed
+ * name must be the computer's name (surrounding whitespace aside; case
+ * counts). A 400 in CONTRACTS §8's envelope otherwise.
+ */
+function assertConfirmName(node: Pick<FleetNode, 'name'>, confirmName: unknown): void {
+    if (typeof confirmName === 'string' && confirmName.trim() === node.name) return;
+    const hint = `Type ${node.name} exactly to remove it from Fleet.`;
+    throw new BadRequestException({
+        statusCode: 400,
+        message: hint,
+        error: { code: 'invalid', hint, details: { field: 'confirmName' } },
     });
 }
 
