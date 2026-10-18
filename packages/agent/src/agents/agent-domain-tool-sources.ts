@@ -197,6 +197,12 @@ export interface AgentProposalToolSource {
             runId?: string | null;
             title: string;
             payload: Record<string, unknown>;
+            /**
+             * What the proposal is ABOUT, for de-duplication (e.g.
+             * `escalation:<id>`): one proposal per subject — a repeat returns
+             * the existing pending one instead of a second card.
+             */
+            subjectKey?: string | null;
         },
     ): Promise<{ id: string; status: 'pending' | 'approved' | 'rejected' }>;
 }

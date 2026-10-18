@@ -2161,15 +2161,39 @@ async function assertRealWriteTarget(
                     ? {
                           proposals: {
                               async propose(userId, input) {
-                                  const proposal = await approvals.createProposal(userId, {
-                                      agentId: input.agentId,
-                                      actionType: 'other',
-                                      title: input.title,
-                                      runId: input.runId ?? null,
-                                      payload: input.payload,
-                                      humanDecisionRequired: true,
-                                  });
-                                  return { id: proposal.id, status: proposal.status };
+                                  const subjectKey = input.subjectKey ?? null;
+                                  try {
+                                      const proposal = await approvals.createProposal(userId, {
+                                          agentId: input.agentId,
+                                          actionType: 'other',
+                                          title: input.title,
+                                          runId: input.runId ?? null,
+                                          payload: input.payload,
+                                          humanDecisionRequired: true,
+                                          ...(subjectKey ? { subjectKey } : {}),
+                                      });
+                                      return { id: proposal.id, status: proposal.status };
+                                  } catch (error) {
+                                      // The (actionType, subjectKey) unique index refused a
+                                      // second proposal about the same subject: hand back the
+                                      // one already waiting rather than a raw DB error.
+                                      if (!subjectKey) throw error;
+                                      const { rows } = await approvals.list(userId, {
+                                          status: 'pending',
+                                          limit: 200,
+                                      });
+                                      const existing = rows.find(
+                                          (row) =>
+                                              row.actionType === 'other' &&
+                                              row.subjectKey === subjectKey,
+                                      );
+                                      if (existing) {
+                                          return { id: existing.id, status: existing.status };
+                                      }
+                                      throw new Error(
+                                          'A request about this was already decided by the owner; it cannot be proposed again.',
+                                      );
+                                  }
                               },
                           },
                       }

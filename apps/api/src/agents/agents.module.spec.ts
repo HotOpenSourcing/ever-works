@@ -499,6 +499,46 @@ describe('api-side AgentsModule — domain chat-tool wiring', () => {
         });
     });
 
+    it('de-duplicates by subjectKey: a repeat returns the pending proposal, a decided one is refused', async () => {
+        const factory = findProvider(AGENT_DOMAIN_TOOL_SOURCES);
+        const stubs: unknown[] = (factory?.inject ?? []).map((_, index) => ({ stub: index }));
+        const approvals = {
+            createProposal: jest.fn().mockRejectedValue(new Error('duplicate key value')),
+            list: jest.fn().mockResolvedValue({
+                rows: [
+                    {
+                        id: 'p-old',
+                        actionType: 'other',
+                        subjectKey: 'escalation:e1',
+                        status: 'pending',
+                    },
+                ],
+                total: 1,
+            }),
+        };
+        stubs[stubs.length - 1] = approvals;
+        const bundle = factory?.useFactory?.(...stubs) as {
+            proposals: { propose: (userId: string, input: unknown) => Promise<unknown> };
+        };
+        const input = {
+            agentId: 'agent-1',
+            title: 'Close e1',
+            payload: { kind: 'agent-escalation-resolution', escalationId: 'e1' },
+            subjectKey: 'escalation:e1',
+        };
+        await expect(bundle.proposals.propose('user-1', input)).resolves.toEqual({
+            id: 'p-old',
+            status: 'pending',
+        });
+        expect(approvals.createProposal).toHaveBeenCalledWith(
+            'user-1',
+            expect.objectContaining({ subjectKey: 'escalation:e1' }),
+        );
+
+        approvals.list.mockResolvedValueOnce({ rows: [], total: 0 });
+        await expect(bundle.proposals.propose('user-1', input)).rejects.toThrow(/already decided/);
+    });
+
     it('carries no proposals seam when the approvals service is not bound', () => {
         const factory = findProvider(AGENT_DOMAIN_TOOL_SOURCES);
         const stubs: unknown[] = (factory?.inject ?? []).map((_, index) => ({ stub: index }));

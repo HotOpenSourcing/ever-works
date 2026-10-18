@@ -57,6 +57,7 @@ describe('resolve_escalation — proposes, never resolves', () => {
                 escalationId: 'e1',
                 note: 'budget raised',
             },
+            subjectKey: 'escalation:e1',
         });
         expect(result).toMatchObject({
             resolved: false,
@@ -87,7 +88,7 @@ describe('resolve_escalation — proposes, never resolves', () => {
         expect(resolved.proposals!.propose).not.toHaveBeenCalled();
     });
 
-    it("reports a guardrail block as a refusal", async () => {
+    it('reports a guardrail block as a refusal', async () => {
         const { tool } = tools({
             proposals: { propose: jest.fn().mockResolvedValue({ id: 'p-2', status: 'rejected' }) },
         });
@@ -130,8 +131,13 @@ describe('AgentProposalExecutionListener', () => {
     function build() {
         const escalations = { resolve: jest.fn().mockResolvedValue(true) };
         const files = { write: jest.fn().mockResolvedValue({ newHash: 'h2' }) };
-        const listener = new AgentProposalExecutionListener(escalations as never, files as never);
-        return { listener, escalations, files };
+        const inbox = { notice: jest.fn().mockResolvedValue(undefined) };
+        const listener = new AgentProposalExecutionListener(
+            escalations as never,
+            files as never,
+            inbox as never,
+        );
+        return { listener, escalations, files, inbox };
     }
 
     const escalationPayload = {
@@ -185,13 +191,64 @@ describe('AgentProposalExecutionListener', () => {
 
     it('ignores a payload naming a file outside the five canonical files', async () => {
         const { listener, files } = build();
-        await listener.handleProposalDecided(event({ ...filePayload, fileName: '../../etc/passwd' }));
+        await listener.handleProposalDecided(
+            event({ ...filePayload, fileName: '../../etc/passwd' }),
+        );
         expect(files.write).not.toHaveBeenCalled();
     });
 
-    it('never throws back into the decision (best-effort)', async () => {
-        const { listener, files } = build();
+    it('never throws back into the decision (best-effort), and tells the owner it did not apply', async () => {
+        const { listener, files, inbox } = build();
         files.write.mockRejectedValue(new Error('etag mismatch'));
         await expect(listener.handleProposalDecided(event(filePayload))).resolves.toBeUndefined();
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({
+                title: expect.stringMatching(/NOT applied/),
+                body: expect.stringContaining('SOUL.md'),
+                agentId: 'agent-1',
+            }),
+        );
+    });
+
+    it('a replayed / stale file edit is refused by the real hash check and reported', async () => {
+        // A real AgentFileService over a row whose hash moved on after the
+        // agent proposed: the approved proposal must not overwrite it.
+        const { AgentFileService } = await import('../agent-file.service');
+        const row = {
+            id: 'agent-1',
+            userId: 'owner-1',
+            slug: 'ceo',
+            scope: 'tenant',
+            soulMd: '# Owner edited this since',
+            contentHash: 'h-newer',
+        };
+        const repo = {
+            findByIdAndUser: jest.fn().mockResolvedValue(row),
+            updateById: jest.fn(),
+            updateByIdIfContentHash: jest.fn().mockResolvedValue(false),
+        };
+        const files = new AgentFileService(repo as never);
+        const inbox = { notice: jest.fn().mockResolvedValue(undefined) };
+        const listener = new AgentProposalExecutionListener(undefined, files, inbox as never);
+
+        await listener.handleProposalDecided(event(filePayload)); // baseHash h1 ≠ h-newer
+
+        expect(repo.updateById).not.toHaveBeenCalled();
+        expect(repo.updateByIdIfContentHash).not.toHaveBeenCalled(); // refused at the read
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({ body: expect.stringMatching(/etag mismatch/) }),
+        );
+    });
+
+    it('an approved closure of an already-resolved escalation is reported, not silent', async () => {
+        const { listener, escalations, inbox } = build();
+        escalations.resolve.mockResolvedValueOnce(false);
+        await listener.handleProposalDecided(event(escalationPayload));
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({ body: expect.stringContaining('escalation e1') }),
+        );
     });
 });

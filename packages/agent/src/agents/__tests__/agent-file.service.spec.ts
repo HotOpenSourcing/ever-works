@@ -67,6 +67,7 @@ describe('AgentFileService', () => {
         repo = {
             findByIdAndUser: jest.fn(),
             updateById: jest.fn(),
+            updateByIdIfContentHash: jest.fn().mockResolvedValue(true),
         };
         activity = { log: jest.fn().mockResolvedValue(undefined) };
         svc = new AgentFileService(repo, activity);
@@ -273,6 +274,45 @@ describe('AgentFileService', () => {
         });
     });
 
+    describe('compare-and-set write (an approved edit can never overwrite a newer one)', () => {
+        it('with expectedHash, writes through the hash-conditional update', async () => {
+            repo.findByIdAndUser.mockResolvedValueOnce(
+                makeAgent({ soulMd: '# Old', contentHash: 'h0' } as Partial<Agent>),
+            );
+            await svc.write({
+                userId: 'u1',
+                agentId: 'a1',
+                name: 'SOUL.md',
+                body: '# New',
+                expectedHash: 'h0',
+            });
+            expect(repo.updateByIdIfContentHash).toHaveBeenCalledWith(
+                'a1',
+                'h0',
+                expect.objectContaining({ soulMd: '# New' }),
+            );
+            expect(repo.updateById).not.toHaveBeenCalled();
+        });
+
+        it('refuses when the row changed between the read and the write (the race the check alone missed)', async () => {
+            // The read still sees h0 — the concurrent edit lands after it.
+            repo.findByIdAndUser.mockResolvedValueOnce(
+                makeAgent({ soulMd: '# Old', contentHash: 'h0' } as Partial<Agent>),
+            );
+            repo.updateByIdIfContentHash.mockResolvedValueOnce(false);
+            await expect(
+                svc.write({
+                    userId: 'u1',
+                    agentId: 'a1',
+                    name: 'SOUL.md',
+                    body: '# Replayed proposal',
+                    expectedHash: 'h0',
+                }),
+            ).rejects.toThrow(/etag mismatch/);
+            expect(repo.updateById).not.toHaveBeenCalled();
+        });
+    });
+
     describe('validateProposedWrite (prompt-injection hardening)', () => {
         it('runs the write checks and describes the change WITHOUT writing anything', async () => {
             repo.findByIdAndUser.mockResolvedValueOnce(
@@ -292,7 +332,12 @@ describe('AgentFileService', () => {
 
         it('refuses what write would refuse: bad name, a secret, a stale hash', async () => {
             await expect(
-                svc.validateProposedWrite({ userId: 'u1', agentId: 'a1', name: 'X.md' as any, body: 'x' }),
+                svc.validateProposedWrite({
+                    userId: 'u1',
+                    agentId: 'a1',
+                    name: 'X.md' as any,
+                    body: 'x',
+                }),
             ).rejects.toThrow(BadRequestException);
 
             repo.findByIdAndUser.mockResolvedValueOnce(makeAgent());
@@ -305,7 +350,9 @@ describe('AgentFileService', () => {
                 }),
             ).rejects.toThrow(/Secret-like value/);
 
-            repo.findByIdAndUser.mockResolvedValueOnce(makeAgent({ contentHash: 'h1' } as Partial<Agent>));
+            repo.findByIdAndUser.mockResolvedValueOnce(
+                makeAgent({ contentHash: 'h1' } as Partial<Agent>),
+            );
             await expect(
                 svc.validateProposedWrite({
                     userId: 'u1',

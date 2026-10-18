@@ -158,6 +158,8 @@ export function buildEscalationTools(args: {
                     agentId: args.agentId,
                     runId: args.agentRunId ?? null,
                     title: `Agent asks to close escalation ${escalationId.slice(0, 8)}`,
+                    // One request per escalation: a retry returns the pending one.
+                    subjectKey: `escalation:${escalationId}`,
                     payload: {
                         kind: AGENT_ESCALATION_RESOLUTION_PROPOSAL_KIND,
                         escalationId,

@@ -1,7 +1,9 @@
-import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { AgentActionProposalDecidedEvent } from '../agent-approvals/agent-action-proposal-decided.event';
 import { AgentEscalationService } from './agent-escalation.service';
+// Leaf token file — no runtime graph (see inbox-producer.port.ts).
+import { INBOX_PRODUCER, type InboxProducer } from '../inbox/inbox-producer.port';
 import { AGENT_FILE_NAMES, AgentFileService, type AgentFileName } from './agent-file.service';
 import {
     AGENT_ESCALATION_RESOLUTION_PROPOSAL_KIND,
@@ -41,6 +43,10 @@ export class AgentProposalExecutionListener {
     constructor(
         @Optional() private readonly escalations?: AgentEscalationService,
         @Optional() private readonly files?: AgentFileService,
+        // Tells the owner when an APPROVED proposal could not be applied (the
+        // file changed since the agent proposed it, the escalation was already
+        // closed…), so an approval never fails silently. @Optional(), appended.
+        @Optional() @Inject(INBOX_PRODUCER) private readonly inbox?: InboxProducer,
     ) {}
 
     @OnEvent(AgentActionProposalDecidedEvent.EVENT_NAME, { async: true })
@@ -56,8 +62,36 @@ export class AgentProposalExecutionListener {
                 await this.applyFileEdit(event, payload);
             }
         } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
             this.logger.warn(
-                `Approved proposal ${event.proposalId} (${String(payload.kind)}) could not be applied: ${
+                `Approved proposal ${event.proposalId} (${String(payload.kind)}) could not be applied: ${reason}`,
+            );
+            await this.noticeNotApplied(event, payload, reason);
+        }
+    }
+
+    /** Best-effort Inbox notice: the owner approved something that did not happen. */
+    private async noticeNotApplied(
+        event: AgentActionProposalDecidedEvent,
+        payload: Record<string, unknown>,
+        reason: string,
+    ): Promise<void> {
+        if (!this.inbox) return;
+        const what =
+            payload.kind === AGENT_FILE_EDIT_PROPOSAL_KIND
+                ? `the edit to ${String(payload.fileName ?? 'an agent file')}`
+                : `closing escalation ${String(payload.escalationId ?? '')}`;
+        try {
+            await this.inbox.notice(event.userId, {
+                title: 'An approved agent change was NOT applied',
+                body:
+                    `You approved ${what}, but it could not be applied: ${reason.slice(0, 300)} ` +
+                    'Nothing was changed. Review the current state and ask the agent again if it is still wanted.',
+                agentId: event.agentId,
+            });
+        } catch (error) {
+            this.logger.warn(
+                `Not-applied notice for proposal ${event.proposalId} failed: ${
                     error instanceof Error ? error.message : String(error)
                 }`,
             );
@@ -72,10 +106,13 @@ export class AgentProposalExecutionListener {
         const escalationId = typeof payload.escalationId === 'string' ? payload.escalationId : '';
         if (!escalationId) return;
         const note = typeof payload.note === 'string' ? payload.note : null;
-        await this.escalations.resolve(escalationId, event.userId, note, {
+        const resolved = await this.escalations.resolve(escalationId, event.userId, note, {
             resolvedBy: 'agent',
             agentId: event.agentId,
         });
+        if (!resolved) {
+            throw new Error('the escalation was already resolved or no longer exists.');
+        }
     }
 
     private async applyFileEdit(

@@ -411,6 +411,30 @@ export class AgentRepository {
         await this.repository.update(id, data);
     }
 
+    /**
+     * Compare-and-set update keyed on the agent's file-content hash: applies
+     * `data` only when the row's `contentHash` still equals `expectedHash`
+     * (`''` matches a row that never had one). `true` when it applied.
+     * The single statement is what makes a concurrent edit lose cleanly
+     * instead of overwriting the newer content.
+     */
+    async updateByIdIfContentHash(
+        id: string,
+        expectedHash: string,
+        data: Partial<Agent>,
+    ): Promise<boolean> {
+        // Criteria objects (not a raw WHERE string) so column naming and
+        // quoting stay TypeORM's business on every driver.
+        if (expectedHash === '') {
+            const unset = await this.repository.update({ id, contentHash: IsNull() }, data);
+            if ((unset.affected ?? 0) > 0) return true;
+            const empty = await this.repository.update({ id, contentHash: '' }, data);
+            return (empty.affected ?? 0) > 0;
+        }
+        const result = await this.repository.update({ id, contentHash: expectedHash }, data);
+        return (result.affected ?? 0) > 0;
+    }
+
     async archiveById(id: string): Promise<void> {
         await this.repository.update(id, { status: AgentStatus.ARCHIVED });
     }

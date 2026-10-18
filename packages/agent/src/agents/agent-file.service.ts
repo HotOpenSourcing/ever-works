@@ -166,7 +166,24 @@ export class AgentFileService {
         const prevHash = agent.contentHash ?? null;
         const updates = this.computeInlineUpdates(agent, name, body);
         const newHash = this.hashOf(updates, agent);
-        await this.agents.updateById(agent.id, { ...updates, contentHash: newHash });
+        if (expectedHash !== undefined) {
+            // Atomic compare-and-set on the hash the caller saw: a concurrent
+            // edit that landed between the read above and this write makes
+            // the update match nothing, and this caller is refused instead of
+            // silently overwriting the newer content (an owner-approved agent
+            // edit replayed over an owner's own later change included).
+            const applied = await this.agents.updateByIdIfContentHash(agent.id, expectedHash, {
+                ...updates,
+                contentHash: newHash,
+            });
+            if (!applied) {
+                throw new BadRequestException(
+                    `Agent file was modified elsewhere — reload and try again (etag mismatch).`,
+                );
+            }
+        } else {
+            await this.agents.updateById(agent.id, { ...updates, contentHash: newHash });
+        }
 
         // Activity row — captured before throwing if logger unavailable, so we
         // don't fail the write if telemetry is wedged.
