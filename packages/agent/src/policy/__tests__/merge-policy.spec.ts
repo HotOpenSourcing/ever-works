@@ -253,6 +253,75 @@ describe('evaluateAgentMerge — the single decision point', () => {
         expect(decision.allowed).toBe(true);
     });
 
+    // ── The protected-branch FLOOR (works-security lane 3a) ─────────────
+    //
+    // `main` / `master` / `develop` / `stage`: a scope may unprotect them, but
+    // an agent merge into one needs a recorded human approval whatever
+    // `requireHumanApproval` resolved to — so a Work-level policy that emptied
+    // `protectedBranches` and dropped the approval cannot land an agent's pull
+    // request on the default branch unattended.
+    const unattended: MergePolicy = {
+        ...permissive,
+        requireHumanApproval: false,
+        protectedBranches: [],
+    };
+
+    it.each([['main'], ['master'], ['develop'], ['stage'], ['refs/heads/Develop']])(
+        'refuses an unattended merge into the floor branch %s even when nothing is protected',
+        (target) => {
+            const decision = evaluateAgentMerge({
+                ...okCtx,
+                policy: unattended,
+                humanApproved: false,
+                targetBranch: target,
+            });
+            expect(decision.allowed).toBe(false);
+            expect(decision.code).toBe('human-approval-required');
+            expect(decision.reason).toContain('protected-branch floor');
+        },
+    );
+
+    it('refuses an unattended merge into an UNKNOWN target, since it may be a floor branch', () => {
+        const decision = evaluateAgentMerge({
+            ...okCtx,
+            policy: unattended,
+            humanApproved: false,
+            targetBranch: null,
+        });
+        expect(decision.allowed).toBe(false);
+        expect(decision.code).toBe('target-branch-unknown');
+    });
+
+    it('allows a floor branch the scope unprotected once a human approved the merge', () => {
+        const decision = evaluateAgentMerge({
+            ...okCtx,
+            policy: unattended,
+            humanApproved: true,
+            targetBranch: 'main',
+        });
+        expect(decision.allowed).toBe(true);
+    });
+
+    it('leaves every other branch to the resolved policy (no approval needed)', () => {
+        const decision = evaluateAgentMerge({
+            ...okCtx,
+            policy: unattended,
+            humanApproved: false,
+            targetBranch: 'feature/x',
+        });
+        expect(decision.allowed).toBe(true);
+    });
+
+    it('still refuses a floor branch the policy keeps protected, approval or not', () => {
+        const decision = evaluateAgentMerge({
+            ...okCtx,
+            policy: { ...permissive, protectedBranches: ['develop'] },
+            humanApproved: true,
+            targetBranch: 'develop',
+        });
+        expect(decision.code).toBe('protected-branch');
+    });
+
     it('refuses a merge method the policy does not allow', () => {
         const decision = evaluateAgentMerge({ ...okCtx, mergeMethod: 'rebase' });
         expect(decision.allowed).toBe(false);

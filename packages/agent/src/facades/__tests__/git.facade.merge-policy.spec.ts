@@ -62,6 +62,8 @@ interface FacadeOpts {
         headSha: string | null;
         /** Omitted = "not reported", which is not a warning. */
         checksComplete?: boolean;
+        /** The pull request's base as the provider reports it. */
+        baseRef?: string | null;
     } | null;
     /** Omit `resolve` from the enforcer (a minimal legacy double). */
     resolvable?: boolean;
@@ -316,6 +318,55 @@ describe('GitFacadeService.mergePullRequest — merge approval gate (slice AE)',
             expect.objectContaining({ humanApproved: false }),
         );
         expect(plugin.mergePullRequest).not.toHaveBeenCalled();
+    });
+
+    // ── The protected-branch FLOOR (works-security lane 3a) ─────────────
+    //
+    // `requireHumanApproval: false` skips the approval for ordinary branches
+    // only: a merge into main / master / develop / stage (or into a base
+    // nobody can name) still needs a recorded human approval at merge time.
+
+    it('requires an approval for a floor base under a policy that asked for none', async () => {
+        const { facade, plugin, verifier, enforcer } = makeFacade({ policy: NO_APPROVAL_NEEDED });
+        await facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, {
+            ...ACTOR,
+            targetBranch: 'main',
+        });
+        expect(verifier.verifyMergeApproval).toHaveBeenCalled();
+        expect(enforcer.canAgentMerge).toHaveBeenCalledWith(
+            expect.objectContaining({ humanApproved: true }),
+        );
+        expect(plugin.mergePullRequest).toHaveBeenCalled();
+    });
+
+    it('refuses a floor base with no approval on record, whatever the policy said', async () => {
+        const { facade, plugin } = makeFacade({
+            policy: NO_APPROVAL_NEEDED,
+            verdict: {
+                approved: false,
+                code: 'approval-missing',
+                reason: 'No approval for this head.',
+            } as MergeApprovalVerdict,
+        });
+        await expect(
+            facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, {
+                ...ACTOR,
+                targetBranch: 'refs/heads/develop',
+            }),
+        ).rejects.toMatchObject({ code: 'approval-missing' });
+        expect(plugin.mergePullRequest).not.toHaveBeenCalled();
+    });
+
+    it('reads the floor off the LIVE base when the caller named none', async () => {
+        const { facade, verifier } = makeFacade({
+            policy: NO_APPROVAL_NEEDED,
+            status: { state: 'open', ciState: 'passing', headSha: HEAD, baseRef: 'stage' },
+        });
+        await facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, {
+            agentId: 'agent-1',
+            taskId: 'task-1',
+        });
+        expect(verifier.verifyMergeApproval).toHaveBeenCalled();
     });
 
     it('pins the head even when the policy requires NO approval', async () => {

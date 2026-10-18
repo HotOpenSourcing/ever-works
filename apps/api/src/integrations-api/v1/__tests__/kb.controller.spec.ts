@@ -192,7 +192,14 @@ describe('IntegrationKbController', () => {
         );
         expect(kb.assertWorkOfOrganization).toHaveBeenCalledWith(ORG, WORK);
         expect(knowledgeBase.createDocument).toHaveBeenCalledWith(
-            expect.objectContaining({ workId: WORK, userId: 'user-7', source: 'user' }),
+            expect.objectContaining({
+                workId: WORK,
+                userId: 'user-7',
+                source: 'user',
+                // Works-security lane 3a — an integration key is a machine
+                // credential: its documents enter the M7 review gate.
+                reviewState: 'proposed',
+            }),
             { withinCreate: undefined },
         );
     });
@@ -316,14 +323,27 @@ describe('IntegrationKbController', () => {
     it('edits a Work document through updateDocument and an organization one through updateOrgDocument; a stale If-Match is 412', async () => {
         const work = setup({ workId: WORK });
         await work.controller.updateDocument(user(), 'doc-1', { body: 'New' }, undefined, res());
+        // Works-security lane 3a — a content edit re-enters the review gate.
         expect(work.knowledgeBase.updateDocument).toHaveBeenCalledWith(WORK, 'doc-1', 'owner-1', {
             body: 'New',
+            reviewState: 'proposed',
         });
         const org = setup();
         await org.controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"1"', res());
         expect(org.knowledgeBase.updateOrgDocument).toHaveBeenCalledWith(ORG, 'doc-1', 'owner-1', {
             title: 'T',
+            reviewState: 'proposed',
         });
+        // A metadata-only edit (tags) leaves the review state alone.
+        await org.controller.updateDocument(user(), 'doc-1', { tags: ['a'] }, undefined, res());
+        expect(org.knowledgeBase.updateOrgDocument).toHaveBeenLastCalledWith(
+            ORG,
+            'doc-1',
+            'owner-1',
+            {
+                tags: ['a'],
+            },
+        );
         await expect(
             org.controller.updateDocument(user(), 'doc-1', { title: 'T' }, '"9"', res()),
         ).rejects.toBeInstanceOf(VersionMismatchError);
@@ -344,10 +364,20 @@ describe('IntegrationKbController', () => {
         expect(org.knowledgeBase.deleteDocument).not.toHaveBeenCalled();
     });
 
-    it('accepts, archives, restores and files through the Knowledge Base and the library', async () => {
-        const { controller, knowledgeBase, library } = setup();
-        await controller.acceptDocument(user(), 'doc-1', res());
-        expect(knowledgeBase.acceptOrgDocument).toHaveBeenCalledWith(ORG, 'doc-1', 'owner-1');
+    it('never accepts a document: the review is a person’s decision (422 domain_rule)', async () => {
+        // Works-security lane 3a — accepting IS the review gate; an integration
+        // key, with or without X-Act-As-User, may not make it.
+        const { controller, knowledgeBase } = setup();
+        await expect(controller.acceptDocument('doc-1')).rejects.toMatchObject({
+            code: 'domain_rule',
+            response: { error: { details: { reason: 'human_session_required' } } },
+        });
+        expect(knowledgeBase.acceptDocument).not.toHaveBeenCalled();
+        expect(knowledgeBase.acceptOrgDocument).not.toHaveBeenCalled();
+    });
+
+    it('archives, restores and files through the Knowledge Base and the library', async () => {
+        const { controller, library } = setup();
         await controller.archiveDocument(user(), 'doc-1', res());
         expect(library.archive).toHaveBeenCalledWith(
             expect.objectContaining({ organizationId: ORG }),
