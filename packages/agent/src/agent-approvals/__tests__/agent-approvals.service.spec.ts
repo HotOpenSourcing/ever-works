@@ -419,6 +419,25 @@ describe('AgentApprovalsService', () => {
         });
     });
 
+    describe('findBySubjectKey', () => {
+        it("finds the caller's proposal about one subject in any status", async () => {
+            proposals.findOne.mockResolvedValueOnce(
+                makeProposal({ actionType: 'other', status: 'rejected' }),
+            );
+            const found = await svc.findBySubjectKey('u1', 'other', 'escalation:e1');
+            expect(found).toMatchObject({ id: 'p1', status: 'rejected' });
+            // Owner-scoped, no status filter, no page limit.
+            expect(proposals.findOne).toHaveBeenCalledWith({
+                where: { userId: 'u1', actionType: 'other', subjectKey: 'escalation:e1' },
+            });
+        });
+
+        it('answers null when there is none', async () => {
+            proposals.findOne.mockResolvedValueOnce(null);
+            await expect(svc.findBySubjectKey('u1', 'other', 'x')).resolves.toBeNull();
+        });
+    });
+
     describe('listPending', () => {
         it('returns the mapped pending rows', async () => {
             proposals.findAndCount.mockResolvedValue([[makeProposal()], 1]);

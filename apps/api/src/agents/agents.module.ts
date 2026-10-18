@@ -77,7 +77,6 @@ import type { RepositoryRole } from '@ever-works/contracts/api';
 import {
     formatInboundEmailChatPost,
     formatInboundEmailTaskDescription,
-    inboundEmailAttachmentList,
     inboundEmailAwaitingOwnerNote,
     inboundEmailReplyAutoDispatchEnabled,
     inboundEmailReplyHint,
@@ -711,11 +710,14 @@ async function assertRealWriteTarget(
                         // is the sender's. Both are defused, and the body is fenced as
                         // untrusted data exactly like a reply joined onto a Task.
                         const title = inboundEmailTaskTitle(subject, from);
+                        // The attachment list (sender-written names) is fenced
+                        // inside the same untrusted section.
                         const body = formatInboundEmailTaskDescription({
                             emailMessageId,
                             from,
                             subject: subject ?? '',
                             bodyText: bodyText ?? '',
+                            attachments,
                         });
                         // EW-P4-3 — a public webhook has no request scope, so the
                         // Task is placed explicitly: where its assignee, the
@@ -746,10 +748,10 @@ async function assertRealWriteTarget(
                             senderTrusted === true || inboundEmailReplyAutoDispatchEnabled();
                         const data = {
                             title,
-                            // EW-P4-3 — the attachments it came with, and the
-                            // message id the agent replies in thread with.
+                            // EW-P4-3 — the message id the agent replies in thread
+                            // with (the attachments are listed inside the fence).
                             description:
-                                `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}${trusted ? '' : inboundEmailAwaitingOwnerNote()}`.trim(),
+                                `${body}${inboundEmailReplyHint(emailMessageId)}${trusted ? '' : inboundEmailAwaitingOwnerNote()}`.trim(),
                             labels: trusted
                                 ? ['inbound-email']
                                 : ['inbound-email', AWAITING_OWNER_LABEL],
@@ -2256,22 +2258,22 @@ async function assertRealWriteTarget(
                                   } catch (error) {
                                       // The (actionType, subjectKey) unique index refused a
                                       // second proposal about the same subject: hand back the
-                                      // one already waiting rather than a raw DB error.
+                                      // one already waiting, or say how it was decided. Any
+                                      // other failure (no such agent, an empty title, the
+                                      // database) keeps its own error — looked up directly by
+                                      // subject, in any status, so no queue page can miss it.
                                       if (!subjectKey) throw error;
-                                      const { rows } = await approvals.list(userId, {
-                                          status: 'pending',
-                                          limit: 200,
-                                      });
-                                      const existing = rows.find(
-                                          (row) =>
-                                              row.actionType === 'other' &&
-                                              row.subjectKey === subjectKey,
-                                      );
-                                      if (existing) {
+                                      const existing = await approvals
+                                          .findBySubjectKey(userId, 'other', subjectKey)
+                                          .catch(() => null);
+                                      if (!existing) throw error;
+                                      if (existing.status === 'pending') {
                                           return { id: existing.id, status: existing.status };
                                       }
                                       throw new Error(
-                                          'A request about this was already decided by the owner; it cannot be proposed again.',
+                                          existing.decidedVia === 'guardrail'
+                                              ? `A request about this was ${existing.status} by the agent's guardrails (proposal ${existing.id}); it cannot be proposed again.`
+                                              : `A request about this was already ${existing.status} by the owner (proposal ${existing.id}); it cannot be proposed again.`,
                                       );
                                   }
                               },

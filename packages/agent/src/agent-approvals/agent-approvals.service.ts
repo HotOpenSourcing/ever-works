@@ -304,6 +304,21 @@ export class AgentApprovalsService {
         return { rows: rows.map(toAgentActionProposalDto), total };
     }
 
+    /**
+     * The caller's proposal about one subject (`(actionType, subjectKey)` is
+     * unique), in ANY status, or `null`. Lets a caller whose second proposal
+     * the unique index refused hand back the existing one — or say how it
+     * was decided — without paging through the queue.
+     */
+    async findBySubjectKey(
+        userId: string,
+        actionType: AgentActionProposalActionType,
+        subjectKey: string,
+    ): Promise<AgentActionProposalDto | null> {
+        const row = await this.proposals.findOne({ where: { userId, actionType, subjectKey } });
+        return row ? toAgentActionProposalDto(row) : null;
+    }
+
     async getOne(userId: string, id: string): Promise<AgentActionProposalDto> {
         const row = await this.requireOwned(userId, id);
         return toAgentActionProposalDto(row);

@@ -509,16 +509,12 @@ describe('api-side AgentsModule — domain chat-tool wiring', () => {
         const stubs: unknown[] = (factory?.inject ?? []).map((_, index) => ({ stub: index }));
         const approvals = {
             createProposal: jest.fn().mockRejectedValue(new Error('duplicate key value')),
-            list: jest.fn().mockResolvedValue({
-                rows: [
-                    {
-                        id: 'p-old',
-                        actionType: 'other',
-                        subjectKey: 'escalation:e1',
-                        status: 'pending',
-                    },
-                ],
-                total: 1,
+            findBySubjectKey: jest.fn().mockResolvedValue({
+                id: 'p-old',
+                actionType: 'other',
+                subjectKey: 'escalation:e1',
+                status: 'pending',
+                decidedVia: null,
             }),
         };
         stubs[stubs.length - 1] = approvals;
@@ -540,8 +536,35 @@ describe('api-side AgentsModule — domain chat-tool wiring', () => {
             expect.objectContaining({ subjectKey: 'escalation:e1' }),
         );
 
-        approvals.list.mockResolvedValueOnce({ rows: [], total: 0 });
-        await expect(bundle.proposals.propose('user-1', input)).rejects.toThrow(/already decided/);
+        expect(approvals.findBySubjectKey).toHaveBeenCalledWith('user-1', 'other', 'escalation:e1');
+
+        // Decided by the owner: says so, with the actual status.
+        approvals.findBySubjectKey.mockResolvedValueOnce({
+            id: 'p-old',
+            status: 'rejected',
+            decidedVia: 'user',
+        });
+        await expect(bundle.proposals.propose('user-1', input)).rejects.toThrow(
+            /already rejected by the owner \(proposal p-old\)/,
+        );
+
+        // Blocked by a guardrail: no person decided it, and the message says so.
+        approvals.findBySubjectKey.mockResolvedValueOnce({
+            id: 'p-old',
+            status: 'rejected',
+            decidedVia: 'guardrail',
+        });
+        await expect(bundle.proposals.propose('user-1', input)).rejects.toThrow(
+            /rejected by the agent's guardrails/,
+        );
+
+        // CodeRabbit on #2769: any OTHER failure keeps its own error — no
+        // existing row means the create failed for a different reason.
+        approvals.createProposal.mockRejectedValueOnce(new Error('Agent agent-1 not found.'));
+        approvals.findBySubjectKey.mockResolvedValueOnce(null);
+        await expect(bundle.proposals.propose('user-1', input)).rejects.toThrow(
+            'Agent agent-1 not found.',
+        );
     });
 
     it('carries no proposals seam when the approvals service is not bound', () => {
@@ -1021,6 +1044,17 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
         const [, created, scope] = tasks.create.mock.calls[0];
         expect(scope).toEqual({ tenantId: 'tenant-1', organizationId: 'org-1' });
         expect(created.description).toContain('- a.pdf (application/pdf, 6 bytes, upload sha-1)');
+        // CodeRabbit on #2769: the sender-written names sit INSIDE the fence.
+        const description = created.description as string;
+        expect(description.indexOf('- a.pdf')).toBeGreaterThan(
+            description.indexOf('<email-attachments>'),
+        );
+        expect(description.indexOf('- a.pdf')).toBeLessThan(
+            description.indexOf('</email-attachments>'),
+        );
+        expect(description.indexOf('</email-attachments>')).toBeLessThan(
+            description.indexOf('<email-body>'),
+        );
         expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
     });
 
