@@ -146,9 +146,43 @@ describe('AgentMemoryController', () => {
                 expect.anything(),
             );
 
-            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('viewer only'));
+            ownership.ensureCanEdit.mockRejectedValueOnce(new ForbiddenException('viewer only'));
             await controller.save(auth, { content: 'y', projectId: workId });
             expect(agentMemory.saveMemory.mock.calls.at(-1)![0].projectId).toBeUndefined();
+
+            ownership.ensureCanEdit.mockRejectedValueOnce(new NotFoundException('no such Work'));
+            await controller.save(auth, { content: 'z', projectId: workId });
+            expect(agentMemory.saveMemory.mock.calls.at(-1)![0].projectId).toBeUndefined();
+        });
+
+        // CodeRabbit on #2769: a Work named only by `projectId` also picks
+        // that Work's provider and settings (the facade options carry it).
+        it('carries a Work resolved from projectId into the facade options', async () => {
+            const workId = '0b6c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
+            await controller.save(auth, { content: 'x', projectId: workId });
+            expect(agentMemory.saveMemory).toHaveBeenLastCalledWith(
+                expect.objectContaining({ projectId: workId }),
+                { userId: 'user-1', workId },
+            );
+            await controller.search(auth, { query: 'q', projectId: workId } as any);
+            expect(agentMemory.searchMemory.mock.calls.at(-1)![1]).toEqual({
+                userId: 'user-1',
+                workId,
+            });
+            // A refused or non-Work project carries no Work into the options.
+            await controller.save(auth, { content: 'y', projectId: 'not-a-work' });
+            expect(agentMemory.saveMemory.mock.calls.at(-1)![1]).toEqual({ userId: 'user-1' });
+        });
+
+        // CodeRabbit on #2769: an ownership-service FAILURE is not "no such
+        // Work" — it propagates instead of saving into the default project.
+        it('propagates an unexpected ownership failure instead of falling back', async () => {
+            const workId = '0b6c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
+            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('connection refused'));
+            await expect(
+                controller.save(auth, { content: 'x', projectId: workId }),
+            ).rejects.toThrow('connection refused');
+            expect(agentMemory.saveMemory).not.toHaveBeenCalled();
         });
     });
 

@@ -140,7 +140,7 @@ export class AgentMemoryController {
         try {
             const session = await this.agentMemory.openSession(
                 metadata,
-                this.facadeOptions(auth, dto.workId),
+                this.facadeOptions(auth, projectId),
             );
             return { status: 'success', session };
         } catch (error) {
@@ -186,7 +186,7 @@ export class AgentMemoryController {
         try {
             const sessions = await this.agentMemory.listSessions(
                 { limit: query.limit, projectId },
-                this.facadeOptions(auth, query.workId),
+                this.facadeOptions(auth, projectId),
             );
             return { status: 'success', sessions };
         } catch (error) {
@@ -224,7 +224,7 @@ export class AgentMemoryController {
                     sessionId: dto.sessionId,
                     projectId,
                 },
-                this.facadeOptions(auth, dto.workId),
+                this.facadeOptions(auth, projectId),
             );
             return { status: 'success', record };
         } catch (error) {
@@ -246,7 +246,7 @@ export class AgentMemoryController {
                     sessionId: dto.sessionId,
                     projectId,
                 },
-                this.facadeOptions(auth, dto.workId),
+                this.facadeOptions(auth, projectId),
             );
             return { status: 'success', ...response };
         } catch (error) {
@@ -268,7 +268,7 @@ export class AgentMemoryController {
                     projectId,
                     maxTokens: dto.maxTokens,
                 },
-                this.facadeOptions(auth, dto.workId),
+                this.facadeOptions(auth, projectId),
             );
             return { status: 'success', context };
         } catch (error) {
@@ -331,8 +331,15 @@ export class AgentMemoryController {
             try {
                 const access = await ensure(candidate);
                 return access?.work?.id ?? candidate;
-            } catch {
-                // Not a Work the caller may reach — fall through to the default.
+            } catch (error) {
+                // Not a Work the caller may reach (the ownership service's own
+                // 404 / 403) — fall through to the default. Anything else (its
+                // repository is down…) is NOT "no such Work": rethrown, so a
+                // save never lands in the default project by accident
+                // (CodeRabbit on #2769).
+                if (!(error instanceof NotFoundException || error instanceof ForbiddenException)) {
+                    throw error;
+                }
             }
         }
         return undefined;
@@ -457,6 +464,12 @@ export class AgentMemoryController {
         return error instanceof Error && error.message.includes('does not support');
     }
 
+    /**
+     * Facade options for one call. The project-resolving handlers pass the
+     * RESOLVED project — always an authorised Work's id when set (from
+     * `workId`, or a `projectId` naming a Work) — so that Work's provider and
+     * settings serve the call the memory lands in (CodeRabbit on #2769).
+     */
     private facadeOptions(auth: AuthenticatedUser, workId?: string): FacadeOptions {
         return {
             userId: auth.userId,
