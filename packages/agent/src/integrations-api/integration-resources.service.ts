@@ -17,10 +17,12 @@ import {
 import { Agent } from '../entities/agent.entity';
 import { Goal } from '../entities/goal.entity';
 import { Mission } from '../entities/mission.entity';
+import { Organization } from '../entities/organization.entity';
 import { OrganizationMember } from '../entities/organization-member.entity';
 import { Task } from '../entities/task.entity';
 import { TaskChatMessage } from '../entities/task-chat-message.entity';
 import { Team } from '../entities/team.entity';
+import { Tenant } from '../entities/tenant.entity';
 import { Work } from '../entities/work.entity';
 import { WorkProposal } from '../entities/work-proposal.entity';
 import type { ExternalLinkEntityType } from '../entities/external-record-link.entity';
@@ -203,7 +205,18 @@ export class IntegrationResourcesService {
         };
     }
 
-    /** `GET /members` — the organization's roster, ordered by `(updatedAt, id)`. */
+    /**
+     * `GET /members` — the organization's roster, ordered by `(updatedAt, id)`.
+     *
+     * The Tenant owner is on every roster (role `owner`, member DTO) even
+     * without a roster row: whoever created the organization has none, so a
+     * one-person tenant listed nobody and an integration could never pair the
+     * owner (found by the first local Gauzy ↔ Ever Works run). The owner is
+     * synthesized on the first page, the way the settings roster does it
+     * (`organization-invitation-flow.service.ts`), with the organization's
+     * `createdAt` as `joinedAt` / `updatedAt`, so an `updatedSince` after it
+     * leaves the unchanged owner out.
+     */
     async members(
         organizationId: string,
         query: KeysetQuery,
@@ -214,11 +227,51 @@ export class IntegrationResourcesService {
             .where('row.organizationId = :organizationId', { organizationId });
         const page = await readKeysetPage(qb, 'row', query);
         const data: Record<string, unknown>[] = [];
+        if (!query.cursor) {
+            const owner = await this.ownerWithoutRosterRow(organizationId);
+            if (owner && !(query.updatedSince && owner.createdAt < query.updatedSince)) {
+                const member = await buildMemberSnapshot(this.dataSource.manager, {
+                    organizationId,
+                    userId: owner.userId,
+                    role: 'owner',
+                    joinedAt: owner.createdAt,
+                    updatedAt: owner.createdAt,
+                } as Pick<
+                    OrganizationMember,
+                    'organizationId' | 'userId' | 'role' | 'joinedAt' | 'updatedAt'
+                >);
+                if (member) data.push(member as unknown as Record<string, unknown>);
+            }
+        }
         for (const row of page.data) {
             const member = await buildMemberSnapshot(this.dataSource.manager, row);
             if (member) data.push(member as unknown as Record<string, unknown>);
         }
         return { data, nextCursor: page.nextCursor, hasMore: page.hasMore };
+    }
+
+    /**
+     * The Tenant owner of the organization when they have no roster row of
+     * their own (they are on the roster all the same), else `null`.
+     */
+    private async ownerWithoutRosterRow(
+        organizationId: string,
+    ): Promise<{ userId: string; createdAt: Date } | null> {
+        const manager = this.dataSource.manager;
+        const organization = await manager
+            .getRepository(Organization)
+            .findOne({ where: { id: organizationId }, select: ['id', 'tenantId', 'createdAt'] });
+        if (!organization?.tenantId) return null;
+        const tenant = await manager
+            .getRepository(Tenant)
+            .findOne({ where: { id: organization.tenantId }, select: ['id', 'ownerUserId'] });
+        const userId = tenant?.ownerUserId;
+        if (!userId) return null;
+        const rows = await manager
+            .getRepository(OrganizationMember)
+            .count({ where: { organizationId, userId } });
+        if (rows > 0) return null;
+        return { userId, createdAt: new Date(organization.createdAt) };
     }
 
     /**
@@ -295,7 +348,13 @@ export class IntegrationResourcesService {
                 const member = await this.dataSource
                     .getRepository(OrganizationMember)
                     .findOne({ where: { organizationId, userId: entityId } });
-                if (!member) throw notFound('member', entityId);
+                // The Tenant owner is a member without a roster row (see `members`).
+                if (
+                    !member &&
+                    (await this.ownerWithoutRosterRow(organizationId))?.userId !== entityId
+                ) {
+                    throw notFound('member', entityId);
+                }
                 return true;
             }
             case 'task_comment': {
