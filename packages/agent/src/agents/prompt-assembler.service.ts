@@ -3,11 +3,7 @@ import type { Agent } from '../entities/agent.entity';
 // Dependency-free helper (skills subpath): renders the one-line
 // `files: name (kind, size); …` manifest for a skill's companion files.
 import { renderSkillFileManifestLine } from '../skills/skill-invocation';
-import {
-    defuseFenceLookalikes,
-    fenceUntrustedContent,
-    neutralizeControlTokens,
-} from '../utils/untrusted-content';
+import { defuseFenceLookalikes, fenceUntrustedContent } from '../utils/untrusted-content';
 
 /**
  * Agents/Skills/Tasks PR #1017 — Phase 7.1–7.3.
@@ -535,15 +531,21 @@ function neutralizeTurnAttribute(value: string): string {
 // `message` is included so a system-segment body (a Skill, advanced
 // prompts, a scope description) cannot forge a conversation turn in the
 // user message either.
-const SEGMENT_FENCE_TOKEN_PATTERN =
-    /<\/?(?:skill|work-advanced-prompts|scope-context|recent-activity|recent-runs|message)\b/gi;
+const SEGMENT_FENCE_TOKENS = [
+    'skill',
+    'work-advanced-prompts',
+    'scope-context',
+    'recent-activity',
+    'recent-runs',
+    'message',
+] as const;
 
 function neutralizeInjectedBlock(value: string): string {
-    // Strip chat-template markers (after folding look-alikes) FIRST, then
-    // defuse fence tags: the other order let `<[INST]/skill>` become a live
-    // `</skill>` once the marker in the middle was removed.
-    return neutralizeControlTokens(value).replace(
-        SEGMENT_FENCE_TOKEN_PATTERN,
-        (token) => `${token[0]}\u200B${token.slice(1)}`,
-    );
+    // The shared defuser: chat-template markers are stripped FIRST (so
+    // `<[INST]/skill>` cannot become a live `</skill>`), look-alike spellings
+    // are found on a folded shadow of each line (only those lines are
+    // rewritten), and the segment tags use the canonical linear
+    // `<\s*(?:\/\s*)?name` shape — plus the fence family and the
+    // lower-case role/tool tags.
+    return defuseFenceLookalikes(value, SEGMENT_FENCE_TOKENS);
 }

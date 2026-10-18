@@ -5,8 +5,9 @@
  * The canonical implementation is `packages/agent/src/utils/untrusted-content.ts`
  * (`fenceUntrusted`, `CHAT_TEMPLATE_MARKER_PATTERN`). `apps/web` does not depend
  * on `@ever-works/agent` (a NestJS server package), so this file mirrors the
- * same contract in a dependency-free form: look-alikes folded first (`\p{Cf}`
- * dropped, NFKC to ASCII), chat-template markers stripped completely (linear
+ * same contract in a dependency-free form: look-alikes detected on a folded
+ * shadow of each line (`\p{Cf}` dropped, NFKC to ASCII) and only those lines
+ * rewritten, chat-template markers stripped completely (linear
  * stack, any nesting depth) BEFORE tags are defused, a random per-call nonce
  * in the open/close markers, the fence family + lower-case role/tool tags
  * defused inside the body, and an explicit "data, never instructions, never
@@ -33,7 +34,11 @@ const ROLE_TAG_PATTERN =
 /** The fence family itself, any case, any label / nonce. */
 const FAMILY_TAG_PATTERN = /<\s*(?:\/\s*)?(?:untrusted[\w-]*|task_brief)(?![\w-])/gi;
 
-/** Drop `\p{Cf}`; fold non-ASCII to its NFKC form when that is printable ASCII (never `"` or `\`). */
+/**
+ * DETECTION view ("shadow"): drop `\p{Cf}`; fold non-ASCII to its NFKC form
+ * when that is printable ASCII (never `"` or `\`). Fenced text is never
+ * rewritten through this wholesale — see `foldLinesOfInterest`.
+ */
 export function foldLookalikes(value: string): string {
     if (!value || !HAS_NON_ASCII.test(value)) return value ?? '';
     let out = '';
@@ -69,16 +74,56 @@ function stripMarkers(value: string): string {
     return out.join('');
 }
 
-/** Fold look-alikes, then strip every chat-template marker (any nesting depth). */
+/** How many marker/tag delimiters (`< > | [ ]`) a string holds. */
+function countDelimiters(value: string): number {
+    let count = 0;
+    for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        if (code === 60 || code === 62 || code === 124 || code === 91 || code === 93) count++;
+    }
+    return count;
+}
+
+/**
+ * Shadow folding (see the canonical file): a line is replaced by its folded
+ * form only when that reveals a marker / tag of interest or new delimiters;
+ * every other line (`10⁹`, `m²`, emoji ZWJ, Persian ZWNJ …) stays byte-identical.
+ */
+function foldLinesOfInterest(text: string, interesting: (folded: string) => boolean): string {
+    if (!text || !HAS_NON_ASCII.test(text)) return text ?? '';
+    const lines = text.split('\n');
+    let changed = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!HAS_NON_ASCII.test(line)) continue;
+        const folded = foldLookalikes(line);
+        if (folded === line) continue;
+        if (interesting(folded) || countDelimiters(folded) > countDelimiters(line)) {
+            lines[i] = folded;
+            changed = true;
+        }
+    }
+    return changed ? lines.join('\n') : text;
+}
+
+const hasMarker = (value: string): boolean => MARKER_ANYWHERE.test(value);
+const ROLE_TAG_TEST = new RegExp(ROLE_TAG_PATTERN.source);
+const FAMILY_TAG_TEST = new RegExp(FAMILY_TAG_PATTERN.source, 'i');
+
+/** Strip every chat-template marker, incl. look-alike spellings found on the folded shadow. */
 export function neutralizeControlTokens(value: string): string {
     if (!value) return value ?? '';
-    return stripMarkers(foldLookalikes(value));
+    return stripMarkers(foldLinesOfInterest(value, hasMarker));
 }
 
 const insertZeroWidth = (token: string): string => `<${ZERO_WIDTH_SPACE}${token.slice(1)}`;
 
 function defuse(body: string): string {
-    return neutralizeControlTokens(body)
+    const shadowed = foldLinesOfInterest(
+        body,
+        (folded) => hasMarker(folded) || FAMILY_TAG_TEST.test(folded) || ROLE_TAG_TEST.test(folded),
+    );
+    return stripMarkers(shadowed)
         .replace(FAMILY_TAG_PATTERN, insertZeroWidth)
         .replace(ROLE_TAG_PATTERN, insertZeroWidth);
 }

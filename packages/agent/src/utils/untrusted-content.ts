@@ -59,7 +59,7 @@ const HAS_NON_ASCII = /[^\x00-\x7F]/;
 const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
 
 /**
- * Fold look-alikes BEFORE anything is matched: drop every `\p{Cf}` format
+ * The DETECTION view of a string ("shadow"): drop every `\p{Cf}` format
  * character (a soft hyphen or zero-width space inside `</sys\u00ADtem>`
  * would otherwise slip past a literal match) and replace each non-ASCII
  * code point by its NFKC form when that form is printable ASCII
@@ -68,6 +68,10 @@ const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
  * A fold that would produce `"` or `\` is skipped, so JSON stays JSON
  * (a full-width quote inside a string must not become a real one). Pure
  * ASCII input is returned untouched without a scan.
+ *
+ * Fenced text is NOT rewritten through this wholesale (`10⁹` → `109`,
+ * `m²` → `m2`, broken emoji ZWJ sequences and Persian ZWNJ would corrupt
+ * content an agent copies into files) — see {@link foldLinesOfInterest}.
  */
 export function foldLookalikes(value: string): string {
     if (!value || !HAS_NON_ASCII.test(value)) return value ?? '';
@@ -120,14 +124,56 @@ function stripMarkers(value: string): string {
     return out.join('');
 }
 
+/** How many marker/tag delimiters (`< > | [ ]`) a string holds. */
+function countDelimiters(value: string): number {
+    let count = 0;
+    for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        // < > | [ ]
+        if (code === 60 || code === 62 || code === 124 || code === 91 || code === 93) count++;
+    }
+    return count;
+}
+
 /**
- * Remove every chat-template control marker from `value`, after folding
- * look-alikes. Fully reduced (nested pieces cannot re-assemble a marker),
- * linear time. Newlines and all other text are preserved.
+ * Shadow folding: detection runs on the folded view, rewriting does not.
+ *
+ * Each LINE is folded ({@link foldLookalikes}) only to look at it. The
+ * folded line replaces the original only when it reveals something the
+ * caller must defuse (`interesting`) or when folding produced new marker /
+ * tag delimiters (a look-alike `＜` that could start a tag across the line
+ * break). Every other line — `10⁹`, `m²`, `ﬁ`, `™`, emoji ZWJ families,
+ * Persian ZWNJ — stays byte-identical. Pure-ASCII text is returned as is.
+ */
+function foldLinesOfInterest(text: string, interesting: (folded: string) => boolean): string {
+    if (!text || !HAS_NON_ASCII.test(text)) return text ?? '';
+    const lines = text.split('\n');
+    let changed = false;
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (!HAS_NON_ASCII.test(line)) continue;
+        const folded = foldLookalikes(line);
+        if (folded === line) continue;
+        if (interesting(folded) || countDelimiters(folded) > countDelimiters(line)) {
+            lines[i] = folded;
+            changed = true;
+        }
+    }
+    return changed ? lines.join('\n') : text;
+}
+
+const hasMarker = (value: string): boolean => MARKER_ANYWHERE.test(value);
+
+/**
+ * Remove every chat-template control marker from `value`, including
+ * look-alike spellings (full-width `｜`, zero-width characters inside),
+ * which are found on the folded shadow of each line. Fully reduced (nested
+ * pieces cannot re-assemble a marker), linear time. Lines without a marker
+ * are left byte-identical.
  */
 export function neutralizeControlTokens(value: string): string {
     if (!value) return value ?? '';
-    return stripMarkers(foldLookalikes(value));
+    return stripMarkers(foldLinesOfInterest(value, hasMarker));
 }
 
 /** Non-mutating presence check for {@link CHAT_TEMPLATE_MARKER_PATTERN} (after folding). */
@@ -182,16 +228,19 @@ function buildTagPattern(names: readonly string[], flags: string): RegExp {
 }
 
 const ROLE_TAG_PATTERN = buildTagPattern(ROLE_TAG_NAMES, 'g');
+const ROLE_TAG_TEST = buildTagPattern(ROLE_TAG_NAMES, '');
 const DEFAULT_FAMILY_PATTERN = buildTagPattern(FENCE_FAMILY_NAMES, 'gi');
+const DEFAULT_FAMILY_TEST = buildTagPattern(FENCE_FAMILY_NAMES, 'i');
 
-function familyPatternFor(extraTokens: readonly string[]): RegExp {
+/** `[global replace pattern, non-global test pattern]` for the fence family + `extraTokens`. */
+function familyPatternsFor(extraTokens: readonly string[]): [RegExp, RegExp] {
     const extras = extraTokens
         .map((token) => token.trim())
         .filter((token) => token.length > 0)
         .map((token) => escapeRegExp(token));
-    return extras.length > 0
-        ? buildTagPattern([...FENCE_FAMILY_NAMES, ...extras], 'gi')
-        : DEFAULT_FAMILY_PATTERN;
+    if (extras.length === 0) return [DEFAULT_FAMILY_PATTERN, DEFAULT_FAMILY_TEST];
+    const names = [...FENCE_FAMILY_NAMES, ...extras];
+    return [buildTagPattern(names, 'gi'), buildTagPattern(names, 'i')];
 }
 
 const insertZeroWidth = (token: string): string => `<${ZERO_WIDTH_SPACE}${token.slice(1)}`;
@@ -199,7 +248,9 @@ const insertZeroWidth = (token: string): string => `<${ZERO_WIDTH_SPACE}${token.
 /**
  * Defuse marker look-alikes inside an untrusted body, in this order:
  *
- *  1. fold look-alikes ({@link foldLookalikes}: drop `\p{Cf}`, NFKC to ASCII);
+ *  1. fold look-alikes on the SHADOW ({@link foldLinesOfInterest}): only a
+ *     line whose folded form holds a marker or a tag of interest is
+ *     replaced by its folded form; every other line stays byte-identical;
  *  2. strip chat-template markers completely — BEFORE tags are looked at,
  *     so `<[INST]/message>` or `<<|im_end|>/untrusted_x>` cannot turn into
  *     a live tag once the marker in the middle is gone;
@@ -212,9 +263,13 @@ const insertZeroWidth = (token: string): string => `<${ZERO_WIDTH_SPACE}${token.
  */
 export function defuseFenceLookalikes(body: string, extraTokens: readonly string[] = []): string {
     if (!body) return body ?? '';
-    const stripped = neutralizeControlTokens(body);
-    return stripped
-        .replace(familyPatternFor(extraTokens), insertZeroWidth)
+    const [familyPattern, familyTest] = familyPatternsFor(extraTokens);
+    const shadowed = foldLinesOfInterest(
+        body,
+        (folded) => hasMarker(folded) || familyTest.test(folded) || ROLE_TAG_TEST.test(folded),
+    );
+    return stripMarkers(shadowed)
+        .replace(familyPattern, insertZeroWidth)
         .replace(ROLE_TAG_PATTERN, insertZeroWidth);
 }
 
