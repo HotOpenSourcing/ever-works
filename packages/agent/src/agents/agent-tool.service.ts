@@ -68,6 +68,8 @@ import { buildFleetTools } from '../fleet/agent-fleet-tools';
 import { buildBrowserTools } from '../facades/agent-browser-tools';
 import { buildEscalationTools } from './agent-escalation-tools';
 import { AGENT_FILE_EDIT_PROPOSAL_KIND } from './agent-proposal-kinds';
+// Operator-declared `{{cred.key}}` allowances (EVERWORKS_CRED_<KEY>_ALLOW).
+import { credentialAllowEnvVar, credentialUseAllowed } from '../policy/credential-allowlist';
 // Leaf (contracts-only imports) — classifies a tool for the fail-closed
 // grant fallback in `resolveGrantedTools`.
 import { classifyAction } from '../safety/action-category';
@@ -947,7 +949,12 @@ export class AgentToolService {
                 // send the secret wherever that argument goes (exfiltration),
                 // and on a shared install the resolver may hold operator-wide
                 // values. Nothing is resolved, nothing is sent.
-                const misplaced = credentialRefsOutsideSlots(args, slots);
+                // …unless the OPERATOR allowed that credential for this tool
+                // (`EVERWORKS_CRED_<KEY>_ALLOW=tool[@host]`, see
+                // `policy/credential-allowlist.ts`).
+                const misplaced = credentialRefsOutsideSlots(args, slots).filter(
+                    (key) => !credentialUseAllowed({ key, toolName: descriptor.name, args }),
+                );
                 if (misplaced.length > 0) {
                     return {
                         error:
@@ -958,7 +965,9 @@ export class AgentToolService {
                                 slots.size > 0
                                     ? `accepts them only in: ${[...slots].join(', ')}`
                                     : 'declares none'
-                            }. Nothing was sent.`,
+                            }. An operator can allow one for this tool with ${misplaced
+                                .map((key) => `${credentialAllowEnvVar(key)}=${descriptor.name}`)
+                                .join(', ')}. Nothing was sent.`,
                     };
                 }
 

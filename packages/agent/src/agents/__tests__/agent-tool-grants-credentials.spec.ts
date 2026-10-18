@@ -239,6 +239,33 @@ describe('`{{cred.key}}` interpolation at invoke time (audit item G14)', () => {
         expect(credentials.resolve).not.toHaveBeenCalled();
     });
 
+    it('substitutes where the OPERATOR allowed that credential for the tool (EVERWORKS_CRED_<KEY>_ALLOW)', async () => {
+        process.env[`${ENV_CREDENTIAL_PREFIX}API_TOKEN_ALLOW`] = 'getActivity';
+        try {
+            const credentials = {
+                resolve: jest.fn().mockResolvedValue(new Map([['api_token', 'value-12345']])),
+            };
+            const { svc } = svcWithEchoTool(credentials);
+            const tool = svc
+                .resolveAllowedTools(makeAgent())
+                .find((t) => t.name === 'getActivity')!;
+            const result = (await tool.invoke({ note: 'Bearer {{cred.api_token}}' })) as {
+                error?: string;
+            };
+            expect(result.error).toBeUndefined();
+            expect(credentials.resolve).toHaveBeenCalledWith(expect.anything(), ['api_token']);
+        } finally {
+            delete process.env[`${ENV_CREDENTIAL_PREFIX}API_TOKEN_ALLOW`];
+        }
+    });
+
+    it('the refusal tells the operator how to allow it', async () => {
+        const { svc } = svcWithEchoTool({ resolve: jest.fn() });
+        const tool = svc.resolveAllowedTools(makeAgent()).find((t) => t.name === 'getActivity')!;
+        const result = (await tool.invoke({ note: '{{cred.api_token}}' })) as { error?: string };
+        expect(result.error).toContain(`${ENV_CREDENTIAL_PREFIX}API_TOKEN_ALLOW=getActivity`);
+    });
+
     it('substitutes ONLY into a declared credential slot', async () => {
         const credentials = {
             resolve: jest.fn().mockResolvedValue(new Map([['api_token', 'value-12345']])),
