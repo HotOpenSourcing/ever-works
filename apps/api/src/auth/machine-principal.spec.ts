@@ -2,13 +2,13 @@ import { ForbiddenException } from '@nestjs/common';
 import { IntegrationHttpException } from './integration/integration-http.exception';
 import { RefuseFleetRunGuard } from './guards/refuse-fleet-run.guard';
 import {
-    MACHINE_REFUSED_WORK_FIELDS,
     fleetRunBindingOf,
     isHumanSession,
     machinePrincipalKind,
     presentFields,
     refuseMachinePrincipalAction,
     refuseMachinePrincipalFields,
+    refuseMachinePrincipalFieldsOutside,
     requireHumanSession,
     truthyFields,
     widerAgentPermissions,
@@ -28,6 +28,8 @@ const integration = {
     integration: { keyId: 'k1', actAsUserId: null },
 } as unknown as AuthenticatedUser;
 const runToken = { fleetRunCredential: { jobId: 'j1', organizationId: null, agentId: 'a1' } };
+
+const WORK_GATE_FIELDS = ['mergePolicy', 'checkDefaults', 'checksPolicy', 'repoDeclaredCommands'];
 
 describe('machine principal detection', () => {
     it('tells a fleet run, an integration key and a person apart', () => {
@@ -51,31 +53,16 @@ describe('refuseMachinePrincipalFields', () => {
     const body = { name: 'x', mergePolicy: { allowAgentMerge: true }, checkDefaults: null };
 
     it('names exactly the present fields (null is a change, undefined is not)', () => {
-        expect(presentFields(body, MACHINE_REFUSED_WORK_FIELDS)).toEqual([
-            'mergePolicy',
-            'checkDefaults',
-        ]);
-        expect(presentFields({ mergePolicy: undefined }, MACHINE_REFUSED_WORK_FIELDS)).toEqual([]);
+        expect(presentFields(body, WORK_GATE_FIELDS)).toEqual(['mergePolicy', 'checkDefaults']);
+        expect(presentFields({ mergePolicy: undefined }, WORK_GATE_FIELDS)).toEqual([]);
     });
 
     it('answers 403 to a fleet run and 422 domain_rule to an integration key', () => {
         expect(() =>
-            refuseMachinePrincipalFields(
-                personalKey,
-                runToken,
-                body,
-                MACHINE_REFUSED_WORK_FIELDS,
-                'a Work',
-            ),
+            refuseMachinePrincipalFields(personalKey, runToken, body, WORK_GATE_FIELDS, 'a Work'),
         ).toThrow(ForbiddenException);
         try {
-            refuseMachinePrincipalFields(
-                integration,
-                {},
-                body,
-                MACHINE_REFUSED_WORK_FIELDS,
-                'a Work',
-            );
+            refuseMachinePrincipalFields(integration, {}, body, WORK_GATE_FIELDS, 'a Work');
             throw new Error('expected a refusal');
         } catch (error) {
             expect(error).toBeInstanceOf(IntegrationHttpException);
@@ -91,23 +78,17 @@ describe('refuseMachinePrincipalFields', () => {
 
     it('lets a session or a personal key through, and a machine principal that sends none of the fields', () => {
         expect(() =>
-            refuseMachinePrincipalFields(session, {}, body, MACHINE_REFUSED_WORK_FIELDS, 'a Work'),
+            refuseMachinePrincipalFields(session, {}, body, WORK_GATE_FIELDS, 'a Work'),
         ).not.toThrow();
         expect(() =>
-            refuseMachinePrincipalFields(
-                personalKey,
-                undefined,
-                body,
-                MACHINE_REFUSED_WORK_FIELDS,
-                'a Work',
-            ),
+            refuseMachinePrincipalFields(personalKey, undefined, body, WORK_GATE_FIELDS, 'a Work'),
         ).not.toThrow();
         expect(() =>
             refuseMachinePrincipalFields(
                 personalKey,
                 runToken,
                 { name: 'x' },
-                MACHINE_REFUSED_WORK_FIELDS,
+                WORK_GATE_FIELDS,
                 'a Work',
             ),
         ).not.toThrow();
@@ -163,5 +144,63 @@ describe('RefuseFleetRunGuard', () => {
         const guard = new RefuseFleetRunGuard();
         expect(() => guard.canActivate(context(runToken))).toThrow(ForbiddenException);
         expect(guard.canActivate(context({ user: personalKey }))).toBe(true);
+    });
+});
+
+describe('refuseMachinePrincipalFieldsOutside (the allowlist twin)', () => {
+    const allowed = ['name', 'description'];
+
+    it('lets a machine principal set only the allowlisted fields', () => {
+        expect(() =>
+            refuseMachinePrincipalFieldsOutside(
+                personalKey,
+                runToken,
+                { name: 'x', description: 'y' },
+                allowed,
+                'a Work',
+            ),
+        ).not.toThrow();
+    });
+
+    it('refuses everything else, naming the fields, including ones nobody listed yet', () => {
+        expect(() =>
+            refuseMachinePrincipalFieldsOutside(
+                personalKey,
+                runToken,
+                { name: 'x', communityPrEnabled: true, brandNewSetting: 1 },
+                allowed,
+                'a Work',
+            ),
+        ).toThrow(/communityPrEnabled, brandNewSetting/);
+        expect(() =>
+            refuseMachinePrincipalFieldsOutside(
+                integration,
+                {},
+                { committerEmail: 'a@b.c' },
+                allowed,
+                'a Work',
+            ),
+        ).toThrow(IntegrationHttpException);
+    });
+
+    it('ignores undefined fields and never applies to a person', () => {
+        expect(() =>
+            refuseMachinePrincipalFieldsOutside(
+                personalKey,
+                runToken,
+                { name: 'x', owner: undefined },
+                allowed,
+                'a Work',
+            ),
+        ).not.toThrow();
+        expect(() =>
+            refuseMachinePrincipalFieldsOutside(
+                session,
+                {},
+                { mergePolicy: {} },
+                allowed,
+                'a Work',
+            ),
+        ).not.toThrow();
     });
 });

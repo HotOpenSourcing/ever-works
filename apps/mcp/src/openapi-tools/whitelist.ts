@@ -1,3 +1,5 @@
+import { MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS } from '@ever-works/contracts';
+
 export interface WhitelistEntry {
 	method: string;
 	path: string;
@@ -18,6 +20,13 @@ export interface WhitelistEntry {
 	 * whole route.
 	 */
 	omitArgs?: string[];
+	/**
+	 * When set, the ONLY body arguments the tool exposes and forwards; path and
+	 * query parameters are kept. The allowlist twin of {@link omitArgs}, for a
+	 * route whose safe body is small and whose new fields must stay off the
+	 * tool until someone lists them (works-security lane 3a).
+	 */
+	bodyArgs?: readonly string[];
 }
 
 /**
@@ -43,29 +52,22 @@ export const WHITELIST: WhitelistEntry[] = [
 		toolName: 'get_work',
 		annotations: { readOnlyHint: true }
 	},
-	// Works-security lane 3a (2026-10-18): the merge gate and the commands a
-	// fleet node runs are NOT tool arguments. A Work-level `mergePolicy`
-	// overrides every broader scope (and the merge gate auto-merges on green CI
-	// when it allows), `checkDefaults` / `repoDeclaredCommands` are shell
-	// commands a node executes, `checksPolicy` decides whether their failure
-	// counts, and the `taskIsolation*` fields decide where task branches come
-	// from and land. An agent bound to this server could otherwise loosen its
-	// own merge gate or plant the commands its next run executes. The API also
-	// refuses them for fleet-run tokens and integration keys; a person changes
-	// them in the Work settings.
+	// Works-security lane 3a (2026-10-18): the tool edits a Work's descriptive
+	// text ONLY (`MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS`, the same allowlist
+	// the API applies to fleet-run tokens and integration keys). Every other
+	// setting on the route decides what the platform later does without a
+	// person — a Work-level `mergePolicy` overrides every broader scope and the
+	// merge gate auto-merges on green CI when it allows; `checkDefaults` /
+	// `repoDeclaredCommands` are shell commands a node executes; the
+	// `taskIsolation*`, community-PR, ownership, template, deploy and committer
+	// fields route and attribute later work. An agent bound to this server
+	// could otherwise loosen its own merge gate or plant the commands its next
+	// run executes. A person changes them in the Work settings.
 	{
 		method: 'PUT',
 		path: '/api/works/{id}',
 		toolName: 'update_work',
-		omitArgs: [
-			'mergePolicy',
-			'checkDefaults',
-			'checksPolicy',
-			'repoDeclaredCommands',
-			'taskIsolation',
-			'taskIsolationBaseBranch',
-			'taskIsolationTargetRepo'
-		]
+		bodyArgs: MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS
 	},
 	{
 		method: 'POST',

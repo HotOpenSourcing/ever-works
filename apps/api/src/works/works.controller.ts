@@ -114,10 +114,11 @@ import { CommunityPrProcessorService } from '@ever-works/agent/community-pr';
 import { WorkRepository } from '@ever-works/agent/database';
 import { AuthService, CurrentUser, AuthSessionGuard } from '../auth';
 import { CaptchaVerifierService } from '../auth/services/captcha-verifier.service';
+import { MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS } from '@ever-works/contracts';
 import {
     MACHINE_REFUSED_WORK_DELETE_FIELDS,
-    MACHINE_REFUSED_WORK_FIELDS,
     refuseMachinePrincipalFields,
+    refuseMachinePrincipalFieldsOutside,
     truthyFields,
     type MachinePrincipalRequest,
 } from '../auth/machine-principal';
@@ -546,19 +547,21 @@ export class WorksController {
         // Appended LAST so positional callers (specs) keep their meaning.
         @Req() req?: MachinePrincipalRequest,
     ) {
-        // Works-security lane 3a — a Work-level merge policy overrides every
-        // broader scope, and the merge gate auto-merges on green CI when it
-        // allows; the check / command fields are shell commands a fleet node
-        // runs. A fleet-run token (the model on the owner's PC) or an
-        // integration key may not change any of them: a person does, here or
-        // in the app.
-        refuseMachinePrincipalFields(
+        // Works-security lane 3a — an ALLOWLIST: a fleet-run token (the model
+        // on the owner's PC) or an integration key may change only the Work's
+        // descriptive text (`MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS`). Every
+        // other setting decides what the platform later does without a person
+        // — the merge gate (a Work-level policy overrides every broader scope),
+        // the commands a node runs, task-branch routing, community-PR
+        // processing, ownership, template, deploy target, committer identity —
+        // and a field added later is refused until it is listed.
+        refuseMachinePrincipalFieldsOutside(
             auth,
             req,
             updateWorkDto as unknown as Record<string, unknown>,
-            MACHINE_REFUSED_WORK_FIELDS,
+            MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS,
             'a Work',
-            "the merge gate, the commands a node runs and the task-branch routing are the owner's decision; a person changes them in the Work settings.",
+            "only a Work's name and description are open to automated credentials; a person changes its settings in the app.",
         );
         const user = await this.authService.getUser(auth.userId);
         const result = await this.workLifecycleService.updateWork(id, updateWorkDto, user);

@@ -230,15 +230,10 @@ describe('fleet-run token surface vs. the MCP whitelist', () => {
 
 	it('keeps the merge, command and repository-deletion fields off the tools', () => {
 		const omitted = (tool: string) => WHITELIST.find((entry) => entry.toolName === tool)?.omitArgs ?? [];
-		expect(omitted('update_work')).toEqual(
-			expect.arrayContaining([
-				'mergePolicy',
-				'checkDefaults',
-				'checksPolicy',
-				'repoDeclaredCommands',
-				'taskIsolationBaseBranch'
-			])
-		);
+		// The allowlist (review of #2765): update_work forwards a Work's name
+		// and description only, the same set the API allows machine principals.
+		expect(WHITELIST.find((entry) => entry.toolName === 'update_work')?.bodyArgs).toEqual(['name', 'description']);
+		expect(omitted('update_work')).toEqual([]);
 		expect(omitted('create_task')).toContain('acceptanceChecks');
 		expect(omitted('update_task')).toContain('acceptanceChecks');
 		expect(omitted('delete_work')).toEqual(

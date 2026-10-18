@@ -507,6 +507,18 @@ describe('WorksController — core CRUD endpoints', () => {
             ['taskIsolation', 'off'],
             ['taskIsolationBaseBranch', 'main'],
             ['taskIsolationTargetRepo', 'provider'],
+            // The allowlist (review of #2765): everything but name / description.
+            ['communityPrEnabled', true],
+            ['communityPrAutoClose', true],
+            ['owner', 'someone-else'],
+            ['organizationId', 'org-2'],
+            ['websiteTemplateId', 'evil-template'],
+            ['externalRefs', { gauzy: 'x' }],
+            ['committerName', 'Mallory'],
+            ['committerEmail', 'm@evil.test'],
+            ['maxGateAttempts', 5],
+            ['taskBranchCleanup', 'manual'],
+            ['memoryRecallEnabled', false],
         ])('refuses %s from a fleet-run token (403) before the service', async (field, value) => {
             await expect(
                 controller.updateWork(auth, 'w-1', { [field]: value } as any, runToken),
@@ -528,9 +540,14 @@ describe('WorksController — core CRUD endpoints', () => {
             expect(s.workLifecycleService.updateWork).not.toHaveBeenCalled();
         });
 
-        it('lets a fleet run change ordinary settings, and a person change everything', async () => {
+        it('lets a fleet run change the name and description, and a person change everything', async () => {
             s.workLifecycleService.updateWork.mockResolvedValue({ id: 'w-1' });
-            await controller.updateWork(auth, 'w-1', { name: 'Renamed' } as any, runToken);
+            await controller.updateWork(
+                auth,
+                'w-1',
+                { name: 'Renamed', description: 'Better words' } as any,
+                runToken,
+            );
             await controller.updateWork(auth, 'w-1', loosened as any, {});
             await controller.updateWork(auth, 'w-1', loosened as any);
             expect(s.workLifecycleService.updateWork).toHaveBeenCalledTimes(3);

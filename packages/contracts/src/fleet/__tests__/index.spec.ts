@@ -278,6 +278,7 @@ const RUN_CREDENTIAL_EXPORTS = [
 	'FLEET_RUN_MCP_SERVER_NAME',
 	'FLEET_RUN_MCP_TOOL_FAMILIES',
 	'FLEET_RUN_TOKEN_ROUTES',
+	'MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS',
 	'isFleetRunTokenRouteAllowed',
 	'fleetRunTokenExpiryFromLease'
 ] as const;
@@ -503,8 +504,9 @@ describe('fleet barrel', () => {
 		// table below gains two rows.
 		// → 232 with the explicit fleet-run route list (works-security lane
 		// 3a): the two prefix arrays become one `FLEET_RUN_TOKEN_ROUTES`.
+		// → 233 with `MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS`, same module.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		expect(Object.keys(fleet)).toHaveLength(232);
+		expect(Object.keys(fleet)).toHaveLength(233);
 	});
 
 	it.each([

@@ -316,6 +316,18 @@ export const FLEET_RUN_TOKEN_ROUTES: readonly FleetRunTokenRoute[] = Object.free
 ] as FleetRunTokenRoute[]) as readonly FleetRunTokenRoute[];
 
 /**
+ * The ONLY Work settings a machine principal — a fleet-run token or an
+ * integration key — may set through `PUT` / `PATCH /api/works/:id`
+ * (works-security lane 3a, 2026-10-18): descriptive text. Everything else on
+ * that route decides what the platform later does without a person — the
+ * merge gate, the commands a node runs, where task branches come from and
+ * land, community-PR processing, who owns the Work, its template, deploy
+ * target, committer identity, external references — and is refused for them.
+ * The MCP `update_work` tool exposes exactly these body arguments.
+ */
+export const MACHINE_PRINCIPAL_WORK_WRITABLE_FIELDS: readonly string[] = Object.freeze(['name', 'description']);
+
+/**
  * Path SEGMENTS that veto a request whatever the list above says.
  *
  * Kept from the prefix era as a second, independent layer: no granted

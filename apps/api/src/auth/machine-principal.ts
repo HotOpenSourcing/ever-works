@@ -133,21 +133,25 @@ function throwMachinePrincipalRefusal(
 // ── Body-field sets ─────────────────────────────────────────────────────────
 
 /**
- * Work settings a machine principal may not change: the merge gate (a
- * Work-level `mergePolicy` overrides every broader scope), the shell
- * commands a fleet node runs (`checkDefaults`, `repoDeclaredCommands`) and
- * how they are enforced (`checksPolicy`), and where task branches come from
- * and land (`taskIsolation*`).
+ * Refuse every field of `body` that is NOT in `allowed` (present = not
+ * `undefined`) for a machine principal — the allowlist twin of
+ * {@link refuseMachinePrincipalFields}, for routes where the safe set is
+ * small and new fields must default to refused.
  */
-export const MACHINE_REFUSED_WORK_FIELDS: readonly string[] = Object.freeze([
-    'mergePolicy',
-    'checkDefaults',
-    'checksPolicy',
-    'repoDeclaredCommands',
-    'taskIsolation',
-    'taskIsolationBaseBranch',
-    'taskIsolationTargetRepo',
-]);
+export function refuseMachinePrincipalFieldsOutside(
+    auth: AuthenticatedUser | null | undefined,
+    req: MachinePrincipalRequest | null | undefined,
+    body: Record<string, unknown> | null | undefined,
+    allowed: readonly string[],
+    what: string,
+    why = 'a person changes it in the app.',
+): void {
+    if (!machinePrincipalKind(auth, req) || !body || typeof body !== 'object') return;
+    const outside = Object.keys(body).filter(
+        (field) => body[field] !== undefined && !allowed.includes(field),
+    );
+    refuseMachinePrincipalFields(auth, req, body, outside, what, why);
+}
 
 /**
  * Task fields a machine principal may not set on create or update: the
