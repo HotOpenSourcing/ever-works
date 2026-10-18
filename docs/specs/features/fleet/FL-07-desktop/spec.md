@@ -118,7 +118,7 @@ the computer page, and from the Run's receipt, with control spans marked on the 
 | To answer…                                   | Today they must…                                                                    | What breaks, with the substrate that proves it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | -------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | "Show me the machine's screen."             | Open Agent → Computer.                                                              | The screen channel pictures **the Agent's own browser**, nothing else. The capture seam says so and names the gap itself — "a headless browser driven over its debugging protocol today, a per-platform desktop capture later" (`apps/node/src/core/screen/capture-backend.ts:4-16`); the only backend is the headless browser (`capture-backend.ts:107-110`, `apps/node/src/core/screen/headless-browser-backend.ts:18-28`). A session has exactly two channels, `screen` and `terminal`, and no notion of a source (`packages/contracts/src/computer/computer-session.types.ts:43-45`). |
-| "Which monitor?"                             | Nothing.                                                                            | A capture request carries only a width and an encoder quality (`capture-backend.ts:46-51`); there is no display enumeration anywhere on the node or in the contracts.                                                                                                                                                                                                                                                                                                                                                                       |
+| "Which monitor?"                             | Nothing.                                                                            | A capture request carries only a width and an encoder quality (`capture-backend.ts:46-51`); there is no display enumeration anywhere on the node or in the contracts (EXISTING-SUBSTRATE §1.14: `rg -n "'desktop'\|monitorId\|monitors" packages/contracts/src/computer apps/node/src/core/screen` → no match).                                                                                                                                                                                                                                  |
 | "Can I click on it?"                         | Take over on Agent → Computer.                                                      | Input reaches the Agent's browser only. The node's input injector exists (`apps/node/src/core/screen/input-injector.ts:10-16`) yet the capability probe still says "`input` is NOT advertised: nothing on this node injects input yet" (`apps/node/src/core/capabilities.ts:315-322`) — a stale promise in the opposite direction, which this epic fixes.                                                                                                                                                                                      |
 | "Show the desktop next to the terminal."     | Switch channels.                                                                    | The controls hold **one** active channel (`apps/web/src/components/computer/ComputerControls.tsx:26-42`): screen or terminal, never both.                                                                                                                                                                                                                                                                                                                                                                                                      |
 | "Was this session recorded? Let me re-watch." | Nothing.                                                                            | The columns exist — `recorded`, `recordingSkippedReason` (`packages/agent/src/entities/computer-session.entity.ts:92-98`), `recordWatchSessions`, `recordingRetentionDays` (`packages/agent/src/entities/fleet-node.entity.ts:504-510`) — but they are only ever **read** (`packages/agent/src/computer/computer-session.service.ts:750`, `packages/agent/src/fleet/fleet.service.ts:1758-1759`); no writer sets them and no retention job exists (`packages/tasks/src/tasks/trigger/` holds `terminal-transcript-gc.task.ts` and nothing for recordings). AW-11 P3 is open; its task list is entirely unticked. |
@@ -270,7 +270,8 @@ not re-specified (D13).
   **when** a desktop view is requested,
   **then** the node refuses to start it, the reason reads _"The screen helper on build-01 has
   changed since you approved it"_, the heartbeat reports `helperTrust: none`, a "needs a look"
-  item of kind `helper-untrusted` appears on the hub, and an audit row records the refusal.
+  item of kind `helper-untrusted` appears on the hub, and an audit row `node.helper.verify-failed`
+  records the refusal.
 
 - **U4 — macOS permission missing.**
   **Given** the helper is admitted but Screen Recording (or, for control, Accessibility) has not
@@ -408,19 +409,21 @@ Every default, limit and cadence is a number. Values marked **(AW-11)** are inhe
 - **FR-13** The screen helper MUST be a separate executable the node starts and supervises, MUST
   speak to the node only over a local, same-user channel, and MUST never listen on a network port.
 - **FR-14** The node MUST start a helper only after verifying it against the admitted trust record,
-  immediately before each start, and MUST refuse with `helper-untrusted` when the file differs.
+  immediately before each start, and MUST refuse with `helper-untrusted` when the file differs,
+  writing audit `node.helper.verify-failed`.
 - **FR-15** Admission MUST happen on the machine, by the machine's owner, through the node's own
   command line, never from the web UI.
 - **FR-16** Hash-pinned admission MUST show the helper's SHA-256 fingerprint and the fingerprint the
   platform published for that helper version side by side, MUST require the owner to type `admit`,
-  and MUST record the time and the acknowledgement locally and as an audit row.
+  and MUST record the time and the acknowledgement locally and as audit `node.helper.admit`.
 - **FR-17** A hash-pinned helper MUST be labelled **Reduced trust** wherever the Node's helper is
-  described — the Desktop tab, the node drawer, the hub's "needs a look" (`helper-untrusted` only
-  when the file changed; `info` severity for hash-pinned itself).
+  described — the Desktop tab, the node drawer and the Computers list (R-8). The hub's "needs a
+  look" MUST carry a `helper-untrusted` item (severity `warn`) only when verification failed; a
+  hash-pinned helper on its own raises no item (§8b default).
 - **FR-18** The Node MUST report `helperTrust` as `none`, `hash-pinned` or `signed` in every
   heartbeat, and the platform MUST store it (R-8).
 - **FR-19** Revoking admission on the machine MUST stop any running helper within 2 seconds, end
-  every desktop view with reason `node-unavailable`, and write an audit row.
+  every desktop view with reason `node-unavailable`, and write audit `node.helper.revoke`.
 - **FR-20** Linux admission MUST always be hash-pinned.
 - **FR-21** The helper MUST be built reproducibly, with a published fingerprint per version and
   platform, and the node package MUST carry the fingerprints of the helper versions it accepts.
@@ -438,8 +441,8 @@ Every default, limit and cadence is a number. Values marked **(AW-11)** are inhe
 - **FR-26** Agent → Computer MUST gain a source switch **Browser | Desktop**, offered only when the
   bound Node serves both, and switching MUST not end the page or change the Agent's binding.
 - **FR-27** Watching a desktop MUST require the viewer to be in the Node's `desktop` family
-  audience (default `owner`); the `view` audience alone MUST see the tab and the reason, never the
-  picture.
+  audience (default `owner`; one family governs watching and controlling — CONTRACTS R-25); the
+  `view` audience alone MUST see the tab and the reason, never the picture.
 - **FR-28** Every desktop view open MUST write audit `node.desktop.view`, every display change
   `node.desktop.display.set`, with the requester as `user:<id>` or `agent:<id>`.
 - **FR-29** The surface MUST state that watching and controlling spend no model tokens and no
@@ -496,7 +499,9 @@ Every default, limit and cadence is a number. Values marked **(AW-11)** are inhe
 ### 4.5 P2 — Recording and re-watch (closing AW-11 P3)
 
 - **FR-48** A view MUST be recorded whenever it enters control mode; a watching-only view MUST be
-  recorded only when the Node's owner has opted in for that Node (default off) **(AW-11)**.
+  recorded only when the Node's owner has opted in for that Node (default off) **(AW-11)**; a
+  recording's start and stop MUST write `node.desktop.recording.start` and
+  `node.desktop.recording.stop`.
 - **FR-49** Recording MUST apply to both sources, browser and desktop, with the same rules.
 - **FR-50** A recording MUST capture at most 1 full picture per second, MUST NOT exceed 200 MB or 4
   hours, and MUST stop at whichever comes first, saying which **(AW-11)**.
@@ -509,7 +514,7 @@ Every default, limit and cadence is a number. Values marked **(AW-11)** are inhe
   it was beside (FL-04), and from the bound Run's receipt, with a scrubber and the control spans
   marked.
 - **FR-54** The player MUST show the display, the quality, the storage used and the deletion date,
-  and MUST offer **Delete now** behind a `confirm` dialog that writes an audit row.
+  and MUST offer **Delete now** behind a `confirm` dialog that writes `node.desktop.recording.delete`.
 - **FR-55** When recording cannot start or fails mid-way, the view MUST continue, MUST say it is
   not recorded and why, and the receipt MUST repeat it **(AW-11)**.
 - **FR-56** The AW-11 tracker MUST be updated in the same change that ships recording, marking its
@@ -528,7 +533,7 @@ Every default, limit and cadence is a number. Values marked **(AW-11)** are inhe
 - **FR-60** Adding a virtual display MUST be refused `unsupported_on_node` on macOS and Windows and
   on any Linux session that is not X11, with the reason named.
 - **FR-61** Virtual display add and remove MUST write `node.desktop.display.add` and
-  `node.desktop.display.remove` (see §8b for the CONTRACTS addition).
+  `node.desktop.display.remove` (CONTRACTS §7).
 
 ### 4.7 Accessibility and keyboard (all phases)
 
@@ -731,9 +736,9 @@ _"While you have control every other key goes to the computer. Esc Esc always co
 | **Node / Computer**                  | Existing     | Gains a helper trust level (`none · hash-pinned · signed`), the `desktop` family audience in its control policy (FL-01 shape), and advertises `screen:desktop`, `helper:screen` and `input`. |
 | **Screen channel source**            | **Extended** | `browser` (today) or `desktop` (this epic). A view has exactly one source at a time.                                                                             |
 | **Desktop view** (a computer session) | Existing, extended | AW-11's computer session, now with a source, a display and — for the Desktop source — no Agent; carries control spans, recording state and the bound Run or Session. |
-| **Display**                          | **New (not stored)** | One monitor the Node reports: id, name, size, scale, primary, virtual. Read live, never a row.                                                           |
-| **Screen helper**                    | **New (on the machine)** | The optional native executable that captures and injects. Known to the platform only through `helperTrust` and audit rows.                           |
-| **Admission**                        | **New (concept)** | The owner's act on the machine that lets the node run a helper: hash-pinned (acknowledged fingerprint) or signed (verified identity).                   |
+| **Display**                          | Plain word — read live, never stored | One monitor the Node reports: id, name, size, scale, primary, virtual. Read live, never a row.                                              |
+| **Screen helper**                    | Named by README D3 (on the machine, not a platform entity) | The optional native executable that captures and injects. Known to the platform only through `helperTrust` and audit rows.     |
+| **Admission**                        | Plain word — the act README D3 and CONTRACTS R-8 define | The owner's act on the machine that lets the node run a helper: hash-pinned (acknowledged fingerprint) or signed (verified identity). |
 | **Recording**                        | Existing columns, **first writer** | Frames of a view at ≤ 1 fps stored through the storage provider; indexed on the view; 14-day retention; replayable with control spans.      |
 | **Control grant / span**             | Existing (AW-11) | Unchanged.                                                                                                                                                   |
 | **Run / Session**                    | Existing     | A desktop view binds to the Run in flight (Agent page) or the Session it sits beside (FL-04); the receipt and the session detail link the recording.             |
@@ -756,14 +761,32 @@ _"While you have control every other key goes to the computer. Esc Esc always co
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §7 audit names need `node.desktop.recording.start|stop|delete` (recording is per view, and §7 only has `node.session.recording.*`) and `node.desktop.display.add|remove` for P3 virtual displays; and `node.helper.verify-failed` for U3 (or fold into `node.helper.revoke` with `outcome: failed-verification`).]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — R-9 says `recordingRef` and retention columns already exist on `computer_sessions`; at HEAD only `recorded` and `recordingSkippedReason` exist and retention lives on `fleet_nodes`. Slot `1796070100000-AddComputerSessionRecordingRef` adds `recordingRef`, `recordingBytes`, `recordingDurationMs`, `recordingExpiresAt`, plus `source`, `displayId`, and widens `agentId` to nullable so a Desktop view from the computer page needs no Agent. R-9 also says "the existing retention job" — none exists; FL-07 creates it. Wording fix requested.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §1.1 `attend` grants "desktop source"; this spec reads the `desktop` family audience as governing both watching and controlling the desktop (AW-11 FR-73 behaviour). Should watching be split into its own audience so an owner can let members watch but not drive?]`
-- `[NEEDS CLARIFICATION: Should the "needs a look" list carry a permanent `info` item for a hash-pinned helper, or is the in-tab note enough? This spec assumes the note only, to keep the list for things that need action.]`
-- `[NEEDS CLARIFICATION: Helper distribution — downloaded by the node's `helper install` from the platform's release channel with a fingerprint baked into the node package (assumed), or shipped as optional per-platform npm packages? Affects FR-21 and air-gapped installs.]`
-- `[NEEDS CLARIFICATION: Should the Agent screenshot tool be allowed while a person holds control (it reads only)? Assumed yes.]`
-- `[NEEDS CLARIFICATION: Local IPC — D2 forbids listening network ports; this spec uses a same-user local socket (Unix domain socket 0600 / named pipe with an owner-only DACL) between node and helper on macOS and Windows where the helper must live in the GUI session. Confirm this is inside D2.]`
-- `[NEEDS CLARIFICATION: New noun check — "Display" and "Admission" are used as plain words, not entities; "Desktop view" reuses AW-11's computer session. Confirm no new noun is introduced (program rule 4).]`
+- **Resolved** by CONTRACTS §7: `node.desktop.recording.start|stop|delete`,
+  `node.desktop.display.set|add|remove` and `node.helper.admit|revoke|verify-failed` are listed
+  (FR-14, FR-16, FR-19, FR-28, FR-48, FR-54, FR-61).
+- **Resolved** by CONTRACTS R-9 and §13: at HEAD `computer_sessions` carries only `recorded` and
+  `recordingSkippedReason`; FL-07's slot `1796070100000-AddComputerSessionRecordingColumns` adds
+  `recordingRef`, `recordingBytes`, `recordingDurationMs`, `recordingExpiresAt`,
+  `recordingStoppedReason`, `source`, `displayId`, `fleetSessionId` and relaxes `agentId` to
+  nullable; FL-07 creates the retention job (none exists); retention is AW-11's 14 days.
+- **Resolved** by CONTRACTS R-25: one `desktop` family governs both watching and controlling the
+  desktop; watching the Agent's browser source keeps AW-11's existing rules (FR-27).
+- **Resolved** by CONTRACTS R-26: the node ↔ helper local socket (Unix domain socket `0600` /
+  named pipe with an owner-only DACL) is same-user local IPC and inside D2 (FR-13).
+- **Resolved** by README D3 and CONTRACTS R-8: "screen helper" and its two admission levels are
+  named there; "Display" is a plain word read live and never stored; a desktop view is AW-11's
+  computer session with a source — no new noun (§7).
+- **Resolved** by CONTRACTS §3.3 and §1.1 (rev 4): `desktop` opens with `viewId` and `quality`; messages `desktop.mode`, `desktop.stats`, `desktop.displayChanged`; heartbeat `helper`, `displays[]`, `desktopReasons[]`, `helperEvents[]`.
+- `[NEEDS CLARIFICATION: A "needs a look" item for a hash-pinned helper. Default until answered: no
+  item — the "Reduced trust" note in the tab, drawer and Computers list is enough (R-8 labels it);
+  `helper-untrusted` (warn) is raised only when verification fails (FR-17, §5.9).]`
+- `[NEEDS CLARIFICATION: Helper distribution. Default until answered: `ever-works-node helper
+  install` downloads the per-platform helper from the platform's release channel and verifies it
+  against the fingerprint manifest baked into the node package (FR-21); optional per-platform npm
+  packages and air-gapped installs are not built.]`
+- `[NEEDS CLARIFICATION: The Agent screenshot tool while a person holds control. Default until
+  answered: allowed — it only reads, takes no control grant and is audited as `node.desktop.view`
+  with `agent:<id>` (FR-30).]`
 
 ---
 
@@ -838,7 +861,8 @@ _"While you have control every other key goes to the computer. Esc Esc always co
 ## 11. References
 
 - Program: [Fleet README](../README.md) (D2, D3, D7, D13, §8 #1, #7) · [CONTRACTS](../CONTRACTS.md)
-  (R-3, R-8, R-9, R-19, R-24; §1, §2, §3.2–3.3, §7, §8, §9, §10, §13) · [CAPABILITY-MAP §C](../CAPABILITY-MAP.md) ·
+  (R-3, R-8, R-9, R-19, R-24, R-25, R-26, R-27; §1, §2, §3.2–3.3, §4.6, §7, §8, §9, §10, §13) · [CAPABILITY-MAP §C](../CAPABILITY-MAP.md) ·
+  [EXISTING-SUBSTRATE](../EXISTING-SUBSTRATE.md) §1.6, §1.12, §1.14, §2.10 ·
   [TRACKER](../TRACKER.md)
 - Rules inherited: [AW-11 spec](../../agent-workspace/AW-11-agent-computers/spec.md) §4.5 take-over,
   §4.8 recording, §4.11 safety, §6 copy; [AW-11 plan](../../agent-workspace/AW-11-agent-computers/plan.md) §2.4 arbitration

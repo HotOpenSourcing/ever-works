@@ -118,7 +118,7 @@ by the Agent's permissions and the Node's policy.
 | "What containers run there?"                 | `docker ps` on the machine.                                             | Docker is a single tag turned on by `docker --version` exiting 0 (`apps/node/src/core/capabilities.ts:278-294`); no container, image or Compose project is read or shown.                                                                                                                                   |
 | "Open a shell inside that container."        | ssh, then `docker exec`.                                                | The only shell the platform can show is the live-view terminal channel — read-only until a take-over, under the Agent's own file root (`apps/node/src/core/screen/terminal-channel.ts:36-44`), not a persistent Session, and never inside a container.                                                      |
 | "What is using the CPU?"                     | `top` on the machine.                                                   | The node probes a GPU's vendor and model once per heartbeat (`apps/node/src/core/gpu-probe.ts:19-26`) and nothing else about processes; there is no process list, no signal, no utilisation.                                                                                                                 |
-| "Let Nina do it."                            | Paste output into chat and type the commands yourself.                  | The one Agent fleet tool lists nodes (`packages/agent/src/fleet/agent-fleet-tools.ts:39-77`); the MCP whitelist's two fleet actions are affinity and drain (`apps/mcp/src/openapi-tools/whitelist.ts:475-530`).                                                                                             |
+| "Let Nina do it."                            | Paste output into chat and type the commands yourself.                  | The one Agent fleet tool lists nodes (`packages/agent/src/fleet/agent-fleet-tools.ts:39-77`); the MCP whitelist's three fleet actions are set/clear affinity and drain (`apps/mcp/src/openapi-tools/whitelist.ts:475-530`; EXISTING-SUBSTRATE §8.2).                                                     |
 | "Who restarted what, when?"                  | Nothing.                                                                | The ledger exists (`packages/agent/src/fleet/fleet-audit.service.ts:96-116`) and already redacts; the action union (`packages/contracts/src/fleet/fleet-panic.types.ts:60-114`) has no service, Docker or process member because no such action exists.                                                     |
 | "Can an org admin do this on my machine?"    | Nothing.                                                                | The control policy is declared with three audiences but the code derives only `owner` or `stranger` (`packages/agent/src/computer/control-policy.ts:39-49`); FL-01 derives the roles; this epic is the first to use three families of them.                                                                 |
 
@@ -166,7 +166,8 @@ epic has no migration slot (CONTRACTS §13) and therefore **no schema change**.
   **when** they click **Restart** and confirm,
   **then** the action is refused with _"build-01 needs your password for this. Run it there:"_
   `sudo systemctl restart nginx` _"— or allow the node's user to run it without a password."_,
-  with a copy button; nothing is run, no password is asked for, and the refusal is audited as
+  with a copy button; nothing is run, no password is asked for, the server answers
+  `root_required` with that command as the `hint`, and the refusal is audited as
   `outcome: refused`.
 
 - **S4 — Blast radius named.**
@@ -245,7 +246,7 @@ epic has no migration slot (CONTRACTS §13) and therefore **no schema change**.
   **then** the tool returns the result or the typed refusal (incl. the root-required command as
   `hint`), the action is audited as `agent:<Ops>`, and if the node computed a blast-radius
   warning the call is held as an Approval in My Decisions unless Ops' trust level allows it
-  (AW-24).
+  (AW-24; the held call reuses the existing Agent action proposals, CONTRACTS R-33).
 
 ### 3.2 Edge cases and failures
 
@@ -273,8 +274,8 @@ epic has no migration slot (CONTRACTS §13) and therefore **no schema change**.
   _"Reconnecting…"_ and resumes streaming from the node's buffer when the link returns; if the
   operation finished meanwhile its final state is shown from the node's record.
 - **U9 — Action on a Windows service without administrator rights.** Refused under the root rule
-  (not `unsupported_on_node`): _"win-lab needs administrator rights for this. Run in an elevated
-  PowerShell:"_ `Restart-Service -Name W3SVC`.
+  with `root_required` (not `unsupported_on_node`): _"win-lab needs administrator rights for this.
+  Run in an elevated PowerShell:"_ `Restart-Service -Name W3SVC`.
 - **U10 — Signalling the node itself.** **Stop** on the node's own process, its session daemon,
   or PID 1 is refused with `invalid` and _"Ever Works will not stop its own node from here. Use
   the machine or Settings → Fleet."_; the rows carry a `⚠ this node` marker and no buttons.
@@ -291,8 +292,9 @@ epic has no migration slot (CONTRACTS §13) and therefore **no schema change**.
   disabled except **Down**; describe answers `operation_failed` with Compose's first stderr line.
 - **U15 — Prune reclaims nothing.** _"Nothing to remove — every image on build-01 is in use."_;
   no audit row is written for a no-op the node refused to run.
-- **U16 — Operation limit.** A sixth concurrent operation on one node answers `busy` with
-  _"build-01 is already running 5 operations"_ (FL-02's per-node operation budget).
+- **U16 — Operation limit.** A sixth concurrent machine operation on one node answers `busy` with
+  _"build-01 is already running 5 operations"_ (this epic's per-node cap; FL-02 and CONTRACTS §10
+  do not set one yet — §8b).
 - **U17 — Agent signals a process.** Allowed only through `fleet_processes_signal`, marked
   state-changing; SIGKILL by an Agent is held as an Approval unless its trust level allows it.
 - **U18 — Desktop node app.** _"Not available on this kind of node yet"_ (R-10).
@@ -363,18 +365,23 @@ Values marked **(C)** come from [CONTRACTS.md](../CONTRACTS.md).
   **(C R-24)**; lists MUST stay readable from their last answer with the stop banner.
 - **FR-20** Errors MUST be drawn from CONTRACTS §8: `unreachable`, `consent_missing`,
   `permission_denied`, `confirmation_required`, `kill_switch`, `limit_exceeded`,
-  `unsupported_on_node`, `busy`, `invalid`, `not_found`, `operation_failed`. A root-required refusal
-  MUST be `operation_failed` with `details.reason = 'root-required'` and the command as `hint`
-  until CONTRACTS adds a code (§8b).
+  `unsupported_on_node`, `busy`, `invalid`, `not_found`, `operation_failed`, `root_required`. A
+  root-required refusal MUST be `root_required` (HTTP 409, CONTRACTS §8) with the exact command as
+  `hint`.
 - **FR-21** Agent tools MUST exist for every list (`fleet_services_list`, `fleet_processes_list`,
-  P2 `fleet_docker_containers_list`, `fleet_docker_images_list`, P3 `fleet_compose_list`,
-  `fleet_compose_describe`) marked `readOnly: true`, and for every action (`fleet_services_action`,
-  `fleet_processes_signal`, P2 `fleet_docker_container_action`, `fleet_docker_run`,
-  `fleet_docker_image_action`, P3 `fleet_compose_action`, `fleet_docker_exec`) marked
+  P2 `fleet_docker_containers_list`, `fleet_docker_images_list`, P3 `fleet_docker_compose_list`,
+  `fleet_docker_compose_describe`) marked `readOnly: true`, and for every action
+  (`fleet_services_action`, `fleet_processes_signal`, P2 `fleet_docker_container_action`,
+  `fleet_docker_run`, `fleet_docker_image_action`, P3 `fleet_docker_compose_action`,
+  `fleet_docker_exec`) — named after the `docker` family, which governs Compose (CONTRACTS §2.1,
+  §11.3) — marked
   `destructive: true|false` with their confirmation class, gated by the Agent's grants **and** the
   Node's family audience **(C §2.1)**.
 - **FR-22** An Agent action whose class is `blast-radius` or `confirm-destructive` MUST be held as
-  an Approval (My Decisions) unless the Agent's trust level allows it (AW-24).
+  an Approval (My Decisions) unless the Agent's trust level allows it (AW-24), reusing the existing
+  Agent action proposals (CONTRACTS R-33); a non-interactive caller satisfies a class only with the
+  CONTRACTS §2.2 fields `confirm: true`, `confirmName` or `acknowledgeBlastRadius: true`, and
+  otherwise receives `confirmation_required` with the class and, for `blast-radius`, the sentence.
 - **FR-23** The palette MUST offer _"Services on <computer>"_, _"Docker on <computer>"_ and
   _"Processes on <computer>"_ for every viewable computer.
 - **FR-24** Everything in this epic MUST be behind `FLEET_MACHINE_FACTS_ENABLED` **(C §9)**.
@@ -396,7 +403,8 @@ Values marked **(C)** come from [CONTRACTS.md](../CONTRACTS.md).
 - **FR-29** Environment variable values entered in the dialog MUST be scanned and MUST never
   appear in audit rows, operation output shown to viewers, or tool results.
 - **FR-30** The computer Overview MUST show a **Runs here** block listing running containers (and,
-  from FL-16, nested Nodes) with Start / Stop.
+  from FL-16, nested Nodes) with Start / Stop, registered as an Overview block through the FL-01
+  registry (CONTRACTS §11.1).
 - **FR-31** Every container row MUST offer **Logs** (FL-08) and, from P3, **Shell inside**.
 
 ### 4.5 P3 — Compose and shell inside
@@ -617,21 +625,22 @@ No new noun (README §1).
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §8 has no code for "root required and not pre-authorised".
-  Proposal: `root_required` (HTTP 409) with the exact command as `hint`. Until then this epic
-  answers `operation_failed` with `details.reason = 'root-required'`.]`
-- `[NEEDS CLARIFICATION: CONTRACTS §11.2 lists `/nodes/:id/services/:name/:action`,
-  `/nodes/:id/docker/containers|images|compose` and `/nodes/:id/processes` but no process-signal
-  or per-container action sub-paths. This epic uses `/nodes/:id/processes/:pid/signal`,
-  `/nodes/:id/docker/containers/:cid/:action`, `/nodes/:id/docker/images/:ref/:action`,
-  `/nodes/:id/docker/compose/:project/:action` as sub-paths of the listed roots — confirm.]`
-- `[NEEDS CLARIFICATION: the "Runs here" Overview block — FL-01 owns the Overview; this epic
-  assumes a block registry (like the tab registry). Confirm the registration shape.]`
-- `[NEEDS CLARIFICATION: should an Agent be allowed `fleet_docker_run` at all by default, or only
-  with an explicit grant? Proposal: explicit grant, `destructive: false`, class `confirm` held as
-  an Approval below AW-24 trust level "trusted".]`
-- `[NEEDS CLARIFICATION: Compose `down` from an Agent — treat as `blast-radius` whenever the
-  project contains a container that is a Node (FL-16)? Proposed yes.]`
+- **Resolved** by CONTRACTS §8: `root_required` (HTTP 409) with the exact command as `hint` is the
+  root-required refusal (FR-4, FR-20, S3, U9).
+- **Resolved** by CONTRACTS §11.2: `/nodes/:id/services/:name/:action`,
+  `/nodes/:id/processes/:pid/signal`, `/nodes/:id/docker/containers/:cid/:action`,
+  `/nodes/:id/docker/images/:iid/:action` and `/nodes/:id/docker/compose/:project/:action` are
+  listed beside their collection roots; the plan uses exactly these.
+- **Resolved** by CONTRACTS §11.1: the FL-01 registry has `registerOverviewBlock`; **Runs here** is
+  registered through it (FR-30).
+- `[NEEDS CLARIFICATION: Agent `fleet_docker_run` by default. Default until answered: allowed only
+  with an explicit per-Agent grant (AW-15), `destructive: false`, class `confirm`, and held as an
+  Approval (CONTRACTS R-33) below AW-24 trust level "trusted".]`
+- `[NEEDS CLARIFICATION: Compose **Down** from an Agent when the project contains a container that
+  is a Node (FL-16). Default until answered: the node computes a `blast-radius` warning for it
+  ("this stops <child>, a computer in your Fleet"), so an Agent below the allowing trust level is
+  held for approval (FR-22).]`
+- **Resolved** by CONTRACTS §10 (rev 4): 5 concurrent machine operations per Node, 60-min operation cap, 20 finished operations kept per Node.
 
 ---
 
@@ -642,7 +651,8 @@ No new noun (README §1).
 - [ ] **ACC-FL09-02** Start on a failed unit the node may start runs, the row updates ≤ 10 s, and
       `node.service.start` is audited with target and requester. (FR-3, FR-18)
 - [ ] **ACC-FL09-03** A system unit with `sudo -n` refused yields the root dialog with the exact
-      command; no password prompt exists; audit `outcome: refused`. (FR-4, FR-20)
+      command; the API answers `root_required` (409) with the command as `hint`; no password prompt
+      exists; audit `outcome: refused`. (FR-4, FR-20)
 - [ ] **ACC-FL09-04** Stop on the network service shows the blast-radius sentence and a red
       button; the audit row's class is `blast-radius`. (FR-5, FR-17)
 - [ ] **ACC-FL09-05** At boot toggles enable/disable and audits them. (FR-3, FR-18)
@@ -708,7 +718,8 @@ No new noun (README §1).
 - Program: [README](../README.md) §1, §3 (sudo refusal, Docker CLI), §4 D2, D7, D8 · [CONTRACTS](../CONTRACTS.md)
   §1.1, §1.2 (`services`, `processes`, `docker`), §2 (families, classes, audit), §3.3 (`machine`
   family: `services.list|action`, `docker.*`, `compose.*`, `processes.list|signal`), §7, §8, §9,
-  §10 (process list), §11, R-18, R-24 · [CAPABILITY-MAP](../CAPABILITY-MAP.md) §D services,
+  §10 (process list), §11, R-18, R-24, R-33 · [EXISTING-SUBSTRATE](../EXISTING-SUBSTRATE.md) §1.9,
+  §1.14, §2.7, §2.10, §8.2 · [CAPABILITY-MAP](../CAPABILITY-MAP.md) §D services,
   Docker, processes rows.
 - Siblings: [FL-02](../FL-02-node-link/), [FL-01](../FL-01-fleet-hub/), [FL-08](../FL-08-logs/),
   [FL-04](../FL-04-sessions-on-computers/), [FL-03](../FL-03-computer-health/),

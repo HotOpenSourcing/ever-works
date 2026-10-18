@@ -46,7 +46,7 @@ Agents get the same read through one read-only tool.
 | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | **P1** | Source discovery per OS; the viewer (last 500, follow, filter, pause, copy, colour); files under allowed roots and standard log directories; container and service logs; Logs tab; `fleet_logs_read`; palette entry | `FLEET_MACHINE_FACTS_ENABLED` |
 | **P2** | Merged multi-source view (Compose hand-off to FL-09), "load 500 earlier", deep links from the Services and Docker tabs                                                                                    | same                          |
-| **P3** | "Open the log" from a "needs a look" item (FL-03), snapshot download of the lines on screen                                                                                                                | same                          |
+| **P3** | "Open the log" from a failed service, positioned at the failure (a "needs a look" item once CONTRACTS §4.6 has its kind), snapshot download of the lines on screen                                       | same                          |
 
 Each phase is independently shippable.
 
@@ -95,7 +95,7 @@ And, from an Agent's owner:
 | "What did the machine log?"                      | Walk to the machine, or ssh in from their own laptop, and run the journal or `tail` by hand.                              | Ever Works shows a computer's heartbeat, disk free and capability tags (`docs/features/fleet.md:110`) and nothing a machine has written. The node's four job kinds (`packages/contracts/src/fleet/fleet-jobs.types.ts:117-120`) read no log of any kind; the node's own log is a redacting logger to its console (`apps/node/src/core/logger.ts`). |
 | "Why did that container exit?"                   | `docker logs` on the machine.                                                                                            | The platform knows Docker exists only as a tag — `docker --version` exiting 0 turns `docker` on (`apps/node/src/core/capabilities.ts:278-294`). No container is listed anywhere, so there is nothing to open.                                                                                                             |
 | "Show me the shell on that machine and I'll tail it myself." | Open the Agent's Computer tab, terminal channel, and take over.                                                 | That shell runs under the Agent's own file root (`apps/node/src/core/screen/terminal-channel.ts:38-40`), needs `--attend` and a take-over grant, and streams a PTY — a tail typed into a shell is a session, not a view, and it is not what an Agent can be given read-only.                                            |
-| "Let the Agent read it."                         | Paste the lines into the conversation.                                                                                   | The one Agent fleet tool lists nodes (`packages/agent/src/fleet/agent-fleet-tools.ts:39-77`); the MCP whitelist exposes eight fleet reads and two actions, none of them a log (`apps/mcp/src/openapi-tools/whitelist.ts:475-530`); the CLI has no fleet verbs (`apps/cli/src/main.ts:5-8`).                             |
+| "Let the Agent read it."                         | Paste the lines into the conversation.                                                                                   | The one Agent fleet tool lists nodes (`packages/agent/src/fleet/agent-fleet-tools.ts:39-77`); the MCP whitelist has eight fleet entries — five reads and three actions (set/clear affinity, drain), none of them a log (`apps/mcp/src/openapi-tools/whitelist.ts:475-530`; EXISTING-SUBSTRATE §8.2); the CLI has no fleet verbs (`apps/cli/src/main.ts:5-8`). |
 | "Is it safe to show a log in the browser?"       | Trust that no token is in it.                                                                                            | The machine already has the right tool: every terminal frame a live view publishes is scanned by the node's outbox (`apps/node/src/core/screen/frame-outbox.ts:61-83`) with the platform's own scanner (`packages/contracts/src/secret/secret-patterns.ts:1-11`). Nothing reuses it for anything but a live view yet.    |
 
 ### 2.3 What this epic closes
@@ -189,8 +189,9 @@ migration slot (CONTRACTS §13) and therefore **no schema change**.
   **then** one viewer shows the three containers' lines merged by time, each line carrying a
   coloured service chip, and the filter applies across all three.
 
-- **S12 — From "needs a look" to the log (P3).**
-  **Given** the hub shows _"build-01 · postgresql failed"_,
+- **S12 — From a failed service to the log (P3).**
+  **Given** the Services tab shows _"postgresql · failed"_ on build-01 (a "needs a look" item joins
+  once CONTRACTS §4.6 has a kind for it — §8b),
   **when** they click **Open the log**,
   **then** the computer page opens on the Logs tab with that service selected and the viewer
   positioned at the time of the failure.
@@ -258,7 +259,8 @@ migration slot (CONTRACTS §13) and therefore **no schema change**.
   **Given** eight sources are already being followed on this node by this person,
   **when** a ninth is opened,
   **then** it is refused with `limit_exceeded` and the hint _"Close one of the 8 open logs on
-  build-01"_. (The cap is the link's channel budget per viewer, not a new limit — plan §6.)
+  build-01"_. (Eight per viewer per Node keeps one viewer inside the link's 64-channel budget,
+  CONTRACTS §10; the per-viewer number is not yet a §10 row — §8b.)
 
 - **U12 — Secret in a line.**
   **Given** a log line contains a token-shaped string,
@@ -341,9 +343,9 @@ Every default, limit and cadence below is a number. Values marked **(C)** come f
 
 - **FR-25** Every log action MUST require the `manage` consent **(C §1.1)**; a node without it MUST
   be refused with `consent_missing` and the exact command, and the tab MUST show that command.
-- **FR-26** Reading or following a log MUST be governed by a `logs` action family of the Node's
-  control policy (§8b, CONTRACTS change), evaluated as owner-only until that family exists; a
-  caller outside the audience MUST be refused with `permission_denied` naming the family.
+- **FR-26** Reading or following a log MUST be governed by the `logs` action family of the Node's
+  control policy (CONTRACTS §2.1, default audience `owner`); a caller outside the audience MUST be
+  refused with `permission_denied` naming the family.
 - **FR-27** Every source open MUST write one `fleet_audit` row `node.logs.read` **(C §7)** and
   every follow MUST write one `node.logs.follow` row, each naming the source, the requester
   (`user:` or `agent:`), the line count and the redaction count, and MUST never contain a log line.
@@ -381,8 +383,10 @@ Every default, limit and cadence below is a number. Values marked **(C)** come f
 
 ### 4.6 P3 — Deep links and snapshots
 
-- **FR-39** A "needs a look" item for a failed service MUST carry an **Open the log** action
-  (CONTRACTS §4.6) that opens the Logs tab on that service positioned at the failure time.
+- **FR-39** A failed service MUST offer **Open the log** that opens the Logs tab on that service
+  positioned at the failure time — from the Services tab's failed rows (FR-38) and, once CONTRACTS
+  §4.6 has a kind for a failed service, from that "needs a look" item (§8b; no such kind exists
+  today, so no item is produced by this epic).
 - **FR-40** **Download shown lines** MUST produce a plain-text file of the filtered lines on
   screen, scanned, named `<computer>-<source>-<time>.log`, produced in the browser from what the
   viewer already holds — the platform stores nothing.
@@ -580,19 +584,17 @@ No new noun is introduced (README §1).
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §2.1 lists no `logs` action family. Logs can expose
-  more than health numbers (auth lines, tokens caught by the scanner). Proposal: add `logs` to
-  the family list with default audience `'owner'`. Until it lands this epic evaluates logs as
-  owner-only, which equals the proposed default, so adding the row only adds the knob.]`
-- `[NEEDS CLARIFICATION: CONTRACTS §3.3 opens `logs` with `{ source, path?, unit?, container?,
-  lines }`. The P2 merged view needs several sources on one channel. Proposal: an additive
-  `sources?: […]` array on the same open message; single-source opens are unchanged.]`
-- `[NEEDS CLARIFICATION: the Windows "standard log directories" for the Files group. Proposal:
-  only the node's own log directory plus allowed roots on Windows; `C:\Windows\Logs` is
-  administrator-only and noisy.]`
-- `[NEEDS CLARIFICATION: should an Agent's `fleet_logs_read` be allowed on a node whose owner is
-  not the Agent's owner but whose `logs` audience includes the Agent's owner's role? CONTRACTS
-  §2.1 says yes (both gates); confirming no further owner opt-in is wanted.]`
+- **Resolved** by CONTRACTS §2.1: `logs` is an action family with default audience `owner`; log
+  reads map to it (FR-26).
+- **Resolved** by CONTRACTS §3.3: the `logs` family opens with `{ source, path?, unit?, container?,
+  lines, sources?[] }`; the P2 merged view uses `sources[]`, single-source opens are unchanged.
+- **Resolved** by CONTRACTS §2.1: an Agent reads a log only when both its own permissions allow the
+  tool and the Node's `logs` audience includes the Agent's owner; no further owner opt-in (FR-31).
+- `[NEEDS CLARIFICATION: Windows "standard log directories" for the Files group (R-18 names "the OS
+  standard log directories" without listing Windows ones). Default until answered: on Windows only
+  the node's own log directory plus the allowed roots; `C:\Windows\Logs` is not listed
+  (administrator-only and noisy).]`
+- **Resolved** by CONTRACTS §3.3, §4.6 and §10 (rev 4): `logs.sources` is a `machine` verb; `logs.earlier`, `logs.initial-done`, `logs.earlier-done`, `logs.notice` on the `logs` channel; kind `service-failed`; limits 5 000 held lines, 200 files per root, 12 merged sources, 8 log channels per viewer per Node; one allowed-roots resolver (R-39).
 
 ---
 
@@ -631,8 +633,8 @@ No new noun is introduced (README §1).
       chips ordered by time. (FR-35, FR-36)
 - [ ] **ACC-FL08-18** (P2) **Load 500 earlier** prepends journal lines and says "no earlier lines"
       for a container. (FR-37)
-- [ ] **ACC-FL08-19** (P3) A failed-service "needs a look" item opens the log at the failure
-      time. (FR-39)
+- [ ] **ACC-FL08-19** (P3) **Open the log** on a failed service row opens the log at the failure
+      time; no "needs a look" item is produced until CONTRACTS §4.6 has a kind for it. (FR-39)
 - [ ] **ACC-FL08-20** (P3) **Download shown lines** yields a text file of the filtered lines only.
       (FR-40)
 - [ ] All functional requirements have a passing unit, controller/e2e, node-side or Playwright
