@@ -17,7 +17,7 @@ function item(overrides: Partial<NeedsALookItem>): NeedsALookItem {
 }
 
 describe('needs a look — shape (CONTRACTS §4.6)', () => {
-	it('is the closed set of twelve kinds (revision 3 adds session-unconfirmed)', () => {
+	it('is the closed set of thirteen kinds (revision 3 adds session-unconfirmed, revision 4 service-failed)', () => {
 		expect(NEEDS_A_LOOK_KINDS).toEqual([
 			'disk-low',
 			'node-throttled',
@@ -27,6 +27,7 @@ describe('needs a look — shape (CONTRACTS §4.6)', () => {
 			'job-unassignable',
 			'session-needs-you',
 			'session-unconfirmed',
+			'service-failed',
 			'schedule-failed',
 			'cloud-idle',
 			'helper-untrusted',
