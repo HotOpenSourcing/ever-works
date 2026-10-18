@@ -133,6 +133,16 @@ describe('TaskTransitionService', () => {
             );
         });
 
+        it('force=true from an AGENT-driven move does NOT skip the approver gate', async () => {
+            const task = makeTask({ status: TaskStatus.IN_REVIEW, requireAllApprovers: true });
+            approvers.allApproved.mockResolvedValueOnce(false);
+            await expect(
+                svc.transition(task, TaskStatus.DONE, { force: true, actorType: 'agent' }),
+            ).rejects.toThrow(ConflictException);
+            expect(approvers.allApproved).toHaveBeenCalled();
+            expect(tasks.casUpdateStatus).not.toHaveBeenCalled();
+        });
+
         it('sets completedAt on → done', async () => {
             const task = makeTask({ status: TaskStatus.IN_REVIEW, requireAllApprovers: false });
             tasks.findById.mockResolvedValueOnce({ ...task, status: TaskStatus.DONE });

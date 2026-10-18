@@ -182,6 +182,26 @@ export interface SyncTransitionResult {
     path: TaskStatus[];
 }
 
+/**
+ * Prompt-injection hardening — `force` is a PERSON's override and never an
+ * agent's. It skips the quality gate on `→ in_review` and the approver gate on
+ * `→ done`, the two checks that exist to judge an agent's work; an agent-driven
+ * move (the `transitionTask` tool, the run finisher, the workspace finalize
+ * step, the merge completion) runs every gate, whatever its caller passed.
+ * Human and API moves keep `force` exactly as before.
+ */
+export function withoutAgentForce(
+    opts: TransitionOptions,
+    logger?: { warn(message: string): void },
+    taskId?: string,
+): TransitionOptions {
+    if (opts.actorType !== 'agent' || opts.force !== true) return opts;
+    logger?.warn(
+        `Task ${taskId ?? '?'}: an agent-driven transition asked for force=true; ignored (agents run every gate).`,
+    );
+    return { ...opts, force: false };
+}
+
 @Injectable()
 export class TaskTransitionService {
     private readonly logger = new Logger(TaskTransitionService.name);
@@ -250,6 +270,7 @@ export class TaskTransitionService {
      * side-effect columns).
      */
     async transition(task: Task, to: TaskStatus, opts: TransitionOptions = {}): Promise<Task> {
+        opts = withoutAgentForce(opts, this.logger, task.id);
         const from = task.status;
         if (!ALLOWED[from]?.includes(to)) {
             throw new BadRequestException(`Cannot transition Task from ${from} to ${to}.`);
@@ -292,7 +313,7 @@ export class TaskTransitionService {
             const refusingGate = await this.findRefusingGateStatus(task);
             if (refusingGate) {
                 throw new ConflictException(
-                    `Task cannot transition to in_review — the latest agent run's quality gate is '${refusingGate}' and this Work requires passing acceptance checks. Fix the failing checks (or pass force=true to override).`,
+                    `Task cannot transition to in_review — the latest agent run's quality gate is '${refusingGate}' and this Work requires passing acceptance checks. Fix the failing checks (only a person can override this, with force=true from the Task).`,
                 );
             }
         }
@@ -544,6 +565,7 @@ export class TaskTransitionService {
         /** Called after EVERY hop that landed, before the next one is tried. */
         onHop?: (hop: { from: TaskStatus; to: TaskStatus }) => Promise<void>,
     ): Promise<SyncTransitionResult> {
+        opts = withoutAgentForce(opts, this.logger, task.id);
         const from = task.status;
         const path = shortestTransitionPath(from, to, ALLOWED);
         if (path === null) {
