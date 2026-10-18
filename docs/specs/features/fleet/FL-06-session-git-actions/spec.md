@@ -65,8 +65,8 @@ When a session starts (FL-04) in a Checkout (FL-14), the session records which c
 Everything in this epic follows from that one link. The **git line** is the checkout's snapshot —
 computed on the node, enriched on the platform with the pull request that has this branch as its
 head and the roll-up of its checks — and it is rendered in one place for every surface: the
-session card's footer (FL-05 fixed the card; this epic fills the "checkout/branch" and "PR pill"
-slots), the session detail header, and the checkout row.
+session card's footer (FL-05 owns the card, CONTRACTS R-22; this epic fills its `gitLine`,
+`prPill` and `cleanUp` slots, §4.8), the session detail header, and the checkout row.
 
 An **Agent session** defaults to a **new worktree** of the chosen checkout, because two agents in
 one working tree overwrite each other and because a worktree shares history with its parent and
@@ -116,9 +116,9 @@ Then:
 | "Open a PR from what it did."                               | Wait for the run to finish; the platform opens one from the pushed branch.              | PR opening is tied to the end of a Task run (`fleet-agent-task-reconciler.service.ts:100-135`, `packages/contracts/src/fleet/fleet-jobs.types.ts:583-587` "the platform opens the pull request from the pushed branch"). A persistent session has no "end of run" to hang it on.                                                                                                                                                                                       |
 | "Give each agent its own copy of the repo."                 | Rely on Task isolation, when the Work turned it on.                                     | Task isolation gives a Task its own branch and checkout (`docs/features/task-isolation.md:9`, `:24` `taskIsolation off · worktree`); the name is `task/<slug>-<id>` (`packages/agent/src/tasks-domain/task-isolation.ts:43-56`). A session without a Task has no branch rule, no uniqueness rule, no worktree default.                                                                                                                                       |
 | "Show me the uncommitted diff."                             | Open the PR, if one exists.                                                             | The Task diff sheet shows the PR's diff from the git provider, read-only (`apps/web/src/components/tasks/TaskDiffSheet.tsx:11-24`). Nothing shows what is on disk and not yet committed.                                                                                                                                                                                                                                                                                 |
-| "Where do I set how Nina writes commit messages?"           | Put it in her instructions and hope.                                                    | An Agent's instructions are five canonical files (`packages/agent/src/entities/agent.entity.ts:204-209`; editor `apps/web/src/app/[locale]/(dashboard)/agents/[id]/instructions/page.tsx:5`). There is no notion of a reusable action prompt anywhere in the repository (no prompt-template entity or setting under `packages/agent/src/entities` or `apps/web/src/components/settings`).                                                                     |
+| "Where do I set how Nina writes commit messages?"           | Put it in her instructions and hope.                                                    | An Agent's instructions are five canonical files (`packages/agent/src/entities/agent.entity.ts:204-209`; editor `apps/web/src/app/[locale]/(dashboard)/agents/[id]/instructions/page.tsx:5`). No Agent-level or user-editable action prompt exists: no prompt-template entity or setting under `packages/agent/src/entities` or `apps/web/src/components/settings` (`rg -il 'prompt.?template'` over both → no match). The `prompt-provider` capability (`packages/plugin/src/contracts/capabilities/prompt-provider.interface.ts:26-30`) fetches externally managed pipeline prompts; it is not reachable from a session or an Agent's instructions. |
 | "Did that commit prompt cost anything?"                     | Nothing.                                                                                | Cost is per job/run (`AgentRun.costCents`); nothing attributes a slice of a session to one prompt.                                                                                                                                                                                                                                                                                                                                                                       |
-| "Is it safe to clean up the worktree?"                      | `ever-works-node gc`, or by hand.                                                       | The reaper's rules are age-based and fail-closed (`apps/node/src/core/workspaces/workspace-reaper.ts:36-56`); nothing offers "the PR is merged — remove this worktree, keep the branch" at the moment it becomes true.                                                                                                                                                                                                                                                  |
+| "Is it safe to clean up the worktree?"                      | `ever-works-node gc`, or by hand.                                                       | The reaper removes a worktree only when every safety rule passes — branch merged or gone from the remote **and** unused for longer than the max age — and keeps it on any unknown (`apps/node/src/core/workspaces/workspace-reaper.ts:36-56`); nothing offers "the PR is merged — remove this worktree, keep the branch" at the moment it becomes true, before the age rule is met.                                                                                                                      |
 
 ### 2.3 The gaps this epic closes
 
@@ -295,7 +295,8 @@ changed. The five Agent files stay five; `agent.yml` gains an optional block.
   GitHub App for the Checkout's remote and branch, at most once per minute per checkout, and MUST
   be refreshed at once on a pull request event for that branch.
 - **FR-8** The pull request pill MUST show one of `open · draft · merged · closed` and a checks
-  roll-up of `pending · passing · failing · none`, and MUST open the pull request on click.
+  roll-up of `pending · passing · failing · none` ("none" is the stored `null` of CONTRACTS §4.7),
+  and MUST open the pull request on click.
 - **FR-9** The Changes view MUST show the uncommitted diff of the session's Checkout — changed
   files with add/delete counts and each file's patch as text — read-only, computed on the node,
   capped at 1 MiB total and 64 KiB per file, saying what was omitted.
@@ -334,9 +335,12 @@ changed. The five Agent files stay five; `agent.yml` gains an optional block.
   request on the Task and move it to **In review**, as a Task run does today.
 - **FR-20** No action in this epic MUST merge a pull request; the merge policy alone decides
   whether and how an agent may merge, and a protected branch MUST never be merged by an agent.
-- **FR-21** Every sent action MUST write one audit row (session input with the action named) and
-  one ledger entry on the session's Run; the ledger entry MUST gain the tokens and cost attributed
-  to that turn when the usage scan runs, and MUST read "unknown" until then.
+- **FR-21** Every sent action MUST write one audit row (session input with the action named). In
+  an Agent session it MUST also write one ledger entry on the session's Run, which MUST gain the
+  tokens and cost attributed to that turn when the usage scan runs and MUST read "unknown" until
+  then. An owner session has no Run (CONTRACTS R-1, §4.2): its ledger MUST be read from the
+  session's audit rows and its cost column MUST read "session total only", showing the session's
+  total once FL-20 fills it.
 - **FR-22** The session detail MUST show the ledger of actions sent, each with time, action,
   tokens, cost and the pull request it produced when one did.
 - **FR-23** Action sends MUST be limited to 10 per minute per session and MUST refuse a second
@@ -350,11 +354,22 @@ changed. The five Agent files stay five; `agent.yml` gains an optional block.
   Checkout is a worktree, its pull request is merged or closed, and no live session uses it; it
   MUST remove the worktree through the Checkout delete with its changes-check and MUST keep the
   branch.
-- **FR-26** Agents MUST get `send action`, `read changes`, `open pull request` and `clean up` as
-  tools with the annotations of CONTRACTS §11.3, gated by Agent permissions and the Node's family
-  audiences.
+- **FR-26** Agents MUST get `list actions`, `send action`, `read changes` and `open pull request`
+  as tools with the annotations of CONTRACTS §11.3, gated by Agent permissions and the Node's family
+  audiences; clean up for an Agent MUST be FL-14's checkout delete tool, refused unless FR-25's
+  conditions hold — no second delete tool.
 - **FR-27** The Agent instructions editor MUST offer the per-action templates and the branch prefix
   as fields that write the Agent's own file, with the default shown beside each override.
+
+### 4.4 Permissions, confirmations, audit (program rule 12)
+
+| Action                    | Consent (CONTRACTS §1.1)                        | Family · default audience (§2.1) | Confirmation (§2.2)                                                                 | Audit (§7)                                    | Errors (§8)                                                                                       | Kill switch (R-24)                 | Agent tool                                      |
+| ------------------------- | ----------------------------------------------- | -------------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------- | ----------------------------------------------- |
+| See the git line, actions list, ledger | none beyond the link                | `view` · org-members             | `plain`                                                                             | none (read)                                   | `not_found`                                                                                       | readable (last snapshot)           | `fleet_sessions_actions_list` · read-only       |
+| Send an action            | owner session `--manage`; Agent session `--work` | `sessions` · owner              | `plain` (the sheet shows the prompt before **Send**)                                | `node.session.input` with the action named    | `invalid` "not available on main", `busy` "another action was sent 1 s ago", `limit_exceeded` "10 per minute", `unreachable`, `consent_missing`, `permission_denied`, `kill_switch` | refused                            | `fleet_sessions_action` · `destructive: false`  |
+| Read the Changes view     | `--manage` (`--work` for a Task-created worktree) | `checkouts` · owner            | `plain`                                                                             | none (read)                                   | `unreachable`, `consent_missing`, `permission_denied`, `kill_switch`                              | refused                            | `fleet_checkouts_changes` · read-only           |
+| Open / update a pull request | none on the node (platform-side, after the push) | `checkouts` · owner, plus the Agent's "may open pull requests" | `plain`                                    | none in `fleet_audit` (no §7 name); the Task trail and activity log record it | `invalid` "branch is not pushed yet", `permission_denied` "Nina may not open pull requests", `operation_failed` (provider's first line), `kill_switch` | refused for new requests; one already requested completes | `fleet_checkouts_open_pull_request` · `destructive: false` |
+| Clean up                  | as Changes                                      | `checkouts` · owner              | `confirm` "Remove the worktree of nina/fix-login on build-01? The branch is kept."; `confirm-destructive` (type the branch) when it has uncommitted work | `node.checkout.delete`                        | FL-14's delete codes; `invalid` "the pull request is not merged or closed yet"                     | refused                            | FL-14's `fleet_checkouts_delete` · `destructive: true` |
 
 ---
 
@@ -441,8 +456,8 @@ unchanged. No new palette entries.
 | ---------------------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | **Session** (`FleetSession`) | Existing (FL-04) | Gains use of its `checkoutId`; no new columns.                                                        |
 | **Checkout** (`FleetCheckout`) | Existing (FL-14) | Its git line gains the platform-resolved `pr` part.                                                 |
-| **Action**                   | **NEW** (concept) | One of seven prompt templates; rendered, edited, sent; recorded on the Run's ledger with its cost.    |
-| **Action template**          | **NEW** (concept) | Default text per action with `{branch} {base} {pull} {task}`; overridable in the Agent's `agent.yml`. |
+| **Action**                   | Plain word — no entity, no table | One of seven prompt templates; rendered, edited, sent as typed input; recorded on the Run's ledger (Agent sessions) or the audit trail (owner sessions). |
+| **Action template**          | Plain word — a text in a file | Default text per action with `{branch} {base} {pull} {task}`; overridable in the Agent's `agent.yml`. |
 | **Run**, **Task**, **Agent**, **Merge policy**, **GitHub App** | Existing | Applied, not changed.                                                                 |
 
 ---
@@ -457,20 +472,25 @@ unchanged. No new palette entries.
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — add `checkouts.changes { checkoutId, maxBytes }` to the
-`machine` family vocabulary (§3.3) for the read-only diff; FL-14 lists only list/create/delete/sync.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §10 limits: "Action prompts per session: 10/min, 2 s
-spacing" and "Changes view diff: 1 MiB total / 64 KiB per file".]`
-- `[NEEDS CLARIFICATION: Templates live in the Agent's `agent.yml` (decided here; no table, no
-slot). If org-wide defaults are wanted, a slot `1796060000000-CreateFleetActionTemplates` would be
-needed — proposed as a later addition, not assumed.]`
-- `[NEEDS CLARIFICATION: Owner-session branch prefix — the account handle by default; is a
-per-person override wanted, and where is it stored (no user-settings row exists for fleet)?]`
-- `[NEEDS CLARIFICATION: Codex sessions in a worktree — the sandbox may refuse writes to the
-parent's `.git`; should FL-04's isolation add the parent git dir to the writable roots, or should
-the prompt say the agent will ask?]`
-- `[NEEDS CLARIFICATION: Should "Commit and push" on a protected branch be hidden for owner
-sessions too (this spec: shown with a warning, because it is the person's own machine)?]`
+- **Resolved** by CONTRACTS §3.3: the `machine` family vocabulary lists `checkouts.changes`; FL-06
+  sends it as `checkouts.changes { checkoutId, maxBytes }`.
+- **Resolved** by CONTRACTS §10: "Action prompts per session — 10 per minute, 2 s spacing" and
+  "Changes diff shown — 1 MiB total, 64 KiB per file" (FR-9, FR-23).
+- **Resolved** by CONTRACTS §11.2 (rev 4): `/sessions/:id/actions` (GET, POST), `/sessions/:id/actions/ledger`, `/sessions/:id/actions/:ledgerId/resend`, `/sessions/branch-proposal`, `/checkouts/:id/pull-request` (GET, POST); audit `node.session.action` and `node.session.pull-request.open` (§7).
+- **Resolved** by CONTRACTS R-38 (rev 4): an owner session's action ledger is read from its `fleet_audit` rows and its cost shows as a session total only; Agent sessions keep the Run ledger.
+- `[NEEDS CLARIFICATION: Org-wide action templates. Default until answered: templates live only in
+  the platform defaults and the Agent's own `agent.yml` (no table, no migration — CONTRACTS §13
+  has no FL-06 slot); an org-wide layer would need a new slot and is not built.]`
+- `[NEEDS CLARIFICATION: Owner-session branch prefix override. Default until answered: the prefix
+  is the person's account handle, with no per-person override and nothing stored (no fleet
+  user-settings row exists).]`
+- `[NEEDS CLARIFICATION: Codex Agent sessions in a worktree — the Codex sandbox may refuse writes
+  to the parent repository's git dir. Default until answered: FL-04's Task-run isolation is used
+  unchanged (CONTRACTS R-5) — no writable root is added — and the default Commit / Commit and push
+  templates tell the agent to say so and ask when a write is refused.]`
+- `[NEEDS CLARIFICATION: "Commit and push" on a protected branch in an owner session. Default
+  until answered: shown with the amber "This pushes straight to main" note (U6), because it is the
+  person's own machine and their own git credentials; Agent sessions never see it (FR-15).]`
 
 ---
 
@@ -487,7 +507,7 @@ sessions too (this spec: shown with a warning, because it is the person's own ma
 - [ ] **ACC-FL06-09** (FR-15, U5, U6, U8) Relevance rules hide the right actions; a direct call is refused with `invalid`; shell sessions show none.
 - [ ] **ACC-FL06-10** (FR-16–FR-19) Open PR in an Agent session arrives as a tool call and the platform opens it via the GitHub App; an owner session uses the dialog; a Task session records the PR and moves to In review; an existing PR is updated, not duplicated.
 - [ ] **ACC-FL06-11** (FR-20) No code path in this epic calls merge; a protected base is never merged.
-- [ ] **ACC-FL06-12** (FR-21, FR-22) Each send writes an audit row and a ledger row; tokens and cost fill in after the usage scan.
+- [ ] **ACC-FL06-12** (FR-21, FR-22) Each send writes an audit row; in an Agent session also a ledger row whose tokens and cost fill in after the usage scan; an owner session's ledger lists the same sends from its audit rows with "session total only".
 - [ ] **ACC-FL06-13** (FR-23, FR-24, U13, U14) 11th send in a minute → `limit_exceeded`; 2 s double send → `busy`; undelivered marked and re-sendable.
 - [ ] **ACC-FL06-14** (FR-25, U16) Clean up appears only when merged/closed + worktree + no live session; removes the folder, keeps the branch.
 - [ ] **ACC-FL06-15** (FR-26) `fleet_sessions_action` refused outside the `sessions` audience with `permission_denied`; `fleet_checkouts_changes` works for any Agent with the grant.
@@ -517,6 +537,6 @@ sessions too (this spec: shown with a warning, because it is the person's own ma
 
 - Program: [Fleet README](../README.md) D4, D5, D6, D7, D14 · [CONTRACTS](../CONTRACTS.md) R-1, R-5, R-13, R-16, R-22, R-24; §3.3 `session`, `machine`; §4.2, §4.3, §4.7, §4.8; §5; §7; §8; §9; §11 · [CAPABILITY-MAP](../CAPABILITY-MAP.md) §B
 - Plan: [`./plan.md`](./plan.md) · Tasks: [`./tasks.md`](./tasks.md)
-- Evidence (HEAD `e4334baf7`): `apps/web/src/components/agents/AgentSessionsClient.tsx:23-33`, `apps/web/src/components/agents/SessionDetailClient.tsx:38-49`, `apps/web/src/components/tasks/TaskBranchSection.tsx:27-33`, `apps/web/src/components/tasks/TaskDiffSheet.tsx:11-24`, `apps/api/src/fleet/fleet-agent-task-reconciler.service.ts:100-135,725-728`, `packages/contracts/src/fleet/fleet-jobs.types.ts:583-587`, `packages/agent/src/tasks-domain/task-isolation.ts:43-56`, `packages/agent/src/entities/agent.entity.ts:204-209`, `packages/contracts/src/policy/merge-policy.types.ts:18-57`, `docs/features/task-isolation.md:9,24`
+- Evidence (HEAD `e4334baf7`): `apps/web/src/components/agents/AgentSessionsClient.tsx:23-33`, `apps/web/src/components/agents/SessionDetailClient.tsx:38-49`, `apps/web/src/components/tasks/TaskBranchSection.tsx:27-33`, `apps/web/src/components/tasks/TaskDiffSheet.tsx:11-24`, `apps/api/src/fleet/fleet-agent-task-reconciler.service.ts:100-135,725-728`, `packages/contracts/src/fleet/fleet-jobs.types.ts:583-587`, `packages/agent/src/tasks-domain/task-isolation.ts:43-56`, `packages/agent/src/entities/agent.entity.ts:204-209`, `packages/contracts/src/policy/merge-policy.types.ts:18-57`, `docs/features/task-isolation.md:9,24`, `apps/node/src/core/executors/agent-task.ts:1048-1060`, `apps/node/src/core/workspaces/workspace-reaper.ts:36-56`, `packages/plugin/src/contracts/capabilities/prompt-provider.interface.ts:26-30`, `packages/agent/src/entities/agent-run-log.entity.ts:21-28` (`runId` not nullable); EXISTING-SUBSTRATE §1.7 (push credential), §3.1 (`fleetCliSession`), §3.3 (sessions list and detail)
 - Related epics: FL-04, FL-05, FL-14, FL-15, FL-19, FL-20
 - User docs to write: `docs/features/fleet-session-git.md`

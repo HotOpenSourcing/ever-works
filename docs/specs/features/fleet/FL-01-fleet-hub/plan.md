@@ -76,10 +76,10 @@ policy.
 | ----------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | Hub tabs                | Sub-routes `/fleet`, `/fleet/computers`, … with one `FleetHubTabs` component                 | Same shape as the Teams hub (`AgentsPageTabs.tsx`); each tab is a server component page                |
 | Computer-page tabs      | One route `/fleet/computers/[id]` + `?tab=`; registry with `next/dynamic` loaders            | D9: epics register without touching each other; code-split per tab; `?view=` precedent in Activity   |
-| Registry                | Plain TypeScript module `apps/web/src/components/fleet/registry.ts` with typed `registerComputerTab`, `registerHubPanel`, `registerOverviewSlot` | Internal, compile-time; no plugin UI (D9)                                                  |
+| Registry                | Plain TypeScript module `apps/web/src/components/fleet/registry.ts` with typed `registerComputerTab`, `registerHubTab`, `registerOverviewBlock` (the names CONTRACTS §11.1 fixes) | Internal, compile-time; no plugin UI (D9)                                                  |
 | "Needs a look"          | API-side producer registry (`NeedsALookProducer` interface, Nest multi-provider token)       | Producers live where their facts live (FL-03 in the fleet package); one shape (CONTRACTS §4.6)        |
 | Roles                   | `FleetAccessService` in `packages/agent/src/fleet/` wrapping a pure `resolveViewerRole`      | Pure truth table is testable; service owns the repository read; AW-11's `canControl` stays             |
-| Policy storage          | New `controlPolicyFamilies` jsonb; legacy `controlPolicy` mirrored for one release           | Constitution V/X; raised as a CONTRACTS clarification in spec §8b                                     |
+| Policy storage          | New `controlPolicyFamilies` map; legacy `controlPolicy` stays as the `desktop` mirror (read through, written back) | CONTRACTS §2.1 / §4.1; Constitution V/X — the live column keeps its type          |
 | Favourites              | `isFavorite` boolean on `fleet_nodes`                                                         | CONTRACTS §4.1; nodes are single-owner (D15)                                                           |
 | Flags                   | `FLEET_HUB_ENABLED` read server-side, passed as a prop (same posture as `fleet-flags.ts`)    | Never `NEXT_PUBLIC_`; sidebar is a client component fed by the layout                                 |
 | i18n                    | New top-level `fleet` namespace in `apps/web/messages/en.json`                               | CONTRACTS §11.4                                                                                        |
@@ -92,36 +92,40 @@ policy.
 | Column                   | Type                                   | Notes                                                                                                 |
 | ------------------------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | `isFavorite`             | boolean, default `false`               | Owner's star (CONTRACTS §4.1)                                                                          |
-| `controlPolicyFamilies`  | `simple-json` nullable                 | `Partial<Record<FleetActionFamily, FleetAudience>>`; `null` = "derive from legacy `controlPolicy`"     |
-| `controlPolicy`          | existing `varchar(24)`                 | Kept; written as the mirror of `families.desktop` on every policy write                               |
+| `controlPolicyFamilies`  | `simple-json` nullable (CONTRACTS "jsonb"; stored as text like `modelThrottles` so SQLite and Postgres share one migration) | `Partial<Record<FleetActionFamily, FleetAudience>>`; a missing key takes its default; a missing `desktop` key reads through to `controlPolicy` |
+| `controlPolicy`          | existing `varchar(24)`                 | Unchanged type; written back whenever `families.desktop` is written (CONTRACTS §2.1)                  |
 
 Reads go through one pure function `effectiveControlPolicy(node)` → full map with defaults
-(`view: 'org-members'`, others `'owner'`, `desktop` from the legacy column when the map is null).
+(`view: 'org-members'`, others `'owner'`, `desktop` from the legacy column when the map has no
+`desktop` key).
 
 ### 4.2 Migrations (`apps/api/src/migrations/`, forward-only, per-step guards like `1795161700000-AddFleetModelUsageLimits.ts`)
 
 | Slot                                               | Contents                                                                                                                                  |
 | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `1796010000000-AddFleetNodeControlPolicyFamilies`  | `ADD COLUMN controlPolicyFamilies text NULL`; backfill `UPDATE fleet_nodes SET controlPolicyFamilies = json('{"desktop": <controlPolicy>}') WHERE controlPolicy <> 'owner'` (portable: two statements, one per dialect, guarded by `getTable`) |
+| `1796010000000-AddFleetNodeControlPolicyFamilies`  | `ADD COLUMN controlPolicyFamilies text NULL`, guarded by `findColumnByName`; **no backfill** — a row without a `desktop` key reads through to `controlPolicy` (CONTRACTS §2.1), so the migration touches no data |
 | `1796010100000-AddFleetNodeFavorite`               | `ADD COLUMN isFavorite boolean NOT NULL DEFAULT false`                                                                                    |
 
 `down` drops exactly what `up` added. Re-stamp before merge if `develop` moved (README rule 10).
 
 ### 4.3 Contracts (`packages/contracts/src/fleet/`)
 
-- New `fleet-access.types.ts`: `FLEET_ACTION_FAMILIES` (`view · sessions · desktop · services ·
-  docker · processes · files · commands · schedules · checkouts · machines`), `FleetActionFamily`,
-  `FLEET_AUDIENCES` (`owner · org-admins · org-members`), `FleetAudience`,
-  `FleetControlPolicyFamilies`, `FLEET_CONTROL_POLICY_DEFAULTS`, `effectiveControlPolicy()`,
-  `audienceIncludes(audience, role)` (pure), re-export of `ComputerViewerRole` as `FleetViewerRole`.
-- New `fleet-needs-a-look.types.ts`: `NEEDS_A_LOOK_KINDS` (the ten kinds of §4.6),
-  `NeedsALookSeverity`, `NeedsALookItem { id, nodeId, nodeName, severity, kind, title, detail,
-  action?: { label, route? , command? }, since }`, `sortNeedsALook()`.
+- New `fleet-access.types.ts`: `FLEET_ACTION_FAMILIES` (the thirteen of CONTRACTS §2.1: `view ·
+  sessions · desktop · logs · services · docker · processes · ports · files · commands · schedules ·
+  checkouts · machines`), `FleetActionFamily`, `FLEET_AUDIENCES` (`owner · org-admins ·
+  org-members`), `FleetAudience`, `FleetControlPolicyFamilies`, `FLEET_CONTROL_POLICY_DEFAULTS`,
+  `effectiveControlPolicy()`, `audienceIncludes(audience, role)` (pure), re-export of
+  `ComputerViewerRole` as `FleetViewerRole`.
+- New `fleet-needs-a-look.types.ts`: `NEEDS_A_LOOK_KINDS` (the eleven kinds of CONTRACTS §4.6, incl.
+  `node-upgrade-required`), `NeedsALookSeverity`, `NeedsALookItem` exactly as §4.6 —
+  `{ id, nodeId, severity, kind, title, detail, action?: { label, route? | command? }, since }` (the
+  web resolves the computer name from `nodeId` against the node list it already holds) —
+  `sortNeedsALook()`.
 - `fleet-node.types.ts` `FleetNodeView` gains optional `isFavorite`, `hostNodeId`, `virtualKind`
   (read-only here; FL-16 writes), `controlPolicyFamilies`, `viewerRole`, `consents` (read-only
   here; FL-02 writes).
-- `fleet-panic.types.ts`: add `'node.policy'` to `FleetAuditAction` / `FLEET_AUDIT_ACTIONS`
-  (policy family change). `[NEEDS CLARIFICATION]` in spec §8b notes it is not in CONTRACTS §7.
+- `fleet-panic.types.ts`: add `'node.policy.change'` (CONTRACTS §7) to `FleetAuditAction` /
+  `FLEET_AUDIT_ACTIONS`.
 
 ## 5. API surface
 
@@ -132,10 +136,10 @@ All under the existing `@Controller('api/fleet')` with `FleetEnabledGuard`
 | ------ | -------------------------------------- | --------------------------------------------- | ------------------------- | ----------------------------------------------------------------------------------------------- |
 | GET    | `/nodes` (existing, widened)           | —                                             | `FleetNodeView[]`         | Owner's nodes **plus** Organization-bound nodes whose `view` audience includes the viewer; each row carries `viewerRole` |
 | GET    | `/nodes/:id` (existing, widened)       | —                                             | node + history            | 404 when `viewerRole === 'stranger'` (identical to unknown)                                      |
-| PATCH  | `/nodes/:id` (existing, widened)       | `UpdateFleetNodeDto` + `isFavorite?`, `controlPolicyFamilies?` | `FleetNodeView`  | `isFavorite`: owner only (403 `permission_denied`); `controlPolicyFamilies`: owner only; `name/paused/disabled`: `machines` family |
+| PATCH  | `/nodes/:id` (existing, widened)       | `UpdateFleetNodeDto` + `isFavorite?`, `controlPolicyFamilies?` | `FleetNodeView`  | `isFavorite`: owner only (403 `permission_denied`); `controlPolicyFamilies`: owner only, audited `node.policy.change`; `name/paused/disabled`: `machines` family |
 | POST   | `/nodes/:id/drain` (existing)          | `{ drain }`                                   | `{ releasedJobs }`        | `machines` family                                                                               |
-| DELETE | `/nodes/:id` (existing)                | `{ confirmName }` (new, optional → required when hub flag on) | 204         | `machines` family; `invalid` when the name does not match                                        |
-| GET    | `/needs-a-look`                        | —                                             | `NeedsALookItem[]`        | All nodes the viewer may see; one producer failing is logged and skipped (`partial: true` header) — see spec §8b |
+| DELETE | `/nodes/:id` (existing)                | `{ confirmName? }` (new, **optional**: existing callers keep working — Constitution X; the hub always sends it) | 204 | `machines` family; `invalid` when a supplied name does not match |
+| GET    | `/needs-a-look`                        | —                                             | `NeedsALookItem[]`        | All nodes the viewer may see (CONTRACTS §11.2); one producer failing is logged and skipped (`partial: true` header) |
 | GET    | `/nodes/:id/needs-a-look`              | —                                             | `NeedsALookItem[]`        | `view` family                                                                                   |
 
 Error envelope on every refusal: `{ error: { code, hint, details } }` with the codes of CONTRACTS §8
@@ -171,12 +175,17 @@ None.
 and renders `FleetHubTabs`. `ROUTES` additions in `apps/web/src/lib/constants.ts`: `DASHBOARD_FLEET`,
 `DASHBOARD_FLEET_COMPUTERS`, `DASHBOARD_FLEET_COMPUTER(id, tab?)`, `DASHBOARD_FLEET_SESSIONS`,
 `DASHBOARD_FLEET_CHECKOUTS`, `DASHBOARD_FLEET_COMMANDS`, `DASHBOARD_FLEET_USAGE` (CONTRACTS §11.1).
+FL-01 creates every hub-tab route file and constant (each tab needs a route for FR-3); the epic
+CONTRACTS §11.1 names for a tab (FL-05 Sessions, FL-14 Checkouts, FL-12 Commands, FL-20 Usage)
+fills it by `registerHubTab` and reuses the constant — it never adds a second page file or
+constant. `DASHBOARD_FLEET_SESSION` (detail) and `DASHBOARD_ACTIVITY_SESSIONS` stay FL-04's and
+FL-05's.
 
 ### 8.2 Components (`apps/web/src/components/fleet/`)
 
 | File                                      | Responsibility                                                                                           |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `registry.ts`                             | `registerHubPanel`, `registerComputerTab`, `registerOverviewSlot`, `getComputerTabs()`; entries carry `id`, `labelKey`, `order`, `epic`, `flag?`, `consent?`, `kinds?`, `load: () => import()` |
+| `registry.ts`                             | `registerHubTab`, `registerComputerTab`, `registerOverviewBlock` (CONTRACTS §11.1), `getComputerTabs()`; entries carry `id`, `labelKey`, `order`, `epic`, `flag?`, `consent?`, `kinds?`, `load: () => import()` |
 | `registry.unit.spec.ts`                   | Order, flag gating, consent gating, kind gating, placeholder resolution                                   |
 | `fleet-hub.shared.ts`                     | Pure: card ordering, `groupNodesByHost`, state word resolution, relative/absolute time, staleness         |
 | `FleetHubTabs.tsx`                        | Six tabs, same shape as `AgentsPageTabs`                                                                  |
@@ -192,7 +201,7 @@ and renders `FleetHubTabs`. `ROUTES` additions in `apps/web/src/lib/constants.ts
 | `computer/ComputerTabPlaceholder.tsx`     | Not shipped / flag off / consent missing (with copyable command) / kind cannot                              |
 | `computer/tabs/OverviewTab.tsx`           | Slot layout: metrics (FL-03), runs here (FL-16), sessions (FL-04), servers (FL-10), needs a look (FL-01), runners (FL-18) |
 | `computer/tabs/SettingsTab.tsx`           | Policy family editor + the drawer's capability/limits/cost/lifecycle sections                               |
-| `computer/PolicyFamiliesEditor.tsx`       | Eleven selects; writes `controlPolicyFamilies`                                                             |
+| `computer/PolicyFamiliesEditor.tsx`       | Thirteen selects (the `machines` family labelled "Lifecycle"); writes `controlPolicyFamilies`              |
 | `FleetSettingsLinkCard.tsx`               | Mounted in `FleetSettings.tsx` when the hub flag is on                                                     |
 
 Sidebar: insert the entry in `DashboardSidebar.tsx` between Teams and Memory; `fleetHubEnabled`
@@ -259,7 +268,7 @@ None.
 ## 12. Observability
 
 - Audit (existing writer): `node.rename`, `node.pause`, `node.disable`, `node.drain`, `node.delete`
-  unchanged; new `node.policy` `{ family, from, to }`.
+  unchanged; new `node.policy.change` `{ family, from, to }` (CONTRACTS §7).
 - Activity log: none new (policy changes are fleet-audit, as AW-11's control rows are).
 - Analytics: `fleet_hub_opened`, `fleet_computer_opened { tab }`, `fleet_needs_a_look_acted
   { kind }`, `fleet_favorite_toggled`.
@@ -286,8 +295,8 @@ None.
   now reach `canControl` through the derived role.
 - **API (Jest)** `apps/api/src/fleet/fleet.controller.spec.ts` — extend: `GET /nodes` includes a
   shared node for a member and excludes it for a stranger; `PATCH isFavorite` 403 for non-owner;
-  `PATCH controlPolicyFamilies` validates keys/values and writes `node.policy`; `DELETE` with wrong
-  `confirmName` → `invalid`; `GET /needs-a-look` partial on producer failure.
+  `PATCH controlPolicyFamilies` validates keys/values and writes `node.policy.change`; `DELETE` with a
+  wrong `confirmName` → `invalid`, without one → 204 as today; `GET /needs-a-look` partial on producer failure.
   `apps/api/src/fleet/__tests__/node-contract.conformance.spec.ts` — the heartbeat wire shape is
   byte-identical (this epic touches no node contract).
 - **Web unit (Vitest)** `registry.unit.spec.ts`, `fleet-hub.shared.unit.spec.ts` (ordering,
@@ -311,8 +320,8 @@ None.
 - **I / II** — no external integration, no provider resolution.
 - **III** — no work content in the database.
 - **IV** — no background work.
-- **V** — two additive migrations; the legacy column is kept (two-step posture for the policy
-  shape).
+- **V** — two additive migrations, neither touching data; the legacy column keeps its type and
+  mirrors the `desktop` family (CONTRACTS §2.1).
 - **VI** — tests in §14 land with each task.
 - **VII** — no secrets touched; the hand-off's one-time token path is moved, not changed.
 - **VIII** — no plugin.
