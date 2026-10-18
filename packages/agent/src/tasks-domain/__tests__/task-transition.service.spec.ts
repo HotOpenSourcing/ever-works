@@ -156,6 +156,23 @@ describe('TaskTransitionService', () => {
                 expect(patch.labels).toEqual(['inbound-email']);
             });
 
+            // Review of #2769 (after the develop merge): only a PERSON's own
+            // move starts it. A machine's move into todo / in_progress keeps
+            // the label and starts no agent run.
+            it.each([
+                ['a sync (mirror) walk hop', { suppressAgentDispatch: true }],
+                ['a fan-out-suppressed move', { suppressAgentFanOut: true }],
+                ['the auto-unblock restore', { automaticRestore: true }],
+            ])('%s into in_progress keeps the label', async (_label, opts) => {
+                const task = makeTask({
+                    status: TaskStatus.TODO,
+                    labels: ['inbound-email', 'awaiting-owner'],
+                });
+                tasks.findById.mockResolvedValueOnce({ ...task, status: TaskStatus.IN_PROGRESS });
+                await svc.transition(task, TaskStatus.IN_PROGRESS, opts);
+                expect(tasks.casUpdateStatus.mock.calls[0][2].labels).toBeUndefined();
+            });
+
             it('a person moving it elsewhere (cancelled) keeps the label', async () => {
                 const task = makeTask({
                     status: TaskStatus.BACKLOG,

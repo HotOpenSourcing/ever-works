@@ -184,6 +184,13 @@ export interface TransitionOptions {
      * are.
      */
     suppressAgentFanOut?: boolean;
+    /**
+     * Set by the auto-unblock cascade on the move that restores a Task's
+     * pre-block status: the PLATFORM moved it, not a person. Today it only
+     * keeps a binding `awaiting-owner` label (see `awaiting-owner.ts`) — a
+     * restore never counts as the owner starting the Task.
+     */
+    automaticRestore?: boolean;
 }
 
 /** Result of a sync walk: the Task after the last hop and the hops taken. */
@@ -368,8 +375,20 @@ export class TaskTransitionService {
         }
 
         const patch: Partial<Task> = { status: to };
-        // A PERSON starting it (into todo / in_progress) clears the binding label.
-        if (awaitingOwner && (to === TaskStatus.TODO || to === TaskStatus.IN_PROGRESS)) {
+        // A PERSON's own move into todo / in_progress starts the Task and
+        // clears the binding label in the same write. A machine's move never
+        // does — a sync (mirror) walk, a fleet run's move (refused above as an
+        // agent anyway), the auto-unblock restore — and while the label stays,
+        // the move starts no agent run on the Task either.
+        const ownerStarts =
+            awaitingOwner &&
+            (to === TaskStatus.TODO || to === TaskStatus.IN_PROGRESS) &&
+            opts.actorType !== 'agent' &&
+            opts.suppressAgentDispatch !== true &&
+            opts.suppressAgentFanOut !== true &&
+            opts.automaticRestore !== true;
+        const holdForOwner = awaitingOwner && !ownerStarts;
+        if (ownerStarts) {
             patch.labels = withoutAwaitingOwner(task.labels);
         }
         if (to === TaskStatus.IN_PROGRESS && !task.startedAt) {
@@ -465,7 +484,8 @@ export class TaskTransitionService {
             this.dispatcher &&
             this.assignees &&
             !opts.suppressAgentDispatch &&
-            !opts.suppressAgentFanOut
+            !opts.suppressAgentFanOut &&
+            !holdForOwner
         ) {
             void this.fanOutAgentExecutions(refreshed).catch((err) =>
                 this.logger.warn(`Agent fan-out failed for task ${refreshed.id}: ${err}`),
@@ -1675,6 +1695,7 @@ export class TaskTransitionService {
                 force: false,
                 suppressAgentDispatch: cascade.suppressAgentDispatch === true,
                 suppressAgentFanOut: cascade.suppressAgentFanOut === true,
+                automaticRestore: true,
             });
             return true;
         } catch (err) {

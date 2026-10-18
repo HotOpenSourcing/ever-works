@@ -419,6 +419,30 @@ describe('TaskTransitionService.transitionSync', () => {
         );
     });
 
+    // Prompt-injection hardening (#2769) — a Task waiting for its owner (the
+    // binding `awaiting-owner` label) starts no agent run on a machine's move
+    // into in_progress (the auto-unblock restore, a mirror walk); a person's
+    // own move starts it, clears the label and fans out as usual.
+    it("awaiting-owner: a machine's in_progress move fans out nothing, a person's does", async () => {
+        const fanOut = jest
+            .spyOn(
+                svc as unknown as { fanOutAgentExecutions: () => Promise<void> },
+                'fanOutAgentExecutions',
+            )
+            .mockResolvedValue(undefined);
+        const labels = ['inbound-email', 'awaiting-owner'];
+
+        row = makeTask({ status: TaskStatus.TODO, labels });
+        await svc.transition(row, TaskStatus.IN_PROGRESS, { automaticRestore: true });
+        expect(fanOut).not.toHaveBeenCalled();
+        expect(tasks.casUpdateStatus.mock.calls.at(-1)[2].labels).toBeUndefined();
+
+        row = makeTask({ status: TaskStatus.TODO, labels });
+        await svc.transition(row, TaskStatus.IN_PROGRESS);
+        expect(fanOut).toHaveBeenCalledTimes(1);
+        expect(tasks.casUpdateStatus.mock.calls.at(-1)[2].labels).toEqual(['inbound-email']);
+    });
+
     // Works-security lane 3a (review round 2) — a fleet run's `suppressAgentFanOut`
     // survives a sync walk (no `suppressAgentDispatch` per hop, so the reviewer
     // is not recorded as refused) and the done/cancel cascade.
