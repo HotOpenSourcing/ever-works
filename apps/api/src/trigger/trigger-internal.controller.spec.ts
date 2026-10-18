@@ -1726,4 +1726,33 @@ describe('TriggerInternalController', () => {
             expect(license).toBeGreaterThan(at);
         });
     });
+
+    /**
+     * Computer health (FL-03) — the `fleet-health-rollup` cron resolves
+     * `FleetNodeHealthService` over this channel (the repositories live
+     * API-side), so the name must be registered AND `rollupAndPrune` callable.
+     * A missing entry would surface only as a failed hourly fire.
+     */
+    describe('the FL-03 fleet-health-rollup remote target', () => {
+        it('registers FleetNodeHealthService and reaches rollupAndPrune over the RPC hop', async () => {
+            const summary = {
+                enabled: true,
+                rolledHours: 1,
+                hourlyRows: 2,
+                prunedRaw: 0,
+                prunedHourly: 0,
+            };
+            const health = { rollupAndPrune: jest.fn().mockResolvedValue(summary) };
+            (controller as any).fleetNodeHealthService = health;
+            controller.onModuleInit();
+
+            expect((controller as any).remoteMap.FleetNodeHealthService).toBe(health);
+            await controller.callRemote(VALID_SECRET, {
+                name: 'FleetNodeHealthService',
+                method: 'rollupAndPrune',
+                args: superjson.serialize([]) as any,
+            });
+            expect(health.rollupAndPrune).toHaveBeenCalledTimes(1);
+        });
+    });
 });

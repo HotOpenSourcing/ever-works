@@ -99,6 +99,13 @@ import { FleetKillSwitchRepository } from '../fleet-kill-switch.repository';
 import { FleetKillSwitchService } from '../fleet-kill-switch.service';
 import { FleetAuditService } from '../fleet-audit.service';
 import { FleetRunCredentialService } from '../fleet-run-credential.service';
+import { FleetNodeHealthSampleRepository } from '../fleet-node-health-sample.repository';
+import { FleetNodeHealthService } from '../fleet-node-health.service';
+import {
+    FL03_NEEDS_A_LOOK_PRODUCERS,
+    NEEDS_A_LOOK_PRODUCERS,
+    NeedsALookService,
+} from '../needs-a-look';
 import { ApiKeyRepository } from '../../database/repositories/api-key.repository';
 
 describe('FleetModule', () => {
@@ -130,6 +137,15 @@ describe('FleetModule', () => {
             FleetKillSwitchService,
             ApiKeyRepository,
             FleetRunCredentialService,
+            // Computer health (FL-03): the history, and "needs a look" (seam owned by FL-01).
+            FleetNodeHealthSampleRepository,
+            FleetNodeHealthService,
+            ...FL03_NEEDS_A_LOOK_PRODUCERS,
+            expect.objectContaining({
+                provide: NEEDS_A_LOOK_PRODUCERS,
+                inject: [...FL03_NEEDS_A_LOOK_PRODUCERS],
+            }),
+            NeedsALookService,
         ]);
     });
 
@@ -149,6 +165,9 @@ describe('FleetModule', () => {
             FleetAuditService,
             FleetKillSwitchService,
             FleetRunCredentialService,
+            FleetNodeHealthSampleRepository,
+            FleetNodeHealthService,
+            NeedsALookService,
         ]);
     });
 

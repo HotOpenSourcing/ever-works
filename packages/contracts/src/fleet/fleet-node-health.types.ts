@@ -46,6 +46,14 @@ export const FLEET_HEALTH_RAW_RETENTION_MS = 7 * 24 * 60 * 60_000;
 /** Hourly roll-ups are kept this long (CONTRACTS §4.5, §10: 90 days). */
 export const FLEET_HEALTH_HOURLY_RETENTION_MS = 90 * 24 * 60 * 60_000;
 
+/**
+ * The hourly roll-up + retention pass, at :07 — off the top of the hour and
+ * off the other sweeps. Shared by the Trigger.dev task and the API's
+ * in-process fallback (used only when Trigger.dev is not the runtime), so the
+ * pass runs on the same schedule whichever scheduler fires it.
+ */
+export const FLEET_HEALTH_ROLLUP_CRON = '7 * * * *';
+
 /** The history endpoint answers at most this many points per series (FR-20). */
 export const FLEET_HEALTH_MAX_HISTORY_POINTS = 500;
 
@@ -143,6 +151,15 @@ export interface FleetNodeHealthStored extends FleetNodeHealthSnapshot {
 	 * item keeps one `since` for as long as its condition lasts (FR-17).
 	 */
 	diskLowSince?: string;
+	/**
+	 * Platform bookkeeping, not a machine fact: the receipt time of the last
+	 * beat whose snapshot was written to the history. Read back from the row
+	 * on the next beat, so "at most one sample per computer per 55 s" (FR-18)
+	 * holds across every API replica — a node may beat every 5 s, and an
+	 * in-process memory of the last write would let each replica write its
+	 * own. Absent while history is switched off.
+	 */
+	sampledAt?: string;
 }
 
 /** History resolutions — one table, one discriminator (CONTRACTS §4.5). */

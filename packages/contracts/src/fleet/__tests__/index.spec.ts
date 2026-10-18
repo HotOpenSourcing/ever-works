@@ -357,6 +357,7 @@ const COMMIT_MESSAGE_EXPORTS = [
 const HEALTH_EXPORTS = [
 	'FLEET_HEALTH_PROBE_TIMEOUT_MS',
 	'FLEET_HEALTH_SAMPLE_MIN_INTERVAL_MS',
+	'FLEET_HEALTH_ROLLUP_CRON',
 	'FLEET_HEALTH_RAW_RETENTION_MS',
 	'FLEET_HEALTH_HOURLY_RETENTION_MS',
 	'FLEET_HEALTH_MAX_HISTORY_POINTS',
@@ -543,12 +544,12 @@ describe('fleet barrel', () => {
 		// symbols of `fleet-model-usage-limit.types.ts` and the seven of
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
-		// → 261 with computer health (FL-03): the twenty-five symbols of
+		// → 262 with computer health (FL-03): the twenty-six symbols of
 		// `fleet-node-health.types.ts` and the three of
 		// `fleet-needs-a-look.types.ts` (seam owned by FL-01) — two NEW
 		// modules, so the witness table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		expect(Object.keys(fleet)).toHaveLength(261);
+		expect(Object.keys(fleet)).toHaveLength(262);
 	});
 
 	it.each([

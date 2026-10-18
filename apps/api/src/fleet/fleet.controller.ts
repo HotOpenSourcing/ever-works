@@ -608,6 +608,8 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Computer health (FL-03): sanitised by the service, never trusted.
+            health: body.health,
         });
         if (!result) {
             // One undifferentiated message — never say WHICH check failed.
@@ -651,6 +653,8 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Computer health (FL-03): the snapshot, sanitised by the service.
+            health: body.health,
         });
         if (!result) {
             throw new UnauthorizedException('Invalid node credential');

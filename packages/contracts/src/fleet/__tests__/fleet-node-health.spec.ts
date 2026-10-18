@@ -6,6 +6,7 @@ import {
 	FLEET_HEALTH_DISK_CRITICAL_MARGIN_BYTES,
 	FLEET_HEALTH_MAX_GPU_MODEL_LENGTH,
 	FLEET_HEALTH_MAX_GPUS,
+	FLEET_HEALTH_ROLLUP_CRON,
 	FLEET_NODE_CLEAR_QUARANTINE_COMMAND,
 	fleetNodeDiskLowInput,
 	isFleetNodeHealthStale,
@@ -363,5 +364,11 @@ describe('resolveComputerState (FR-7, FR-8) — the truth table', () => {
 				expect(state).toBe(runnerRowState(status, busy));
 			}
 		}
+	});
+});
+
+describe('FLEET_HEALTH_ROLLUP_CRON', () => {
+	it('is hourly at :07 — the one schedule the Trigger.dev task and the API fallback share', () => {
+		expect(FLEET_HEALTH_ROLLUP_CRON).toBe('7 * * * *');
 	});
 });

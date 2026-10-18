@@ -480,6 +480,8 @@ describe('FleetController', () => {
                 maxConcurrentJobs: undefined,
                 maxCpuPercent: undefined,
                 maxMemoryMb: undefined,
+                // Computer health (FL-03).
+                health: undefined,
             });
             // …and the KEY SET, because the assertion above does not check
             // it (review AO-12). `toHaveBeenCalledWith` uses the same
@@ -508,6 +510,7 @@ describe('FleetController', () => {
                     'maxConcurrentJobs',
                     'maxCpuPercent',
                     'maxMemoryMb',
+                    'health',
                 ].sort(),
             );
             expect(result.secret).toBe('node-secret');

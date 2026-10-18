@@ -70,7 +70,7 @@ import {
     TasksService,
 } from '@ever-works/agent/tasks-domain';
 import { CredentialVersionService } from '@ever-works/agent/tasks';
-import { FleetJobService } from '@ever-works/agent/fleet';
+import { FleetJobService, FleetNodeHealthService } from '@ever-works/agent/fleet';
 import { ModelAccountHealthService } from '@ever-works/agent/model-routing';
 import { AgentRepository, AgentRunRepository } from '@ever-works/agent/database';
 import { ConversationMessageService } from '@ever-works/agent/conversations';
@@ -715,6 +715,11 @@ export class TriggerInternalController implements OnModuleInit {
         // Lane aw-deploy-3 — the worker's pull credential reads the stored registry pull token.
         @Optional()
         private readonly appBuildPullTokenReader?: AppBuildPullTokenReader,
+        // Computer health (FL-03) — backs the `fleet-health-rollup` cron: the
+        // worker proxy calls `rollupAndPrune()` over the internal RPC channel.
+        // Appended LAST + @Optional() per the arity rule above.
+        @Optional()
+        private readonly fleetNodeHealthService?: FleetNodeHealthService,
     ) {}
 
     onModuleInit() {
@@ -826,6 +831,9 @@ export class TriggerInternalController implements OnModuleInit {
             // Fleet job runtime (Desktop PRD M4) — `fleet-job-lease-sweeper`
             // calls `reclaimExpired()` here (allow-list auto-derived).
             FleetJobService: this.fleetJobService,
+            // Computer health (FL-03) — `fleet-health-rollup` calls
+            // `rollupAndPrune()` here (allow-list auto-derived).
+            FleetNodeHealthService: this.fleetNodeHealthService,
             // Memory consolidation cadence (memory upgrades M9) —
             // `memory-consolidation-tick` calls `dispatchDue()` here
             // (allow-list auto-derived).

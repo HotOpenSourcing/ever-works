@@ -23,6 +23,12 @@ export * from './fleet-audit.service';
 // Fleet MCP bridge (self-build slice Z / EW-796) — run-scoped credentials.
 export * from './fleet-run-credential.service';
 export * from './agent-fleet-tools';
+// Computer health (FL-03) — the health history and the needs-a-look producers
+// (the registry itself is a seam owned by FL-01).
+export * from './fleet-node-health-sample.repository';
+export * from './fleet-node-health.service';
+export * from './needs-a-look';
+export { FleetNodeHealthSample } from '../entities/fleet-node-health-sample.entity';
 export { FleetNode } from '../entities/fleet-node.entity';
 export { FleetCostPolicy } from '../entities/fleet-cost-policy.entity';
 export type { FleetNodeKind, FleetNodeStatus } from '../entities/fleet-node.entity';

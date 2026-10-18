@@ -24,6 +24,14 @@ import { FleetAuditService } from './fleet-audit.service';
 import { FleetRunCredentialService } from './fleet-run-credential.service';
 import { ApiKey } from '../entities/api-key.entity';
 import { ApiKeyRepository } from '../database/repositories/api-key.repository';
+import { FleetNodeHealthSample } from '../entities/fleet-node-health-sample.entity';
+import { FleetNodeHealthSampleRepository } from './fleet-node-health-sample.repository';
+import { FleetNodeHealthService } from './fleet-node-health.service';
+import {
+    FL03_NEEDS_A_LOOK_PRODUCERS,
+    NEEDS_A_LOOK_PRODUCERS,
+    NeedsALookService,
+} from './needs-a-look';
 
 /**
  * Fleet (Wave 12, slice 1 + Desktop PRD M4) — agent-side module owning
@@ -85,6 +93,8 @@ import { ApiKeyRepository } from '../database/repositories/api-key.repository';
             // reuses the ONE hash/expiry/revoke implementation the
             // platform already has instead of growing a second one.
             ApiKey,
+            // Computer health (FL-03) — the raw and hourly health history.
+            FleetNodeHealthSample,
         ]),
     ],
     providers: [
@@ -107,6 +117,17 @@ import { ApiKeyRepository } from '../database/repositories/api-key.repository';
         // exactly as the fleet repositories are.
         ApiKeyRepository,
         FleetRunCredentialService,
+        // Computer health (FL-03) — the history writer and its roll-up.
+        FleetNodeHealthSampleRepository,
+        FleetNodeHealthService,
+        // Fleet "needs a look" (seam owned by FL-01) and FL-03's producers.
+        ...FL03_NEEDS_A_LOOK_PRODUCERS,
+        {
+            provide: NEEDS_A_LOOK_PRODUCERS,
+            useFactory: (...producers: unknown[]) => producers,
+            inject: [...FL03_NEEDS_A_LOOK_PRODUCERS],
+        },
+        NeedsALookService,
     ],
     exports: [
         FleetNodeRepository,
@@ -125,6 +146,11 @@ import { ApiKeyRepository } from '../database/repositories/api-key.repository';
         // Exported so the api-side `FleetJobsController` can mint on the
         // node channel and the completion listener can revoke.
         FleetRunCredentialService,
+        // Computer health (FL-03): the API reads snapshots and runs the
+        // roll-up fallback; "needs a look" is read by the hub endpoints.
+        FleetNodeHealthSampleRepository,
+        FleetNodeHealthService,
+        NeedsALookService,
     ],
 })
 export class FleetModule {}
