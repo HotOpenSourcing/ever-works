@@ -68,6 +68,9 @@ import { buildFleetTools } from '../fleet/agent-fleet-tools';
 import { buildBrowserTools } from '../facades/agent-browser-tools';
 import { buildEscalationTools } from './agent-escalation-tools';
 import { AGENT_FILE_EDIT_PROPOSAL_KIND } from './agent-proposal-kinds';
+// Leaf (contracts-only imports) — classifies a tool for the fail-closed
+// grant fallback in `resolveGrantedTools`.
+import { classifyAction } from '../safety/action-category';
 import { buildInboxTools } from '../inbox/agent-inbox-tools';
 // APW-08 T26 — the App change chat tools. A leaf: every import it has is type-only.
 import { buildAppChangeTools } from '../app-works/agent-app-change-tools';
@@ -98,12 +101,13 @@ import type {
     SubAgentScope,
     ToolGrantDecision,
 } from '@ever-works/contracts';
-// Security: lexical SSRF guard reused by the model-controlled URL tools
-// (screenshot / extractContent). Blocks non-HTTP(S) schemes, literal
-// private/loopback/link-local IPs, and cloud-metadata hostnames before
-// the URL reaches a (possibly self-hosted) fetcher facade. Same helper
-// used by the plugin HTTP client + WebhookDeliveryService.
-import { isSafeWebhookUrl } from '../utils/ssrf-guard';
+// Security: SSRF guard for the model-controlled URL tools (screenshot /
+// extractContent). Runs the shared lexical guard (`isSafeWebhookUrl`: non-
+// HTTP(S) schemes, literal private/loopback/link-local IPs, cloud-metadata
+// names) and then — prompt-injection hardening — refuses internal hostnames
+// and any name that RESOLVES to a private / metadata address, before the URL
+// reaches a (possibly self-hosted) fetcher facade.
+import { publicFetchTargetRefusal } from '../utils/outbound-url-guard';
 
 /**
  * Largest `editAgentFile` proposal payload (serialized bytes). The proposal
@@ -111,6 +115,23 @@ import { isSafeWebhookUrl } from '../utils/ssrf-guard';
  * MySQL; an edit bigger than this is refused with a pointer to the owner.
  */
 const MAX_PROPOSED_FILE_PAYLOAD_BYTES = 60_000;
+
+/**
+ * `{{cred.key}}` references that sit OUTSIDE the declared credential slots of a
+ * tool call: anywhere in a non-slot top-level argument, or anywhere at all when
+ * the arguments are not a plain object. Keys only — never values.
+ */
+export function credentialRefsOutsideSlots(args: unknown, slots: ReadonlySet<string>): string[] {
+    if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        return collectCredentialRefs(args);
+    }
+    const out = new Set<string>();
+    for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
+        if (slots.has(key) && typeof value === 'string') continue;
+        for (const ref of collectCredentialRefs(value)) out.add(ref);
+    }
+    return [...out];
+}
 
 /**
  * Tool descriptor — stable shape across every Agent tool. The
@@ -131,6 +152,15 @@ export interface AgentToolParameterSchema {
     type: 'string' | 'number' | 'integer' | 'boolean' | 'array' | 'object';
     description: string;
     items?: { type: 'string' | 'number' | 'integer' | 'boolean' | 'object' };
+    /**
+     * Prompt-injection hardening — this argument is a DECLARED CREDENTIAL SLOT:
+     * the only place a `{{cred.key}}` reference is substituted. A reference in
+     * any other argument (a URL, an email body, a Task comment…) is refused,
+     * because substituting it would hand the secret to wherever that argument
+     * goes. Only descriptors the PLATFORM builds may declare a slot; a schema
+     * that came from an MCP server is never trusted to.
+     */
+    'x-credential'?: boolean;
 }
 
 export interface AgentToolDescriptor<TArgs = unknown, TResult = unknown> {
@@ -750,7 +780,13 @@ export class AgentToolService {
                     // calls credentials exist FOR, so skipping the wrapper
                     // here would send the literal `{{cred.x}}` text to a
                     // third-party server and scrub nothing on the way back.
-                    tools.push(this.withCredentialInterpolation(agent, descriptor));
+                    tools.push(
+                        this.withCredentialInterpolation(agent, descriptor, {
+                            // A server-supplied schema may not declare its own
+                            // credential slots (it would choose where a secret goes).
+                            trustDeclaredSlots: false,
+                        }),
+                    );
                 }
             } catch (err) {
                 this.logger.warn(
@@ -782,16 +818,34 @@ export class AgentToolService {
                 refused,
             };
         } catch (err) {
-            // An access matrix that fails CLOSED on its own lookup error
-            // takes the product down on a transient DB blip. The
-            // per-Agent permission gates above still applied, so degrade
-            // to them and say so loudly.
+            // Prompt-injection hardening: fail CLOSED for everything that
+            // acts. When the matrix cannot be read we do not know what the
+            // operator withheld, so only `read.internal` tools (reading what
+            // is already inside the workspace — the category the ladder never
+            // governs) stay available; every write / message / publish /
+            // external / unclassified tool is withheld for this run and
+            // reported, so the run degrades instead of acting unchecked.
             this.logger.warn(
-                `Agent ${agent.id}: tool-grant resolution failed, falling back to permission gates only: ${
+                `Agent ${agent.id}: tool-grant resolution failed — withholding every tool that is not read-only for this run: ${
                     err instanceof Error ? err.message : String(err)
                 }`,
             );
-            return { tools, refused: [] };
+            const kept: AgentToolDescriptor[] = [];
+            const refused: ToolGrantDecision[] = [];
+            for (const tool of tools) {
+                if (classifyAction(tool.name, { toolName: tool.name }) === 'read.internal') {
+                    kept.push(tool);
+                } else {
+                    refused.push({
+                        allowed: false,
+                        toolName: tool.name,
+                        source: 'default',
+                        code: 'tool-not-granted',
+                        reason: 'The tool-grant matrix could not be read, so this tool is withheld for this run (fail closed). Only read-only workspace tools are available until it can be read again.',
+                    });
+                }
+            }
+            return { tools: kept, refused };
         }
     }
 
@@ -864,10 +918,20 @@ export class AgentToolService {
     private withCredentialInterpolation(
         agent: Agent,
         descriptor: AgentToolDescriptor,
+        options: { trustDeclaredSlots?: boolean } = {},
     ): AgentToolDescriptor {
         const resolver = this.credentials;
         if (!resolver) return descriptor;
         const invoke = descriptor.invoke;
+        // Prompt-injection hardening: the ONLY arguments a reference is
+        // substituted into are the descriptor's declared credential slots.
+        const slots = new Set(
+            options.trustDeclaredSlots === false
+                ? []
+                : Object.entries(descriptor.parameters?.properties ?? {})
+                      .filter(([, schema]) => schema?.['x-credential'] === true)
+                      .map(([key]) => key),
+        );
 
         return {
             ...descriptor,
@@ -876,6 +940,26 @@ export class AgentToolService {
                 const required = requiredCredentialsForTool(descriptor.name);
                 if (referenced.length === 0 && required.length === 0) {
                     return invoke(args);
+                }
+
+                // A reference anywhere but a declared slot is refused, never
+                // substituted: in a URL, an email body or a comment it would
+                // send the secret wherever that argument goes (exfiltration),
+                // and on a shared install the resolver may hold operator-wide
+                // values. Nothing is resolved, nothing is sent.
+                const misplaced = credentialRefsOutsideSlots(args, slots);
+                if (misplaced.length > 0) {
+                    return {
+                        error:
+                            `Credential references (${misplaced
+                                .map((key) => `{{cred.${key}}}`)
+                                .join(', ')}) may only be used in a tool's declared credential ` +
+                            `fields, and '${descriptor.name}' ${
+                                slots.size > 0
+                                    ? `accepts them only in: ${[...slots].join(', ')}`
+                                    : 'declares none'
+                            }. Nothing was sent.`,
+                    };
                 }
 
                 const malformed = invalidCredentialKeys(args);
@@ -1804,12 +1888,12 @@ export class AgentToolService {
                 // Security: SSRF guard. The url is model-controlled (and can be
                 // steered by prompt-injected fetched content). The active
                 // screenshot plugin may fetch it server-side, so reject
-                // non-HTTP(S) schemes + private/loopback/link-local/metadata
-                // targets before dispatch. Public URLs are unaffected.
-                if (!isSafeWebhookUrl(args.url)) {
-                    return {
-                        error: 'url is not allowed: must be an http(s) URL to a public host (private, loopback, link-local, and cloud-metadata addresses are blocked).',
-                    };
+                // non-HTTP(S) schemes, internal hostnames, and any name that
+                // RESOLVES to a private/loopback/link-local/metadata address
+                // before dispatch. Public URLs are unaffected.
+                const refusal = await publicFetchTargetRefusal(args.url);
+                if (refusal) {
+                    return { error: `url is not allowed: it ${refusal}.` };
                 }
                 try {
                     return await this.pluginTools!.screenshot({
@@ -1859,14 +1943,15 @@ export class AgentToolService {
                 // Security: SSRF guard. extractContent fetches the model-
                 // controlled url server-side (the default content-extractor is
                 // a self-hosted fetcher), so an injected instruction could
-                // point it at cloud-metadata / internal services or use it to
-                // exfiltrate context to an attacker host. Reject non-HTTP(S)
-                // schemes + private/loopback/link-local/metadata targets before
-                // dispatch; public URLs are unaffected.
-                if (!isSafeWebhookUrl(args.url)) {
-                    return {
-                        error: 'url is not allowed: must be an http(s) URL to a public host (private, loopback, link-local, and cloud-metadata addresses are blocked).',
-                    };
+                // point it at cloud-metadata / internal services. The lexical
+                // check alone let `localhost`, `*.svc.cluster.local`,
+                // `*.internal`, single-label hosts and any public NAME that
+                // resolves to a private address through; this one refuses all
+                // of them, resolving the name first (fail closed when it does
+                // not resolve). Public URLs are unaffected.
+                const refusal = await publicFetchTargetRefusal(args.url);
+                if (refusal) {
+                    return { error: `url is not allowed: it ${refusal}.` };
                 }
                 try {
                     return await this.pluginTools!.extractContent({
