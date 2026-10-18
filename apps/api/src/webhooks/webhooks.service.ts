@@ -137,6 +137,20 @@ export class WebhooksService {
     }
 
     /**
+     * Review 2026-10-17 F47: the v2 subscriptions owned by these integration keys,
+     * whichever account holds them (a key's subscriptions sit in its creator's
+     * account). The caller passes only keys it manages (`IntegrationKeyService.list`).
+     */
+    async listForIntegrationKeys(keyIds: readonly string[]): Promise<WebhookSubscriptionView[]> {
+        const views: WebhookSubscriptionView[] = [];
+        for (const keyId of new Set(keyIds)) {
+            const rows = await this.repo.listForOwner('integration_key', keyId);
+            views.push(...rows.map((row) => this.toView(row)));
+        }
+        return views;
+    }
+
+    /**
      * Integration API v1 (EW-P1-5): the v2 subscriptions one owner holds in the
      * account, e.g. those an integration key created. Another owner's
      * subscriptions in the same account are not listed.
