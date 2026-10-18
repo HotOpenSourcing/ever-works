@@ -137,7 +137,7 @@ Two behaviours worth knowing:
 ### Security defaults
 
 - **Platform-event triggers start in the backlog.** A new trigger with source **Platform event** defaults **First task** to _Leave in backlog_, because it fires on text people outside your account write. Choose _Start automatically_ explicitly to dispatch the agent on every fire. Existing triggers keep the value they were saved with; webhook triggers (signed by your own sender) still default to _Start automatically_.
-- **Outsider GitHub issues never auto-start.** For a `github.issue` or `github.issue_comment` event whose author's repository association is present and is not `OWNER`, `MEMBER` or `COLLABORATOR`, the Task is created and assigned but not dispatched, even with _Start automatically_. Its description starts with the reason, and the fire log row carries it.
+- **Outsider GitHub events never auto-start.** For a `github.issue`, `github.pr` or `github.mention` event whose author's repository association is not `OWNER`, `MEMBER` or `COLLABORATOR` — or is missing from the event (fail closed) — the Task is created and assigned but not dispatched, even with _Start automatically_. Its description starts with the reason, and the fire log row carries it.
 
 ### Where the spawned Task shows up
 

@@ -721,7 +721,8 @@ describe('InboundTriggersService — modes, contracts and the fire log', () => {
         it.each([
             ['github.issue', 'OWNER'],
             ['github.issue', 'member'],
-            ['github.issue_comment', 'COLLABORATOR'],
+            ['github.pr', 'COLLABORATOR'],
+            ['github.mention', 'OWNER'],
         ])('%s from a trusted author (%s) still auto-starts', async (kind, association) => {
             const { service, tasks } = makeService();
             await service.create(SCOPE, {
@@ -736,23 +737,41 @@ describe('InboundTriggersService — modes, contracts and the fire log', () => {
             expect(tasks.runTask).toHaveBeenCalled();
         });
 
-        it('an issue comment from an outsider is gated too; an absent association keeps the setting', async () => {
+        it.each(['github.pr', 'github.mention'])(
+            'a %s from an outsider is gated too',
+            async (kind) => {
+                const { service, tasks } = makeService();
+                await service.create(SCOPE, {
+                    name: 'GitHub',
+                    targetAgentId: 'agent-1',
+                    autoStart: 'always',
+                    ...EVENT_SOURCED,
+                });
+                await service.fireForEvent(
+                    makeEvent({ kind, payload: { authorAssociation: 'NONE' } }),
+                );
+                expect(tasks.create).toHaveBeenCalledTimes(1);
+                expect(tasks.runTask).not.toHaveBeenCalled();
+            },
+        );
+
+        it('fails closed: a gated GitHub event with NO association is filed but not started', async () => {
             const { service, tasks } = makeService();
             await service.create(SCOPE, {
-                name: 'Issues',
+                name: 'GitHub',
                 targetAgentId: 'agent-1',
                 autoStart: 'always',
                 ...EVENT_SOURCED,
             });
-            await service.fireForEvent(
-                makeEvent({
-                    id: 'e-1',
-                    kind: 'github.issue_comment',
-                    payload: { authorAssociation: 'NONE' },
-                }),
-            );
+            await service.fireForEvent(makeEvent({ id: 'e-1', kind: 'github.issue', payload: {} }));
+            expect(tasks.create).toHaveBeenCalledTimes(1);
             expect(tasks.runTask).not.toHaveBeenCalled();
-            await service.fireForEvent(makeEvent({ id: 'e-2', kind: 'github.issue', payload: {} }));
+            const description = tasks.create.mock.calls[0][1].description as string;
+            expect(description).toMatch(
+                /^Not started automatically: this GitHub event does not say/,
+            );
+            // Other kinds (a push) keep the trigger's own setting.
+            await service.fireForEvent(makeEvent({ id: 'e-2', kind: 'github.push', payload: {} }));
             expect(tasks.runTask).toHaveBeenCalledTimes(1);
         });
 

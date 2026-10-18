@@ -90,14 +90,16 @@ const MAX_TITLE_EVENT_VALUE_LENGTH = 120;
 const MAX_DESCRIPTION_EVENT_VALUE_LENGTH = 4_000;
 
 /**
- * Event kinds whose author can be ANYONE on GitHub (an issue or an issue
- * comment on a public repository). For these, `payload.authorAssociation`
- * (GitHub's `author_association`, camelCased by the GitHub intake) decides
- * whether the fire may dispatch an agent on its own.
+ * Event kinds whose author can be ANYONE on GitHub (an issue, a pull
+ * request, or an @mention on a public repository) — the kinds the GitHub
+ * intake emits. For these, `payload.authorAssociation` (GitHub's
+ * `author_association`, camelCased by the intake) decides whether the fire
+ * may dispatch an agent on its own.
  */
 const GITHUB_OUTSIDER_GATED_KINDS: ReadonlySet<string> = new Set([
     'github.issue',
-    'github.issue_comment',
+    'github.pr',
+    'github.mention',
 ]);
 
 /** GitHub associations trusted to start an agent run without a human in the loop. */
@@ -124,18 +126,26 @@ export const WEBHOOK_REPLAY_REASON =
  * Why a fire must NOT auto-start its agent even though the trigger says
  * `autoStart: 'always'` — or null when nothing blocks it.
  *
- * Today: a GitHub issue / issue comment whose author is not an OWNER,
- * MEMBER or COLLABORATOR of the repository. Anyone can open an issue on a
- * public repository, so its text reaching an agent with tools must wait
- * for a human. The association is only enforced when PRESENT (older
- * intake builds do not stamp it) — absent keeps the trigger's setting.
+ * Today: a GitHub issue, pull request or @mention whose author is not an
+ * OWNER, MEMBER or COLLABORATOR of the repository. Anyone can open an issue
+ * or a PR on a public repository, so its text reaching an agent with tools
+ * must wait for a human. FAILS CLOSED: an event of these kinds that carries
+ * no association (an older intake build) is treated as unverified and is
+ * not started either.
  */
 export function outsiderAutoStartBlockReason(event: TriggerTemplateEvent | null): string | null {
     if (!event?.kind || !GITHUB_OUTSIDER_GATED_KINDS.has(event.kind)) return null;
     const payload = event.payload;
-    if (!payload || typeof payload !== 'object') return null;
-    const raw = (payload as Record<string, unknown>).authorAssociation;
-    if (typeof raw !== 'string' || raw.trim().length === 0) return null;
+    const raw =
+        payload && typeof payload === 'object'
+            ? (payload as Record<string, unknown>).authorAssociation
+            : undefined;
+    if (typeof raw !== 'string' || raw.trim().length === 0) {
+        return (
+            'Not started automatically: this GitHub event does not say how its author relates to the repository, so the author could not be verified as an OWNER, MEMBER or COLLABORATOR. ' +
+            'Review the request, then start the Task by hand.'
+        );
+    }
     const association = raw.trim().toUpperCase();
     if (TRUSTED_GITHUB_AUTHOR_ASSOCIATIONS.has(association)) return null;
     // GitHub's values are an enum (CONTRIBUTOR, FIRST_TIMER, NONE …); keep
