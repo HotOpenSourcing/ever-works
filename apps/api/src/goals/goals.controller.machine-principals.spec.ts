@@ -1,8 +1,5 @@
-jest.mock('@ever-works/agent/goals', () => ({
-    GoalOrchestratorService: class {},
-    GoalsService: class {},
-    GoalStatus: { DRAFT: 'draft', ACTIVE: 'active', PAUSED: 'paused' },
-}));
+// The real `@ever-works/agent/goals` barrel is loaded (the DTOs read its
+// constants); the services arrive as doubles through the constructor.
 
 import { ForbiddenException } from '@nestjs/common';
 import { GoalsController } from './goals.controller';
