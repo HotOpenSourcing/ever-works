@@ -14,7 +14,13 @@ import {
     ResourceNotFoundError,
     VersionMismatchError,
 } from '@ever-works/agent/integrations-api';
-import { IntegrationKbController } from '../kb.controller';
+import { plainToInstance } from 'class-transformer';
+import { validate } from 'class-validator';
+import {
+    IntegrationKbController,
+    IntegrationUpdateKbDocumentDto,
+    IntegrationUpdateKbFolderDto,
+} from '../kb.controller';
 
 /**
  * The Knowledge Base of `/api/integrations/v1` (EW-P3-2) over doubles of the
@@ -414,5 +420,57 @@ describe('IntegrationKbController', () => {
         await expect(
             controller.updateFolder(user(), FOLDER, {}, undefined, res()),
         ).rejects.toMatchObject({ code: 'validation_failed' });
+    });
+});
+
+// Review 2026-10-17 F39: `null` only where the contract allows it (else 400 validation_failed,
+// not a NOT NULL write or a `.trim()` on null answering 500).
+describe('IntegrationUpdateKbDocumentDto null fields', () => {
+    const properties = async (body: Record<string, unknown>) =>
+        (await validate(plainToInstance(IntegrationUpdateKbDocumentDto, body))).map(
+            (error) => error.property,
+        );
+
+    it('refuses null on the fields the contract does not make nullable', async () => {
+        for (const field of [
+            'title',
+            'body',
+            'class',
+            'tags',
+            'categories',
+            'language',
+            'status',
+        ]) {
+            expect(await properties({ [field]: null })).toContain(field);
+        }
+    });
+
+    it('still takes null on the nullable ones, and never validates an absent field', async () => {
+        for (const field of ['description']) {
+            expect(await properties({ [field]: null })).not.toContain(field);
+        }
+        expect(await properties({})).toEqual([]);
+    });
+});
+
+// Review 2026-10-17 F39: `null` only where the contract allows it (else 400 validation_failed,
+// not a NOT NULL write or a `.trim()` on null answering 500).
+describe('IntegrationUpdateKbFolderDto null fields', () => {
+    const properties = async (body: Record<string, unknown>) =>
+        (await validate(plainToInstance(IntegrationUpdateKbFolderDto, body))).map(
+            (error) => error.property,
+        );
+
+    it('refuses null on the fields the contract does not make nullable', async () => {
+        for (const field of ['name']) {
+            expect(await properties({ [field]: null })).toContain(field);
+        }
+    });
+
+    it('still takes null on the nullable ones, and never validates an absent field', async () => {
+        for (const field of ['parentId']) {
+            expect(await properties({ [field]: null })).not.toContain(field);
+        }
+        expect(await properties({})).toEqual([]);
     });
 });

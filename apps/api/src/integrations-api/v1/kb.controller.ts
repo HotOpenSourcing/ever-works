@@ -80,6 +80,7 @@ import {
     principalOf,
     rethrowCursor,
     validationFailed,
+    IsOptionalNonNull,
 } from './integration-request';
 import { IntegrationExternalRefDto } from './tasks-write.controller';
 
@@ -196,13 +197,13 @@ export class IntegrationCreateKbDocumentDto {
 /** `UpdateKbDocument` (contract v1 requests.schema.json): at least one field. */
 export class IntegrationUpdateKbDocumentDto {
     @ApiProperty({ required: false, maxLength: 255 })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @Length(1, 255)
     title?: string;
 
     @ApiProperty({ required: false, maxLength: KB_BODY_MAX_CHARS })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @MaxLength(KB_BODY_MAX_CHARS)
     body?: string;
@@ -214,12 +215,12 @@ export class IntegrationUpdateKbDocumentDto {
     description?: string | null;
 
     @ApiProperty({ required: false, enum: [...KB_DOCUMENT_CLASSES] })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsIn(KB_DOCUMENT_CLASSES as unknown as string[])
     class?: string;
 
     @ApiProperty({ required: false, type: [String] })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsArray()
     @ArrayMaxSize(50)
     @IsString({ each: true })
@@ -227,7 +228,7 @@ export class IntegrationUpdateKbDocumentDto {
     tags?: string[];
 
     @ApiProperty({ required: false, type: [String] })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsArray()
     @ArrayMaxSize(50)
     @IsString({ each: true })
@@ -235,13 +236,13 @@ export class IntegrationUpdateKbDocumentDto {
     categories?: string[];
 
     @ApiProperty({ required: false, maxLength: 8 })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @Length(2, 8)
     language?: string;
 
     @ApiProperty({ required: false, enum: WRITABLE_STATUSES })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsIn(WRITABLE_STATUSES as unknown as string[])
     status?: 'draft' | 'active';
 }
@@ -276,7 +277,7 @@ export class IntegrationCreateKbFolderDto {
 /** `UpdateKbFolder`: rename and / or move (`parentId: null` = top level). */
 export class IntegrationUpdateKbFolderDto {
     @ApiProperty({ required: false, maxLength: 120 })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @Length(1, 120)
     name?: string;
