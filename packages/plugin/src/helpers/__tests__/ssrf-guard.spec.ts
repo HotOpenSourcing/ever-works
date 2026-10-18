@@ -210,3 +210,62 @@ describe('safeFetchWithDnsPin', () => {
 		expect(resolver).not.toHaveBeenCalled();
 	});
 });
+
+describe('IPv6 forms that embed an IPv4 address (review of #2769)', () => {
+	it.each([
+		// IPv4-mapped, dotted and in the hex spelling the URL parser normalizes to.
+		'::ffff:169.254.169.254',
+		'::ffff:a9fe:a9fe',
+		'::ffff:127.0.0.1',
+		'::ffff:7f00:1',
+		'::FFFF:10.0.0.1',
+		// IPv4-translated (RFC 2765).
+		'::ffff:0:127.0.0.1',
+		// IPv4-compatible (deprecated, still parsed by stacks).
+		'::127.0.0.1',
+		'::a9fe:a9fe',
+		// NAT64 well-known prefix (RFC 6052).
+		'64:ff9b::169.254.169.254',
+		'64:ff9b::7f00:1',
+		// 6to4 (RFC 3056).
+		'2002:a9fe:a9fe::1',
+		'2002:7f00:1::',
+		'2002:c0a8:101::1',
+		// Teredo: client IPv4 is the last 32 bits inverted (127.0.0.1 ⇒ 80ff:fffe).
+		'2001:0:4136:e378:8000:63bf:80ff:fffe'
+	])('treats %s as private', (ip) => {
+		expect(isPrivateIPv6(ip)).toBe(true);
+	});
+
+	it.each(['::ffff:8.8.8.8', '64:ff9b::808:808', '2002:808:808::1', '2606:4700:4700::1111'])(
+		'leaves the public address %s alone',
+		(ip) => {
+			expect(isPrivateIPv6(ip)).toBe(false);
+		}
+	);
+
+	it.each(['ff02::1', 'fec0::1', '2001:db8::1', '64:ff9b:1::a', 'fe80::1%eth0'])(
+		'treats the non-routable block of %s as private',
+		(ip) => {
+			expect(isPrivateIPv6(ip)).toBe(true);
+		}
+	);
+
+	it.each([
+		'http://[::ffff:169.254.169.254]/latest/meta-data/',
+		'http://[::ffff:127.0.0.1]:6379/',
+		'http://[::127.0.0.1]/',
+		'http://[64:ff9b::169.254.169.254]/',
+		'http://[2002:a9fe:a9fe::]/',
+		'http://[::ffff:0:10.0.0.1]/'
+	])('isSafeWebhookUrl refuses %s (normalized by the URL parser first)', (url) => {
+		expect(isSafeWebhookUrl(url)).toBe(false);
+	});
+
+	it('safeFetchWithDnsPin refuses a name resolving to an IPv4-mapped metadata address', async () => {
+		const resolver: DnsResolver = async () => [{ address: '::ffff:a9fe:a9fe', family: 6 }];
+		await expect(
+			safeFetchWithDnsPin('https://rebind.example.com/', undefined, { dnsResolver: resolver })
+		).rejects.toBeInstanceOf(SsrfBlockedError);
+	});
+});

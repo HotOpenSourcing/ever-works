@@ -34,6 +34,34 @@ describe('publicFetchTargetRefusal', () => {
     });
 
     it.each([
+        'http://[::ffff:169.254.169.254]/latest/meta-data/',
+        'http://[::ffff:127.0.0.1]:6379/',
+        'http://[::ffff:a9fe:a9fe]/',
+        'http://[::127.0.0.1]/',
+        'http://[64:ff9b::169.254.169.254]/',
+        'http://[2002:a9fe:a9fe::1]/',
+        'http://[::ffff:0:10.0.0.1]/',
+    ])('refuses the IPv4-embedding IPv6 literal %s without resolving it', async (url) => {
+        const dnsResolver = jest.fn(publicDns);
+        await expect(publicFetchTargetRefusal(url, { dnsResolver })).resolves.toEqual(
+            expect.any(String),
+        );
+        expect(dnsResolver).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        [{ address: '::ffff:a9fe:a9fe', family: 6 }],
+        [{ address: '64:ff9b::7f00:1', family: 6 }],
+        [{ address: '2002:c0a8:101::1', family: 6 }],
+    ])('refuses a name that resolves to the IPv4-embedding address %o', async (address) => {
+        await expect(
+            publicFetchTargetRefusal('https://rebind6.example.com/', {
+                dnsResolver: resolvesTo(address),
+            }),
+        ).resolves.toMatch(/private or internal address/);
+    });
+
+    it.each([
         'http://localhost:8080/',
         'http://LOCALHOST./',
         'http://app.localhost/',
