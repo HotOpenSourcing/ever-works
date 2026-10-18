@@ -444,6 +444,11 @@ function selfDescription(source: NodeSelfDescription): NodeSelfDescription {
 	if (source.maxMemoryMb !== undefined) {
 		out.maxMemoryMb = source.maxMemoryMb;
 	}
+	// Computer health (FL-03). Already sanitised by `describeSelf`; copied as
+	// is. Heartbeat-only in practice: enrolment never wires the probe.
+	if (source.health !== undefined) {
+		out.health = source.health;
+	}
 	return out;
 }
 

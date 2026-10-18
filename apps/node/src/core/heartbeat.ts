@@ -70,7 +70,12 @@ export interface HeartbeatCapableClient {
  * it talks to a platform older than itself.
  */
 const OPTIONAL_DESCRIPTION_FIELD_TIERS = [
-	// NEWEST first. Node lifecycle + remote node limits (self-build slices
+	// NEWEST first. Computer health (FL-03): the health snapshot. Its own
+	// tier, so a platform that predates it costs exactly this one field —
+	// the pinned CLI versions and enforced limits below keep flowing (FR-3,
+	// U9).
+	['health'],
+	// Node lifecycle + remote node limits (self-build slices
 	// AR, AS). Tiered (review): `cliVersions` goes out on EVERY beat of a
 	// node with a pinned CLI, so an upgraded node talking to a platform that
 	// predates it would otherwise drop the worker state and housekeeping
@@ -88,6 +93,16 @@ const OPTIONAL_DESCRIPTION_FIELD_TIERS = [
 		'lastReclaimFreedBytes'
 	]
 ] as const satisfies ReadonlyArray<ReadonlyArray<keyof NodeSelfDescription>>;
+
+/**
+ * What the node says when it latches below the newest tiers — one line per
+ * tier it can latch at, in tier order, naming what was dropped and what is
+ * still reported. The all-tiers (liveness only) line is in `beat()`.
+ */
+const TIER_DROP_WARNINGS: readonly string[] = [
+	'Platform rejected the health snapshot; it predates it. Still reporting pinned CLI versions, enforced limits, worker state and housekeeping; health stays off until this node restarts.',
+	'Platform rejected the newest optional self-description fields (pinned CLI versions, enforced limits); it predates them. Still reporting worker state and housekeeping; the newer fields stay off until this node restarts.'
+];
 
 export interface HeartbeatLoopOptions {
 	client: HeartbeatCapableClient;
@@ -308,7 +323,7 @@ export class HeartbeatLoop {
 					this.options.logger?.warn(
 						tiers >= OPTIONAL_DESCRIPTION_FIELD_TIERS.length
 							? 'Platform rejected the optional self-description fields (worker state, housekeeping); it predates them. Reporting liveness only until this node restarts.'
-							: 'Platform rejected the newest optional self-description fields (pinned CLI versions, enforced limits); it predates them. Still reporting worker state and housekeeping; the newer fields stay off until this node restarts.'
+							: (TIER_DROP_WARNINGS[tiers - 1] ?? TIER_DROP_WARNINGS[TIER_DROP_WARNINGS.length - 1])
 					);
 					return result;
 				} catch (retryError) {

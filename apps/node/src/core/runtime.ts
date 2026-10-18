@@ -17,6 +17,7 @@ import { NodeLifecycleTracker, type NodeLifecycleRecord, type UpgradeHoldable } 
 import { FleetClient, type FetchLike } from './fleet-client';
 import { FleetJobClient } from './job-client';
 import { HeartbeatLoop, type Scheduler } from './heartbeat';
+import { createHealthProbe, type HealthProbeIo } from './health-probe';
 import { NodeHousekeepingReporter } from './housekeeping-report';
 import type { ResourceProbe } from './resource-limits';
 import { describeWorkerHealth } from './worker-health';
@@ -97,6 +98,13 @@ export interface NodeIo {
 	 * `fs.stat`-backed one.
 	 */
 	statFile?: (path: string) => Promise<ModelCliFileStamp | null> | ModelCliFileStamp | null;
+	/**
+	 * Computer health (FL-03) — what the per-beat health snapshot reads.
+	 * Optional: without it the heartbeat carries no `health` field, exactly
+	 * as before the field existed. `node-io.ts` supplies the real one
+	 * (`createHealthProbeIo`); every test can leave it out.
+	 */
+	health?: HealthProbeIo;
 }
 
 /**
@@ -550,6 +558,18 @@ export function createNodeRuntime(config: NodeConfig, io: NodeIo, options: Creat
 		},
 		cliCompat
 	);
+	// Computer health (FL-03): the snapshot on every BEAT — wired here and
+	// not in `buildSelfDescriptionTelemetry`, because that also feeds
+	// enrolment, which has no strip-and-retry fallback for a field an older
+	// platform does not know. One probe per process: its slow-fact caches
+	// live in the closure. Every consent gets it — health is what enrolment
+	// alone already grants (CONTRACTS §1.1).
+	if (io.health) {
+		telemetry.health = createHealthProbe(io.health, {
+			workspacePath: io.workspacePath ?? workspaceRoot,
+			...(io.now ? { now: io.now } : {})
+		});
+	}
 	// Agent computers: `--attend` is process-scoped consent, so it rides the
 	// environment the capability probe reads rather than the stored config —
 	// `attended` (and `screen`) are advertised only by a process started with it.

@@ -4,7 +4,9 @@ import {
 	FLEET_GPU_CAPABILITY,
 	FLEET_PUSH_CAPABILITY,
 	FLEET_PUSH_MIN_GIT_VERSION,
-	FLEET_SCREEN_CAPABILITY
+	FLEET_SCREEN_CAPABILITY,
+	sanitizeFleetNodeHealthSnapshot,
+	type FleetNodeHealthSnapshot
 } from '@ever-works/contracts';
 import type { BrowserProbeIo } from './browser-probe';
 import type { ModelCliPaths } from './executors/model-cli';
@@ -33,10 +35,24 @@ import {
  */
 
 /** Minimal command abstraction, mirroring `apps/desktop`'s `CommandRunner`. */
+/**
+ * Per-call runner options. Optional on purpose: every existing runner (and
+ * every test fake) ignores them and keeps its own default timeout.
+ */
+export interface CommandRunOptions {
+	/**
+	 * Kill the process after this many ms instead of the runner's default.
+	 * The health probe (FL-03) passes its 2 s per-fact budget so a hung
+	 * vendor tool is reaped at the deadline rather than lingering.
+	 */
+	timeoutMs?: number;
+}
+
 export interface CommandRunner {
 	run(
 		command: string,
-		args: string[]
+		args: string[],
+		options?: CommandRunOptions
 	): Promise<{
 		code: number | null;
 		stdout: string;
@@ -476,6 +492,13 @@ export interface SelfDescriptionTelemetry {
 		| Promise<{ maxConcurrentJobs: number; maxCpuPercent: number | null; maxMemoryMb: number | null } | null>
 		| { maxConcurrentJobs: number; maxCpuPercent: number | null; maxMemoryMb: number | null }
 		| null;
+	/**
+	 * Computer health (FL-03) — this beat's health snapshot, via
+	 * `createHealthProbe(...)`. Heartbeat only: enrolment never wires it,
+	 * because enrolment has no strip-and-retry fallback for a field an older
+	 * platform does not know. Null or a throw leaves the field ABSENT.
+	 */
+	health?: () => Promise<FleetNodeHealthSnapshot | null> | FleetNodeHealthSnapshot | null;
 }
 
 /**
@@ -498,6 +521,10 @@ export async function describeSelf(
 	selection?: readonly string[] | null,
 	telemetry: SelfDescriptionTelemetry = {}
 ): Promise<NodeSelfDescriptionPayload> {
+	// Computer health (FL-03) runs alongside every other probe: it has its own
+	// per-fact budget, and serialising it behind them would only lengthen the
+	// beat. `resolveTelemetry` never rejects, so nothing here can fail early.
+	const healthReading = resolveTelemetry(telemetry.health);
 	const detected = await detectCapabilities(runner, environment);
 	const description: NodeSelfDescriptionPayload = {
 		platform: describePlatform(environment),
@@ -578,6 +605,14 @@ export async function describeSelf(
 		description.maxConcurrentJobs = limits.maxConcurrentJobs;
 		description.maxCpuPercent = typeof limits.maxCpuPercent === 'number' ? limits.maxCpuPercent : null;
 		description.maxMemoryMb = typeof limits.maxMemoryMb === 'number' ? limits.maxMemoryMb : null;
+	}
+	// Computer health (FL-03). Re-sanitised HERE, the wire boundary, for the
+	// reason the housekeeping block gives: whatever a probe returns, only the
+	// fields this build knows, each within its bounds, ever reach a pipe that
+	// answers an unexpected value with a 400.
+	const health = sanitizeFleetNodeHealthSnapshot(await healthReading);
+	if (health) {
+		description.health = health;
 	}
 	return description;
 }
