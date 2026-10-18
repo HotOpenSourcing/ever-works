@@ -45,6 +45,14 @@ import {
     upstreamSyncBranch,
     type AppUpstreamSyncSettings,
 } from './upstream-schedule';
+import {
+    APP_UPSTREAM_COMPARE_MAX_FILES,
+    APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS_ENV,
+    holdsForWorkflowReview,
+    upstreamWorkflowChangesAllowedForWork,
+    workflowChanges,
+    type UpstreamWorkflowChanges,
+} from './upstream-workflow-diff';
 
 /**
  * APW-02 T26 — one upstream sync run (plan §6.3, `plan.md:715-754`).
@@ -107,11 +115,30 @@ import {
  *      (FR-41, FR-42, FR-45) and the default-branch rename of FR-43;
  *   6. `trigger === 'divergence'` ⇒ compare only, settle with the outcome that was
  *      already recorded, and stop;
- *   7. the compare, then either the fast-forward (fork, behind-only, licence not
- *      worse) or the pull-request path (FR-35, FR-36, FR-37);
+ *   7. the compare, then **the workflow hold** (FR-60/FR-61, T46 — below), then
+ *      either the fast-forward (fork, behind-only, licence not worse) or the
+ *      pull-request path (FR-35, FR-36, FR-37);
  *   8. settle: record the outcome, the next slot (§6.4), the licence request and
  *      the hygiene pass — the last two only when the tracked branch changed
  *      (FR-40, plan §6.3 step 8).
+ *
+ * ## The workflow hold (FR-60, FR-61, S29 — prompt-injection hardening)
+ *
+ * Moving `ever-works/upstream-sync`, opening the sync pull request and
+ * fast-forwarding the tracked branch all put **third-party commits on a
+ * same-repository ref**, and GitHub runs the workflows those commits carry with
+ * the App repository's secrets — its Build values included — before Actions
+ * hygiene could ever see a new workflow file. So once the range is known and
+ * before ANY of those moves, the run reads the compare of `tracked
+ * branch...upstream head` (pinned to the exact head it would move to) and, when
+ * the range touches `.github/workflows/**` or `.github/actions/**` — or the
+ * compare cannot be read, or cannot prove it is the whole range — it moves
+ * nothing, opens nothing, records `skipped` / `held_for_workflow_review`, and
+ * emits one `app.upstream.held` naming the paths (never their content). Every
+ * trigger takes the same branch: scheduled, manual and retried. The only way
+ * past it is an operator listing the Work in
+ * `APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS` — never the App spec, which the
+ * upstream author can write.
  *
  * ## Fail-closed everywhere a seam is missing
  *
@@ -435,7 +462,11 @@ export class ProviderBudgetExceededError extends Error {
 
 /** One Activity event this run emits itself (§3.5's eight, minus the ones T23 owns). */
 interface SyncEvent {
-    action: 'app.upstream.behind' | 'app.upstream.unavailable' | 'app.fork.missing';
+    action:
+        | 'app.upstream.behind'
+        | 'app.upstream.unavailable'
+        | 'app.upstream.held'
+        | 'app.fork.missing';
     actionType: ActivityActionType;
     status: ActivityStatus;
     summary: string;
@@ -828,6 +859,15 @@ export class AppUpstreamSyncService {
             return { ...base, commits: 0 };
         }
 
+        // FR-60/FR-61 (T46): the workflow hold — before the private copy's branch
+        // move, before the fast-forward, and before any push to
+        // `ever-works/upstream-sync` (the history-rewritten recreation included,
+        // which is only reachable from the pull-request path below).
+        const held = await this.holdForWorkflowReview(context, row, base, comparison.upstreamHeadSha);
+        if (held) {
+            return held;
+        }
+
         if (row.relation === 'private-copy') {
             // FR-36 + FR-63: behind ⇒ the sync branch moves and one pull request is
             // kept open on it. The move itself lives in the pull-request path, so both
@@ -883,6 +923,143 @@ export class AppUpstreamSyncService {
         // fast-forward raced or was refused, and every private copy that is behind: one
         // reusable pull request on `ever-works/upstream-sync` (FR-36).
         return await this.pullRequestPath(context, row, base);
+    }
+
+    // ── the workflow hold (FR-60, FR-61, T46) ─────────────────────────────────
+
+    /**
+     * `null` ⇒ the range may be synced; an outcome ⇒ it is held and nothing moves.
+     *
+     * Held when the compare names a protected path, and equally when it cannot
+     * prove there is none (unreadable, truncated, at the provider's file ceiling):
+     * a check that cannot answer has not said yes. The `app.upstream.held` event is
+     * emitted once per held upstream head — a weekly schedule that keeps finding the
+     * same head held records the state again but notifies the owner only once.
+     */
+    private async holdForWorkflowReview(
+        context: RunContext,
+        row: WorkUpstreamState,
+        base: SyncOutcome,
+        headSha: string,
+    ): Promise<SyncOutcome | null> {
+        if (upstreamWorkflowChangesAllowedForWork(context.workId)) {
+            this.logger.warn(
+                `App upstream sync: work ${context.workId} is listed in ${APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS_ENV}, so the upstream range to ${headSha || '(unknown head)'} is synced without the workflow-change hold.`,
+            );
+            return null;
+        }
+
+        const changes = await this.readUpstreamWorkflowChanges(context, row, headSha);
+        if (!holdsForWorkflowReview(changes)) {
+            return null;
+        }
+
+        const alreadyHeld =
+            row.lastSyncReason === 'held_for_workflow_review' &&
+            (row.lastSyncedUpstreamSha ?? null) === (headSha || null);
+        this.logger.warn(
+            `App upstream sync: work ${context.workId} held — the upstream range to ${headSha || '(unknown head)'} ${
+                changes.complete
+                    ? `changes ${changes.pathCount} workflow/action path(s)`
+                    : 'could not be proven free of workflow/action changes'
+            }; nothing was moved (FR-60).`,
+        );
+
+        return {
+            ...base,
+            result: 'skipped',
+            reason: 'held_for_workflow_review',
+            events: [
+                ...(base.events ?? []),
+                ...(alreadyHeld ? [] : [workflowHeldEvent(headSha, changes)]),
+            ],
+        };
+    }
+
+    /**
+     * The protected paths the range `tracked branch...headSha` touches (FR-60).
+     *
+     * - **Fork**: the compare is read in the App repository itself, with the
+     *   upstream head as an exact sha (a fork network shares its objects), so the
+     *   range checked is the range that would move — never a branch name that
+     *   upstream could advance between the check and the move.
+     * - **Private copy**: it shares no objects with upstream, so the compare is read
+     *   in the upstream repository from the commit `ever-works/upstream-sync`
+     *   already holds (always an upstream commit, and one this hold already let
+     *   through). No such branch ⇒ no trustworthy base ⇒ held.
+     *
+     * Rate limits and the run budget propagate (they have their own outcomes and
+     * move nothing either); every other failure is "unreadable", which holds.
+     */
+    private async readUpstreamWorkflowChanges(
+        context: RunContext,
+        row: WorkUpstreamState,
+        headSha: string,
+    ): Promise<UpstreamWorkflowChanges> {
+        const unreadable: UpstreamWorkflowChanges = { paths: [], pathCount: 0, complete: false };
+        if (!nonEmptyString(headSha)) {
+            return unreadable;
+        }
+        const options = {
+            userId: context.ownerUserId as string,
+            providerId: context.providerId,
+            workId: context.workId,
+        };
+        // Paths are all the hold reads: no patch text, and the provider's whole file list.
+        const caps = { maxFiles: APP_UPSTREAM_COMPARE_MAX_FILES, maxBytes: 0 };
+
+        try {
+            if (row.relation === 'private-copy') {
+                const tip = await context.budget.call(() =>
+                    this.git.getLatestCommit(
+                        row.dataOwner,
+                        row.dataRepo,
+                        APP_UPSTREAM_SYNC_BRANCH,
+                        options,
+                    ),
+                );
+                const baseSha = nonEmptyString(tip?.sha);
+                if (!baseSha) {
+                    return unreadable;
+                }
+                const diff = await context.budget.call(() =>
+                    this.git.getCompareDiff(
+                        row.upstreamOwner as string,
+                        row.upstreamRepo as string,
+                        baseSha,
+                        headSha,
+                        caps,
+                        options,
+                    ),
+                );
+                return workflowChanges(diff);
+            }
+
+            const diff = await context.budget.call(() =>
+                this.git.getCompareDiff(
+                    row.dataOwner,
+                    row.dataRepo,
+                    row.dataDefaultBranch,
+                    headSha,
+                    caps,
+                    options,
+                ),
+            );
+            return workflowChanges(diff);
+        } catch (error) {
+            const reason = providerReasonOf(error);
+            if (
+                error instanceof ProviderBudgetExceededError ||
+                reason === 'rate_limited' ||
+                reason === 'secondary_rate_limited'
+            ) {
+                throw error;
+            }
+            this.logger.warn(
+                `App upstream sync: reading the upstream range of work ${context.workId} for workflow changes failed (${errorText(error)}); the range is held rather than synced unchecked.`,
+            );
+            return unreadable;
+        }
     }
 
     // ── the compare (§6.3 step 6) ────────────────────────────────────────────
@@ -1819,6 +1996,30 @@ function behindEvents(
             },
         },
     ];
+}
+
+/**
+ * FR-60's owner notice: the range was held, and which protected paths it touches —
+ * paths and counts only, never file content (S29). `complete: false` says the
+ * compare could not prove the range clean (unreadable or truncated), which holds
+ * just the same.
+ */
+function workflowHeldEvent(headSha: string, changes: UpstreamWorkflowChanges): SyncEvent {
+    return {
+        action: 'app.upstream.held',
+        actionType: ActivityActionType.APP_UPSTREAM,
+        // Waiting on a person: an operator lifts it, or upstream reverts the change.
+        status: ActivityStatus.PENDING,
+        summary: 'Upstream changed its workflows. Review before syncing.',
+        details: {
+            reason: 'held_for_workflow_review',
+            upstreamHeadSha: headSha || null,
+            paths: changes.paths,
+            pathCount: changes.pathCount,
+            complete: changes.complete,
+            optIn: APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS_ENV,
+        },
+    };
 }
 
 /**

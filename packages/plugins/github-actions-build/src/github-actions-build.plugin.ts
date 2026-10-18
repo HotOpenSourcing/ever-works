@@ -41,6 +41,7 @@ import { extractPushLogDigest } from './runs/push-digest.js';
 import { checkImageAccess as checkGhcrAccess, type GhcrAccessResult, type GhcrFetch } from './registry/ghcr-access.js';
 import { selectRunner } from './runner/runner-selector.js';
 import { generateWorkflow } from './workflow/generator.js';
+import { findUnsafeWorkflowInput } from './workflow/input-guard.js';
 import { writeWorkflow } from './repo/workflow-writer.js';
 import { createBuildValueSecretSync, type RepositorySecretPort } from './repo/secret-sync.js';
 import { octokitRepositoryWriter, type OctokitRequester } from './repo/octokit-repository-writer.js';
@@ -260,8 +261,11 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 			};
 		}
 
-		// 2 · the file.
-		const content = generateWorkflow({
+		// 2 · the file. The App spec strings it interpolates are untrusted (an adopted
+		// fork's `.works/works.yml` is the upstream author's), so a value that could
+		// become YAML or a `${{ }}` expression blocks the Build as `specInvalid` here —
+		// before a byte is committed or a secret written (`workflow/input-guard.ts`).
+		const generatorInput: Parameters<typeof generateWorkflow>[0] = {
 			trackedBranch: input.repository.trackedBranch,
 			repository: {
 				owner: input.repository.owner,
@@ -282,7 +286,19 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 			// verify job would have nothing to run.
 			verifyEnabled: Boolean(input.build),
 			checks: input.checks ?? []
-		});
+		};
+		const refusal = findUnsafeWorkflowInput(generatorInput);
+		if (refusal) {
+			return {
+				workflow: { state: 'unchanged', contentSha256: '' },
+				secretsWritten: [],
+				secretsRemoved: [],
+				buildInputsHash: computeBuildInputsHash(input.values ?? []),
+				// Where and why — never the refused value itself.
+				blocked: { reason: 'specInvalid', detail: { field: refusal.field, cause: refusal.cause } }
+			};
+		}
+		const content = generateWorkflow(generatorInput);
 
 		// 3 · the delivery.
 		const written = await writeWorkflow(
