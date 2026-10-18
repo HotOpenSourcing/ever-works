@@ -76,7 +76,7 @@ describe('TasksController.transition — force is not available to a fleet-run c
             'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
             taskId,
             'done',
-            { force: false, suppressAgentDispatch: true, actorType: 'agent' },
+            { force: false, suppressAgentFanOut: true, actorType: 'agent' },
             scope,
         );
     });

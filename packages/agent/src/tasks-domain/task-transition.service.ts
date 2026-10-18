@@ -171,6 +171,17 @@ export interface TransitionOptions {
      * auto-unblock of dependents still run.
      */
     suppressAgentDispatch?: boolean;
+    /**
+     * Works-security lane 3a — suppress ONLY the `→ in_progress` agent
+     * fan-out, and nothing else. Set for a fleet-run token (the model on a
+     * fleet node, reached through the MCP bridge): moving a Task into
+     * `in_progress` must not start another Agent's run on text an injected
+     * run may have written. Unlike {@link suppressAgentDispatch} it leaves the
+     * `→ in_review` reviewer stage (a review still has to happen before a
+     * merge) and the dispatch-on-done cascade of dependents exactly as they
+     * are.
+     */
+    suppressAgentFanOut?: boolean;
 }
 
 /** Result of a sync walk: the Task after the last hop and the hops taken. */
@@ -418,7 +429,8 @@ export class TaskTransitionService {
             to === TaskStatus.IN_PROGRESS &&
             this.dispatcher &&
             this.assignees &&
-            !opts.suppressAgentDispatch
+            !opts.suppressAgentDispatch &&
+            !opts.suppressAgentFanOut
         ) {
             void this.fanOutAgentExecutions(refreshed).catch((err) =>
                 this.logger.warn(`Agent fan-out failed for task ${refreshed.id}: ${err}`),

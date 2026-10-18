@@ -250,7 +250,7 @@ describe('a fleet run never starts autonomous work', () => {
             USER_ID,
             TASK_ID,
             'in_progress',
-            { force: false, suppressAgentDispatch: true, actorType: 'agent' },
+            { force: false, suppressAgentFanOut: true, actorType: 'agent' },
             scope,
         );
         await controller.transition(
@@ -263,7 +263,7 @@ describe('a fleet run never starts autonomous work', () => {
             USER_ID,
             TASK_ID,
             'in_progress',
-            { force: false, suppressAgentDispatch: true, actorType: 'agent' },
+            { force: false, suppressAgentFanOut: true, actorType: 'agent' },
             scope,
         );
     });

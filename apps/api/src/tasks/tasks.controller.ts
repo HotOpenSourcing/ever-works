@@ -909,12 +909,13 @@ export class TasksController {
             }
             await this.refuseIntegrationPrivateTask(auth, id);
         }
-        // Works-security lane 3a — a fleet run moves a Task without starting
-        // anything: no `→ in_progress` agent fan-out and no `→ in_review`
-        // reviewer runs (the integrations' sync-mode rule, D9), and it moves
-        // as an AGENT, so the red-gate refusal on `→ in_review` applies to it.
+        // Works-security lane 3a — a fleet run's `→ in_progress` never fans out
+        // to another Agent's run (`suppressAgentFanOut`). Everything else a move
+        // triggers stays: the `→ in_review` reviewer stage (a review must still
+        // happen before any merge) and the dependents' cascade on done. It
+        // moves as an AGENT, so the red-gate refusal on `→ in_review` applies.
         const runTokenOptions = isFleetRunRequest(req)
-            ? { suppressAgentDispatch: true, actorType: 'agent' as const }
+            ? { suppressAgentFanOut: true, actorType: 'agent' as const }
             : {};
         if (body.mode === 'sync') {
             const result = await this.service.syncTransition(
