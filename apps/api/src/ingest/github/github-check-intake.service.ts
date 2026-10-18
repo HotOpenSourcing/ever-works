@@ -6,6 +6,7 @@ import {
     TaskCiAutoResumeService,
     classifyCheckResult,
     computeCiFailureKey,
+    isTrustedCheckApp as isTrustedCheckAppFor,
     type AutoResumeOutcome,
     type CheckVerdict,
     type CiCheckResultInput,
@@ -202,8 +203,7 @@ function provesSameRepoHead(refs: CheckPullRequestRef[] | undefined): boolean {
  * and the trigger matcher, but never resumes a run.
  */
 export function isTrustedCheckApp(appSlug: string | null | undefined): boolean {
-    const slug = (appSlug ?? '').trim().toLowerCase();
-    return slug.length > 0 && config.githubChecks.trustedApps().includes(slug);
+    return isTrustedCheckAppFor(appSlug, config.githubChecks.trustedApps());
 }
 
 function prHeads(refs: CheckPullRequestRef[] | undefined): CheckPullRequestHead[] {
@@ -435,6 +435,8 @@ export function normalizeGitHubCheck(
             observedAt: reportedAt,
             verdict,
             granularity,
+            // Who reported it — the evaluator refuses an unlisted app too (F8).
+            appSlug,
             checkName,
             conclusion: conclusion ?? status ?? 'unknown',
             url: url ?? null,

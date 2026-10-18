@@ -42,6 +42,7 @@ jest.mock('@ever-works/agent/tasks-domain', () => {
         TaskCiAutoResumeService: class {},
         classifyCheckResult: policy.classifyCheckResult,
         computeCiFailureKey: policy.computeCiFailureKey,
+        isTrustedCheckApp: policy.isTrustedCheckApp,
     };
 });
 

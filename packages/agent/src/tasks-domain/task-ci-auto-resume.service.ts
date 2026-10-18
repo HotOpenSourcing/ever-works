@@ -23,6 +23,7 @@ import {
     composeCiFailureFeedback,
     decideCiHead,
     isPullRequestFinished,
+    isTrustedCheckApp,
     reviewAutoResumeClaimKey,
     type AutoResumeOutcome,
     type AutoResumeOutcomeReason,
@@ -103,6 +104,13 @@ export interface CiCheckResultInput {
     verdict: CheckVerdict;
     /** Which vendor delivery this came from, for the audit trail. */
     granularity: 'check_run' | 'check_suite' | 'workflow_run';
+    /**
+     * The GitHub App that reported the result (`check_run.app.slug`;
+     * `github-actions` for a `workflow_run`). Only an allow-listed app may
+     * drive the loop (`config.agents.getTrustedCheckApps()`); `null` /
+     * absent is an unknown reporter and is refused — security finding F8.
+     */
+    appSlug?: string | null;
     checkName: string;
     conclusion: string;
     url?: string | null;
@@ -299,6 +307,16 @@ export class TaskCiAutoResumeService {
     private async handleCheckResult(input: CiCheckResultInput): Promise<AutoResumeOutcome> {
         const headSha = (input.headSha ?? '').trim();
         if (!headSha) return { reason: 'no-task' };
+
+        // F8 — any GitHub App installed on the repository can post a check
+        // run, and a red one's name and output become the resumed agent's
+        // instructions. Refused before the Task lookup and before any write:
+        // the head of an unlisted reporter is not recorded either. Checked
+        // HERE, not only by the callers, so the webhook intake and the
+        // two-minute poll cannot drift apart.
+        if (!isTrustedCheckApp(input.appSlug, config.agents.getTrustedCheckApps())) {
+            return { reason: 'untrusted-check-app' };
+        }
 
         const resolved = await this.resolveTask(input);
         if (!resolved) return { reason: 'no-task' };

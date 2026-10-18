@@ -50,12 +50,6 @@ export const DEFAULT_TRUSTED_REVIEW_BOTS = [
     'greptile-apps[bot]',
 ] as const;
 
-/**
- * GitHub App slugs whose check results always count as CI for the fix loop
- * (F8). Operators ADD to this with `GITHUB_TRUSTED_CHECK_APPS`.
- */
-export const DEFAULT_TRUSTED_CHECK_APPS = ['github-actions'] as const;
-
 export enum AuthProvider {
     LOCAL = 'local',
     GITHUB = 'github',
@@ -295,13 +289,9 @@ export const config = {
      * definition.
      */
     githubChecks: {
-        trustedApps: (): string[] => {
-            const extra = (process.env.GITHUB_TRUSTED_CHECK_APPS ?? '')
-                .split(',')
-                .map((value) => value.trim().toLowerCase())
-                .filter((value) => value.length > 0);
-            return Array.from(new Set([...DEFAULT_TRUSTED_CHECK_APPS, ...extra]));
-        },
+        // ONE definition, shared with the evaluator and the two-minute poll
+        // in the agent package — the three must never disagree.
+        trustedApps: (): string[] => agentConfig.agents.getTrustedCheckApps(),
     },
 
     /**

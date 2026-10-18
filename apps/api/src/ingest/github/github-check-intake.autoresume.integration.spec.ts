@@ -848,6 +848,7 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
                     observedAt,
                     verdict: 'failing' as const,
                     granularity: 'workflow_run' as const,
+                    appSlug: 'github-actions',
                     checkName: 'CI',
                     conclusion: 'failure',
                 };
@@ -1214,10 +1215,35 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             observedAt: new Date('2026-09-06T10:05:00Z'),
             verdict: 'failing' as const,
             granularity: 'check_run' as const,
+            appSlug: 'github-actions',
             checkName: 'lint-and-test',
             conclusion: 'failure',
         };
     }
+
+    /**
+     * F8 review (2026-10-18): the evaluator itself refuses an unlisted
+     * reporter, so neither entry point — the webhook intake nor the
+     * two-minute poll — can be the way around the allow-list.
+     */
+    it('⭐ the evaluator refuses a check from an unlisted app, or with no app, writing nothing', async () => {
+        const { task } = await seedWorkTaskAndRun();
+        const autoResume = new TaskCiAutoResumeService(
+            tasks,
+            attempts,
+            new TaskGitLinkService(tasks, works),
+            runs,
+            rejections,
+            steering,
+            inbox,
+        );
+        for (const appSlug of ['some-linter', null, undefined]) {
+            const outcome = await autoResume.onCheckResult({ ...redCheckInput(), appSlug });
+            expect(outcome).toEqual({ reason: 'untrusted-check-app' });
+        }
+        expect(resumes).toHaveLength(0);
+        expect((await tasks.findById(task.id))?.ciHeadSha).toBeNull();
+    });
 
     it('sends CI feedback to the IMPLEMENTER when a finished review run is the Task’s newest run', async () => {
         const { task, run } = await seedWorkTaskAndRun();

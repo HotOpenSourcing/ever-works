@@ -58,6 +58,42 @@ export function clampAutoResumeAttempts(raw: unknown): number {
     );
 }
 
+// ── who may report CI (security finding F8) ─────────────────────────
+
+/**
+ * The GitHub Apps whose check results may drive the fix loop when nothing
+ * else is configured. Operators ADD to this with `GITHUB_TRUSTED_CHECK_APPS`.
+ */
+export const DEFAULT_TRUSTED_CHECK_APPS: readonly string[] = ['github-actions'];
+
+/**
+ * `github-actions` plus every slug in a comma-separated list (trimmed,
+ * lower-cased, de-duplicated). There is no way to remove the default: it is
+ * what this repository's own CI runs as.
+ */
+export function parseTrustedCheckApps(raw: string | null | undefined): string[] {
+    const extra = (raw ?? '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter((value) => value.length > 0);
+    return Array.from(new Set([...DEFAULT_TRUSTED_CHECK_APPS, ...extra]));
+}
+
+/**
+ * May a check reported by `appSlug` drive the fix loop? Any GitHub App
+ * installed on a repository can post a check run, and a red one's name,
+ * title and summary become what the resumed agent is told to fix — so only
+ * an allow-listed reporter counts, and an unknown one (`null`, absent, a
+ * commit status) never does.
+ */
+export function isTrustedCheckApp(
+    appSlug: string | null | undefined,
+    trusted: readonly string[],
+): boolean {
+    const slug = (appSlug ?? '').trim().toLowerCase();
+    return slug.length > 0 && trusted.includes(slug);
+}
+
 // ── reading a provider check result ─────────────────────────────────
 
 /**
@@ -322,6 +358,12 @@ export type AutoResumeOutcomeReason =
     | 'halted'
     /** The repo/branch/PR resolved to no Task this owner holds. */
     | 'no-task'
+    /**
+     * The result was reported by a GitHub App that is not on the trusted
+     * list (`github-actions` + `GITHUB_TRUSTED_CHECK_APPS`), or by nothing
+     * the provider could name. Nothing recorded, nothing resumed (F8).
+     */
+    | 'untrusted-check-app'
     /**
      * The delivery matched a Task by BRANCH NAME only — it named no pull
      * request at all, as every fork pull request's deliveries do — and its

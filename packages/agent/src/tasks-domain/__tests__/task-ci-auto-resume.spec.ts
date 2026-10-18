@@ -13,6 +13,8 @@ import {
     computeCiFailureKey,
     decideCiHead,
     isPullRequestFinished,
+    isTrustedCheckApp,
+    parseTrustedCheckApps,
     reviewAutoResumeClaimKey,
 } from '../task-ci-auto-resume';
 import { isComposedCiFeedback } from '../review-feedback-fence';
@@ -170,6 +172,44 @@ describe('computeCiFailureKey', () => {
 
     it('fits the varchar(64) column', () => {
         expect(computeCiFailureKey({ checkNames: ['lint'], output: 'x' })).toHaveLength(32);
+    });
+});
+
+/**
+ * F8 (2026-10-18): any GitHub App installed on a repository can post a check
+ * run. Only an allow-listed reporter may drive the fix loop — ONE rule, read
+ * by the webhook intake, the evaluator and the two-minute poll alike.
+ */
+describe('who may report CI (F8)', () => {
+    it('trusts github-actions by default and nothing else', () => {
+        const trusted = parseTrustedCheckApps(undefined);
+        expect(trusted).toEqual(['github-actions']);
+        expect(isTrustedCheckApp('github-actions', trusted)).toBe(true);
+        expect(isTrustedCheckApp(' GitHub-Actions ', trusted)).toBe(true);
+        expect(isTrustedCheckApp('some-linter', trusted)).toBe(false);
+        // An unknown reporter (a commit status, a stale cached row) never counts.
+        expect(isTrustedCheckApp(null, trusted)).toBe(false);
+        expect(isTrustedCheckApp(undefined, trusted)).toBe(false);
+        expect(isTrustedCheckApp('', trusted)).toBe(false);
+    });
+
+    it('adds the operator list on top of the default, which cannot be removed', () => {
+        expect(parseTrustedCheckApps(' Buildkite , circleci-checks ,, github-actions')).toEqual([
+            'github-actions',
+            'buildkite',
+            'circleci-checks',
+        ]);
+    });
+
+    it('reads GITHUB_TRUSTED_CHECK_APPS through the shipped config', () => {
+        const original = process.env.GITHUB_TRUSTED_CHECK_APPS;
+        try {
+            process.env.GITHUB_TRUSTED_CHECK_APPS = 'some-linter';
+            expect(config.agents.getTrustedCheckApps()).toEqual(['github-actions', 'some-linter']);
+        } finally {
+            if (original === undefined) delete process.env.GITHUB_TRUSTED_CHECK_APPS;
+            else process.env.GITHUB_TRUSTED_CHECK_APPS = original;
+        }
     });
 });
 
