@@ -89,7 +89,7 @@
       action); use it in FL-01's `ComputerHeader.tsx`, `ComputerCards.tsx`, `FleetComputersTable.tsx`
       (word beside dot, action button); card cells read `node.health`.
       **Test**: `computer-state.shared.unit.spec.ts`; extend `ComputerCards.unit.spec.tsx` ("—", stale).
-      **Status (FL-03 PR 1)**: P1 half ✓ (`computer-state.shared.ts`, `ComputerStateLine`, `HealthCells` for the cards). Wiring them into `ComputerHeader` / `ComputerCards` / `FleetComputersTable` waits for FL-01 to create those files.
+      **Status (FL-03 PR 1)**: P1 half ✓ (`computer-state.shared.ts`, `ComputerStateLine`, `HealthCells` for the cards). Wiring them into FL-01's `ComputerHeader` / `ComputerCards` / `FleetComputersTable` (on `develop` since FL-01 P1b) lands in PR 2.
 - [x] **T-10**. `apps/web/src/components/fleet/health/overview/HealthMetrics.tsx` registered as the
       Overview "metrics" block via `registerOverviewBlock` in `apps/web/src/components/fleet/registry.ts` (six cards, reboot line,
       footprint sentence, Refresh now button disabled with reason until P3).
