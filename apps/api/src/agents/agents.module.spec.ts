@@ -117,6 +117,9 @@ jest.mock('@ever-works/agent/pr-review', () => ({
     PrReviewService: class PrReviewService {},
 }));
 jest.mock('@ever-works/agent/policy', () => ({
+    // The protected-repo-path rules are pure: keep the real ones so the git
+    // adapter's floor (and its operator opt-in) is exercised for real.
+    ...jest.requireActual('../../../../packages/agent/src/policy/agent-protected-repo-paths'),
     PolicyModule: class PolicyModule {},
     MergePolicyService: class MergePolicyService {},
     PullRequestGateService: class PullRequestGateService {},
@@ -897,7 +900,9 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
 
     it('spawns a Task whose description names the email message id', async () => {
         const { spawner, tasks } = build();
-        await expect(spawner.spawnTaskForInboundEmail(input)).resolves.toEqual({
+        await expect(
+            spawner.spawnTaskForInboundEmail({ ...input, senderTrusted: true }),
+        ).resolves.toEqual({
             taskId: 'task-new',
         });
         expect(tasks.create).toHaveBeenCalledWith(
@@ -932,7 +937,11 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
         const spawner = findProvider('INBOUND_EMAIL_TASK_SPAWNER')?.useFactory?.(
             tasks,
             { post: jest.fn() },
-            { findByIdAndUser: jest.fn().mockResolvedValue({ id: 'agent-1', slug: 'support-bot' }) },
+            {
+                findByIdAndUser: jest
+                    .fn()
+                    .mockResolvedValue({ id: 'agent-1', slug: 'support-bot' }),
+            },
             inbox,
         ) as Spawner;
 
@@ -2298,8 +2307,7 @@ describe('api-side AgentsModule — AGENT_GIT_FACADE Work repository resolution 
                     .commitToRepo(
                         commitInput({
                             branch: 'feature/x',
-                            files: [{ path: '.github/workflows/ci.yml', body: 'on: push
-' }],
+                            files: [{ path: '.github/workflows/ci.yml', body: 'on: push' }],
                         }),
                     )
                     .catch(() => undefined);
