@@ -18,6 +18,12 @@ the `health` snapshot shape and hourly peaks (§4.5), `session-unconfirmed` (§4
 as `simple-json` text (§4 preamble), `costCents`/`tokens` ownership (§4.2), API and link rates
 (§10.1), the health route (R-7), and hub-tab route ownership (§11.1).
 
+**Revision 4 (2026-10-18)** — the audit of FL-06…FL-10: R-38 (owner-session action ledger), R-39 (one
+allowed-roots resolver), R-40 (node module path), desktop and logs vocabulary (§3.3), FL-07
+heartbeat fields (§1.1), `service-failed` (§4.6), tunnel close reasons and request count (§4.9),
+FL-06 routes (§11.2), `node.session.pull-request.open` (§7), and §10 rows for logs, operations and
+the preview profile.
+
 ---
 
 ## 0. Resolutions (R-1 … R-33)
@@ -62,6 +68,9 @@ Rulings that settle questions more than one epic would otherwise answer differen
 | R-34 | **A management lane leases `vm-create`, `vm-control`, `runner-install`, `runner-control` and `usage-scan` jobs** on nodes with the matching consent (`--manage` for VMs, `--work` for runners, `--usage-scan` for the scan), modelled on the existing attended lane; they never compete with Agent work for `--concurrency`.                                                                          | FL-02, 16, 18, 20    |
 | R-35 | **`origin`, `hostNodeId`, `virtualKind` are added by FL-16's slot; `providerPluginId`, `providerMachineRef`, `providerMeta` by FL-17's.** Both migrations guard every column with `findColumnByName` so either may land first. Child Nodes enrol with a late-minted one-time token when the guest signals readiness (`enroll --token-file`, never argv).                                              | FL-16, 17            |
 | R-36 | **"Remove from Fleet" on a cloud computer** is refused with `unsupported_on_node` and the hint "destroy it instead" until the provider reports the machine gone — an additive guard, not a removed action. Power-off and destroy stay allowed while the kill switch is on (they stop spending).                                                                                                      | FL-17                |
+| R-38 | **Owner sessions have no Run, so their action ledger is their audit rows.** Agent sessions keep the per-action ledger on their Run (`agent_run_logs`); an owner session's actions are read back from its `fleet_audit` rows (`node.session.*` with the action in `target`), and its cost shows as a session total only.                                                                 | FL-06, 20            |
+| R-39 | **One allowed-roots resolver on the node** (`apps/node/src/core/link/allowed-roots.ts`, R-18's rules) is used by logs (FL-08), files (FL-11) and checkouts (FL-14). Whichever of those lands first creates it; the others import it and never define a second one.                                                                                                                                        | FL-08, 11, 14        |
+| R-40 | **Node-side modules live under FL-02's registry**: `apps/node/src/core/link/modules/<family>.ts`, one entry each in `apps/node/src/core/link/modules/index.ts`. No epic creates `core/modules/` or `link/channels/`.                                                                                                                                                                           | all                  |
 | R-37 | **Cancelling a GitHub workflow run** is worded "Cancel workflow run" everywhere (never "cancel run"); the tool is `fleet_runners_cancel_run`. The Jobs view is a hub Overview panel, not a seventh tab.                                                                                                                                                                                             | FL-18                |
 
 ## 1. Consents and capability tags
@@ -92,6 +101,7 @@ All other heartbeat payload additions are optional fields (old nodes omit them):
 | `timeZone` (IANA)                                 | FL-13 | schedules                                     |
 | `helperTrust`                                     | FL-07 | R-8                                           |
 | `daemon { state, reason?, sessions, hooks? }`     | FL-04 | session daemon health (`state`: `running · stopped · failed`) |
+| `helper { trust, version?, verifiedAt? }`, `displays[]`, `desktopReasons[]`, `helperEvents[]` | FL-07 | native helper state, display list, why the Desktop source is unavailable, recent admission events |
 
 ### 1.2 Capability tags (advertised by the node; `cap:` requirements on jobs — existing mechanism)
 
@@ -217,8 +227,8 @@ state-changing requests, leave processes running), `link.resume`, and `link.drai
 | Family      | Opens with                                                   | Messages (JSON on the channel)                                                                 | Consent      |
 | ----------- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- | ------------ |
 | `session`   | `{ sessionId, mode: 'viewer'|'driver' }`                     | platform→node: `session.start`, `session.attach`, `session.input` (driver), `session.resize`, `session.end`, `session.rename`, `session.answer`, `session.restart`; node→platform (channel 0): `session.list`, `session.event`, `session.status`, `session.attention` | work / manage |
-| `desktop`   | `{ source: 'desktop'|'browser', display?, profile?: 'agent'|'preview' }` | `desktop.quality`, `desktop.refresh`, `desktop.displays`, `desktop.setDisplay`, `desktop.openUrl`, input via `INPUT` | attend |
-| `logs`      | `{ source, path?, unit?, container?, lines, sources?[] }`    | `logs.sources`, `logs.read`, `logs.follow`, `logs.pause`, `logs.resume`                        | manage       |
+| `desktop`   | `{ source: 'desktop'|'browser', display?, profile?: 'agent'|'preview', viewId, quality? }` | `desktop.quality`, `desktop.refresh`, `desktop.displays`, `desktop.setDisplay`, `desktop.openUrl`, `desktop.mode`; node→platform `desktop.stats`, `desktop.displayChanged`; input via `INPUT` | attend |
+| `logs`      | `{ source, path?, unit?, container?, lines, sources?[] }`    | `logs.read`, `logs.follow`, `logs.pause`, `logs.resume`, `logs.earlier`; node→platform `logs.initial-done`, `logs.earlier-done`, `logs.notice`. `logs.sources` is a `machine` verb (a list needs no open channel) | manage |
 | `machine`   | (one per link, lazily)                                       | `services.list|action`, `docker.*`, `compose.*`, `processes.list|signal`, `ports.list|open|preview`, `checkouts.list|create|delete|sync|changes`, `git.identity|setIdentity`, `health.now`, `wake.send`, `vm.*`, `runner.*` | manage (see §2.1 for family) |
 | `files`     | `{ root, path }`                                             | `files.list`, `files.stat`, `files.pack` (DATA out), `files.unpack` (DATA in), `files.delete`  | manage       |
 | `command`   | `{ commandId, nodeId }`                                      | `command.run` → `DATA`/`EXIT`, `command.cancel`                                                | manage       |
@@ -371,7 +381,7 @@ The `health` snapshot (heartbeat field and `FleetNode.health`) is one sample plu
 ```
 { id, nodeId, severity: 'info'|'warn'|'critical', kind, title, detail, action?: { label, route|command }, since }
 kinds: disk-low · node-throttled · node-quarantined · node-upgrade-required · runner-stopped ·
-       job-unassignable · session-needs-you · session-unconfirmed · schedule-failed · cloud-idle ·
+       job-unassignable · session-needs-you · session-unconfirmed · service-failed · schedule-failed · cloud-idle ·
        helper-untrusted · consent-missing
 ```
 
@@ -391,7 +401,8 @@ Tint: `needs_you` warm, `done` green, else neutral.
 
 `ownerUserId`, `nodeId`, `port`, `previewHost`, `state` (`open · closed`), `openedAt`,
 `lastRequestAt`, `closedAt`, `closedReason` (enum null `idle · hard · user · node-offline ·
-kill-switch`), `bytesIn`, `bytesOut`, `auditOpenId`, `auditCloseId`.
+kill-switch · drain · link-closed`), `requestCount`, `bytesIn`, `bytesOut`, `auditOpenId`,
+`auditCloseId`.
 
 ### 4.10 `FleetUsageSample` (new, table `fleet_usage_samples`, FL-20 P2)
 
@@ -452,7 +463,8 @@ permission Decision exposes exactly the options the CLI showed.
 ## 7. Audit action names
 
 `node.session.start · node.session.attach · node.session.input · node.session.answer ·
-node.session.rename · node.session.restart · node.session.end · node.session.recording.start|stop`
+node.session.rename · node.session.restart · node.session.end · node.session.recording.start|stop ·
+node.session.action · node.session.pull-request.open`
 `node.desktop.view · node.desktop.control.take|release|request · node.desktop.display.set|add|remove ·
 node.desktop.recording.start|stop|delete · node.desktop.openUrl`
 `node.helper.admit|revoke|verify-failed`
@@ -549,6 +561,14 @@ Node-side there are no flags, only consents.
 | Virtual computers per host Node                 | 4                                       | FL-16  |
 | Cloud computers per owner                       | 10                                      | FL-17  |
 | Usage scan interval                             | 15 min                                  | FL-20  |
+| Log lines held per viewer                       | 5 000                                   | FL-08  |
+| Log files listed per root                       | 200                                     | FL-08  |
+| Sources in one merged log view                  | 12                                      | FL-08  |
+| Log channels per viewer per Node                | 8                                       | FL-08  |
+| Concurrent machine operations per Node          | 5                                       | FL-09  |
+| Machine operation hard cap                      | 60 min                                  | FL-09  |
+| Finished machine operations kept per Node       | 20                                      | FL-09  |
+| Preview-profile views per Node                  | 1, 60-min cap, 15 s grace after the viewer leaves | FL-10 |
 
 ### 10.1 Rates (per caller unless stated; `limit_exceeded` with the limit in `hint`)
 
@@ -609,6 +629,8 @@ All under `/api/fleet` (existing controller root), authenticated, `FLEET_ENABLED
 `/nodes/:id/processes`, `/nodes/:id/processes/:pid/signal`,
 `/nodes/:id/ports`, `/nodes/:id/ports/:port/open`, `/nodes/:id/ports/:port/preview`,
 `/nodes/:id/files/*`, `/commands`, `/commands/:id`, `/commands/:id/runs`,
+`/sessions/:id/actions` (GET, POST), `/sessions/:id/actions/ledger`, `/sessions/:id/actions/:ledgerId/resend`,
+`/sessions/branch-proposal`, `/checkouts/:id/pull-request` (GET, POST),
 `/checkouts`, `/nodes/:id/checkouts`, `/checkouts/:id`, `/checkouts/:id/changes`,
 `/nodes/:id/git/identity`,
 `/nodes/:id/virtual`, `/providers`, `/providers/:plugin/options`, `/cloud`,

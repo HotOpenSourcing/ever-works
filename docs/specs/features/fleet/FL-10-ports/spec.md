@@ -231,7 +231,8 @@ tunnel is a time-boxed grant that must survive an API restart and be audited.
 - **U13 — The page redirects to an absolute address (P2).** A `Location` to `http://127.0.0.1:3000/x`
   is rewritten to the preview address; a redirect elsewhere is shown as a plain link, not followed.
 - **U14 — Link drops mid-request (P2).** The request fails with 502 _"build-01 did not answer"_;
-  the tunnel survives one reconnect and closes with `link-closed` if the link does not return.
+  the tunnel survives one reconnect and, if the link does not return, closes with reason
+  `node-offline` (CONTRACTS §4.9), the close audit row naming the lost link.
 - **U15 — Agent asks to preview (P2).** `fleet_ports_preview_open` mints a tunnel for the
   Agent's **owner** and returns the address for a person; the Agent cannot fetch it (it has no
   owner session cookie), and the row says _"opened by Nina for you"_.
@@ -281,16 +282,18 @@ Values marked **(C)** come from [CONTRACTS.md](../CONTRACTS.md).
 - **FR-13** Opening on the desktop MUST require the `attend` consent and the `desktop` family
   audience in addition to this epic's family; the menu MUST show which is missing.
 - **FR-14** Every open MUST write one `fleet_audit` row `node.port.open` **(C §7)** naming the
-  port, the target (`desktop` | `preview-profile`), the program or container, and the requester.
+  port, the target (`desktop` | `preview-profile`), the program or container, and the requester; an
+  open on the desktop from this epic MUST NOT also write FL-07's `node.desktop.openUrl` (that name is
+  for opening a URL from the Desktop surface itself), so each act is audited once.
 - **FR-15** The confirmation class of every open MUST be `plain` **(C §2.2)**.
 
 ### 4.3 P1 — Consent, permission, kill switch, tools, flag
 
 - **FR-16** Listing and opening MUST require the `manage` consent **(C §1.1)** and MUST be refused
   with `consent_missing` and the exact command otherwise.
-- **FR-17** Opening and previewing MUST be governed by a `ports` action family of the Node's
-  control policy (§8b, CONTRACTS change), evaluated as owner-only until it exists; listing MUST be
-  governed by `view`.
+- **FR-17** Opening and previewing MUST be governed by the `ports` action family of the Node's
+  control policy (CONTRACTS §2.1, default audience `owner`); listing MUST be governed by `view`
+  (§2.1 maps port list to `view`).
 - **FR-18** When the kill switch is on every request MUST answer `kill_switch` **(C R-24)**, open
   previews and tunnels MUST close within 5 seconds, and the list MUST remain as last known.
 - **FR-19** Errors MUST be drawn from CONTRACTS §8: `unreachable`, `consent_missing`,
@@ -312,12 +315,15 @@ Values marked **(C)** come from [CONTRACTS.md](../CONTRACTS.md).
   nothing MUST be forwarded.
 - **FR-25** A tunnel MUST close after **10 minutes** idle, after **60 minutes** in all, when the
   node goes offline, on the kill switch, on drain, and on request; at most **4** tunnels MAY be
-  open per person **(C §10, R-17)**.
+  open per person **(C §10, R-17)**. The stored close reason MUST be one of CONTRACTS §4.9's
+  `idle · hard · user · node-offline · kill-switch` (a lost link or a drained node records
+  `node-offline`), and the close audit row MUST name the precise trigger.
 - **FR-26** One `fleet_audit` row `node.port.preview.open` MUST be written when a tunnel opens and
   one `node.port.preview.close` when it closes, carrying the reason, request count and bytes —
   never per request **(C R-17)**.
-- **FR-27** A tunnel MUST be recorded as a `FleetPortTunnel` row (§7) so it survives an API
-  restart and can be listed and closed from the tab, the hub's Usage tab and the tools.
+- **FR-27** A tunnel MUST be recorded as a `FleetPortTunnel` row (CONTRACTS §4.9) so it survives an
+  API restart and can be listed and closed from the tab and the tools; the hub's Usage tab lists
+  open tunnels once FL-20 adds that block (FL-20 does not plan one yet — §8b).
 - **FR-28** The platform MUST strip its own cookies and authorization headers before forwarding,
   MUST forward the local server's `Set-Cookie` unchanged, MUST rewrite absolute `Location` headers
   pointing at the tunnelled port to the preview address, and MUST stream bodies in both directions
@@ -441,7 +447,7 @@ browser (P2) · `Esc` closes the preview pane. Palette: _"Ports on build-01"_.
 - **Compatibility:** Linux (`ss`), macOS (`lsof`), Windows 10/11 (PowerShell); additive contracts;
   the P2 table is new.
 - **Cost:** listing and opening spend no tokens or credits; a tunnel's bytes are shown on its row
-  and in the hub's Usage tab (FL-20) as bandwidth, never billed; cloud computers' egress (FL-17)
+  (and in the hub's Usage tab once FL-20 adds a tunnels block — §8b) as bandwidth, never billed; cloud computers' egress (FL-17)
   is named on the row: _"Egress on this cloud computer is billed by its provider."_
 
 ---
@@ -450,10 +456,10 @@ browser (P2) · `Esc` closes the preview pane. Palette: _"Ports on build-01"_.
 
 | Entity / concept                    | New?        | Description                                                                                                                                       |
 | ----------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Node / Computer**                 | Existing    | Gains `previewProfileEnabled` (CONTRACTS §4.1, R-3), read by this epic and switched from the computer Settings tab; the column lands with FL-02's consents migration (§8b). |
+| **Node / Computer**                 | Existing    | Gains `previewProfileEnabled` (CONTRACTS §4.1, R-3), read by this epic and switched from the computer Settings tab; the column lands with FL-02's `1796020000000-AddFleetNodeConsents` (CONTRACTS §13). |
 | **Listening port / web server**     | plain words | Read from the Node, never stored.                                                                                                                 |
 | **Preview profile**                 | concept     | The owner-level browser profile on the Node used for **Open** when no Desktop source exists; never an Agent profile; one live preview per Node.    |
-| **Preview tunnel** (`FleetPortTunnel`) | **NEW row (P2)** | One time-boxed grant to reach one port on one Node through the owner's browser: who, which node and port, when opened, last request, when it ends, why it closed, how much it carried. Not a Session (no process on the machine), not a Command (no lifecycle beyond open/close) — hence its own row, declared in §8b for CONTRACTS §4. |
+| **Preview tunnel** (`FleetPortTunnel`) | **NEW row (P2)**, CONTRACTS §4.9 | One time-boxed grant to reach one port on one Node through the owner's browser: who, which node and port, which preview host, when opened, last request, when and why it closed, how many bytes it carried, and its open and close audit rows. Not a Session (no process on the machine), not a Command (no lifecycle beyond open/close) — hence its own row. |
 | **Fleet audit**                     | Existing    | Gains `node.port.open`, `node.port.preview.open|close` (CONTRACTS §7).                                                                             |
 
 `FleetPortTunnel` is the only new stored shape and it is a grant record, not a machine fact
@@ -475,24 +481,23 @@ browser (P2) · `Esc` closes the preview pane. Palette: _"Ports on build-01"_.
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §4 has no `FleetPortTunnel` entity although §13 reserves
-  `1796100000000-CreateFleetPortTunnels`. Proposed columns (plan §4): `nodeId`, `userId`,
-  `organizationId?`, `port`, `host` (`127.0.0.1`), `state` (`open · closed`), `openedAt`,
-  `lastRequestAt`, `expiresAt`, `closedAt?`, `closeReason?` (`user · idle · hard-cap · node-offline ·
-  kill-switch · drain · limit · link-closed`), `requestCount`, `bytesIn`, `bytesOut`, `wsUpgrades`,
-  `requestedBy` (`user · agent`), `agentId?`. Please add the table to §4.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §2.1 lists no `ports` family. Opening a localhost-only
-  admin page or minting a tunnel is more than `view`. Proposal: add `ports` with default `'owner'`;
-  evaluated owner-only until added.]`
-- `[NEEDS CLARIFICATION: R-17 authenticates by "the owner's platform session cookie". That requires
-  the preview hostname to share the cookie domain (`preview.<app domain>`). Where it cannot, the
-  fallback in plan §5 is a one-time hand-off (`/p/<tunnelId>/?t=<60 s token>`) that sets a
-  tunnel-scoped cookie on the preview host. Confirm the fallback is acceptable.]`
-- `[NEEDS CLARIFICATION: CONTRACTS §3.3 opens `desktop` with `{ source: 'desktop'|'browser', display }`.
-  The preview-profile picture is a browser-profile capture of the preview profile, not an Agent's.
-  This epic adds an additive `profile: 'agent' | 'preview'` param (default `agent`). Confirm.]`
-- `[NEEDS CLARIFICATION: `previewProfileEnabled` (CONTRACTS §4.1) — which migration adds the column?
-  This plan assumes FL-02's `AddFleetNodeConsents`; if not, FL-10 P1 needs a slot (`1796100100000`).]`
+- **Resolved** by CONTRACTS §4.9: `fleet_port_tunnels` carries `ownerUserId`, `nodeId`, `port`,
+  `previewHost`, `state` (`open · closed`), `openedAt`, `lastRequestAt`, `closedAt`, `closedReason`
+  (`idle · hard · user · node-offline · kill-switch`), `bytesIn`, `bytesOut`, `auditOpenId`,
+  `auditCloseId`; the plan uses exactly these. The expiry is `openedAt` + 60 min; the request count,
+  the requester (person or Agent) and the precise close trigger live in the open/close audit rows.
+- **Resolved** by CONTRACTS §2.1: `ports` is an action family (default `owner`); port list maps to
+  `view`, open / preview / tunnel to `ports` (FR-17).
+- **Resolved** by CONTRACTS R-17: the preview host shares the platform session cookie domain, and a
+  one-time hand-off link is the fallback where the domains differ (plan §3).
+- **Resolved** by CONTRACTS §3.3: the `desktop` family opens with `profile?: 'agent' | 'preview'`;
+  the preview-profile picture uses `profile: 'preview'`.
+- **Resolved** by CONTRACTS §13: `previewProfileEnabled` is added by FL-02's
+  `1796020000000-AddFleetNodeConsents`; FL-10 has no P1 schema change.
+- **Resolved** by CONTRACTS §10 and §4.9 (rev 4): one preview-profile view per Node, 60-min cap, 15 s grace; tunnel close reasons add `drain` and `link-closed`, and the row carries `requestCount`.
+- `[NEEDS CLARIFICATION: the hub's Usage tab is FL-20's and FL-20 plans no tunnels block. Default
+  until answered: open tunnels are listed and closed from the Ports tab and the tools only (FR-27);
+  FL-20 adds the block when it chooses.]`
 
 ---
 
