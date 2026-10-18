@@ -489,6 +489,8 @@ describe('EmailSendPolicyService', () => {
             const { service, messages } = makeHarness();
             messages.countOutboundSentSince.mockResolvedValue(1_000_000);
             const to = Array.from({ length: 500 }, (_, i) => `r${i}@example.com`);
+            // Known correspondents: this case is about ceilings, not review.
+            messages.listCorrespondentAddresses.mockResolvedValue(to);
 
             await expect(service.assertSendAllowed(attempt({ to }))).resolves.toBeUndefined();
             await expect(
@@ -761,6 +763,8 @@ describe('EmailSendPolicyService', () => {
             });
             const { lock } = withLock(harness);
             const to = ['a@x.io', 'b@x.io', 'c@x.io', 'd@x.io'];
+            // Known correspondents: this case is about ceilings, not review.
+            harness.messages.listCorrespondentAddresses.mockResolvedValue(to);
             await expect(
                 harness.service.admitSend(attempt({ to }), { kind: 'message', row: ROW }),
             ).rejects.toMatchObject({ details: { limitKind: 'recipientsPerMessage', cap: 3 } });
