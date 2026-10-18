@@ -398,7 +398,7 @@ describe('CodexPlugin', () => {
 				expect.objectContaining({ bypassApprovalsAndSandbox: false })
 			);
 			// Structured recovery still runs — sandboxed.
-			expect(recoverySpy).toHaveBeenCalledWith(expect.objectContaining({ preferBypass: false }));
+			expect(recoverySpy).toHaveBeenCalledTimes(1);
 			// The declined escalation is logged.
 			expect(context.logger.warn).toHaveBeenCalledWith(
 				expect.stringContaining('NOT retrying with sandbox bypass')

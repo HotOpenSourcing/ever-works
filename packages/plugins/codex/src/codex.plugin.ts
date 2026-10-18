@@ -759,14 +759,12 @@ export class CodexPlugin
 				// `unsafeBypassSandbox`. That stdout is model-produced text, so
 				// an injected page or README could make the model print the
 				// trigger phrases and escalate the run to full host access.
-				// Bypass is now only ever the operator's explicit choice: with
-				// the setting ON the first run already bypassed (nothing to
-				// retry); with it OFF the escalation is declined and logged.
-				const sandboxBlockReported =
-					settings.unsafeBypassSandbox !== true && this.detectSandboxWriteBlock(executionResult);
-				const shouldRetryWithBypass = sandboxBlockReported && this.isBypassRetryAllowed(settings);
-
-				if (sandboxBlockReported && !shouldRetryWithBypass) {
+				// The automatic bypass retry is gone: bypass is only ever the
+				// operator's explicit `unsafeBypassSandbox` choice (with it ON
+				// the first run above already bypassed, so a retry could never
+				// add anything). A reported block is logged and the run goes on
+				// to the sandboxed structured-output recovery below.
+				if (settings.unsafeBypassSandbox !== true && this.detectSandboxWriteBlock(executionResult)) {
 					logger.warn(
 						'Codex output reported a sandboxed file-write block; NOT retrying with sandbox bypass ' +
 							'(unsafeBypassSandbox is off). Enable it explicitly only on hosts where Codex sandboxing is incompatible.'
@@ -781,40 +779,6 @@ export class CodexPlugin
 					});
 				}
 
-				if (shouldRetryWithBypass) {
-					this.emitCodexLog({
-						onLogEntry,
-						stepId: 'generate-items',
-						event: 'message',
-						level: 'warn',
-						message: 'Codex reported sandboxed file-write blockage; retrying once with sandbox bypass'
-					});
-
-					executionResult = await this.runCodexPrompt({
-						workspacePath,
-						executionAuthEnv: executionAuthEnv ?? {},
-						model: typeof settings.model === 'string' ? settings.model : DEFAULT_MODEL,
-						bypassApprovalsAndSandbox: true,
-						prompt,
-						signal,
-						onLogEntry,
-						stepId: 'generate-items',
-						logPrefix: '[retry:bypass] '
-					});
-
-					if (signal.aborted || executionResult.killed) {
-						return this.handleCancel(startTime);
-					}
-
-					if (executionResult.exitCode !== 0) {
-						const retryDetail = this.extractErrorDetail(executionResult);
-						logger.warn(`Codex bypass retry exited with code ${executionResult.exitCode}: ${retryDetail}`);
-						generationWarning = `Codex finished with an error (${retryDetail}).`;
-					}
-
-					items = await readGeneratedItems(workspacePath, logger);
-				}
-
 				if (items.length === 0) {
 					const recoveredItems = await this.recoverItemsFromStructuredOutput({
 						work,
@@ -823,7 +787,6 @@ export class CodexPlugin
 						workspacePath,
 						settings,
 						executionAuthEnv: executionAuthEnv ?? {},
-						preferBypass: shouldRetryWithBypass,
 						onLogEntry,
 						signal
 					});
@@ -1048,7 +1011,6 @@ export class CodexPlugin
 		workspacePath,
 		settings,
 		executionAuthEnv,
-		preferBypass,
 		onLogEntry,
 		signal
 	}: {
@@ -1058,7 +1020,6 @@ export class CodexPlugin
 		readonly workspacePath: string;
 		readonly settings: Record<string, unknown>;
 		readonly executionAuthEnv: Record<string, string>;
-		readonly preferBypass: boolean;
 		readonly onLogEntry?: PipelineExecutionOptions['onLogEntry'];
 		readonly signal: AbortSignal;
 	}): Promise<ExistingItems['items']> {
@@ -1082,7 +1043,7 @@ export class CodexPlugin
 			cwd: workspacePath,
 			env: executionAuthEnv,
 			model: typeof settings.model === 'string' ? settings.model : DEFAULT_MODEL,
-			bypassApprovalsAndSandbox: settings.unsafeBypassSandbox === true || preferBypass,
+			bypassApprovalsAndSandbox: settings.unsafeBypassSandbox === true,
 			outputSchemaPath: recoverySchemaPath,
 			outputLastMessagePath: recoveryOutputPath,
 			prompt: recoveryPrompt,
@@ -1170,17 +1131,6 @@ export class CodexPlugin
 			.join('\n');
 
 		return contextParts;
-	}
-
-	/**
-	 * Whether a sandbox-bypass RETRY may follow a reported write block.
-	 * Only the operator's explicit `unsafeBypassSandbox` opt-in allows
-	 * bypass at all — and with it on, the first run already bypassed, so in
-	 * practice this never authorizes an escalation on its own. Kept as a
-	 * single seam so the policy is stated (and tested) in one place.
-	 */
-	private isBypassRetryAllowed(settings: Record<string, unknown>): boolean {
-		return settings.unsafeBypassSandbox === true;
 	}
 
 	private detectSandboxWriteBlock(result: ExecuteResult): boolean {
