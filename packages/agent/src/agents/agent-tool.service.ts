@@ -67,6 +67,7 @@ import { buildMeetingTools } from '../meetings/agent-meeting-tools';
 import { buildFleetTools } from '../fleet/agent-fleet-tools';
 import { buildBrowserTools } from '../facades/agent-browser-tools';
 import { buildEscalationTools } from './agent-escalation-tools';
+import { AGENT_FILE_EDIT_PROPOSAL_KIND } from './agent-proposal-kinds';
 import { buildInboxTools } from '../inbox/agent-inbox-tools';
 // APW-08 T26 — the App change chat tools. A leaf: every import it has is type-only.
 import { buildAppChangeTools } from '../app-works/agent-app-change-tools';
@@ -103,6 +104,13 @@ import type {
 // the URL reaches a (possibly self-hosted) fetcher facade. Same helper
 // used by the plugin HTTP client + WebhookDeliveryService.
 import { isSafeWebhookUrl } from '../utils/ssrf-guard';
+
+/**
+ * Largest `editAgentFile` proposal payload (serialized bytes). The proposal
+ * row stores it in a `simple-json` (TEXT) column, which is 65,535 bytes on
+ * MySQL; an edit bigger than this is refused with a pointer to the owner.
+ */
+const MAX_PROPOSED_FILE_PAYLOAD_BYTES = 60_000;
 
 /**
  * Tool descriptor — stable shape across every Agent tool. The
@@ -576,12 +584,22 @@ export class AgentToolService {
 
         // Judgment layer G3/G10 — "what is waiting on me?" and the
         // matching close. Ungated by agent permissions on purpose: these
-        // read and close the OWNER'S OWN escalation queue, which is
-        // exactly the surface an assistant should be able to answer from.
+        // read the OWNER'S OWN escalation queue, and the "close" only ever
+        // PROPOSES a resolution the owner must approve (prompt-injection
+        // hardening — an agent never answers a human gate by itself).
         if (sources.escalations) {
             const escalations = sources.escalations;
             add('escalations', () =>
-                buildEscalationTools({ userId: agent.userId, service: escalations.service }),
+                buildEscalationTools({
+                    userId: agent.userId,
+                    service: escalations.service,
+                    agentId: agent.id,
+                    agentRunId:
+                        runContext?.runId && runContext.runId !== 'no-run'
+                            ? runContext.runId
+                            : null,
+                    proposals: sources.proposals ?? null,
+                }),
             );
         }
 
@@ -911,17 +929,31 @@ export class AgentToolService {
 
     // ── tool builders ─────────────────────────────────────────────
 
+    /**
+     * `editAgentFile` — PROPOSES an edit to one of the Agent's own files.
+     *
+     * Prompt-injection hardening: SOUL.md / AGENTS.md / HEARTBEAT.md /
+     * TOOLS.md / agent.yml are re-injected as TRUSTED identity into every
+     * later run of this Agent (fleet runs included), so an edit the model
+     * makes on its own is an instruction that outlives the run that was
+     * injected. The tool therefore never writes: it runs every check a write
+     * would run (`AgentFileService.validateProposedWrite`), then files the
+     * full proposed body as an owner-approval proposal. The owner's approval
+     * writes exactly that body (`AgentProposalExecutionListener`), guarded by
+     * the content hash seen here. Owner edits through the UI/API are
+     * unchanged. With no approval queue bound the tool refuses (fail closed).
+     */
     private buildEditAgentFileTool(
         agent: Agent,
         runContext: { runId: string; editsThisRunByFile: Set<string> },
     ): AgentToolDescriptor<
         { name: string; body: string; expectedHash?: string },
-        { newHash: string }
+        { proposed: true; pendingApproval: true; proposalId: string; note: string }
     > {
         return {
             name: 'editAgentFile',
             description:
-                "Edit one of YOUR OWN definition files (SOUL.md / AGENTS.md / HEARTBEAT.md / TOOLS.md / agent.yml). Body is secret-scanned, 64 KB cap, once per file per run. Pass expectedHash for optimistic concurrency. NEVER edit another Agent's files.",
+                "Propose an edit to one of YOUR OWN definition files (SOUL.md / AGENTS.md / HEARTBEAT.md / TOOLS.md / agent.yml). Nothing changes until the owner approves it in their Inbox; the approved body is written exactly as proposed. Body is secret-scanned, 64 KB cap, once per file per run. Pass expectedHash for optimistic concurrency. NEVER edit another Agent's files.",
             parameters: {
                 type: 'object',
                 properties: {
@@ -949,20 +981,66 @@ export class AgentToolService {
                         error: `editAgentFile: file "${args.name}" was already edited once in this run (cap: 1 edit per file per run).`,
                     };
                 }
+                const proposals = this.domainToolSources?.proposals;
+                if (!proposals) {
+                    return {
+                        error: "editAgentFile: changes to an agent's own files need the owner's approval, and no approval queue is available here. Nothing was changed.",
+                    };
+                }
                 try {
-                    const result = await this.files!.write({
+                    const check = await this.files!.validateProposedWrite({
                         userId: agent.userId,
                         agentId: agent.id,
                         name: args.name as any,
                         body: args.body,
                         expectedHash: args.expectedHash,
-                        // The agent edits its own file from a run: the
-                        // activity record names the agent, not its owner.
-                        actor: 'agent',
-                        runId: runContext.runId,
                     });
+                    if (!check.changed) {
+                        return {
+                            error: `editAgentFile: "${args.name}" already has exactly this body.`,
+                        };
+                    }
+                    const runId =
+                        runContext.runId && runContext.runId !== 'no-run' ? runContext.runId : null;
+                    const payload: Record<string, unknown> = {
+                        kind: AGENT_FILE_EDIT_PROPOSAL_KIND,
+                        fileName: args.name,
+                        body: args.body,
+                        baseHash: check.baseHash,
+                        bytes: Buffer.byteLength(args.body, 'utf8'),
+                        previousChars: check.previousChars,
+                        addedChars: check.addedChars,
+                        removedChars: check.removedChars,
+                        ...(runId ? { runId } : {}),
+                    };
+                    if (
+                        Buffer.byteLength(JSON.stringify(payload), 'utf8') >
+                        MAX_PROPOSED_FILE_PAYLOAD_BYTES
+                    ) {
+                        return {
+                            error: `editAgentFile: this edit is too large to send for approval. Ask the owner to change "${args.name}" directly. Nothing was changed.`,
+                        };
+                    }
+                    const proposal = await proposals.propose(agent.userId, {
+                        agentId: agent.id,
+                        runId,
+                        title: `Edit ${args.name} of agent ${check.agentSlug}`.slice(0, 200),
+                        payload,
+                    });
+                    if (proposal.status === 'rejected') {
+                        return {
+                            error: "editAgentFile: this agent's guardrails do not allow it to change its own files. Nothing was changed.",
+                        };
+                    }
                     runContext.editsThisRunByFile.add(key);
-                    return result;
+                    return {
+                        proposed: true,
+                        pendingApproval: true,
+                        proposalId: proposal.id,
+                        // Said explicitly so the model does not retry or act
+                        // as if the new instructions were already in force.
+                        note: 'Proposed. Your file is unchanged until the owner approves this edit; do not retry.',
+                    };
                 } catch (err) {
                     return { error: err instanceof Error ? err.message : String(err) };
                 }

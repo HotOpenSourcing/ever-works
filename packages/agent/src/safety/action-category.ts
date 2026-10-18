@@ -81,8 +81,6 @@ export const ENTRY_POINT_CATEGORY: Readonly<Record<string, ActionCategory>> = Ob
     commentOnTask: 'write.internal',
     transitionTask: 'write.internal',
     submitTaskReview: 'write.internal',
-    editAgentFile: 'write.internal',
-    resolve_escalation: 'write.internal',
     review_pull_request: 'write.internal',
     run_workflow_graph: 'write.internal',
     // APW-08 T26 — files and starts an App Work change Task (the PR is reviewed before merge).
@@ -122,6 +120,13 @@ export const ENTRY_POINT_CATEGORY: Readonly<Record<string, ActionCategory>> = Ob
     'facade:never-purchase': 'spend.commitment',
 
     // ── access.grant — widening any access ──
+    // Prompt-injection hardening: an Agent rewriting its own trusted identity
+    // files, or closing one of the owner's human gates, widens what that Agent
+    // may do — so both sit in the category whose ceiling is Ask and can never
+    // be raised to Auto. (Both tools also only ever FILE an owner-approval
+    // proposal; this keeps the ladder honest about what they are.)
+    editAgentFile: 'access.grant',
+    resolve_escalation: 'access.grant',
     'facade:tool-grant-write': 'access.grant',
     'facade:connection-write': 'access.grant',
     'facade:autonomy-grant-write': 'access.grant',

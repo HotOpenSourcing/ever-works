@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import {
     TenantEmailAddressRepository,
@@ -147,6 +148,54 @@ function threadLookupIds(payload: AgentInboundEmailDispatchPayload): string[] {
         0,
         MAX_THREAD_LOOKUP_IDS,
     );
+}
+
+/**
+ * The bare, lower-cased mailbox of an address as a header writes it:
+ * `"Ada" <Ada@Example.com>` and `ada@example.com` are the same participant.
+ * `''` when nothing address-like is there.
+ */
+export function normalizeEmailAddress(raw: unknown): string {
+    if (typeof raw !== 'string') return '';
+    const text = raw.trim();
+    const open = text.lastIndexOf('<');
+    const close = text.lastIndexOf('>');
+    const bare = open >= 0 && close > open ? text.slice(open + 1, close) : text;
+    return bare.trim().toLowerCase();
+}
+
+/**
+ * Prompt-injection hardening — everyone a set of stored messages was from or
+ * addressed to (from / to / cc / bcc), normalized. A reply may only JOIN a
+ * thread whose participants include its sender: `In-Reply-To` and
+ * `References` are the sender's to write, and any internet sender who learned
+ * one Message-ID could otherwise post into the owner's Task.
+ */
+export function threadParticipants(messages: readonly EmailMessage[]): Set<string> {
+    const out = new Set<string>();
+    const add = (value: unknown): void => {
+        const address = normalizeEmailAddress(value);
+        if (address) out.add(address);
+    };
+    for (const message of messages) {
+        add(message.from);
+        for (const list of [message.toAddresses, message.ccAddresses, message.bccAddresses]) {
+            for (const address of list ?? []) add(address);
+        }
+    }
+    return out;
+}
+
+/**
+ * Prompt-injection hardening — the conversation key for a subject-only match
+ * from a sender who is not a participant of the conversation that subject
+ * already names. Scoped to the sender (by a short hash, so it fits the
+ * 200-character column), so two different senders using the same subject
+ * never land in one conversation.
+ */
+export function senderScopedThreadKey(threadKey: string, sender: string): string {
+    const suffix = ` #${createHash('sha256').update(sender).digest('hex').slice(0, 16)}`;
+    return `${threadKey.slice(0, 200 - suffix.length)}${suffix}`;
 }
 
 /**
@@ -363,9 +412,23 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
             }
         }
         const threaded = !!conversation;
-        const threadKey = deriveThreadKey(payload.subject);
+        let threadKey = deriveThreadKey(payload.subject);
         if (!conversation) {
             conversation = await this.conversations.findByThreadKey(agentId, threadKey);
+            // Prompt-injection hardening: a subject is not an identity. A
+            // conversation found by subject alone is joined only by one of its
+            // participants; anyone else gets their own, sender-scoped thread.
+            const sender = normalizeEmailAddress(payload.from);
+            const isParticipant =
+                !!conversation &&
+                !!sender &&
+                (conversation.participants ?? []).some(
+                    (participant) => normalizeEmailAddress(participant?.address) === sender,
+                );
+            if (conversation && !isParticipant) {
+                threadKey = senderScopedThreadKey(threadKey, sender || '(no sender)');
+                conversation = await this.conversations.findByThreadKey(agentId, threadKey);
+            }
         }
         if (!conversation) {
             conversation = await this.conversations.save({
@@ -418,9 +481,21 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         const ids = threadLookupIds(payload);
         if (ids.length === 0) return null;
         try {
-            const candidates = (await this.messages.findByMessageIdHeaders(userId, ids)).filter(
-                (candidate) => candidate.agentId === agentId && accept(candidate),
+            const referenced = (await this.messages.findByMessageIdHeaders(userId, ids)).filter(
+                (candidate) => candidate.agentId === agentId,
             );
+            if (referenced.length === 0) return null;
+            // Prompt-injection hardening: only a PARTICIPANT of the referenced
+            // thread may join it. A sender who merely quotes a Message-ID gets
+            // a fresh Task / conversation instead — never the owner's thread.
+            const sender = normalizeEmailAddress(payload.from);
+            if (!sender || !threadParticipants(referenced).has(sender)) {
+                this.logger.warn(
+                    `Inbound ${payload.pluginId} message names a thread of agent ${agentId} but its sender is not a participant; not joining it.`,
+                );
+                return null;
+            }
+            const candidates = referenced.filter((candidate) => accept(candidate));
             for (const id of ids) {
                 const match = candidates.find((candidate) => candidate.messageIdHeader === id);
                 if (match) return match;

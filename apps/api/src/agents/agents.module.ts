@@ -76,8 +76,11 @@ import {
 import type { RepositoryRole } from '@ever-works/contracts/api';
 import {
     formatInboundEmailChatPost,
+    formatInboundEmailTaskDescription,
     inboundEmailAttachmentList,
+    inboundEmailReplyAutoDispatchEnabled,
     inboundEmailReplyHint,
+    inboundEmailTaskTitle,
 } from './inbound-email-task-chat';
 import { UploadsModule } from '../uploads/uploads.module';
 import { UploadsService } from '../uploads/uploads.service';
@@ -169,7 +172,7 @@ import { ConversationsModule, ConversationMessageService } from '@ever-works/age
 // you" reason (pending proposals alongside open escalations). The
 // agent-side AgentApprovalsModule registers its own two entities and
 // imports nothing else, so no cycle is introduced.
-import { AgentApprovalsModule } from '@ever-works/agent/agent-approvals';
+import { AgentApprovalsModule, AgentApprovalsService } from '@ever-works/agent/agent-approvals';
 // ActivityLogService is injected @Optional() into AgentsController for
 // the lifecycle trail (AGENT_PAUSED / AGENT_RESUMED / run-triggered /
 // run-cancelled / task-assigned) and the GET :id/events feed. Without
@@ -650,10 +653,17 @@ async function assertRealWriteTarget(
                     organizationId,
                     attachments,
                 }) {
-                    const title = subject?.trim()
-                        ? subject.trim().slice(0, 200)
-                        : `Inbound email from ${from}`;
-                    const body = bodyText?.trim() ? bodyText.trim().slice(0, 8000) : '';
+                    // Prompt-injection hardening: the title and description are
+                    // part of the receiving Agent's prompt, and every byte of them
+                    // is the sender's. Both are defused, and the body is fenced as
+                    // untrusted data exactly like a reply joined onto a Task.
+                    const title = inboundEmailTaskTitle(subject, from);
+                    const body = formatInboundEmailTaskDescription({
+                        emailMessageId,
+                        from,
+                        subject: subject ?? '',
+                        bodyText: bodyText ?? '',
+                    });
                     // EW-P4-3 — a public webhook has no request scope, so the
                     // Task is placed explicitly: where its assignee, the
                     // receiving Agent, lives. Not the address's scope: an
@@ -704,8 +714,13 @@ async function assertRealWriteTarget(
                 }) {
                     const agent = await agents.findByIdAndUser(agentId, userId);
                     if (!agent?.slug) return null;
-                    // Posted as the address owner (whose mailbox received it);
-                    // only the receiving agent's mention is live.
+                    // Prompt-injection hardening: filed on the Task as clearly
+                    // EXTERNAL mail with NO live mention, so an outside sender can
+                    // never start or steer one of the owner's Agents by replying;
+                    // a person mentions the Agent to have it act. The operator
+                    // switch restores the old auto-pickup (the dispatcher still
+                    // only joins a thread the sender participates in).
+                    const liveMention = inboundEmailReplyAutoDispatchEnabled();
                     await chat.post(
                         userId,
                         {
@@ -714,6 +729,7 @@ async function assertRealWriteTarget(
                             authorId: userId,
                             body: formatInboundEmailChatPost({
                                 agentSlug: agent.slug,
+                                liveMention,
                                 emailMessageId,
                                 from,
                                 subject,
@@ -721,7 +737,7 @@ async function assertRealWriteTarget(
                                 attachments,
                             }),
                         },
-                        { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) },
+                        liveMention ? { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) } : {},
                     );
                     return { taskId };
                 },
@@ -1920,6 +1936,10 @@ async function assertRealWriteTarget(
                 // LAST for the same positional reason, and optional: unbound, the two
                 // tools are simply not offered.
                 { token: AppChangeRequestService, optional: true },
+                // Prompt-injection hardening — the owner-approval seam behind
+                // `resolve_escalation` and `editAgentFile`. APPENDED LAST (positional),
+                // optional: unbound, both tools refuse instead of acting.
+                { token: AgentApprovalsService, optional: true },
             ],
             useFactory: (
                 tasksService: TasksService,
@@ -1942,6 +1962,7 @@ async function assertRealWriteTarget(
                 inboxService: InboxService,
                 agentReviews: TaskAgentReviewService,
                 appChangeService?: AppChangeRequestService | null,
+                approvals?: AgentApprovalsService | null,
             ): AgentDomainToolSources => ({
                 // All three membership repositories are bound: the
                 // commentOnTask gate is fail-closed and DENIES every call
@@ -2043,6 +2064,29 @@ async function assertRealWriteTarget(
                 // `askHuman` is carried, so the reply router and list
                 // surface are unreachable from the model.
                 inbox: { service: inboxService },
+                // Prompt-injection hardening — an Agent never resolves one of the
+                // owner's escalations, nor rewrites its own trusted identity files,
+                // by itself: both tools file a PENDING proposal here that only a
+                // person can approve (`humanDecisionRequired`: guardrails may block,
+                // never approve). The approved action is applied by the agent-side
+                // `AgentProposalExecutionListener`.
+                ...(approvals
+                    ? {
+                          proposals: {
+                              async propose(userId, input) {
+                                  const proposal = await approvals.createProposal(userId, {
+                                      agentId: input.agentId,
+                                      actionType: 'other',
+                                      title: input.title,
+                                      runId: input.runId ?? null,
+                                      payload: input.payload,
+                                      humanDecisionRequired: true,
+                                  });
+                                  return { id: proposal.id, status: proposal.status };
+                              },
+                          },
+                      }
+                    : {}),
                 // APW-08 T26 — the chat half of the evolve loop. The Work id comes from
                 // the MODEL, so it is owner-checked (edit for the write, view for the
                 // read) and kind-checked before the service sees it; a foreign or

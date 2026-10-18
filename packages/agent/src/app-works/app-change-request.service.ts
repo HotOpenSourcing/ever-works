@@ -8,6 +8,8 @@ import type { Work } from '../entities/work.entity';
 import { appWorkCloudPushAllowed } from '../tasks-domain/app-work-cloud-push';
 import { resolveTaskRepository } from '../tasks-domain/task-repository';
 import { TasksService } from '../tasks-domain/tasks.service';
+// Leaf token file — no runtime graph (see inbox-producer.port.ts).
+import { INBOX_PRODUCER, type InboxProducer } from '../inbox/inbox-producer.port';
 import {
     APP_WORK_AGENT_RESOLVER,
     AppWorkAgentResolverService,
@@ -78,6 +80,13 @@ export interface AppChangeAccepted {
     readonly agentSource: AppWorkAgentSource | 'explicit';
     readonly dispatched: boolean;
     readonly parked: boolean;
+    /**
+     * Prompt-injection hardening — `true` when a member who is NOT the Work owner asked:
+     * the Task was filed (assigned, in the backlog) but NOT started, because starting it
+     * runs the OWNER's committing Agent. The owner was told in their Inbox and starts it
+     * from the Task (Run). Absent for an owner's own request, which starts as before.
+     */
+    readonly awaitingOwner?: boolean;
     readonly queuedReason?: string;
     readonly dispatchError?: string;
     /** The repository the change lands in (the fork). */
@@ -133,6 +142,10 @@ export class AppChangeRequestService {
         @Inject(APP_WORK_AGENT_RESOLVER)
         private readonly resolver?: AppWorkAgentResolver,
         @Optional() private readonly resolverService?: AppWorkAgentResolverService,
+        // Prompt-injection hardening — tells the owner a member's change request is
+        // waiting for them. @Optional() and appended LAST (positional-spec arity rule);
+        // unbound, the Task still waits in the owner's backlog, just without the notice.
+        @Optional() @Inject(INBOX_PRODUCER) private readonly inbox?: InboxProducer,
     ) {}
 
     async request(input: AppChangeRequestInput): Promise<AppChangeRequestResult> {
@@ -246,6 +259,32 @@ export class AppChangeRequestService {
             );
         }
 
+        // ── a member who is not the owner: file it, never start it ────────────
+        // Prompt-injection hardening. Starting the Task runs the OWNER's committing Agent
+        // with the owner's credentials (on the owner's machine for a Fleet run), so a
+        // request from anyone else — a Work Editor, or an Editor's Agent steered by
+        // injected text — is held for the owner: the Task exists, is assigned and sits
+        // in the backlog, and the owner is told. Pressing Run on it is the owner's call.
+        const requestedByOwner = !input.actorUserId || input.actorUserId === ownerId;
+        if (!requestedByOwner) {
+            await this.noticeOwner(work, task, input.actorUserId);
+            return {
+                status: 'accepted',
+                httpStatus: 202,
+                taskId: task.id,
+                taskSlug: task.slug,
+                taskUrl: taskUrlOf(task.id),
+                runId: null,
+                agentId,
+                agentSource,
+                dispatched: false,
+                parked: false,
+                awaitingOwner: true,
+                repository: target,
+                warnings: ['awaitingOwner'],
+            };
+        }
+
         // ── start it, through THE dispatch path ───────────────────────────────
         let runId: string | null = null;
         let dispatched = false;
@@ -290,6 +329,31 @@ export class AppChangeRequestService {
             repository: target,
             warnings,
         };
+    }
+
+    /**
+     * Tell the Work owner a member's change request is waiting for them. Best-effort:
+     * the Task is filed either way and shows on the owner's board.
+     */
+    private async noticeOwner(work: Work, task: Task, actorUserId: string): Promise<void> {
+        if (!this.inbox) return;
+        try {
+            await this.inbox.notice(work.userId, {
+                title: `A change to "${(work.name ?? work.slug ?? 'your App Work').slice(0, 120)}" is waiting for you`,
+                body:
+                    `A member with edit access (user ${actorUserId}) asked for a change. The Task ` +
+                    `${task.slug} was filed and assigned but NOT started, because starting it runs ` +
+                    'your Agent with your credentials. Review the request on the Task and press Run ' +
+                    'if you want it made.',
+                taskId: task.id,
+                workId: work.id,
+                organizationId: work.organizationId ?? null,
+            });
+        } catch (error) {
+            this.logger.warn(
+                `App change: the owner notice for Task ${task.id} failed (${errorText(error)}).`,
+            );
+        }
     }
 
     /** The Work's change Tasks, newest first — what the chat panel lists under the input. */
