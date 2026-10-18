@@ -90,6 +90,32 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
     };
 }
 
+/** A compare result (`GitDiffResult`) over the given paths, complete unless told otherwise. */
+function compareOf(
+    files: Array<string | { path: string; previousPath?: string }>,
+    overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+    const rows = files.map((file) =>
+        typeof file === 'string'
+            ? { path: file, status: 'modified', additions: 1, deletions: 0 }
+            : { status: 'renamed', additions: 0, deletions: 0, ...file },
+    );
+    return {
+        files: rows,
+        truncated: false,
+        totalFiles: rows.length,
+        totalAdditions: rows.length,
+        totalDeletions: 0,
+        patchBytes: 0,
+        ...overrides,
+    };
+}
+
+/** The default compare: an upstream range that changes source code only. */
+function cleanCompare(): Record<string, unknown> {
+    return compareOf(['src/index.ts', 'README.md']);
+}
+
 /** The repository object the provider double answers reads with. */
 function repository(owner: string, name: string, overrides: Record<string, unknown> = {}) {
     return {
@@ -122,6 +148,9 @@ const PROVIDER_METHODS = [
     'listPullRequests',
     'getPullRequestStatus',
     'getPullRequestFiles',
+    // FR-60/T46: the workflow hold's compare, and the private copy's sync-branch tip.
+    'getCompareDiff',
+    'getLatestCommit',
     'push',
     'replaceRemote',
     'mergePullRequest',
@@ -218,6 +247,14 @@ function makeHarness(
         })) as unknown as Handler,
         listPullRequests: (() => []) as unknown as Handler,
         getPullRequestFiles: (() => []) as unknown as Handler,
+        // A range that touches no workflow file: every pre-T46 path behaves as before.
+        getCompareDiff: (() => cleanCompare()) as unknown as Handler,
+        getLatestCommit: (() => ({
+            sha: SHA_A,
+            message: 'previous upstream head',
+            author: { name: 'upstream', email: 'upstream@example.invalid' },
+            date: '',
+        })) as unknown as Handler,
     };
 
     const handlers = { ...defaultHandlers, ...(options.handlers ?? {}) };
@@ -2269,5 +2306,288 @@ describe('AppUpstreamSyncService — its Activity rows carry the Work’s worksp
 
         expect(harness.works.findById).toHaveBeenCalledTimes(1);
         expect(harness.works.findById).toHaveBeenCalledWith(WORK_ID);
+    });
+});
+
+/**
+ * FR-60 / FR-61 / S29 / ACC-02-24 (T46) — the workflow hold, and the
+ * prompt-injection finding behind it: every sync move puts third-party commits on
+ * a SAME-repository ref, where GitHub runs their workflows with the App
+ * repository's secrets. A range that touches `.github/workflows/**` or
+ * `.github/actions/**` — or cannot be proven not to — moves nothing.
+ */
+describe('AppUpstreamSyncService — the workflow hold (FR-60, FR-61, ACC-02-24)', () => {
+    const BEHIND_AND_AHEAD = () => ({
+        aheadBy: 1,
+        behindBy: 2,
+        upstreamHeadSha: SHA_B,
+        forkHeadSha: SHA_A,
+    });
+    const BEHIND_ONLY = () => ({
+        aheadBy: 0,
+        behindBy: 2,
+        upstreamHeadSha: SHA_B,
+        forkHeadSha: SHA_A,
+    });
+    const ENV = 'APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS';
+
+    afterEach(() => {
+        delete process.env[ENV];
+    });
+
+    /** Nothing that moves a ref or opens a pull request ran. */
+    function expectNothingMoved(harness: Harness): void {
+        expect(harness.calls.updateBranchRef).toHaveLength(0);
+        expect(harness.calls.createBranchFromSha).toHaveLength(0);
+        expect(harness.calls.deleteBranch).toHaveLength(0);
+        expect(harness.calls.createPullRequest).toHaveLength(0);
+        expect(harness.calls.syncForkBranch).toHaveLength(0);
+        if (harness.privateCopies) {
+            expect(harness.privateCopies.moveSyncBranch).not.toHaveBeenCalled();
+        }
+    }
+
+    function heldEvents(harness: Harness): Array<Record<string, unknown>> {
+        return harness.activity.log.mock.calls
+            .map((call) => call[0] as Record<string, unknown>)
+            .filter((entry) => entry.action === 'app.upstream.held');
+    }
+
+    it('holds a range that adds a workflow: no branch move, no pull request, one owner notice', async () => {
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () => compareOf(['src/app.ts', '.github/workflows/exfiltrate.yml']),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.result).toBe('skipped');
+        expect(result.reason).toBe('held_for_workflow_review');
+        expectNothingMoved(harness);
+        // The compare is the App repository's, pinned to the exact upstream head.
+        expect(firstArgs(harness, 'getCompareDiff').slice(0, 5)).toEqual([
+            OWNER,
+            REPO,
+            TRACKED_BRANCH,
+            SHA_B,
+            { maxFiles: 300, maxBytes: 0 },
+        ]);
+        const finished = finishInput(harness);
+        expect(finished.result).toBe('skipped');
+        expect(finished.reason).toBe('held_for_workflow_review');
+        // Not a pause: the next scheduled run looks again (upstream may revert, or
+        // an operator may lift the hold).
+        expect(finished.nextSyncAt).not.toBeNull();
+        expect(finished.trackedBranchChanged).toBe(false);
+
+        const [event] = heldEvents(harness);
+        expect(event).toBeDefined();
+        expect(event.details).toEqual({
+            reason: 'held_for_workflow_review',
+            upstreamHeadSha: SHA_B,
+            paths: ['.github/workflows/exfiltrate.yml'],
+            pathCount: 1,
+            complete: true,
+            optIn: ENV,
+        });
+        expect(result.events).toContain('app.upstream.held');
+    });
+
+    it('never fast-forwards a behind-only fork onto a workflow change (the LOW finding)', async () => {
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_ONLY,
+                getCompareDiff: () => compareOf(['.github/workflows/release.yml']),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expect(harness.calls.syncForkBranch).toHaveLength(0);
+        expect(harness.licenses.previewUpstream).not.toHaveBeenCalled();
+        expectNothingMoved(harness);
+        expect(harness.hygiene.apply).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['a composite action', ['.github/actions/setup/action.yml']],
+        ['a nested workflow path, upper-cased', ['.GitHub/Workflows/sub/ci.YML']],
+        ['the workflows directory itself (a symlink swap)', ['.github/workflows']],
+        [
+            'a rename out of the workflows directory',
+            [{ path: 'docs/ci.yml', previousPath: '.github/workflows/ci.yml' }],
+        ],
+    ])('holds %s', async (_label, files) => {
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () => compareOf(files as never),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expectNothingMoved(harness);
+    });
+
+    it.each([
+        [
+            'the compare is refused',
+            () => Promise.reject(new GitProviderRequestError('not_found', 404)),
+        ],
+        [
+            'the provider has no compare',
+            () => Promise.reject(new GitOperationNotSupportedError('getCompareDiff', 'github')),
+        ],
+        ['the file list was cut', () => compareOf(['src/a.ts'], { totalFiles: 2, truncated: true })],
+        ['the list is at the 300-file ceiling', () => compareOf(['src/a.ts'], { totalFiles: 300 })],
+        ['the answer is empty', () => null],
+    ])('fails closed when %s', async (_label, getCompareDiff) => {
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: getCompareDiff as never,
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.result).toBe('skipped');
+        expect(result.reason).toBe('held_for_workflow_review');
+        expectNothingMoved(harness);
+        expect(heldEvents(harness)[0]?.details).toMatchObject({ complete: false, pathCount: 0 });
+    });
+
+    it('lets a range that touches no workflow through exactly as before', async () => {
+        const harness = makeHarness({ handlers: { getForkDivergence: BEHIND_AND_AHEAD } });
+
+        const result = await runSync(harness);
+
+        expect(result.result).toBe('pull_request_opened');
+        expect(harness.calls.getCompareDiff).toHaveLength(1);
+        expect(harness.calls.updateBranchRef).toHaveLength(1);
+        expect(harness.calls.createPullRequest).toHaveLength(1);
+        expect(heldEvents(harness)).toHaveLength(0);
+    });
+
+    it('holds the manual Sync now and the merged-PR follow-up the same way (FR-61: no path skips it)', async () => {
+        for (const trigger of ['manual', 'merged']) {
+            const harness = makeHarness({
+                handlers: {
+                    getForkDivergence: BEHIND_AND_AHEAD,
+                    getCompareDiff: () => compareOf(['.github/workflows/x.yml']),
+                },
+            });
+
+            const result = await runSync(harness, { trigger });
+
+            expect([trigger, result.reason]).toEqual([trigger, 'held_for_workflow_review']);
+            expectNothingMoved(harness);
+        }
+    });
+
+    it('is not lifted by the App spec — only the operator list lifts it', async () => {
+        const harness = makeHarness({
+            spec: { upstreamSync: { enabled: true, allowWorkflowChanges: true } },
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () => compareOf(['.github/workflows/x.yml']),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expectNothingMoved(harness);
+    });
+
+    it('syncs a Work the operator listed in APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS', async () => {
+        process.env[ENV] = ` other-work , ${WORK_ID.toUpperCase()} `;
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () => compareOf(['.github/workflows/x.yml']),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.result).toBe('pull_request_opened');
+        expect(harness.calls.getCompareDiff).toHaveLength(0);
+        expect(harness.calls.createPullRequest).toHaveLength(1);
+    });
+
+    it('notifies the owner once per held head, not on every scheduled run', async () => {
+        const harness = makeHarness({
+            row: makeRow({
+                lastSyncReason: 'held_for_workflow_review',
+                lastSyncedUpstreamSha: SHA_B,
+            }),
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () => compareOf(['.github/workflows/x.yml']),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expect(heldEvents(harness)).toHaveLength(0);
+        expect(result.events).not.toContain('app.upstream.held');
+    });
+
+    it('lets a rate limit on the compare take its own outcome (nothing moves either way)', async () => {
+        const harness = makeHarness({
+            handlers: {
+                getForkDivergence: BEHIND_AND_AHEAD,
+                getCompareDiff: () =>
+                    Promise.reject(new GitProviderRequestError('rate_limited', 403)),
+            },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('skipped_rate_limited');
+        expectNothingMoved(harness);
+    });
+
+    it('checks a private copy in the upstream repository from the sync branch commit', async () => {
+        const harness = makeHarness({
+            row: makeRow({ relation: 'private-copy' }),
+            handlers: { getCompareDiff: () => compareOf(['.github/workflows/x.yml']) },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expect(firstArgs(harness, 'getLatestCommit').slice(0, 3)).toEqual([
+            OWNER,
+            REPO,
+            APP_UPSTREAM_SYNC_BRANCH,
+        ]);
+        expect(firstArgs(harness, 'getCompareDiff').slice(0, 4)).toEqual([
+            UPSTREAM_OWNER,
+            UPSTREAM_REPO,
+            SHA_A,
+            SHA_B,
+        ]);
+        expectNothingMoved(harness);
+    });
+
+    it('holds a private copy whose sync branch holds no commit to compare from', async () => {
+        const harness = makeHarness({
+            row: makeRow({ relation: 'private-copy' }),
+            handlers: { getLatestCommit: () => null },
+        });
+
+        const result = await runSync(harness);
+
+        expect(result.reason).toBe('held_for_workflow_review');
+        expect(harness.calls.getCompareDiff).toHaveLength(0);
+        expectNothingMoved(harness);
     });
 });
