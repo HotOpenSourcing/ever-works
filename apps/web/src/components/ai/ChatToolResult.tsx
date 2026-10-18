@@ -98,6 +98,8 @@ interface ConfirmationOutput {
     action?: string;
     target?: string;
     args?: Record<string, unknown>;
+    /** `privileged` = reversible, but changes what agents can do / know / are told. */
+    confirmationKind?: 'destructive' | 'privileged';
 }
 
 // Security: tool outputs are LLM-authored and can be poisoned via prompt
@@ -297,6 +299,7 @@ export function ChatToolResult({
                 confirmToolName={confirmation.toolName ?? toolName}
                 action={confirmation.action ?? ''}
                 target={confirmation.target}
+                kind={confirmation.confirmationKind}
             />
         );
     }
@@ -369,10 +372,12 @@ function ConfirmCard({
     confirmToolName,
     action,
     target,
+    kind,
 }: {
     confirmToolName: string;
     action: string;
     target?: string;
+    kind?: 'destructive' | 'privileged';
 }) {
     const { sendMessage } = useChatContext();
     const [resolved, setResolved] = useState<null | 'confirmed' | 'cancelled'>(null);
@@ -410,7 +415,10 @@ function ConfirmCard({
             </div>
             <p className="text-[11px] text-text-muted dark:text-text-muted-dark mb-3">
                 {action}
-                {target ? ` (${target})` : ''}. This can’t be undone.
+                {target ? ` (${target})` : ''}.{' '}
+                {kind === 'privileged'
+                    ? 'This changes what your agents can do, know or are told.'
+                    : 'This can’t be undone.'}
             </p>
             <div className="flex gap-2">
                 <button

@@ -69,7 +69,7 @@ import {
 // Manifest-driven generated tools (agents, tasks, skills, notifications,
 // members, api-keys, budgets/usage, webhooks, orgs, KB, templates, plugins …).
 // One registry entry per platform operation — see ./generated/registry.ts.
-import { buildGeneratedTools } from './generated/factory';
+import { buildGeneratedTools, type GeneratedToolsOptions } from './generated/factory';
 import { ALL_OPERATIONS } from './generated/registry.all';
 // Canvas rendering tools (charts / tables / stat tiles / detail panels).
 import { buildCanvasTools } from './canvas.tools';
@@ -89,9 +89,12 @@ import { buildReportTools } from './reports';
  * Hand-written tools are spread LAST so they win any name collision with a
  * generated entry (they carry richer, bespoke UX).
  */
-export function buildChatTools(model: LanguageModel) {
+export function buildChatTools(model: LanguageModel, options: GeneratedToolsOptions = {}) {
     return {
-        ...buildGeneratedTools(ALL_OPERATIONS),
+        // Security: `options.userConfirmed` ties every gated generated tool's
+        // `confirmed: true` to the user's own latest message (see
+        // ./generated/confirmation.ts).
+        ...buildGeneratedTools(ALL_OPERATIONS, options),
         ...buildCanvasTools(),
         ...buildReportTools(),
 
