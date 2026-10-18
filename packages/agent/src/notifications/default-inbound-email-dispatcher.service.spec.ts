@@ -142,61 +142,134 @@ describe('DefaultInboundEmailDispatcher', () => {
         );
     });
 
-    describe('the trusted-sender rule (review of #2769)', () => {
+    describe('the trusted-sender rule (reviews of #2769)', () => {
         afterEach(() => {
             delete process.env.INBOUND_EMAIL_TRUSTED_SENDERS;
         });
 
+        const RECEIVING = 'support@agents.acme.test';
+        const alignedPass = { dkim: 'pass', dkimDomain: 'acme.test' };
+
         async function spawnFrom(
             from: string,
             setup?: (svc: any) => void,
-            metadata?: Record<string, unknown>,
+            extra: Record<string, unknown> = {},
         ) {
             const svc = await build(true);
-            addresses.findById.mockResolvedValue(inboundAddress);
+            addresses.findById.mockResolvedValue({ ...inboundAddress, address: RECEIVING });
             assignments.findByEmailAddress.mockResolvedValue([
                 { agentId: 'agent-1', dispatchMode: 'task-spawn' },
             ]);
             setup?.(svc);
-            await svc.dispatch({ ...basePayload, from, ...(metadata ? { metadata } : {}) });
+            await svc.dispatch({ ...basePayload, from, ...extra });
             return taskSpawner.spawnTaskForInboundEmail.mock.calls.at(-1)[0];
         }
+
+        const ownerUser = (svc: any, emailVerified = true) => {
+            svc.users = {
+                findById: jest.fn(async () => ({ email: 'owner@acme.test', emailVerified })),
+            };
+        };
 
         it('marks an unknown sender untrusted', async () => {
             expect((await spawnFrom('stranger@evil.test')).senderTrusted).toBe(false);
         });
 
-        it("trusts the owner's verified account email", async () => {
-            const input = await spawnFrom('Owner <OWNER@acme.test>', (svc) => {
-                svc.users = {
-                    findById: jest.fn(async () => ({
-                        email: 'owner@acme.test',
-                        emailVerified: true,
-                    })),
-                };
+        it("trusts the owner's verified account email only with an aligned authentication pass", async () => {
+            const withPass = await spawnFrom('Owner <OWNER@acme.test>', ownerUser, {
+                metadata: alignedPass,
             });
-            expect(input.senderTrusted).toBe(true);
+            expect(withPass.senderTrusted).toBe(true);
+            // No provider verdict: the From spelling alone is not enough for an owner address.
+            expect((await spawnFrom('owner@acme.test', ownerUser)).senderTrusted).toBe(false);
         });
 
         it('does not trust an UNVERIFIED account email', async () => {
-            const input = await spawnFrom('owner@acme.test', (svc) => {
-                svc.users = {
-                    findById: jest.fn(async () => ({
-                        email: 'owner@acme.test',
-                        emailVerified: false,
-                    })),
-                };
+            const input = await spawnFrom('owner@acme.test', (svc) => ownerUser(svc, false), {
+                metadata: alignedPass,
             });
             expect(input.senderTrusted).toBe(false);
         });
 
-        it('trusts a configured sender unless the provider reports a failed authentication', async () => {
-            process.env.INBOUND_EMAIL_TRUSTED_SENDERS = '@partner.test';
-            expect((await spawnFrom('ops@partner.test')).senderTrusted).toBe(true);
-            const forged = await spawnFrom('ops@partner.test', undefined, {
-                headers: [{ Name: 'Received-SPF', Value: 'fail (domain does not designate)' }],
+        it('SELF-ADDRESS SPOOF: From = the receiving address (or an inbound-only one) is never trusted', async () => {
+            const ownedAddresses = () => {
+                addresses.findAllByUser = jest.fn(async () => [
+                    {
+                        id: 'addr-1',
+                        address: RECEIVING,
+                        verified: true,
+                        disabledAt: null,
+                        direction: 'both',
+                    },
+                    {
+                        id: 'addr-in',
+                        address: 'inbox@agents.acme.test',
+                        verified: true,
+                        disabledAt: null,
+                        direction: 'inbound',
+                    },
+                    {
+                        id: 'addr-out',
+                        address: 'ops@agents.acme.test',
+                        verified: true,
+                        disabledAt: null,
+                        direction: 'outbound',
+                    },
+                ]);
+            };
+            const agentsPass = { metadata: { dkim: 'pass', dkimDomain: 'agents.acme.test' } };
+
+            expect((await spawnFrom(RECEIVING, ownedAddresses, agentsPass)).senderTrusted).toBe(
+                false,
+            );
+            expect(
+                (await spawnFrom('inbox@agents.acme.test', ownedAddresses, agentsPass))
+                    .senderTrusted,
+            ).toBe(false);
+            // Control: a verified OUTBOUND address of the owner, with an aligned pass, is trusted.
+            expect(
+                (await spawnFrom('ops@agents.acme.test', ownedAddresses, agentsPass)).senderTrusted,
+            ).toBe(true);
+        });
+
+        it('trusts agent-to-agent mail recognised from the platform outbound record, not From', async () => {
+            const OTHER = 'ops@agents.acme.test';
+            const sentRow = (svc: any) => {
+                void svc;
+                messages.findByMessageIdHeaders.mockImplementation(async () => [
+                    {
+                        id: 'sent-1',
+                        direction: 'outbound',
+                        sentAt: new Date(),
+                        from: OTHER,
+                        toAddresses: [RECEIVING],
+                        messageIdHeader: 'm-1@agents.acme.test',
+                    },
+                ]);
+            };
+            const sent = await spawnFrom(OTHER, sentRow, {
+                messageIdHeader: 'm-1@agents.acme.test',
+            });
+            expect(sent.senderTrusted).toBe(true);
+
+            // Same Message-ID, a different From: not the message the platform sent.
+            const forged = await spawnFrom('mallory@evil.test', sentRow, {
+                messageIdHeader: 'm-1@agents.acme.test',
             });
             expect(forged.senderTrusted).toBe(false);
+        });
+
+        it('trusts a configured sender by spelling only when the provider reports no verdict', async () => {
+            process.env.INBOUND_EMAIL_TRUSTED_SENDERS = '@partner.test';
+            expect((await spawnFrom('ops@partner.test')).senderTrusted).toBe(true);
+            const failed = await spawnFrom('ops@partner.test', undefined, {
+                metadata: { spf: 'fail' },
+            });
+            expect(failed.senderTrusted).toBe(false);
+            const unaligned = await spawnFrom('ops@partner.test', undefined, {
+                metadata: { spf: 'pass', spfDomain: 'bulk-mailer.test' },
+            });
+            expect(unaligned.senderTrusted).toBe(false);
         });
     });
 

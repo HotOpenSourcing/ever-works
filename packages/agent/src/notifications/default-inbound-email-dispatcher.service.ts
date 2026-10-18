@@ -268,7 +268,15 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
     /**
      * Prompt-injection hardening — whether this email's sender is trusted
      * (`inbound-email-trust.ts`). Never throws: a lookup that fails trusts
-     * nobody beyond the configured list.
+     * less, never more.
+     *
+     * The owner's SENDING addresses only: their verified account email and
+     * verified outbound / two-way addresses — never the address this mail was
+     * received on, never an inbound-only address (anyone can write either into
+     * `From`). Mail one of the owner's agents sent another is recognised from
+     * the platform's own outbound record instead: the inbound `Message-ID` is
+     * the id of a message the owner's account SENT, from the same address, to
+     * this very address.
      */
     private async senderTrusted(
         payload: AgentInboundEmailDispatchPayload,
@@ -283,12 +291,54 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         }
         try {
             for (const own of await this.addresses.findAllByUser(address.userId)) {
-                if (own.verified && !own.disabledAt) ownerAddresses.push(own.address);
+                if (!own.verified || own.disabledAt) continue;
+                if (own.id === address.id) continue;
+                if (own.direction !== 'outbound' && own.direction !== 'both') continue;
+                ownerAddresses.push(own.address);
             }
         } catch {
             // Same.
         }
-        return isTrustedSender({ from: payload.from, ownerAddresses, metadata: payload.metadata });
+        return isTrustedSender({
+            from: payload.from,
+            ownerAddresses,
+            metadata: payload.metadata,
+            platformSent: await this.sentByPlatform(payload, address),
+        });
+    }
+
+    /**
+     * Whether this inbound message is one the owner's account itself sent to
+     * the receiving address (agent-to-agent mail): its `Message-ID` matches an
+     * OUTBOUND row of the owner that went out (`sentAt` set), from the same
+     * address as this message's `From`, addressed to the receiving address.
+     */
+    private async sentByPlatform(
+        payload: AgentInboundEmailDispatchPayload,
+        address: TenantEmailAddress,
+    ): Promise<boolean> {
+        const id = typeof payload.messageIdHeader === 'string' ? payload.messageIdHeader : '';
+        if (!id) return false;
+        const sender = normalizeEmailAddress(payload.from);
+        const receiving = normalizeEmailAddress(address.address);
+        try {
+            const rows = await this.messages.findByMessageIdHeaders(address.userId, [id]);
+            return rows.some(
+                (row) =>
+                    row.direction === 'outbound' &&
+                    !!row.sentAt &&
+                    normalizeEmailAddress(row.from) === sender &&
+                    [
+                        ...(row.toAddresses ?? []),
+                        ...(row.ccAddresses ?? []),
+                        ...(row.bccAddresses ?? []),
+                    ]
+                        .map(normalizeEmailAddress)
+                        .includes(receiving),
+            );
+        } catch {
+            return false;
+        }
     }
 
     async dispatch(
