@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import { FLEET_DEFAULT_MAX_CAPABILITY_TAGS } from '@ever-works/contracts';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { IS_PUBLIC_KEY } from '../auth/decorators/public.decorator';
 import { FleetController } from './fleet.controller';
@@ -45,6 +46,17 @@ describe('FleetController', () => {
         // ownership with, and the node-initiated rotation.
         getForUser: jest.Mock;
         rotateCredentialByCredential: jest.Mock;
+        // Fleet hub (FL-01) — the visibility-aware read the detail route
+        // settles with (owner here: it delegates to getForUser), the widened
+        // list, and the two owner-only registry writes.
+        getVisibleForUser: jest.Mock;
+        listVisibleForUser: jest.Mock;
+        setFavoriteForUser: jest.Mock;
+        setControlPolicyFamiliesForUser: jest.Mock;
+        // Fleet hub (FL-01, FR-22) — who a machines-family act runs as. The
+        // caller owns the node here; fleet-hub.controller.spec.ts covers the
+        // organisation roles.
+        resolveMachinesActor: jest.Mock;
     };
     let jobs: {
         loadByNodeForUser: jest.Mock;
@@ -106,6 +118,27 @@ describe('FleetController', () => {
             heartbeat: jest.fn(async () => null),
             getForUser: jest.fn(async () => nodeView),
             rotateCredentialByCredential: jest.fn(async () => null),
+            getVisibleForUser: jest.fn(async (userId: string, id: string) => ({
+                view: await service.getForUser(userId, id),
+                role: 'owner',
+            })),
+            listVisibleForUser: jest.fn(async () => [
+                { ...nodeView, viewerRole: 'owner' },
+                {
+                    ...nodeView,
+                    id: '22222222-2222-4222-8222-222222222222',
+                    name: 'design-mac',
+                    viewerRole: 'org-member',
+                },
+            ]),
+            setFavoriteForUser: jest.fn(async () => ({ ...nodeView, isFavorite: true })),
+            setControlPolicyFamiliesForUser: jest.fn(async () => nodeView),
+            resolveMachinesActor: jest.fn(async (userId: string) => ({
+                ownerUserId: userId,
+                role: 'owner',
+                nodeName: nodeView.name,
+                ctx: {},
+            })),
         };
         jobs = {
             loadByNodeForUser: jest.fn(async () => ({})),
@@ -332,6 +365,27 @@ describe('FleetController', () => {
         expect(service.deleteForUser).toHaveBeenCalledWith('user-1', nodeView.id);
     });
 
+    // Fleet hub (FL-01, T-20, CONTRACTS §2.2) — the optional typed name.
+    it('remove forwards a typed name to the confirm-destructive check', async () => {
+        await controller.remove(auth, nodeView.id, 'build-01');
+        expect(service.resolveMachinesActor).toHaveBeenCalledWith('user-1', nodeView.id);
+        expect(service.deleteForUser).toHaveBeenCalledWith(
+            'user-1',
+            nodeView.id,
+            {},
+            { confirmName: 'build-01' },
+        );
+    });
+
+    it('remove passes a wrong typed name to the service and answers its invalid refusal', async () => {
+        service.deleteForUser.mockRejectedValueOnce(
+            new BadRequestException({ error: { code: 'invalid' } }),
+        );
+        await expect(controller.remove(auth, nodeView.id, 'wrong')).rejects.toBeInstanceOf(
+            BadRequestException,
+        );
+    });
+
     describe('detail — the node drawer payload (EW-776)', () => {
         const RUN_ID = '99999999-9999-4999-8999-999999999999';
         const TASK_ID = '88888888-8888-4888-8888-888888888888';
@@ -480,6 +534,8 @@ describe('FleetController', () => {
                 maxConcurrentJobs: undefined,
                 maxCpuPercent: undefined,
                 maxMemoryMb: undefined,
+                // Computer health (FL-03).
+                health: undefined,
             });
             // …and the KEY SET, because the assertion above does not check
             // it (review AO-12). `toHaveBeenCalledWith` uses the same
@@ -508,6 +564,9 @@ describe('FleetController', () => {
                     'maxConcurrentJobs',
                     'maxCpuPercent',
                     'maxMemoryMb',
+                    'health',
+                    // Fleet node link (FL-02).
+                    'consents',
                 ].sort(),
             );
             expect(result.secret).toBe('node-secret');
@@ -939,7 +998,12 @@ describe('FleetController', () => {
 
             const badCapabilities = plainToInstance(EnrollFleetNodeDto, {
                 token: 'x'.repeat(43),
-                capabilities: Array.from({ length: 17 }, (_, i) => `tag-${i}`),
+                // One over the configured cap (the default: 32 since FL-02, which
+                // raised it from 16 for the program's consent tags).
+                capabilities: Array.from(
+                    { length: FLEET_DEFAULT_MAX_CAPABILITY_TAGS + 1 },
+                    (_, i) => `tag-${i}`,
+                ),
             });
             expect((await validate(badCapabilities)).length).toBeGreaterThan(0);
 
