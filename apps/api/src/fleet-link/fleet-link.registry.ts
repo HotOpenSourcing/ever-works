@@ -52,7 +52,14 @@ import type { FleetLinkRequirement } from './fleet-link.types';
  *  - **One link per node.** A newer accepted hello replaces an older link
  *    (closed `4010`), whose resumable channels become that hello's to resume.
  *  - **Generations.** Each accepted link gets `max(last, presented) + 1`, so a
- *    generation never repeats for a node even across an API restart.
+ *    generation never repeats for a node even across an API restart. A link
+ *    that dropped before the node sent anything on it may never have reached
+ *    the node's `link.ready`: the generation it resumed from still counts as
+ *    the node's current one.
+ *  - **Wire order on accept.** The registry sends `link.ready` itself, then the
+ *    pause in force, and only then tells a resumed channel's listeners and the
+ *    link listeners — so nothing they send can reach the node before the
+ *    ready it would drop it for.
  *  - **Channels are the platform's.** Numbers are allocated from 1 upward per
  *    link, never reused on a generation; at most {@link FLEET_LINK_MAX_CHANNELS}.
  *  - **Resume.** A dropped link's channels that the node acknowledged with a
@@ -63,8 +70,12 @@ import type { FleetLinkRequirement } from './fleet-link.types';
  *  - **Consent withdrawn** (a heartbeat with fewer consents) closes every
  *    channel whose family needs what is gone, telling the node.
  *  - **Kill switch.** While paused, every link has been told `link.pause`
- *    (and a link accepted meanwhile is told at once); clearing sends
- *    `link.resume`. Refusing NEW opens is the authoriser's job.
+ *    (and a link accepted meanwhile is told right after its ready); clearing
+ *    sends `link.resume`. The node lifts a pause on every new ready, so a
+ *    link that missed the resume is not left paused. Refusing NEW opens is the
+ *    authoriser's job.
+ *  - **Channels are opened by the platform.** A node that sends
+ *    `channel.open` is answered `channel.refused` (`invalid`); nothing opens.
  *
  * No payload is ever logged — control messages by `type` and ids only.
  */
@@ -107,7 +118,7 @@ export interface FleetLinkAcceptInput {
 export interface FleetLinkSession {
     readonly nodeId: string;
     readonly linkGeneration: number;
-    /** The ready the gateway sends first. */
+    /** The ready the registry sent as this link's first frame. */
     readonly ready: FleetLinkReady;
     /** Epoch ms of the last frame received. */
     lastFrameAt(): number;
@@ -168,10 +179,20 @@ interface LinkEntry {
     bytesOut: number;
     machine: Promise<FleetLinkChannelHandle> | null;
     dropped: boolean;
+    /** The generation this link's hello resumed from, or null for a fresh hello. */
+    resumedFrom: number | null;
+    /** True once any frame arrived on this link — the node had its `link.ready`. */
+    heard: boolean;
 }
 
 interface Orphan {
     generation: number;
+    /**
+     * Also accepted as "the same node process": the generation the dropped
+     * link resumed from, when the node was never heard on it (its ready may
+     * not have arrived). Null otherwise.
+     */
+    alsoGeneration: number | null;
     channels: ChannelEntry[];
     timer: unknown;
 }
@@ -268,6 +289,11 @@ export class FleetLinkRegistry {
     private readonly generations = new Map<string, number>();
     /** Epoch ms each node's last link dropped, for the "reconnecting" state. */
     private readonly lastDrop = new Map<string, number>();
+    /**
+     * Per node: the generation its last link resumed from, when that link
+     * dropped before the node was heard on it (see the class doc).
+     */
+    private readonly unconfirmedFrom = new Map<string, number>();
     private readonly controlListeners = new Map<
         string,
         Set<(nodeId: string, message: FleetLinkExtensionMessage) => void>
@@ -318,10 +344,13 @@ export class FleetLinkRegistry {
         }
         const now = this.now();
         const previous = this.generations.get(nodeId) ?? 0;
+        const presented = hello.resume?.linkGeneration;
+        const unconfirmed = this.unconfirmedFrom.get(nodeId);
+        this.unconfirmedFrom.delete(nodeId);
         const continued =
-            hello.resume !== undefined &&
-            (previous === 0 || hello.resume.linkGeneration === previous);
-        const generation = Math.max(previous, hello.resume?.linkGeneration ?? 0) + 1;
+            presented !== undefined &&
+            (previous === 0 || presented === previous || presented === unconfirmed);
+        const generation = Math.max(previous, presented ?? 0) + 1;
         this.generations.set(nodeId, generation);
         const link: LinkEntry = {
             id: this.nextLinkId++,
@@ -343,9 +372,13 @@ export class FleetLinkRegistry {
             bytesOut: 0,
             machine: null,
             dropped: false,
+            resumedFrom: presented ?? null,
+            heard: false,
         };
         const resumed: number[] = [];
         const closed: number[] = [];
+        // Told only after `link.ready` (and a pause in force) is on the wire.
+        const resumedEntries: ChannelEntry[] = [];
         const offered = new Map(
             (hello.resume?.channels ?? []).map((offer) => [offer.channel, offer]),
         );
@@ -357,7 +390,8 @@ export class FleetLinkRegistry {
                 const offer = offered.get(entry.channel);
                 offered.delete(entry.channel);
                 const sameChannel =
-                    hello.resume?.linkGeneration === orphan.generation &&
+                    presented !== undefined &&
+                    (presented === orphan.generation || presented === orphan.alsoGeneration) &&
                     offer !== undefined &&
                     offer.family === entry.family &&
                     offer.resumeKey === entry.resumeKey;
@@ -372,15 +406,7 @@ export class FleetLinkRegistry {
                     // The shared machine channel carries on as the new link's.
                     if (entry.family === 'machine' && !link.machine)
                         link.machine = Promise.resolve(entry.handle);
-                    for (const listener of [...entry.listeners]) {
-                        try {
-                            listener.resume?.(generation);
-                        } catch (error) {
-                            this.logger.warn(
-                                `link channel resume listener failed: ${describe(error)}`,
-                            );
-                        }
-                    }
+                    resumedEntries.push(entry);
                     continue;
                 }
                 if (offer) closed.push(entry.channel);
@@ -399,7 +425,6 @@ export class FleetLinkRegistry {
         link.nextChannel = resumed.length > 0 ? Math.max(...resumed) + 1 : 1;
         this.links.set(nodeId, link);
         this.lastDrop.delete(nodeId);
-        this.emitLink({ type: 'connected', nodeId, linkGeneration: generation, continued });
         const ready: FleetLinkReady = {
             type: 'link.ready',
             linkGeneration: generation,
@@ -408,6 +433,24 @@ export class FleetLinkRegistry {
             resumed,
             closed,
         };
+        // Wire order: the ready, the pause in force, then whatever a resumed
+        // channel's listeners or the link listeners send. The node drops
+        // channel frames until it has its ready.
+        this.sendControl(link, ready);
+        if (this.paused) this.sendControl(link, { type: 'link.pause', reason: 'kill_switch' });
+        for (const entry of resumedEntries) {
+            if (entry.state !== 'open' || entry.link !== link) continue;
+            for (const listener of [...entry.listeners]) {
+                try {
+                    listener.resume?.(generation);
+                } catch (error) {
+                    this.logger.warn(`link channel resume listener failed: ${describe(error)}`);
+                }
+            }
+        }
+        if (!link.dropped) {
+            this.emitLink({ type: 'connected', nodeId, linkGeneration: generation, continued });
+        }
         const registry = this;
         return {
             nodeId,
@@ -418,13 +461,6 @@ export class FleetLinkRegistry {
             refuseOversized: (channel) => registry.refuseOversized(link, channel),
             dropped: (reason) => registry.drop(link, reason),
         };
-    }
-
-    /** Send what must follow `link.ready` on a fresh link (a pause in force). */
-    afterReady(nodeId: string): void {
-        const link = this.links.get(nodeId);
-        if (link && this.paused)
-            this.sendControl(link, { type: 'link.pause', reason: 'kill_switch' });
     }
 
     isConnected(nodeId: string): boolean {
@@ -789,24 +825,26 @@ export class FleetLinkRegistry {
                 this.sendControl(link, close);
             }
         }
+        // A caller waiting on this channel reads a CONTRACTS §8 code: a link
+        // that went away (`resume_failed` is a listener's reason, not an API
+        // answer) or a channel closed normally are both `unreachable`.
+        const callerCode =
+            reason === 'normal' || reason === 'resume_failed' ? 'unreachable' : reason;
+        const callerHint =
+            reason === 'resume_failed' ? 'the link to the computer dropped' : undefined;
         if (entry.opening) {
             this.clearTimer(entry.opening.timer);
             entry.opening.reject(
                 fleetLinkError(
-                    reason === 'normal' ? 'unreachable' : reason,
-                    hint ?? 'the channel closed before it opened',
+                    callerCode,
+                    hint ?? callerHint ?? 'the channel closed before it opened',
                 ),
             );
             entry.opening = null;
         }
         for (const [requestId, pending] of entry.pending) {
             this.clearTimer(pending.timer);
-            pending.reject(
-                fleetLinkError(
-                    reason === 'normal' ? 'unreachable' : reason,
-                    hint ?? 'the channel closed',
-                ),
-            );
+            pending.reject(fleetLinkError(callerCode, hint ?? callerHint ?? 'the channel closed'));
             entry.pending.delete(requestId);
         }
         for (const listener of [...entry.listeners]) {
@@ -823,6 +861,7 @@ export class FleetLinkRegistry {
 
     private receive(link: LinkEntry, frame: FleetLinkFrame): void {
         if (link.dropped) return;
+        link.heard = true;
         link.lastFrameAt = this.now();
         link.bytesIn += FLEET_LINK_FRAME_HEADER_BYTES + frame.payload.byteLength;
         if (frame.channel === 0) {
@@ -917,6 +956,19 @@ export class FleetLinkRegistry {
                     );
                 }
                 return;
+            case 'channel.open':
+                // Channels are the platform's to open (CONTRACTS §3.2,
+                // ACC-FL02-07): refused, never created.
+                this.logger.debug(
+                    `node ${link.nodeId} tried to open channel ${message.channel}; refused`,
+                );
+                this.sendControl(link, {
+                    type: 'channel.refused',
+                    channel: message.channel,
+                    requestId: message.requestId,
+                    error: { code: 'invalid', hint: 'channels are opened by the platform' },
+                });
+                return;
             default:
                 // pong, and anything only the platform sends: nothing to do.
                 return;
@@ -950,6 +1002,9 @@ export class FleetLinkRegistry {
         link.dropped = true;
         if (this.links.get(link.nodeId) === link) this.links.delete(link.nodeId);
         this.lastDrop.set(link.nodeId, this.now());
+        const alsoGeneration = !link.heard && link.resumedFrom !== null ? link.resumedFrom : null;
+        if (alsoGeneration !== null) this.unconfirmedFrom.set(link.nodeId, alsoGeneration);
+        else this.unconfirmedFrom.delete(link.nodeId);
         const keep: ChannelEntry[] = [];
         for (const entry of [...link.channels.values()]) {
             if (keepForResume && entry.state === 'open' && entry.resumeKey) {
@@ -972,6 +1027,7 @@ export class FleetLinkRegistry {
         }
         const orphan: Orphan = {
             generation: link.generation,
+            alsoGeneration,
             channels: keep,
             timer: this.setTimer(() => {
                 if (this.orphans.get(link.nodeId) !== orphan) return;

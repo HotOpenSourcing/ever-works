@@ -82,7 +82,8 @@ export class FleetLinkController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id') id: string,
     ): FleetOperationView {
-        if (!isFleetLinkId(id)) throw fleetLinkError('not_found', 'no such operation');
+        if (!config.fleet.isNodeLinkEnabled() || !isFleetLinkId(id))
+            throw fleetLinkError('not_found', 'no such operation');
         return this.operations.get(id, auth.userId);
     }
 
@@ -97,7 +98,8 @@ export class FleetLinkController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id') id: string,
     ): FleetOperationCancelResult {
-        if (!isFleetLinkId(id)) throw fleetLinkError('not_found', 'no such operation');
+        if (!config.fleet.isNodeLinkEnabled() || !isFleetLinkId(id))
+            throw fleetLinkError('not_found', 'no such operation');
         return this.operations.cancel(id, auth.userId);
     }
 }

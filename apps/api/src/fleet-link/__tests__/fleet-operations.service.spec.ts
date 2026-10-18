@@ -245,6 +245,56 @@ describe('FleetOperationsService', () => {
         });
     });
 
+    describe('updates that arrive before the reply naming the operation', () => {
+        it('are applied when the operation is tracked', () => {
+            const h = setup();
+            h.session.receive(
+                controlFrame({
+                    type: 'operation.progress',
+                    operationId: 'op-1',
+                    progress: { percent: 10 },
+                }),
+            );
+            h.session.receive(
+                controlFrame({ type: 'operation.done', operationId: 'op-1', result: { ok: true } }),
+            );
+            expect(h.operations.earlyCount).toBe(1);
+            expect(h.track()).toMatchObject({
+                state: 'done',
+                progress: { percent: 10 },
+                result: { ok: true },
+            });
+            expect(h.operations.earlyCount).toBe(0);
+        });
+
+        it('never reach another node’s operation, and are forgotten after 10 s', () => {
+            const h = setup();
+            const other = h.registry.accept({
+                nodeId: '11111111-2222-4333-8444-555555555555',
+                ownerUserId: 'mallory',
+                nodeName: 'other',
+                nodeKind: 'node',
+                hello: hello({ nodeId: '11111111-2222-4333-8444-555555555555' }),
+                socket: new RecordingPort(),
+            });
+            other.receive(
+                controlFrame({ type: 'operation.done', operationId: 'op-1', result: 'forged' }),
+            );
+            expect(h.track()).toMatchObject({ state: 'running' });
+
+            const late = setup();
+            late.session.receive(
+                controlFrame({
+                    type: 'operation.progress',
+                    operationId: 'op-1',
+                    progress: { percent: 99 },
+                }),
+            );
+            late.advance(10_000);
+            expect(late.track()).toMatchObject({ state: 'running', progress: null });
+        });
+    });
+
     it('keeps a finished operation one hour and fails one never finished after a day', () => {
         const h = setup();
         h.track();

@@ -190,10 +190,16 @@ export class FleetPanicService {
             `drain-all by ${userId}: drained ${drainedIds.length} node(s), skipped ${skippedNodes}, requeued ${releasedJobs} job(s)`,
         );
         // Owner sessions get their 60-second warning over the link; Agent
-        // sessions end as their Runs end. Never able to fail the drain.
-        if (this.linkDrain && drainedIds.length > 0) {
+        // sessions end as their Runs end. EVERY enrolled node is told, not
+        // only the ones drained just now: a node disabled earlier still runs
+        // its owner sessions (disabling drains jobs, not sessions), and one
+        // whose job drain failed should still stop. Never able to fail the drain.
+        const linkNodeIds = nodes
+            .filter((node) => node.status !== 'enrolling')
+            .map((node) => node.id);
+        if (this.linkDrain && linkNodeIds.length > 0) {
             try {
-                this.linkDrain.drainNodes(drainedIds, FLEET_LINK_DRAIN_GRACE_SEC);
+                this.linkDrain.drainNodes(linkNodeIds, FLEET_LINK_DRAIN_GRACE_SEC);
             } catch (error) {
                 this.logger.warn(
                     `drain-all: the link drain notice could not be sent: ${

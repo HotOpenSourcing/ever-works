@@ -281,6 +281,16 @@ describe('control messages', () => {
 		expect(
 			controlOf({ type: 'channel.refused', channel: 3, requestId: 'r1', error: { code: 'nope', hint: '' } })
 		).toBeNull();
+		// CONTRACTS §3.2's abbreviated form is read the same; it is never written.
+		expect(
+			controlOf({ type: 'channel.refused', channel: 3, requestId: 'r1', code: 'kill_switch', hint: 'clear it' })
+		).toEqual({
+			type: 'channel.refused',
+			channel: 3,
+			requestId: 'r1',
+			error: { code: 'kill_switch', hint: 'clear it' }
+		});
+		expect(controlOf({ type: 'channel.refused', channel: 3, requestId: 'r1', code: 'nope' })).toBeNull();
 		expect(controlOf({ type: 'channel.close', channel: 3, reason: 'resume_failed' })).toEqual({
 			type: 'channel.close',
 			channel: 3,

@@ -39,8 +39,8 @@ import {
  *     heartbeat stored (`effectiveConsents`, which never infers `manage`):
  *     `consent_missing` with the command to run on the machine.
  *  3. **Family audience** — the node's control policy for the action family
- *     (FL-01's role derivation behind {@link FLEET_LINK_AUDIENCE}):
- *     `permission_denied` with who to ask.
+ *     against the caller's role (FL-01's role derivation behind
+ *     {@link FLEET_LINK_AUDIENCE}): `permission_denied` with who to ask.
  *
  * Reachability (`unreachable`) is the service's, after all of this: a
  * refusal is never a reason to wake a machine.

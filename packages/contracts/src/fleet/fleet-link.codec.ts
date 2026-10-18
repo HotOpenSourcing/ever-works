@@ -418,7 +418,13 @@ function decodeKnownControl(record: Record<string, unknown>): FleetLinkControlMe
 			return ready;
 		}
 		case 'channel.refused': {
-			const error = normalizeFleetLinkError(record.error);
+			// The wire carries `error: { code, hint }` (the FL-02 plan, like every reply's
+			// error); CONTRACTS §3.2 abbreviates it `{ code, hint }` — read either, write the first.
+			const error = normalizeFleetLinkError(
+				record.error !== undefined
+					? record.error
+					: { code: record.code, hint: record.hint, details: record.details }
+			);
 			if (!isChannelNumber(record.channel) || !isFleetLinkId(record.requestId) || error === null) return null;
 			return { type: 'channel.refused', channel: record.channel, requestId: record.requestId, error };
 		}

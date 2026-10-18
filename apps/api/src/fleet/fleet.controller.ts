@@ -56,8 +56,10 @@ import {
 } from '@ever-works/contracts';
 import {
     FLEET_LINK_HEARTBEAT_OBSERVER,
+    FLEET_LINK_NODE_LIFECYCLE,
     FLEET_LINK_NODE_STATE,
     type FleetLinkHeartbeatObserver,
+    type FleetLinkNodeLifecycle,
     type FleetLinkNodeStateLookup,
 } from '../fleet-link/fleet-link.types';
 import { FleetPanicService } from './fleet-panic.service';
@@ -216,6 +218,10 @@ export class FleetController {
         @Optional()
         @Inject(FLEET_LINK_NODE_STATE)
         private readonly linkState?: FleetLinkNodeStateLookup,
+        // A removed or re-keyed node's live link closes at once (FL-02).
+        @Optional()
+        @Inject(FLEET_LINK_NODE_LIFECYCLE)
+        private readonly linkLifecycle?: FleetLinkNodeLifecycle,
     ) {}
 
     @Get('cost-ceiling')
@@ -501,7 +507,11 @@ export class FleetController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
     ): Promise<CreateEnrollmentTokenResult> {
-        return this.service.rotateCredentialForUser(auth.userId, id);
+        const result = await this.service.rotateCredentialForUser(auth.userId, id);
+        // The old secret is dead the instant the hash is replaced; so is the
+        // link it authenticated.
+        this.closeLink(id, 'credential replaced');
+        return result;
     }
 
     @Get('nodes/:id/audit')
@@ -683,6 +693,7 @@ export class FleetController {
         @Param('id', ParseUUIDPipe) id: string,
     ): Promise<void> {
         await this.service.deleteForUser(auth.userId, id);
+        this.closeLink(id, 'node removed');
     }
 
     @Public()
@@ -846,6 +857,23 @@ export class FleetController {
      * does not gain it: the link's traffic counters and generation are the
      * owner's, and a shared field is a decision, not a side effect.
      */
+    /** Close a gone node's live link; never the reason a lifecycle call fails. */
+    private closeLink(
+        nodeId: string,
+        reason: Parameters<FleetLinkNodeLifecycle['nodeGone']>[1],
+    ): void {
+        if (!this.linkLifecycle) return;
+        try {
+            this.linkLifecycle.nodeGone(nodeId, reason);
+        } catch (error) {
+            this.logger.warn(
+                `node ${nodeId}: its link could not be closed (${reason}): ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        }
+    }
+
     private withLink<T extends FleetNodeView>(node: T): T {
         if (!this.linkState || node.persisted === false) return node;
         if (node.viewerRole !== undefined && node.viewerRole !== 'owner') return node;
@@ -957,6 +985,7 @@ export class FleetController {
         if (!removed) {
             throw new UnauthorizedException('Invalid node credential');
         }
+        this.closeLink(body.nodeId, 'node unenrolled');
         return { ok: true };
     }
 }

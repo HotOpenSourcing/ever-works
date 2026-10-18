@@ -36,7 +36,13 @@ import { FleetLinkRegistry, type FleetLinkOperationMessage } from './fleet-link.
  *  - updated only by the node that runs it — a node cannot touch another
  *    node's operation;
  *  - one the node never finished is failed after
- *    {@link FLEET_OPERATION_MAX_RUNNING_MS} so nothing is "running" forever.
+ *    {@link FLEET_OPERATION_MAX_RUNNING_MS} so nothing is "running" forever;
+ *  - an update that arrives BEFORE the reply naming its operation was
+ *    handled (the node may send the reply and a first `operation.progress`
+ *    back to back, and both can be read off one socket chunk before the
+ *    reply's promise continuation runs) is held for
+ *    {@link FLEET_OPERATION_EARLY_UPDATE_MS} and applied when the operation is
+ *    tracked — never applied to another node's operation.
  *
  * Request state, not work: the records live in this process (and, with the
  * relay bus, are visible to every replica through it).
@@ -49,6 +55,18 @@ export const FLEET_OPERATION_MAX_RUNNING_MS = 24 * 60 * 60_000;
 export const FLEET_OPERATION_MAX_RECORDS = 10_000;
 
 const SWEEP_INTERVAL_MS = 60_000;
+
+/** How long an update for an operation not tracked yet is held. */
+export const FLEET_OPERATION_EARLY_UPDATE_MS = 10_000;
+
+/** Most early updates held at once (one entry per node × operation; oldest go first). */
+const EARLY_UPDATE_MAX_ENTRIES = 256;
+
+interface EarlyUpdates {
+    at: number;
+    progress: FleetLinkOperationMessage | null;
+    done: FleetLinkOperationMessage | null;
+}
 
 export interface FleetOperationRecord {
     view: FleetOperationView;
@@ -86,6 +104,8 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
     private readonly clearTimer: (handle: unknown) => void;
     private readonly awayTimers = new Map<string, unknown>();
     private readonly unsubscribeLinks: () => void;
+    /** Keyed `<nodeId> <operationId>`: the latest progress and the completion, if any. */
+    private readonly early = new Map<string, EarlyUpdates>();
 
     constructor(
         private readonly registry: FleetLinkRegistry,
@@ -181,7 +201,17 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
             startedAtMs: now,
         });
         this.bound();
-        return { ...view };
+        // Updates the node sent before this reply was handled.
+        const key = earlyKey(input.nodeId, input.operationId);
+        const early = this.early.get(key);
+        if (early) {
+            this.early.delete(key);
+            if (now - early.at < FLEET_OPERATION_EARLY_UPDATE_MS) {
+                if (early.progress) this.fromNode(input.nodeId, early.progress);
+                if (early.done) this.fromNode(input.nodeId, early.done);
+            }
+        }
+        return { ...this.records.get(input.operationId)!.view };
     }
 
     /** The operation as `userId` may see it, or `not_found`. */
@@ -250,9 +280,12 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
 
     private fromNode(nodeId: string, message: FleetLinkOperationMessage): void {
         const record = this.records.get(message.operationId);
-        // Only the node that runs an operation may report on it.
-        if (!record || record.view.nodeId !== nodeId || isFleetOperationTerminal(record.view.state))
+        if (!record) {
+            this.holdEarly(nodeId, message);
             return;
+        }
+        // Only the node that runs an operation may report on it.
+        if (record.view.nodeId !== nodeId || isFleetOperationTerminal(record.view.state)) return;
         if (message.type === 'operation.progress') {
             record.view = {
                 ...record.view,
@@ -267,6 +300,25 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
             });
         } else {
             this.end(record, { state: 'done', result: message.result ?? null });
+        }
+    }
+
+    /** Keep the latest progress and the completion of an operation not tracked yet. */
+    private holdEarly(nodeId: string, message: FleetLinkOperationMessage): void {
+        const now = this.now();
+        for (const [key, entry] of this.early) {
+            if (now - entry.at >= FLEET_OPERATION_EARLY_UPDATE_MS) this.early.delete(key);
+        }
+        const key = earlyKey(nodeId, message.operationId);
+        const entry = this.early.get(key) ?? { at: now, progress: null, done: null };
+        if (message.type === 'operation.progress') entry.progress = message;
+        else entry.done = message;
+        this.early.delete(key);
+        this.early.set(key, entry);
+        while (this.early.size > EARLY_UPDATE_MAX_ENTRIES) {
+            const oldest = this.early.keys().next().value;
+            if (oldest === undefined) break;
+            this.early.delete(oldest);
         }
     }
 
@@ -298,6 +350,11 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
         return record;
     }
 
+    /** Early updates held right now (tests). */
+    get earlyCount(): number {
+        return this.early.size;
+    }
+
     private bound(): void {
         if (this.records.size <= FLEET_OPERATION_MAX_RECORDS) return;
         // Oldest finished first, then the oldest of all.
@@ -314,4 +371,8 @@ export class FleetOperationsService implements OnModuleInit, OnModuleDestroy {
             `operation records over ${FLEET_OPERATION_MAX_RECORDS}; the oldest were dropped`,
         );
     }
+}
+
+function earlyKey(nodeId: string, operationId: string): string {
+    return `${nodeId} ${operationId}`;
 }

@@ -18,7 +18,6 @@ import {
 import {
     decodeFleetLinkControl,
     decodeFleetLinkFrame,
-    encodeFleetLinkControl,
     FLEET_LINK_AUTH_TIMEOUT_MS,
     FLEET_LINK_CLOSE_CODES,
     FLEET_LINK_FRAME_KINDS,
@@ -26,7 +25,9 @@ import {
     FLEET_LINK_HELLO_RATE_LIMIT,
     FLEET_LINK_HELLO_RATE_WINDOW_MS,
     FLEET_LINK_KILL_SWITCH_POLL_MS,
+    FLEET_LINK_FRAME_HEADER_BYTES,
     FLEET_LINK_MAX_FRAME_BYTES,
+    FLEET_LINK_MAX_JSON_BYTES,
     FLEET_LINK_SILENCE_MS,
     FLEET_LINK_VERSION,
     FLEET_LINK_WS_PATH,
@@ -57,9 +58,16 @@ import { FleetLinkTokenService } from './fleet-link-token.service';
  *  - A query string on any `/ws/fleet/` upgrade is refused outright.
  *  - The first frame must be `link.hello` on channel 0 within
  *    {@link FLEET_LINK_AUTH_TIMEOUT_MS}; its token must be a valid, unused
- *    link token for the node it names, and the node must exist and be
- *    neither disabled nor still enrolling. Every one of those refusals is the
- *    SAME close, `4001`.
+ *    link token for the node it names, and the node must exist and not be
+ *    still enrolling (a re-keyed node is). Every one of those refusals is the
+ *    SAME close, `4001`. A DISABLED node keeps its link: disabling drains
+ *    work, it does not sever the machine — it keeps heartbeating "so it
+ *    remains observable" (`FleetService.setDisabledForUser`), and drain-all
+ *    (which disables) warns owner sessions over this very link.
+ *  - A node removed or re-keyed loses its link: at once from the fleet
+ *    controller (`FLEET_LINK_NODE_LIFECYCLE`), and on the next re-read of the
+ *    connected nodes' rows (every {@link FLEET_LINK_NODE_SWEEP_MS}) for any
+ *    other path.
  *  - A node presenting more than {@link FLEET_LINK_HELLO_RATE_LIMIT} accepted
  *    hellos a minute is refused `4008` for a minute (spec U9).
  *  - A node presenting no consent that opens a link is refused `4012`.
@@ -78,6 +86,10 @@ import { FleetLinkTokenService } from './fleet-link-token.service';
 const WS_MAX_PAYLOAD_BYTES = FLEET_LINK_MAX_FRAME_BYTES + 1024 * 1024;
 /** A link whose outgoing buffer passes this is not sent more until it drains. */
 const SEND_BUFFER_CAP_BYTES = 32 * 1024 * 1024;
+/** The largest frame an unauthenticated socket may send: one hello. */
+const PRE_AUTH_MAX_FRAME_BYTES = FLEET_LINK_FRAME_HEADER_BYTES + FLEET_LINK_MAX_JSON_BYTES;
+/** How often the rows of the connected nodes are re-read (removed / re-keyed elsewhere). */
+export const FLEET_LINK_NODE_SWEEP_MS = 30_000;
 
 interface SocketState {
     session: FleetLinkSession | null;
@@ -99,6 +111,8 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
     private wss: WebSocketServer | null = null;
     private ticker: NodeJS.Timeout | null = null;
     private polling = false;
+    private sweeping = false;
+    private lastSweepAt = 0;
     private readonly states = new Map<WebSocket, SocketState>();
     private readonly hellos = new Map<string, number[]>();
     private readonly blockedUntil = new Map<string, number>();
@@ -194,9 +208,13 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
                     this.safeClose(ws, FLEET_LINK_CLOSE_CODES.auth, 'auth required');
                 return;
             }
+            if (!state.session && bytes.byteLength > PRE_AUTH_MAX_FRAME_BYTES) {
+                // Before auth only a hello is expected, and a hello is small.
+                this.safeClose(ws, FLEET_LINK_CLOSE_CODES.auth, 'auth required');
+                return;
+            }
             if (bytes.byteLength > FLEET_LINK_MAX_FRAME_BYTES) {
-                if (state.session) state.session.refuseOversized(peekFleetLinkFrameChannel(bytes));
-                else this.safeClose(ws, FLEET_LINK_CLOSE_CODES.auth, 'auth required');
+                state.session?.refuseOversized(peekFleetLinkFrameChannel(bytes));
                 return;
             }
             const frame = decodeFleetLinkFrame(bytes);
@@ -236,6 +254,10 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
                 this.safeClose(ws, FLEET_LINK_CLOSE_CODES.silence, 'silence', true);
             }
         }
+        if (now - this.lastSweepAt >= FLEET_LINK_NODE_SWEEP_MS) {
+            this.lastSweepAt = now;
+            void this.sweepNodes();
+        }
         if (this.polling || this.registry.connectedNodeIds().length === 0) return;
         this.polling = true;
         try {
@@ -248,6 +270,43 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
             this.registry.setPaused(stopped);
         } finally {
             this.polling = false;
+        }
+    }
+
+    /**
+     * Re-read the rows of every connected node: a node whose row is gone
+     * (deleted, unenrolled) or back to `enrolling` (an owner re-key) loses its
+     * link `4001`. A failed read closes nothing. Exposed for the spec.
+     */
+    async sweepNodes(): Promise<number> {
+        const ids = this.registry.connectedNodeIds();
+        if (this.sweeping || ids.length === 0) return 0;
+        this.sweeping = true;
+        try {
+            let rows: Array<{ id: string; status: string }>;
+            try {
+                rows = await this.nodes.findStatusesByIds(ids);
+            } catch (error) {
+                this.logger.debug(
+                    `fleet link node sweep skipped: ${error instanceof Error ? error.message : String(error)}`,
+                );
+                return 0;
+            }
+            const statuses = new Map(rows.map((row) => [row.id, row.status]));
+            let closed = 0;
+            for (const id of ids) {
+                const status = statuses.get(id);
+                if (status !== undefined && status !== 'enrolling') continue;
+                this.registry.closeNode(
+                    id,
+                    FLEET_LINK_CLOSE_CODES.auth,
+                    status === undefined ? 'node removed' : 'credential replaced',
+                );
+                closed += 1;
+            }
+            return closed;
+        } finally {
+            this.sweeping = false;
         }
     }
 
@@ -276,7 +335,7 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
             accepted = false;
         }
         const node = accepted ? await this.nodes.findById(hello.nodeId).catch(() => null) : null;
-        if (!node || node.status === 'disabled' || node.status === 'enrolling') {
+        if (!node || node.status === 'enrolling') {
             this.safeClose(ws, FLEET_LINK_CLOSE_CODES.auth, 'invalid link token');
             return;
         }
@@ -309,9 +368,6 @@ export class FleetLinkGatewayService implements OnApplicationBootstrap, OnApplic
         state.session = session;
         state.nodeId = node.id;
         state.ownerUserId = node.userId;
-        const ready = encodeFleetLinkControl(session.ready);
-        if (ready) port.send(ready);
-        this.registry.afterReady(node.id);
         void this.auditLink('node.link.connect', state, {
             linkGeneration: session.linkGeneration,
             resumed: session.ready.resumed.length,

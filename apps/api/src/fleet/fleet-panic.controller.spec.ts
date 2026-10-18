@@ -275,7 +275,7 @@ describe('FleetPanicService', () => {
             expect(result.nodes.find((n) => n.id === 'node-enrolling')?.status).toBe('enrolling');
         });
 
-        it('warns the owner sessions on every drained node over the link, 60 s ahead (FL-02, FR-27)', async () => {
+        it('warns the owner sessions on every enrolled node over the link, 60 s ahead — an earlier-disabled one too (FL-02, FR-27)', async () => {
             const linkDrain = { drainNodes: jest.fn() };
             const withLink = new FleetPanicService(
                 fleet as never,
@@ -286,7 +286,10 @@ describe('FleetPanicService', () => {
             );
             await withLink.drainAllForUser('user-1');
             expect(linkDrain.drainNodes).toHaveBeenCalledTimes(1);
-            expect(linkDrain.drainNodes).toHaveBeenCalledWith(['node-online', 'node-busy'], 60);
+            expect(linkDrain.drainNodes).toHaveBeenCalledWith(
+                ['node-online', 'node-busy', 'node-disabled'],
+                60,
+            );
         });
 
         it('drains all the same when the link notice throws', async () => {

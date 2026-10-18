@@ -185,6 +185,29 @@ describe('FleetLinkAuthorizer', () => {
         ).rejects.toMatchObject({ linkError: { code: 'consent_missing' } });
     });
 
+    it('refuses consent_missing before asking the family audience (order, ACC-FL02-10)', async () => {
+        const asked: string[] = [];
+        const audience: FleetLinkAudience = {
+            check: ({ actionFamily }) => {
+                asked.push(actionFamily);
+                return actionFamily === 'view'
+                    ? { allowed: true }
+                    : { allowed: false, hint: 'not you' };
+            },
+        };
+        const h = setup({ audience });
+        await expect(
+            h.authorizer.authorize({
+                node: node({
+                    storedConsents: { work: true, attend: false, manage: false, usageScan: false },
+                }),
+                caller: owner,
+                family: 'logs',
+            }),
+        ).rejects.toMatchObject({ linkError: { code: 'consent_missing' } });
+        expect(asked).toEqual(['view']);
+    });
+
     it('refuses permission_denied with who to ask when the family audience excludes the caller (S5)', async () => {
         const audience: FleetLinkAudience = {
             check: ({ actionFamily }) =>

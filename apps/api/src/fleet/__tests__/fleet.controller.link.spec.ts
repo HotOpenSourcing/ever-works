@@ -33,7 +33,11 @@ const LINK = {
 };
 
 function build(
-    options: { observer?: { onHeartbeat: jest.Mock }; linkState?: { linkView: jest.Mock } } = {},
+    options: {
+        observer?: { onHeartbeat: jest.Mock };
+        linkState?: { linkView: jest.Mock };
+        lifecycle?: { nodeGone: jest.Mock };
+    } = {},
 ) {
     const service = {
         heartbeat: jest.fn(async () => ({
@@ -55,6 +59,9 @@ function build(
             { ...nodeView, id: 'shared-node', viewerRole: 'org-member' },
         ]),
         getVisibleForUser: jest.fn(async () => ({ view: nodeView, role: 'owner' })),
+        deleteForUser: jest.fn(async () => undefined),
+        rotateCredentialForUser: jest.fn(async () => ({ token: 'one-time', nodeId: NODE })),
+        unenrollByCredential: jest.fn(async () => true),
     };
     const jobs = {
         loadByNodeForUser: jest.fn(async () => ({})),
@@ -74,6 +81,7 @@ function build(
         undefined, // needs-a-look (FL-01)
         options.observer as never,
         options.linkState as never,
+        options.lifecycle as never,
     );
     return { controller, service };
 }
@@ -132,6 +140,29 @@ describe('FleetController — the node link', () => {
         expect(own.link).toEqual(LINK);
         expect('link' in shared).toBe(false);
         expect(linkState.linkView).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes the live link of a node that is deleted, re-keyed by its owner, or unenrolls itself', async () => {
+        const lifecycle = { nodeGone: jest.fn() };
+        const { controller, service } = build({ lifecycle });
+        await controller.remove(auth, NODE);
+        await controller.rotate(auth, NODE);
+        await controller.unenroll({ nodeId: NODE, secret: 'x'.repeat(43) } as never);
+        expect(lifecycle.nodeGone.mock.calls).toEqual([
+            [NODE, 'node removed'],
+            [NODE, 'credential replaced'],
+            [NODE, 'node unenrolled'],
+        ]);
+        // A refused unenrol closes nothing; a failing close never fails the call.
+        service.unenrollByCredential.mockResolvedValueOnce(false);
+        await expect(
+            controller.unenroll({ nodeId: NODE, secret: 'y'.repeat(43) } as never),
+        ).rejects.toThrow();
+        expect(lifecycle.nodeGone).toHaveBeenCalledTimes(3);
+        lifecycle.nodeGone.mockImplementationOnce(() => {
+            throw new Error('registry down');
+        });
+        await expect(controller.remove(auth, NODE)).resolves.toBeUndefined();
     });
 
     it('keeps every response shape exactly as before without the link module', async () => {

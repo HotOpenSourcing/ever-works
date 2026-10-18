@@ -183,7 +183,9 @@ describe('FleetLinkService.request', () => {
         ).rejects.toMatchObject({
             linkError: { code: 'consent_missing' },
         });
-        expect(link.port.frames).toHaveLength(0);
+        // Nothing after the link's own ready reached the node.
+        expect(link.port.frames.map((frame) => frame.channel)).toEqual([0]);
+        expect(link.port.controls().map((message) => message.type)).toEqual(['link.ready']);
     });
 
     it('is not_found for an unknown node or a stranger, and invalid for a malformed verb', async () => {
@@ -312,7 +314,9 @@ describe('FleetLinkService.openChannel', () => {
             status: 423,
             linkError: { code: 'kill_switch' },
         });
-        expect(link.port.frames).toHaveLength(0);
+        // Nothing after the link's own ready reached the node.
+        expect(link.port.frames.map((frame) => frame.channel)).toEqual([0]);
+        expect(link.port.controls().map((message) => message.type)).toEqual(['link.ready']);
     });
 
     it('is the same class under the name later epics use', () => {

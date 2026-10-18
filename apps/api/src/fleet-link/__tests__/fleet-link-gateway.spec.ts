@@ -51,7 +51,7 @@ interface Harness {
     registry: FleetLinkRegistry;
     tokens: FleetLinkTokenService;
     killSwitch: { isStopped: jest.Mock };
-    nodes: { findById: jest.Mock };
+    nodes: { findById: jest.Mock; findStatusesByIds: jest.Mock };
     audit: { tryRecord: jest.Mock };
     url: string;
     close(): Promise<void>;
@@ -67,6 +67,9 @@ async function start(nodeStatus = 'online'): Promise<Harness> {
             id === NODE_ID || id === OTHER_NODE
                 ? { id, userId: OWNER, name: 'build-01', kind: 'node', status: nodeStatus }
                 : null,
+        ),
+        findStatusesByIds: jest.fn(async (ids: string[]) =>
+            ids.map((id) => ({ id, status: nodeStatus })),
         ),
     };
     const audit = { tryRecord: jest.fn(async () => true) };
@@ -171,7 +174,7 @@ describe('FleetLinkGatewayService', () => {
         );
     });
 
-    it('refuses a replayed token, another node’s token and a disabled node with the same 4001 (FR-5)', async () => {
+    it('refuses a replayed token, another node’s token and a re-keyed (enrolling) node with the same 4001 (FR-5)', async () => {
         h = await start();
         const { token } = h.tokens.mint(NODE_ID);
         const first = await exchange(`${h.url}/ws/fleet/link`, helloFrame({ token }), isReady);
@@ -186,12 +189,103 @@ describe('FleetLinkGatewayService', () => {
         ).toBe(4001);
         await h.close();
 
-        h = await start('disabled');
-        const disabled = h.tokens.mint(NODE_ID).token;
+        h = await start('enrolling');
+        const rekeyed = h.tokens.mint(NODE_ID).token;
         expect(
-            (await exchange(`${h.url}/ws/fleet/link`, helloFrame({ token: disabled }))).code,
+            (await exchange(`${h.url}/ws/fleet/link`, helloFrame({ token: rekeyed }))).code,
         ).toBe(4001);
     });
+
+    it('lets a disabled node keep its link: disabling drains work, it does not sever the machine', async () => {
+        h = await start('disabled');
+        const { messages, socket } = await exchange(
+            `${h.url}/ws/fleet/link`,
+            helloFrame({ token: h.tokens.mint(NODE_ID).token }),
+            isReady,
+        );
+        expect(messages[0]).toMatchObject({ type: 'link.ready' });
+        expect(h.registry.isConnected(NODE_ID)).toBe(true);
+        socket.close();
+    });
+
+    it('closes the link of a node whose row is gone or re-keyed on the next re-read, 4001', async () => {
+        h = await start();
+        const { socket } = await exchange(
+            `${h.url}/ws/fleet/link`,
+            helloFrame({ token: h.tokens.mint(NODE_ID).token }),
+            isReady,
+        );
+        const closed = new Promise<number>((resolve) =>
+            socket.on('close', (code) => resolve(code)),
+        );
+        // A read that fails closes nothing.
+        h.nodes.findStatusesByIds.mockRejectedValueOnce(new Error('db down'));
+        expect(await h.gateway.sweepNodes()).toBe(0);
+        expect(h.registry.isConnected(NODE_ID)).toBe(true);
+        h.nodes.findStatusesByIds.mockResolvedValueOnce([]);
+        expect(await h.gateway.sweepNodes()).toBe(1);
+        expect(await closed).toBe(4001);
+        expect(h.registry.isConnected(NODE_ID)).toBe(false);
+    });
+
+    it('refuses a large first frame before auth with 4001 — only a hello is expected', async () => {
+        h = await start();
+        const big = new Uint8Array(2 * 1024 * 1024);
+        big[4] = 10;
+        new DataView(big.buffer).setUint32(5, big.byteLength - 9, false);
+        expect((await exchange(`${h.url}/ws/fleet/link`, big)).code).toBe(4001);
+    });
+
+    it('closes only the channel a frame over 16 MiB was aimed at; the link stays up (U5)', async () => {
+        h = await start();
+        const { socket } = await exchange(
+            `${h.url}/ws/fleet/link`,
+            helloFrame({ token: h.tokens.mint(NODE_ID).token }),
+            isReady,
+        );
+        const seen: Array<{ type: string; [key: string]: unknown }> = [];
+        socket.on('message', (data: Buffer) => {
+            const frame = decodeFleetLinkFrame(new Uint8Array(data));
+            const message = frame ? decodeFleetLinkControl(frame.payload) : null;
+            if (!message) return;
+            seen.push(message as never);
+            if (message.type === 'channel.open') {
+                socket.send(
+                    encodeFleetLinkControl({
+                        type: 'channel.ready',
+                        channel: message.channel,
+                        requestId: message.requestId,
+                    })!,
+                );
+            }
+        });
+        const handle = await h.registry.openChannel({
+            nodeId: NODE_ID,
+            family: 'logs',
+            requirement: { consent: 'manage', actionFamily: 'logs', stateChanging: false },
+            requestedBy: `user:${OWNER}`,
+        });
+        const oversized = new Uint8Array(16 * 1024 * 1024 + 16);
+        const view = new DataView(oversized.buffer);
+        view.setUint32(0, handle.channel, false);
+        view.setUint8(4, 1);
+        view.setUint32(5, oversized.byteLength - 9, false);
+        socket.send(oversized);
+        // 16 MiB takes a moment over loopback: wait for the close, bounded.
+        for (let waited = 0; waited < 10_000; waited += 50) {
+            if (seen.some((message) => message.type === 'channel.close')) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        expect(seen.at(-1)).toEqual({
+            type: 'channel.close',
+            channel: handle.channel,
+            reason: 'invalid',
+            hint: 'frame over 16 MiB',
+        });
+        expect(handle.isClosed).toBe(true);
+        expect(h.registry.isConnected(NODE_ID)).toBe(true);
+        socket.close();
+    }, 20_000);
 
     it('refuses a first frame that is not a hello, and text, with 4001', async () => {
         h = await start();

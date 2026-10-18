@@ -84,6 +84,8 @@ function nodeFacts(node: FleetNode): FleetLinkNodeFacts {
         storedConsents: node.consents ?? null,
         capabilities: node.capabilities ?? null,
         workerState: node.workerState ?? null,
+        controlPolicy: node.controlPolicy,
+        controlPolicyFamilies: node.controlPolicyFamilies ?? null,
     };
 }
 

@@ -1,3 +1,4 @@
+import type { FleetNode } from '@ever-works/agent/fleet';
 import type {
     FleetConsents,
     FleetLinkActionFamily,
@@ -72,6 +73,10 @@ export interface FleetLinkNodeFacts {
     storedConsents: unknown;
     capabilities: string[] | null;
     workerState: string | null;
+    /** The legacy single policy value — the `desktop` family's mirror (FL-01). */
+    controlPolicy?: FleetNode['controlPolicy'];
+    /** The stored per-family control policy (FL-01, CONTRACTS §2.1). */
+    controlPolicyFamilies?: FleetNode['controlPolicyFamilies'];
 }
 
 /** The audience answer (CONTRACTS §2.1). */
@@ -92,12 +97,11 @@ export interface FleetLinkAudienceQuery {
 }
 
 /**
- * The family-audience lookup (CONTRACTS §2.1) as a port: the Fleet hub's
- * role derivation (FL-01 `FleetAccessService`) binds it under
- * {@link FLEET_LINK_AUDIENCE}; until it does, the module binds the owner-only
- * default, which admits the node's owner (and the owner's own schedules and
- * system jobs) and refuses everyone else — fail-closed for every role FL-01
- * has not derived yet.
+ * The family-audience lookup (CONTRACTS §2.1) as a port, bound under
+ * {@link FLEET_LINK_AUDIENCE} to the Fleet hub's role derivation (FL-01
+ * `FleetAccessService`, through `RoleBasedFleetLinkAudience`). A context
+ * without that service answers owner-only — the node's owner (and the owner's
+ * own schedules and system jobs) and nobody else — which is fail-closed.
  */
 export interface FleetLinkAudience {
     check(
@@ -105,7 +109,7 @@ export interface FleetLinkAudience {
     ): Promise<FleetLinkAudienceDecision> | FleetLinkAudienceDecision;
 }
 
-/** Bound by the link module (owner-only default); FL-01 rebinds it to its role derivation. */
+/** Bound by the link module to the Fleet hub's role derivation (owner-only without it). */
 export const FLEET_LINK_AUDIENCE = 'FLEET_LINK_AUDIENCE' as const;
 
 /**
@@ -125,6 +129,22 @@ export interface FleetLinkNodeStateLookup {
 }
 
 export const FLEET_LINK_NODE_STATE = 'FLEET_LINK_NODE_STATE' as const;
+
+/**
+ * A node whose registration is gone or whose credential was replaced loses
+ * its live link at once (close `4001`). The fleet controller calls it after
+ * delete, unenrol and an owner re-key; the gateway's periodic re-read of the
+ * connected nodes' rows catches every other path. Bound by the link module;
+ * consumed `@Optional()`.
+ */
+export interface FleetLinkNodeLifecycle {
+    nodeGone(
+        nodeId: string,
+        reason: 'node removed' | 'node unenrolled' | 'credential replaced',
+    ): void;
+}
+
+export const FLEET_LINK_NODE_LIFECYCLE = 'FLEET_LINK_NODE_LIFECYCLE' as const;
 
 /** Drain-all (CONTRACTS R-24): warn every owner session on these nodes, then end them. */
 export interface FleetLinkDrainNotifier {
