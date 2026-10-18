@@ -358,24 +358,27 @@ export class WebhookDomainEventFanoutService implements OnApplicationBootstrap, 
     private async retryInProcess(): Promise<number> {
         if (!this.enqueuer) return 0;
         const now = Date.now();
-        const rows = await this.deliveries.listRetryingFanout(
-            new Date(now - webhookRetryDelayMs(1)),
-            UNSENT_BATCH,
-        );
         const budget = webhookMaxAttempts();
         let sent = 0;
-        for (const row of rows) {
-            const attempts = Number(row.attempts) || 0;
-            if (attempts >= budget) continue;
+        // One query per ladder step, each returning only rows already due at that step:
+        // a row that waits on a long step (or is past the budget) never crowds out a due one.
+        for (let attempts = 1; attempts < budget && sent < UNSENT_BATCH; attempts++) {
             const dueBefore = new Date(now - webhookRetryDelayMs(attempts));
-            if (!(await this.deliveries.claimRetry(row.id, dueBefore))) continue;
-            await this.enqueuer.enqueueDelivery({
-                deliveryId: row.id,
-                subscriptionId: row.subscriptionId,
-                eventName: row.event,
-                payload: row.payload,
-            });
-            sent += 1;
+            const rows = await this.deliveries.listRetryingFanout(
+                attempts,
+                dueBefore,
+                UNSENT_BATCH - sent,
+            );
+            for (const row of rows) {
+                if (!(await this.deliveries.claimRetry(row.id, dueBefore))) continue;
+                await this.enqueuer.enqueueDelivery({
+                    deliveryId: row.id,
+                    subscriptionId: row.subscriptionId,
+                    eventName: row.event,
+                    payload: row.payload,
+                });
+                sent += 1;
+            }
         }
         return sent;
     }

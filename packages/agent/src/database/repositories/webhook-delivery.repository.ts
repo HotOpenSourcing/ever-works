@@ -101,15 +101,21 @@ export class WebhookDeliveryRepository {
 
     /**
      * Webhooks v2 (review 2026-10-17 F45): fan-out deliveries the IN-PROCESS path left
-     * `retrying` (no Trigger.dev run: Trigger.dev retries its own), oldest attempt first.
+     * `retrying` (no Trigger.dev run: Trigger.dev retries its own) after exactly
+     * `attempts` attempts, last tried before `lastAttemptBefore`; oldest attempt first.
      */
-    async listRetryingFanout(lastAttemptBefore: Date, limit: number): Promise<WebhookDelivery[]> {
+    async listRetryingFanout(
+        attempts: number,
+        lastAttemptBefore: Date,
+        limit: number,
+    ): Promise<WebhookDelivery[]> {
         // `lastAttemptAt` is stored as epoch milliseconds (TimestampColumn): compare numbers.
         return this.repository
             .createQueryBuilder('delivery')
             .where('delivery.eventId IS NOT NULL')
             .andWhere('delivery.status = :status', { status: 'retrying' })
             .andWhere('delivery.triggerRunId IS NULL')
+            .andWhere('delivery.attempts = :attempts', { attempts })
             .andWhere('delivery.lastAttemptAt < :before', { before: lastAttemptBefore.getTime() })
             .orderBy('delivery.lastAttemptAt', 'ASC')
             .take(limit)

@@ -783,6 +783,31 @@ describe('WebhookDomainEventFanoutService', () => {
         expect(enqueued).toHaveLength(2);
     });
 
+    it('a delivery waiting on a long ladder step never holds back a due one (F45)', async () => {
+        await fanout.catchUp();
+        await subscribe();
+        await record();
+        await record();
+        await dispatch();
+        await fanout.catchUp();
+        const [waiting, due] = await deliveries();
+        const repo = dataSource.getRepository(WebhookDelivery);
+        // 4 attempts: next step 1.8 h; tried 10 min ago (older than the due one).
+        await repo.update(
+            { id: waiting.id },
+            { status: 'retrying', attempts: 4, lastAttemptAt: new Date(Date.now() - 600_000) },
+        );
+        await repo.update(
+            { id: due.id },
+            { status: 'retrying', attempts: 1, lastAttemptAt: new Date(Date.now() - 31_000) },
+        );
+        enqueued.length = 0;
+        await fanout.catchUp();
+        expect(enqueued.map((item) => (item as { deliveryId?: string }).deliveryId)).toEqual([
+            due.id,
+        ]);
+    });
+
     it('ignores v1 subscriptions and paused v2 ones', async () => {
         await fanout.catchUp();
         await subscriptions.createForAccount({
