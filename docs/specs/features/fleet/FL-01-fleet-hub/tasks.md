@@ -32,7 +32,7 @@
       **Test**: `packages/contracts/src/fleet/__tests__/fleet-access.spec.ts` — null map, legacy value
       as `desktop`, partial map, 3×4 audience/role truth table.
 - [x] **T-02** (parallel). Add `fleet-needs-a-look.types.ts` at
-      `packages/contracts/src/fleet/fleet-needs-a-look.types.ts`: the eleven kinds of CONTRACTS §4.6,
+      `packages/contracts/src/fleet/fleet-needs-a-look.types.ts`: the kinds of CONTRACTS §4.6 (thirteen at revision 4),
       severity, the item shape exactly as §4.6 (no extra fields), `sortNeedsALook`. **Test**: `packages/contracts/src/fleet/__tests__/fleet-needs-a-look.spec.ts`.
 - [x] **T-03**. Extend `FleetNodeView` in `packages/contracts/src/fleet/fleet-node.types.ts` (after
       `controlPolicy`, `:471`) with optional `isFavorite`, `hostNodeId`, `virtualKind`,
@@ -60,7 +60,8 @@
       **Test**: extend `apps/api/src/fleet/fleet.controller.spec.ts` — empty registry → `[]`; one
       failing producer → partial result and a logged warning; foreign node id → 404.
 - [x] **T-07**. Add `fleetAPI.needsALook()` / `nodeNeedsALook(id)` to `apps/web/src/lib/api/fleet.ts`
-      and `fetchNeedsALookAction` to `apps/web/src/lib/actions/fleet.ts`.
+      and `fetchFleetNeedsALookAction` to `apps/web/src/app/actions/settings/fleet.ts` (where the fleet
+      server actions live).
       **Test**: `apps/web/src/lib/api/fleet.unit.spec.ts` (new) — endpoint shapes.
 
 ## P1.C — Web: hub, overview, moved Computers tab
@@ -122,7 +123,7 @@
       guards as in `1795161700000-AddFleetModelUsageLimits.ts`.
       **Test**: applies twice on sqlite and Postgres; `migration:generate` afterwards is empty; a row
       with `controlPolicy = 'org-admins'` and a null map yields `effectiveControlPolicy(node).desktop
-    === 'org-admins'`; writing `families.desktop = 'owner'` writes `controlPolicy = 'owner'` back.
+  === 'org-admins'`; writing `families.desktop = 'owner'` writes `controlPolicy = 'owner'` back.
 - [x] **T-18**. Create `packages/agent/src/fleet/fleet-access.service.ts` (`roleFor`, `assertFamily`,
       `canAct`) over `OrganizationMemberRepository`
       (`packages/agent/src/database/repositories/organization-member.repository.ts`); register and export

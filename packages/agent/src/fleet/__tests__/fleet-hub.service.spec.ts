@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { FleetNode } from '../../entities/fleet-node.entity';
-import { FleetService } from '../fleet.service';
+import { FLEET_SHARED_VIEW_FIELDS, FleetService } from '../fleet.service';
 import { FleetAccessService } from '../fleet-access.service';
 
 /**
@@ -167,8 +167,14 @@ describe('FleetService control policy families (FR-27 … FR-31)', () => {
     });
 
     it('writes the legacy controlPolicy back whenever desktop changes (the AW-11 mirror)', async () => {
-        const { service, store } = build([node({ controlPolicy: 'org-admins' })]);
+        const { service, store, repository } = build([node({ controlPolicy: 'org-admins' })]);
         await service.setControlPolicyFamiliesForUser(OWNER, 'node-1', { desktop: 'owner' });
+        // ONE update carrying both columns, so the mirror can never be half-written.
+        expect(repository.update).toHaveBeenCalledTimes(1);
+        expect(repository.update).toHaveBeenCalledWith('node-1', {
+            controlPolicyFamilies: { desktop: 'owner' },
+            controlPolicy: 'owner',
+        });
         expect(store.get('node-1')?.controlPolicy).toBe('owner');
         expect(store.get('node-1')?.controlPolicyFamilies).toEqual({ desktop: 'owner' });
     });
@@ -203,9 +209,13 @@ describe('FleetService control policy families (FR-27 … FR-31)', () => {
         ['a non-map', ['sessions']],
     ])('refuses %s as invalid', async (_name, input) => {
         const { service, repository } = build();
-        await expect(
-            service.setControlPolicyFamiliesForUser(OWNER, 'node-1', input),
-        ).rejects.toBeInstanceOf(BadRequestException);
+        const refusal = await service
+            .setControlPolicyFamiliesForUser(OWNER, 'node-1', input)
+            .catch((error) => error);
+        expect(refusal).toBeInstanceOf(BadRequestException);
+        expect((refusal as BadRequestException).getResponse()).toMatchObject({
+            error: { code: 'invalid', details: { field: 'controlPolicyFamilies' } },
+        });
         expect(repository.update).not.toHaveBeenCalled();
     });
 
@@ -245,8 +255,47 @@ describe('FleetService.listVisibleForUser (S9)', () => {
             id: 'node-shared',
             viewerRole: 'org-member',
             isFavorite: false,
-            modelIdentity: null,
         });
+    });
+
+    it('shares an ALLOW-LIST of fields — nothing the owner did not decide to share', async () => {
+        const holder = node({
+            id: 'node-shared',
+            userId: 'someone',
+            modelIdentity: 'owner@example.test',
+            dailyCostCeilingCents: 500,
+            workerState: 'quarantined',
+            workerStateReason:
+                'process tree under /home/owner/secret-project could not be proven dead',
+            controlHolderUserId: 'someone',
+            controlHolderSessionId: 'session-1',
+            controlExpiresAt: new Date(Date.now() + 60_000),
+            rotationRequestedAt: new Date(),
+            modelThrottles: [
+                {
+                    provider: 'claude-code',
+                    window: 'weekly',
+                    until: new Date(Date.now() + 3_600_000).toISOString(),
+                    reason: "You've hit your weekly limit for owner@example.test",
+                    since: new Date().toISOString(),
+                },
+            ],
+        } as Partial<FleetNode>);
+        const { service } = build([holder]);
+        const [shared] = await service.listVisibleForUser(MEMBER);
+        expect(Object.keys(shared).sort()).toEqual([...FLEET_SHARED_VIEW_FIELDS].sort());
+        const serialized = JSON.stringify(shared);
+        expect(serialized).not.toContain('owner@example.test');
+        expect(serialized).not.toContain('secret-project');
+        expect(shared.workerState).toBe('quarantined');
+        expect(shared.modelThrottles?.[0]).toMatchObject({ provider: 'claude-code', reason: '' });
+    });
+
+    it('keeps the needs-a-look read off the live cluster merge', async () => {
+        const { service } = build([others]);
+        const listForUser = jest.spyOn(service, 'listForUser');
+        await service.listVisibleForUser(MEMBER, { includeClusters: false });
+        expect(listForUser).not.toHaveBeenCalled();
     });
 
     it('shows a shared node whose heartbeat is stale as offline without writing anything', async () => {

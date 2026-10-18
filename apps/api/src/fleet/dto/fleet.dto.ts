@@ -99,16 +99,13 @@ export class CreateFleetEnrollmentTokenDto {
 }
 
 /**
- * Query of `GET /api/fleet/nodes`. `scope` absent or `own` is the
- * owner-only list every existing caller reads; `visible` (the Fleet hub)
- * adds computers shared with the caller through an Organization.
+ * `GET /api/fleet/nodes?scope=` (Fleet hub). Absent or `own` is the
+ * owner-only list every existing caller reads; `visible` adds computers
+ * shared with the caller through an Organization. Read as one named query
+ * value (not a whitelisted DTO), so the route still ignores any other query
+ * parameter exactly as it did.
  */
-export class ListFleetNodesQueryDto {
-    @ApiProperty({ required: false, enum: ['own', 'visible'], default: 'own' })
-    @IsOptional()
-    @IsIn(['own', 'visible'])
-    scope?: 'own' | 'visible';
-}
+export const FLEET_NODE_LIST_SCOPES = ['own', 'visible'] as const;
 
 /** Request body for `PATCH /api/fleet/nodes/:id` (partial update). */
 export class UpdateFleetNodeDto {

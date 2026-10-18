@@ -71,16 +71,13 @@ export interface NeedsALookItem {
 	since: string;
 }
 
-/** Response of `GET /api/fleet/needs-a-look` and `GET /api/fleet/nodes/:id/needs-a-look`. */
-export interface NeedsALookResponse {
-	items: NeedsALookItem[];
-	/**
-	 * True when at least one producer failed and was skipped: the list is
-	 * what the others said (spec U11 — one failing producer never hides the
-	 * rest). The renderer says so instead of claiming "nothing needs a look".
-	 */
-	partial: boolean;
-}
+/**
+ * Response header of `GET /api/fleet/needs-a-look` and
+ * `GET /api/fleet/nodes/:id/needs-a-look` (whose body is `NeedsALookItem[]`):
+ * `true` when at least one producer failed and was skipped, so the list is
+ * what the others said (spec U11) — never proof that nothing needs a look.
+ */
+export const NEEDS_A_LOOK_PARTIAL_HEADER = 'X-Fleet-Partial';
 
 /** Bounds a producer's output is clipped to before it reaches a browser. */
 export const NEEDS_A_LOOK_MAX_ITEMS = 200;
@@ -108,7 +105,10 @@ function normalizeSince(value: unknown): string | null {
 /**
  * An app route a row may navigate to: a same-origin path, never a URL with a
  * scheme or a protocol-relative `//host` (a producer bug must not become an
- * open redirect in someone's hub).
+ * open redirect in someone's hub). ASCII whitespace and control characters
+ * are refused anywhere in it: URL parsing strips tabs and newlines BEFORE it
+ * reads the path, so `/\t/evil.example` would otherwise navigate like
+ * `//evil.example`.
  */
 export function isNeedsALookRoute(value: unknown): value is string {
 	return (
@@ -116,8 +116,18 @@ export function isNeedsALookRoute(value: unknown): value is string {
 		value.startsWith('/') &&
 		!value.startsWith('//') &&
 		!value.includes('\\') &&
+		!hasWhitespaceOrControl(value) &&
 		value.length <= NEEDS_A_LOOK_MAX_ROUTE_LENGTH
 	);
+}
+
+/** True when `value` holds an ASCII control character (U+0000–U+001F, U+007F) or a space. */
+function hasWhitespaceOrControl(value: string): boolean {
+	for (let index = 0; index < value.length; index += 1) {
+		const code = value.charCodeAt(index);
+		if (code <= 0x20 || code === 0x7f) return true;
+	}
+	return false;
 }
 
 /**

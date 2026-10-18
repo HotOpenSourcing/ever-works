@@ -88,8 +88,11 @@ export class NeedsALookService {
             }
             for (const raw of answer) {
                 const item = normalizeNeedsALookItem(raw);
-                if (!item || !known.has(item.nodeId) || seen.has(item.id)) continue;
-                seen.add(item.id);
+                // Keyed on node AND id: two producers that both name a problem
+                // `disk-low` on different nodes must not swallow each other.
+                const key = item ? `${item.nodeId}:${item.id}` : '';
+                if (!item || !known.has(item.nodeId) || seen.has(key)) continue;
+                seen.add(key);
                 items.push(item);
             }
         }

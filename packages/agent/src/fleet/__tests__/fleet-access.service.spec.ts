@@ -252,6 +252,13 @@ describe('FleetAccessService.listSharedWith', () => {
         expect(nodes.findByOrganizations).not.toHaveBeenCalled();
     });
 
+    it('never lists an enrolling row — an outstanding token is the owner’s alone', async () => {
+        const enrolling = node({ id: 'node-enrolling', status: 'enrolling' } as Partial<FleetNode>);
+        const { service } = build({ rows: [shared, enrolling] });
+        const result = await service.listSharedWith(MEMBER);
+        expect(result.map((entry) => entry.node.id)).toEqual(['node-shared']);
+    });
+
     it('degrades to nothing, never throws, when a read fails', async () => {
         const { service, directory } = build({ rows: [shared] });
         directory.rosterRowsFor.mockRejectedValueOnce(new Error('db down'));

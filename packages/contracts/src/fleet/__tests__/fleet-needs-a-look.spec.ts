@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	NEEDS_A_LOOK_KINDS,
+	NEEDS_A_LOOK_PARTIAL_HEADER,
 	NEEDS_A_LOOK_MAX_TITLE_LENGTH,
 	NEEDS_A_LOOK_SEVERITIES,
 	isNeedsALookKind,
@@ -50,6 +51,10 @@ describe('kinds and severities', () => {
 		expect(isNeedsALookKind('disk-full')).toBe(false);
 	});
 
+	it('names the partial-answer header the API sets and the web reads', () => {
+		expect(NEEDS_A_LOOK_PARTIAL_HEADER).toBe('X-Fleet-Partial');
+	});
+
 	it('orders severities most urgent first', () => {
 		expect(NEEDS_A_LOOK_SEVERITIES).toEqual(['critical', 'warn', 'info']);
 	});
@@ -85,6 +90,20 @@ describe('isNeedsALookRoute', () => {
 		expect(isNeedsALookRoute('//example.com/x')).toBe(false);
 		expect(isNeedsALookRoute('/\\example.com')).toBe(false);
 		expect(isNeedsALookRoute('fleet')).toBe(false);
+	});
+
+	it('refuses whitespace and control characters URL parsing would strip into //host', () => {
+		for (const sneaky of [
+			'/\t/evil.example',
+			'/\n/evil.example',
+			'/\r/evil.example',
+			'/ /x',
+			'/\u0000/x',
+			'/\u007f/x'
+		]) {
+			expect(isNeedsALookRoute(sneaky), JSON.stringify(sneaky)).toBe(false);
+		}
+		expect(isNeedsALookRoute('/fleet/computers/n1?tab=logs#top')).toBe(true);
 	});
 });
 

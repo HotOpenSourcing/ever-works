@@ -383,6 +383,7 @@ const NEEDS_A_LOOK_EXPORTS = [
 	'NEEDS_A_LOOK_MAX_LABEL_LENGTH',
 	'NEEDS_A_LOOK_MAX_ROUTE_LENGTH',
 	'NEEDS_A_LOOK_MAX_COMMAND_LENGTH',
+	'NEEDS_A_LOOK_PARTIAL_HEADER',
 	'isNeedsALookRoute',
 	'normalizeNeedsALookItem',
 	'sortNeedsALook'
@@ -501,7 +502,7 @@ describe('fleet barrel', () => {
 		expect(typeof bag[name]).toBe('function');
 	});
 
-	it('exposes exactly these 260 runtime symbols', () => {
+	it('exposes exactly these 261 runtime symbols', () => {
 		// Regression guard in BOTH directions: an `export *` line deleted from
 		// index.ts fails here, and a NEW runtime export added without a spec
 		// also fails here — which forces the author back to cover it.
@@ -555,11 +556,11 @@ describe('fleet barrel', () => {
 		// symbols of `fleet-model-usage-limit.types.ts` and the seven of
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
-		// → 260 with the Fleet hub (FL-01): the fourteen symbols of
-		// `fleet-access.types.ts` and the thirteen of `fleet-needs-a-look.types.ts`
+		// → 261 with the Fleet hub (FL-01): the fourteen symbols of
+		// `fleet-access.types.ts` and the fourteen of `fleet-needs-a-look.types.ts`
 		// — two NEW modules, so the witness table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		expect(Object.keys(fleet)).toHaveLength(260);
+		expect(Object.keys(fleet)).toHaveLength(261);
 	});
 
 	it.each([

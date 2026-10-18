@@ -191,8 +191,8 @@ export function effectiveControlPolicy(node: FleetControlPolicySubject | null | 
  *
  * The owner is always admitted — a policy only ever widens who else may
  * act, it never narrows the owner out — and a stranger never is (FR-32).
- * The same table as AW-11's `canControl`, which is now this function for
- * the `desktop` family.
+ * The same table as AW-11's `canControl` (`packages/agent/src/computer/control-policy.ts`),
+ * which answers the `desktop` family for live-view take-over.
  */
 export function audienceIncludes(audience: FleetAudience, role: FleetViewerRole): boolean {
 	if (role === 'owner') return true;

@@ -6,6 +6,7 @@ import type {
     FleetNodeView,
     NeedsALookItem,
 } from '@ever-works/contracts';
+import { NEEDS_A_LOOK_PARTIAL_HEADER } from '@ever-works/contracts';
 import { ApiResponseError, serverFetch, serverMutation } from './server-api';
 
 /**
@@ -139,8 +140,8 @@ export interface FleetNeedsALookResult {
     partial: boolean;
 }
 
-/** The response header the API sets on a partial needs-a-look answer. */
-export const FLEET_PARTIAL_HEADER = 'x-fleet-partial';
+/** The response header the API sets on a partial needs-a-look answer (header names are case-insensitive). */
+export const FLEET_PARTIAL_HEADER = NEEDS_A_LOOK_PARTIAL_HEADER;
 
 export interface SetFleetExecutionPreferencePayload {
     scopeType: FleetExecutionScopeType;
@@ -162,10 +163,13 @@ async function readNeedsALook(response: Response): Promise<FleetNeedsALookResult
             response.status,
         );
     }
-    const body = (await response.json().catch(() => [])) as unknown;
+    // A 2xx body that does not parse, or is not a list, is NOT "nothing needs
+    // a look": it is an answer we could not read, so it is reported partial.
+    const body = (await response.json().catch(() => undefined)) as unknown;
+    const readable = Array.isArray(body);
     return {
-        items: Array.isArray(body) ? (body as NeedsALookItem[]) : [],
-        partial: response.headers.get(FLEET_PARTIAL_HEADER) === 'true',
+        items: readable ? (body as NeedsALookItem[]) : [],
+        partial: !readable || response.headers.get(FLEET_PARTIAL_HEADER) === 'true',
     };
 }
 

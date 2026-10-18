@@ -6,7 +6,7 @@ import { NeedsALookService } from '@ever-works/agent/fleet';
 import type { NeedsALookItem } from '@ever-works/contracts';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { FLEET_PARTIAL_HEADER, FleetController } from './fleet.controller';
-import { ListFleetNodesQueryDto, UpdateFleetNodeDto } from './dto/fleet.dto';
+import { UpdateFleetNodeDto } from './dto/fleet.dto';
 
 /**
  * Fleet hub (FL-01) — the routes the hub adds or widens on the existing
@@ -94,7 +94,7 @@ describe('GET /api/fleet/nodes — scope (FR-15)', () => {
 
     it('adds the shared computers with scope=visible, without someone else’s load', async () => {
         const { controller, service } = build();
-        const nodes = await controller.list(auth, { scope: 'visible' });
+        const nodes = await controller.list(auth, 'visible');
         expect(service.listVisibleForUser).toHaveBeenCalledWith('user-1');
         expect(nodes.map((node) => [node.id, node.viewerRole, node.load])).toEqual([
             [OWN, 'owner', { activeJobCount: 2 }],
@@ -103,11 +103,11 @@ describe('GET /api/fleet/nodes — scope (FR-15)', () => {
         ]);
     });
 
-    it('validates the scope query', async () => {
-        const ok = await validate(plainToInstance(ListFleetNodesQueryDto, { scope: 'visible' }));
-        const bad = await validate(plainToInstance(ListFleetNodesQueryDto, { scope: 'everyone' }));
-        expect(ok).toHaveLength(0);
-        expect(bad).not.toHaveLength(0);
+    it('reads an unknown scope as the owner-only list (it never widens by accident)', async () => {
+        const { controller, service } = build();
+        await controller.list(auth, 'everyone');
+        expect(service.listForUser).toHaveBeenCalledWith('user-1');
+        expect(service.listVisibleForUser).not.toHaveBeenCalled();
     });
 });
 
@@ -130,9 +130,13 @@ describe('GET /api/fleet/needs-a-look (CONTRACTS §4.6, §11.2)', () => {
             item({ id: 'shared', nodeId: SHARED, severity: 'critical' }),
         ]);
         registry.register({ id: 'stub', produce });
-        const { controller, res } = build({ needsALook: registry });
+        const { controller, res, service } = build({ needsALook: registry });
 
         const items = await controller.needsALookFleet(auth, res);
+        // Without the live cluster merge: no producer reads cluster rows.
+        expect(service.listVisibleForUser).toHaveBeenCalledWith('user-1', {
+            includeClusters: false,
+        });
         expect(produce.mock.calls[0]?.[0].map((node) => node.id)).toEqual([OWN, SHARED]);
         expect(items.map((entry) => entry.id)).toEqual(['shared', 'disk-low:' + OWN]);
     });

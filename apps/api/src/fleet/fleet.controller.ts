@@ -19,7 +19,7 @@ import {
     UnauthorizedException,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type {
     CreateEnrollmentTokenResult,
@@ -49,7 +49,11 @@ import {
     COMPUTER_PENDING_SESSIONS,
     type ComputerPendingSessionsLookup,
 } from '@ever-works/agent/computer';
-import { FLEET_ATTENDED_CAPABILITY, FLEET_AUDIT_DEFAULT_LIMIT } from '@ever-works/contracts';
+import {
+    FLEET_ATTENDED_CAPABILITY,
+    FLEET_AUDIT_DEFAULT_LIMIT,
+    NEEDS_A_LOOK_PARTIAL_HEADER,
+} from '@ever-works/contracts';
 import { FleetPanicService } from './fleet-panic.service';
 import { FleetRunnerStatusService } from './fleet-runner-status.service';
 import {
@@ -70,7 +74,7 @@ import {
     FleetHeartbeatDto,
     FleetNodePauseDto,
     FleetUnenrollDto,
-    ListFleetNodesQueryDto,
+    FLEET_NODE_LIST_SCOPES,
     RotateFleetNodeCredentialDto,
     SetFleetCostCeilingDto,
     SetFleetNodeLimitCeilingDto,
@@ -88,7 +92,7 @@ const NODE_HISTORY_LIMIT = 25;
  * producer failed or timed out and was skipped (spec U11): the list is what
  * the others said, not proof that nothing needs a look.
  */
-export const FLEET_PARTIAL_HEADER = 'X-Fleet-Partial';
+export const FLEET_PARTIAL_HEADER = NEEDS_A_LOOK_PARTIAL_HEADER;
 
 /** The one thing the needs-a-look routes do with the response (same posture as the CSV export's). */
 type HeaderResponse = { setHeader(name: string, value: string): void };
@@ -288,15 +292,24 @@ export class FleetController {
             'List my fleet nodes (enrolled machines + live nodes of my own configured clusters), each with its current execution load. `scope=visible` (the Fleet hub) also lists computers other people own that are shared with me through an Organization, each row carrying my role on it (`viewerRole`).',
     })
     @HttpCode(HttpStatus.OK)
+    @ApiQuery({
+        name: 'scope',
+        required: false,
+        enum: FLEET_NODE_LIST_SCOPES,
+        description:
+            '`own` (default): my computers. `visible`: also the computers shared with me through an Organization.',
+    })
     async list(
         @CurrentUser() auth: AuthenticatedUser,
-        @Query() query: ListFleetNodesQueryDto = {},
+        @Query('scope') scope?: string,
     ): Promise<FleetNodeView[]> {
         // The default stays OWNER-ONLY, byte for byte: Settings → Fleet, the
         // panic controls and every existing caller keep reading exactly what
-        // they read before the hub existed (spec FR-15).
+        // they read before the hub existed (spec FR-15). A single named query
+        // value, not a whitelisted DTO, so any other query parameter is still
+        // ignored rather than refused; an unknown scope reads as `own`.
         const nodes =
-            query?.scope === 'visible'
+            scope === 'visible'
                 ? await this.service.listVisibleForUser(auth.userId)
                 : await this.service.listForUser(auth.userId);
         // Per-node load (Desktop PRD §4.1 "current load (running Tasks)")
@@ -330,9 +343,9 @@ export class FleetController {
         @Res({ passthrough: true }) res?: HeaderResponse,
     ): Promise<NeedsALookItem[]> {
         if (!this.needsALook) return [];
-        const nodes = (await this.service.listVisibleForUser(auth.userId)).filter(
-            (node) => node.persisted,
-        );
+        const nodes = (
+            await this.service.listVisibleForUser(auth.userId, { includeClusters: false })
+        ).filter((node) => node.persisted);
         const result = await this.needsALook.forNodes(nodes, { userId: auth.userId });
         if (result.partial) res?.setHeader(FLEET_PARTIAL_HEADER, 'true');
         return result.items;

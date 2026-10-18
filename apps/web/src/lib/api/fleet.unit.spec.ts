@@ -148,6 +148,14 @@ describe('fleetAPI hub reads and writes — endpoint shape', () => {
         await expect(fleetAPI.needsALook()).resolves.toEqual({ items: [], partial: false });
     });
 
+    it('needsALook reports an unreadable 2xx body as partial, never as a complete empty list', async () => {
+        const { fleetAPI } = await importApi();
+        serverFetchMock.mockResolvedValueOnce(new Response('not json', { status: 200 }));
+        await expect(fleetAPI.needsALook()).resolves.toEqual({ items: [], partial: true });
+        serverFetchMock.mockResolvedValueOnce(response({ items: [] }));
+        await expect(fleetAPI.needsALook()).resolves.toEqual({ items: [], partial: true });
+    });
+
     it('needsALook throws on a failed read so the block can say so (U11)', async () => {
         const { fleetAPI } = await importApi();
         serverFetchMock.mockResolvedValueOnce(response({ message: 'boom' }, { status: 500 }));

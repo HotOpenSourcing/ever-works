@@ -1021,8 +1021,18 @@ export class FleetService {
      * runner pill, the panic controls, Settings → Fleet and the lease path
      * read: a shared Node is never counted as the caller's runner.
      */
-    async listVisibleForUser(userId: string): Promise<FleetNodeView[]> {
-        const own = (await this.listForUser(userId)).map((view) => ({
+    async listVisibleForUser(
+        userId: string,
+        options: { includeClusters?: boolean } = {},
+    ): Promise<FleetNodeView[]> {
+        // `includeClusters: false` (the needs-a-look read) skips the live
+        // cluster merge, which talks to the user's Kubernetes API and whose rows
+        // no producer reads — the same reason the pill reads `listEnrolledForUser`.
+        const ownRows =
+            options.includeClusters === false
+                ? await this.listEnrolledForUser(userId)
+                : await this.listForUser(userId);
+        const own = ownRows.map((view) => ({
             ...view,
             viewerRole: 'owner' as const,
         }));
@@ -1923,14 +1933,20 @@ export class FleetService {
  * Fleet hub (FL-01) — the view of a Node someone else owns, as an
  * Organization member sees it (`view` grants listing only).
  *
- * Built from the same mapping as the owner's view, then:
- *  - `viewerRole` stamped, `isFavorite` false (the star is the owner's);
- *  - `modelIdentity` withheld — which account the machine's CLI is signed in
- *    as is the owner's to share, not the Organization's;
- *  - the status judged at READ time: the offline sweep only runs on the
- *    owner's own reads, so a row still marked `online` whose last heartbeat
- *    is older than the offline window is SHOWN as `offline` (nothing is
- *    written — the owner's next read sweeps it for real).
+ * An ALLOW-LIST, not a deny-list: only what the hub needs to list a computer
+ * and say its state in words is copied from the owner-shaped view; every
+ * other field is absent, or null where the wire type requires it. So a field
+ * added to `FleetNodeView` later is NOT shared until someone decides it
+ * should be. Withheld in particular: who holds control, the cost and limit
+ * ceilings, the recording settings, pending rotation, the housekeeping
+ * counters, the account the machine's CLI is signed in as, and the
+ * free-text reasons a node reports (quarantine reason, throttle reason).
+ *
+ * `viewerRole` is stamped and `isFavorite` is false (the star is the
+ * owner's). The status is judged at READ time: the offline sweep only runs on
+ * the owner's own reads, so a row still marked `online` whose last heartbeat
+ * is older than the offline window is SHOWN as `offline` (nothing is written
+ * — the owner's next read sweeps it for real).
  *
  * Takes the owner-shaped `view` (`toView`) so there is ONE entity → wire
  * mapping; this only narrows it.
@@ -1946,13 +1962,61 @@ function toSharedView(
         view.status === 'online' &&
         (!Number.isFinite(lastBeat) || lastBeat < offlineCutoff.getTime());
     return {
-        ...view,
+        id: view.id,
+        name: view.name,
+        kind: view.kind,
         status: stale ? 'offline' : view.status,
+        platform: view.platform,
+        version: view.version,
+        capabilities: view.capabilities,
+        lastHeartbeatAt: view.lastHeartbeatAt,
+        createdAt: view.createdAt,
+        persisted: view.persisted,
+        cliVersion: view.cliVersion ?? null,
+        upgradeRequired: view.upgradeRequired,
+        diskFreeBytes: view.diskFreeBytes ?? null,
+        workerState: view.workerState ?? null,
+        workerStateChangedAt: view.workerStateChangedAt ?? null,
+        // The CLI and window that are out of quota say "throttled" in words;
+        // the node's own sentence about it stays the owner's.
+        modelThrottles: (view.modelThrottles ?? []).map((throttle) => ({
+            ...throttle,
+            reason: '',
+        })),
+        controlPolicy: view.controlPolicy,
+        controlPolicyFamilies: view.controlPolicyFamilies,
         viewerRole: role,
         isFavorite: false,
-        modelIdentity: null,
+        hostNodeId: view.hostNodeId ?? null,
+        virtualKind: view.virtualKind ?? null,
     };
 }
+
+/** The fields a shared view carries (`toSharedView`) — pinned by the spec so a new one is a decision. */
+export const FLEET_SHARED_VIEW_FIELDS: readonly (keyof FleetNodeView)[] = [
+    'id',
+    'name',
+    'kind',
+    'status',
+    'platform',
+    'version',
+    'capabilities',
+    'lastHeartbeatAt',
+    'createdAt',
+    'persisted',
+    'cliVersion',
+    'upgradeRequired',
+    'diskFreeBytes',
+    'workerState',
+    'workerStateChangedAt',
+    'modelThrottles',
+    'controlPolicy',
+    'controlPolicyFamilies',
+    'viewerRole',
+    'isFavorite',
+    'hostNodeId',
+    'virtualKind',
+];
 
 /**
  * Validate a family-map write: an object whose keys are families and whose
@@ -1962,24 +2026,33 @@ function toSharedView(
  */
 function parseControlPolicyFamiliesInput(value: unknown): FleetControlPolicyFamiliesInput {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-        throw new BadRequestException('controlPolicyFamilies must be a map of family → audience');
+        throw invalidPolicy('controlPolicyFamilies must be a map of family → audience');
     }
     const out: FleetControlPolicyFamiliesInput = {};
     for (const [family, audience] of Object.entries(value as Record<string, unknown>)) {
         if (!(FLEET_ACTION_FAMILIES as readonly string[]).includes(family)) {
-            throw new BadRequestException(`Unknown action family: ${family}`);
+            throw invalidPolicy(`Unknown action family: ${family}`);
         }
         if (!isFleetAudience(audience)) {
-            throw new BadRequestException(
+            throw invalidPolicy(
                 `Audience for ${family} must be one of: owner, org-admins, org-members`,
             );
         }
         out[family as keyof FleetControlPolicyFamiliesInput] = audience;
     }
     if (Object.keys(out).length === 0) {
-        throw new BadRequestException('controlPolicyFamilies must name at least one family');
+        throw invalidPolicy('controlPolicyFamilies must name at least one family');
     }
     return out;
+}
+
+/** A 400 in CONTRACTS §8's envelope (`invalid`, the hint naming the field), with `message` for existing clients. */
+function invalidPolicy(hint: string): BadRequestException {
+    return new BadRequestException({
+        statusCode: 400,
+        message: hint,
+        error: { code: 'invalid', hint, details: { field: 'controlPolicyFamilies' } },
+    });
 }
 
 /**

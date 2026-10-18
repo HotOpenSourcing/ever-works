@@ -268,6 +268,9 @@ export class FleetAccessService {
             const shared: FleetNodeAccess[] = [];
             for (const node of rows) {
                 if (node.userId === userId || !node.organizationId) continue;
+                // An `enrolling` row is an outstanding one-time token, not a
+                // computer: it is the owner's business alone.
+                if (node.status === 'enrolling') continue;
                 const role = roles.get(node.organizationId);
                 if (role && this.allows(node, role, 'view')) shared.push({ node, role });
             }

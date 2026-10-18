@@ -126,6 +126,14 @@ describe('NeedsALookService', () => {
         expect(result.items).toEqual([item({ id: 'dup', title: 'first' })]);
     });
 
+    it('keeps two producers’ same-named problems on DIFFERENT nodes apart', async () => {
+        const service = new NeedsALookService();
+        service.register(producer('a', () => [item({ id: 'disk-low', nodeId: 'n1' })]));
+        service.register(producer('b', () => [item({ id: 'disk-low', nodeId: 'n2' })]));
+        const result = await service.forNodes([node('n1'), node('n2')], { userId: 'u1' });
+        expect(result.items.map((entry) => entry.nodeId).sort()).toEqual(['n1', 'n2']);
+    });
+
     it('gives every producer the nodes and one clock', async () => {
         const service = new NeedsALookService();
         const produce = jest.fn(() => []);
