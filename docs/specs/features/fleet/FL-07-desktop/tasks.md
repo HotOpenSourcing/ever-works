@@ -46,7 +46,8 @@
       `fleet-node.types.ts` with optional `helperTrust`, `helper`, `displays`, `desktopReasons` on
       the view and heartbeat; extend `fleet-panic.types.ts` with `node.desktop.view`,
       `node.desktop.display.set|add|remove`, `node.desktop.control.take|release|request`,
-      `node.desktop.recording.start|stop|delete`, `node.helper.admit|revoke`; extend
+      `node.desktop.recording.start|stop|delete`, `node.helper.admit|revoke|verify-failed` (all
+      CONTRACTS §7); extend
       `packages/contracts/src/computer/computer-session.types.ts` `COMPUTER_UNWATCHABLE_REASONS`
       with the eight new reasons and `ComputerSessionView.source?`.
       **Test**: extend `packages/contracts/src/fleet/__tests__/fleet-panic.spec.ts` and
@@ -123,13 +124,15 @@
       `helper`, `displays`, `desktopReasons` to the heartbeat telemetry.
       **Test**: extend `apps/node/src/core/capabilities.spec.ts` — tags iff facts; no tag without an
       admitted helper; `runtime.spec.ts` heartbeat carries the fields.
-- [ ] **T-16**. The `desktop` link channel at `apps/node/src/core/link/channels/desktop-channel.ts`
-      _(FL-02 directory)_: implements the message table in plan §6.4 (`channel.open` →
+- [ ] **T-16**. The `desktop` link family as a `NodeModule` at `apps/node/src/core/link/modules/desktop.ts`
+      with one entry appended to `apps/node/src/core/link/modules/index.ts` _(FL-02's registry)_:
+      implements the message table in plan §6.4 (`channel.open` →
       `channel.ready|refused`; `FRAME`/`TILES`/`desktop.stats`; `desktop.quality|refresh|displays|setDisplay`;
       `desktop.displayChanged`; `CLOSE`); input handling deferred to T-31; a `DesktopLinkOutbox`
       with drop-oldest and the 16 MiB cap.
-      **Test**: `desktop-channel.spec.ts` — every request gets a reply with its `requestId`;
-      refusal codes per reason; backlog drops oldest tiles first.
+      **Test**: `apps/node/src/core/link/modules/desktop.spec.ts` — every request gets a reply with
+      its `requestId`; refusal codes per reason; backlog drops oldest tiles first; `link.pause`
+      blocks `INPUT`.
 
 ## P1.D — Platform: schema, services, API, relay
 
@@ -154,14 +157,14 @@
       **Test**: `__tests__/desktop-view.service.spec.ts` — each error code with its hint; caps count
       both sources; audience matrix owner/org-admin/org-member/stranger.
 - [ ] **T-20**. Helper trust service at `packages/agent/src/fleet/desktop/helper-trust.service.ts`:
-      consumes heartbeat `helperEvents` → audit `node.helper.admit|revoke` (de-duplicated by event
+      consumes heartbeat `helperEvents` → audit `node.helper.admit|revoke|verify-failed` (de-duplicated by event
       id); registers the `helper-untrusted` needs-a-look producer (R-23, FL-01 registry).
       **Test**: `__tests__/helper-trust.service.spec.ts` — duplicate event writes one row; item
       appears only when the file changed, never for hash-pinned alone.
 - [ ] **T-21**. API at `apps/api/src/fleet/desktop/fleet-desktop.controller.ts` with
       `dto/fleet-desktop.dto.ts`: availability, displays, views CRUD, attach-token (role may only
       downgrade; `driver` only to the holder), refresh; module `fleet-desktop.module.ts` imported in
-      `apps/api/src/api.module.ts` beside `ComputerModule`; guard `FleetEnabledGuard` +
+      `apps/api/src/api.module.ts` beside `ComputerApiModule` (`api.module.ts:73`); guard `FleetEnabledGuard` +
       `FLEET_DESKTOP_ENABLED`.
       **Test**: `fleet-desktop.controller.spec.ts` — every §8 code with hint; cross-user node 404s
       like unknown; throttles present.
@@ -224,10 +227,10 @@
       **Test**: `tests/input_release.rs`; coordinate mapping at @2× scale; blocked shortcut arriving
       at the helper is refused.
 - [ ] **T-31**. Node: `DesktopHelperBackend.dispatchInput` feeding `apps/node/src/core/screen/input-injector.ts`
-      unchanged; `desktop.mode` handling in `desktop-channel.ts` (resume marker only when the view
-      is bound to an Agent; `releaseAll` on `watching`); advertise `input` in `capabilities.ts`
-      when either injector exists.
-      **Test**: extend `desktop-channel.spec.ts` and `capabilities.spec.ts` — INPUT dropped while
+      unchanged; `desktop.mode` handling in `apps/node/src/core/link/modules/desktop.ts` (resume
+      marker only when the view is bound to an Agent; `releaseAll` on `watching`); advertise `input`
+      in `capabilities.ts` when either injector exists.
+      **Test**: extend `apps/node/src/core/link/modules/desktop.spec.ts` and `capabilities.spec.ts` — INPUT dropped while
       watching; `input` tag iff an injector; the stale comment is gone (`grep -n "nothing on this
       node injects" apps/node/src/core/capabilities.ts` returns nothing).
 - [ ] **T-32**. Platform control on views: add the control routes to `fleet-desktop.controller.ts`
@@ -261,10 +264,11 @@
 
 ## P2.C — Recording and re-watch (closes AW-11 P3)
 
-- [ ] **T-37**. Slot 01 migration `apps/api/src/migrations/1796070100000-AddComputerSessionRecordingRef.ts`
-      and entity columns in `packages/agent/src/entities/computer-session.entity.ts`
+- [ ] **T-37**. Slot 01 migration `apps/api/src/migrations/1796070100000-AddComputerSessionRecordingColumns.ts`
+      (CONTRACTS §13 name; R-9) and entity columns in `packages/agent/src/entities/computer-session.entity.ts`
       (`source`, `displayId`, `fleetSessionId`, `recordingRef`, `recordingBytes`,
-      `recordingDurationMs`, `recordingExpiresAt`, `recordingStoppedReason`; `agentId` nullable);
+      `recordingDurationMs`, `recordingExpiresAt`, `recordingStoppedReason`; `agentId` nullable via
+      a portable `changeColumn`; enums as validated `varchar`, CONTRACTS §4 storage note);
       indexes; guarded FK to `fleet_sessions`.
       **Test**: applies twice; `migration:generate` empty; existing `computer-session.service.spec.ts`
       green.
@@ -278,7 +282,7 @@
 - [ ] **T-39**. Recording API (`/recordings`, `/recordings/:viewId`, `/chunks/:seq`, `DELETE` with
       `confirm`) in `fleet-desktop.controller.ts`; audit `node.desktop.recording.start|stop|delete`.
       **Test**: `fleet-desktop-recordings.controller.spec.ts` — `nosniff` + `attachment`; delete
-      without token → `confirmation_required`.
+      without `confirm: true` (CONTRACTS §2.2) → `confirmation_required`.
 - [ ] **T-40**. GC task `packages/tasks/src/tasks/trigger/computer-recording-gc.task.ts` (cron
       `23 3 * * *`; object first, row second) with dispatcher symbol in
       `packages/agent/src/fleet/desktop/computer-recording-gc.dispatcher.ts`; register beside
@@ -324,8 +328,9 @@
       it costs); add to `apps/docs/sidebarsPlatform.ts`; cross-link from `docs/features/fleet.md`.
       **Test**: `pnpm --filter ever-works-docs build` — no broken links.
 - [ ] **T-48**. Update `docs/specs/features/fleet/TRACKER.md` (FL-07 spec/impl per phase) and the
-      spec/plan status fields; propose the CONTRACTS additions from spec §8b in the same PR
-      (owner-approved before merge).
+      spec/plan status fields; add the remaining CONTRACTS additions from spec §8b (§1.1 heartbeat
+      fields and §3.3 desktop open params and messages) in the same PR — the audit names, R-9
+      columns, R-25 family and R-26 IPC already landed in CONTRACTS rev 2.
       **Test**: banned-terms grep over `docs/specs/features/fleet/FL-07-desktop/`, `docs/features/fleet-desktop.md`,
       `apps/node/native/ever-works-screen/` prints nothing.
 - [ ] **T-49**. Flip `FLEET_DESKTOP_ENABLED` default per D12 after acceptance tests are green on

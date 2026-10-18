@@ -113,8 +113,10 @@ unchanged on the day this ships.
 Nothing is removed or renamed. The one relocation — the machine table, enrol hand-off and drawer
 moving from Settings → Fleet to Fleet → Computers — is the owner-requested move in README D1, is
 gated by `FLEET_HUB_ENABLED` (flag off = today's Settings page, byte for byte), and leaves a link
-behind where the table was. The existing `controlPolicy` value keeps working: it becomes the
-`desktop` family's audience and is still written for one release.
+behind where the table was. The existing single-value control policy keeps working: it is read as
+the `desktop` family's audience whenever the new map has no `desktop` entry, and it is written back
+every time that entry changes (CONTRACTS §2.1), so everything that reads it today keeps reading the
+right answer.
 
 ---
 
@@ -160,7 +162,7 @@ behind where the table was. The existing `controlPolicy` value keeps working: it
 - **S10 — The owner widens one family.** **Given** the computer's Settings tab, **when** the owner
   sets **Sessions** to _Organization admins_ and leaves **Services** at _Only me_, **then** an
   org-admin may act in the sessions family (once FL-04 ships) and is refused in services with the
-  reason _"Ask the owner of build-01 to allow admins: services"_; the audit row names the change.
+  reason _"Ask the owner of build-01 to allow org admins: services"_; the audit row names the change.
 - **S11 — An Agent asks.** **Given** an Agent with the existing read-only fleet tool, **when** it
   lists computers, **then** it receives the same rows the hub shows, including state in words and
   favourite, and nothing that needs a consent.
@@ -188,7 +190,8 @@ behind where the table was. The existing `controlPolicy` value keeps working: it
   still offers rename, favourite, drain and remove.
 - **U8 — Permission denied.** A member outside a family's audience sees the control present but
   disabled with the audience named in the tooltip; calling the API directly returns
-  `permission_denied` with the hint _"ask the owner of build-01 to allow org admins: machines"_.
+  `permission_denied` with the hint _"ask the owner of build-01 to allow org admins: lifecycle"_
+  (the `machines` family's label, §5.10).
 - **U9 — Kill switch on.** The hub shows the same stop banner Settings → Fleet shows, with its
   reason; the hub's own acts (rename, favourite, pause, drain, remove) still work — they are
   registry acts, not machine acts — and the banner says that live actions are refused.
@@ -199,9 +202,9 @@ behind where the table was. The existing `controlPolicy` value keeps working: it
   fleet.
 - **U12 — Favourite race.** Two tabs toggle the star at once; the last write wins and both tabs
   converge on the next poll; no error is shown.
-- **U13 — Legacy single-value policy.** A node whose row still carries only the old single value
-  behaves exactly as before for AW-11 control; its Settings tab shows the derived family map with
-  `desktop` pre-set from the old value.
+- **U13 — Legacy single-value policy.** A node whose family map has no `desktop` entry behaves
+  exactly as before for AW-11 control; its Settings tab shows the derived family map with `desktop`
+  read from the old value.
 
 ---
 
@@ -272,17 +275,18 @@ behind where the table was. The existing `controlPolicy` value keeps working: it
   role in the Organization the computer is bound to.
 - **FR-26** A computer bound to no Organization MUST yield `stranger` for every viewer but its
   owner.
-- **FR-27** The control policy MUST be a map from the eleven action families (`view · sessions ·
-  desktop · services · docker · processes · files · commands · schedules · checkouts · machines`)
-  to an audience in `owner · org-admins · org-members`, defaulting `view` to `org-members` and
-  every other family to `owner`.
-- **FR-28** A row that carries only the legacy single value MUST behave as a map whose `desktop`
-  audience is that value and whose other families are defaults, with no migration of behaviour.
+- **FR-27** The control policy MUST be a map from the thirteen action families (`view · sessions ·
+  desktop · logs · services · docker · processes · ports · files · commands · schedules ·
+  checkouts · machines`, CONTRACTS §2.1) to an audience in `owner · org-admins · org-members`,
+  defaulting `view` to `org-members` and every other family to `owner`.
+- **FR-28** A computer whose family map has no `desktop` entry MUST read its `desktop` audience from
+  the existing single-value policy, every other family taking its default, and every change to the
+  `desktop` entry MUST be written back to the single value, with no migration of behaviour.
 - **FR-29** Every family check MUST be answered server-side; the UI MAY only mirror the answer.
 - **FR-30** A viewer who is not in the `view` audience MUST receive a 404 indistinguishable from an
   unknown computer.
-- **FR-31** Changing a family's audience MUST write a `fleet_audit` row naming the family, the old
-  and new audience, and the actor.
+- **FR-31** Changing a family's audience MUST write one `node.policy.change` fleet audit row
+  (CONTRACTS §7) naming the family, the old and new audience, and the actor.
 - **FR-32** A `stranger` MUST never see, list or act on a computer, whatever the policy says.
 
 ### 4.3 P3 — Polish
@@ -420,9 +424,11 @@ Disabled header actions: tooltip _"New session arrives with FL-04"_, _"Desktop a
 │  View          [ Organization members ▾ ]                                    │
 │  Sessions      [ Only me ▾ ]                                                 │
 │  Desktop       [ Organization admins ▾ ]   ← carried over from "control"    │
-│  Services      [ Only me ▾ ]   Docker [ Only me ▾ ]   Processes [ Only me ▾ ]│
-│  Files         [ Only me ▾ ]   Commands [ Only me ▾ ]  Schedules [ Only me ▾ ]│
-│  Checkouts     [ Only me ▾ ]   Machine  [ Only me ▾ ]                        │
+│  Logs          [ Only me ▾ ]   Services [ Only me ▾ ]  Docker [ Only me ▾ ]  │
+│  Processes     [ Only me ▾ ]   Ports    [ Only me ▾ ]  Files  [ Only me ▾ ]  │
+│  Commands      [ Only me ▾ ]   Schedules [ Only me ▾ ] Checkouts [ Only me ▾ ]│
+│  Lifecycle     [ Only me ▾ ]   rename, pause, drain, remove, wake, VMs,      │
+│                                cloud computers, Actions runners              │
 │                                                                              │
 │  Agents act in a family only when their own permissions allow the tool AND   │
 │  the family includes the Agent's owner.                                      │
@@ -439,7 +445,7 @@ mounted unchanged.
 - Remove: _"Remove build-01 from Fleet? Its registration is deleted; nothing on the machine is
   touched. Type the computer's name to confirm."_
 - Permission denied (tooltip): _"Only the owner of build-01 can do this."_ /
-  _"Ask the owner of build-01 to allow org admins: machines."_
+  _"Ask the owner of build-01 to allow org admins: lifecycle."_
 
 ### 5.12 Keyboard and palette
 
@@ -464,8 +470,10 @@ the "needs a look" list is a labelled region announcing its count; placeholders 
   Organization binding is read from the computer, never from the request.
 - **Observability:** audit rows for rename, pause, drain, remove (existing actions) and for policy
   changes; analytics events `fleet_hub_opened`, `fleet_computer_opened`, `fleet_needs_a_look_acted`.
-- **Compatibility:** `FleetNodeView` gains optional fields only; the legacy `controlPolicy` value is
-  still written for one release; `apps/desktop-node` rows render with the R-10 placeholder.
+- **Compatibility:** `FleetNodeView` gains optional fields only; the legacy single-value policy
+  stays as the `desktop` family's mirror (read through, written back — CONTRACTS §2.1); the existing
+  remove call keeps working without a typed name; `apps/desktop-node` rows render with the R-10
+  placeholder.
 
 ---
 
@@ -476,10 +484,23 @@ the "needs a look" list is a labelled region announcing its count; placeholders 
 | **Fleet** / **Node** (Computer)  | Existing     | The registry and one machine in it. Gains a favourite mark and, read-only here, a host reference (FL-16 writes it). |
 | **Organization**                 | Existing     | The scope a computer may be bound to; its member roles feed the derived viewer role.                            |
 | **Viewer role**                  | **NEW** (derived) | `owner · org-admin · org-member · stranger` for one viewer against one computer. Never stored.                |
-| **Action family / audience**     | **NEW** (shape) | The eleven families and three audiences of CONTRACTS §2.1; the control policy becomes this map.             |
+| **Action family / audience**     | **NEW** (shape) | The thirteen families and three audiences of CONTRACTS §2.1; the control policy becomes this map.           |
 | **"Needs a look" item**          | **NEW** (computed) | The one shape of CONTRACTS §4.6; produced by registered producers, rendered here.                        |
 | **Tab registry**                 | **NEW** (internal) | Where hub panels and computer-page tabs register with their flag, consent and kind requirements (D9).    |
 | **Fleet audit**                  | Existing     | Receives the policy-change rows and the existing lifecycle rows.                                                 |
+
+**Acts this epic adds to the page (rule 7).** None needs a consent: they are registry acts, not
+machine acts, so none rides the node link and none is refused by the kill switch.
+
+| Act                     | Family / audience default | Confirmation                                   | Audit (existing unless marked)      | Errors                                   | Agent tool                        |
+| ----------------------- | ------------------------- | ---------------------------------------------- | ----------------------------------- | ---------------------------------------- | --------------------------------- |
+| Rename                  | `machines` / owner        | `plain`                                        | `node.rename`                       | `invalid`, `permission_denied`, `not_found` | — (FL-19)                       |
+| Favourite on/off        | owner only                | `plain`                                        | — (a personal preference)           | `permission_denied`, `not_found`         | —                                 |
+| Pause / resume          | `machines` / owner        | `plain` + toast                                | `node.pause`                        | `permission_denied`, `not_found`         | — (FL-19)                         |
+| Drain / return          | `machines` / owner        | `confirm` — _"Drain build-01? 2 jobs in flight will be released…"_ | `node.drain`       | `permission_denied`, `not_found`         | existing MCP `drain_fleet_node`   |
+| Remove from Fleet       | `machines` / owner        | `confirm-destructive` — type the name          | `node.delete`                       | `invalid` (name mismatch), `permission_denied`, `not_found` | — (FL-19)    |
+| Change a family's audience | owner only             | `plain`                                        | **`node.policy.change`** (new)      | `invalid`, `permission_denied`           | —                                 |
+| List / open a computer  | `view` / org-members      | `plain`                                        | — (read)                            | `not_found` (also for strangers)         | existing `list_fleet_nodes` · readOnly |
 
 ---
 
@@ -495,12 +516,20 @@ the "needs a look" list is a labelled region announcing its count; placeholders 
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §11.2 lists only /nodes/:id/needs-a-look. The hub Overview needs a fleet-wide list; this spec assumes GET /api/fleet/needs-a-look (all computers the viewer may see) is added beside it.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §4.1 names controlPolicy as the jsonb column with the new shape. A type change on a live column is not additive (Constitution V/X); this plan adds controlPolicyFamilies jsonb, backfills desktop from controlPolicy, and keeps writing controlPolicy for one release. Confirm the two-column path.]`
-- `[NEEDS CLARIFICATION: Who produces the job-unassignable "needs a look" kind? R-23 lists FL-03, 05, 13, 17, 18 as producers; "a queued job no runner can take" is a platform fact (queuedReason waiting-for-runner exists today). Proposed: FL-18 (it owns runner diagnosis), else FL-01 P3.]`
-- `[NEEDS CLARIFICATION: Should a computer bound to an Organization default view to org-members (CONTRACTS §2.1) when it was enrolled before this epic? Proposed: yes, since view grants listing only and every other family stays owner.]`
-- `[NEEDS CLARIFICATION: Favourite is a boolean on the node row ("per owner", §4.1). If Organization members gain favourites later, it becomes a per-user table; accepted as owner-only now.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §7 names no audit action for changing a family's audience (FR-31). Proposed `node.policy` with details { family, from, to }; the existing `node.capabilities` is the nearest precedent.]`
+- **Resolved** by CONTRACTS §11.2: the fleet-wide list is `GET /api/fleet/needs-a-look` (every
+  computer the viewer may see), beside `/nodes/:id/needs-a-look`.
+- **Resolved** by CONTRACTS §2.1 / §4.1: a new `controlPolicyFamilies` map is added; the existing
+  `controlPolicy` column keeps its type and is the `desktop` family's mirror — read through when the
+  map has no `desktop` entry, written back whenever that entry changes (no backfill, no expiry).
+- **Resolved** by CONTRACTS R-23: FL-18 owns the `job-unassignable` producer; FL-01 renders it and
+  registers no producer of its own.
+- **Resolved** by CONTRACTS §2.1: the defaults (`view: org-members`, every other family `owner`)
+  apply to every computer whose map lacks the family, including computers enrolled before this
+  epic; only an Organization-bound computer can have org viewers at all (FR-26).
+- **Resolved** by CONTRACTS §4.1: `isFavorite` is a boolean on the computer row, set by its owner
+  only.
+- **Resolved** by CONTRACTS §7: a family audience change writes `node.policy.change` with details
+  `{ family, from, to }`.
 
 ---
 

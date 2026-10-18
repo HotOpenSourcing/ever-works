@@ -88,7 +88,7 @@ a Valkey fan-out implementation; a `fleet_relay` health key; a node module regis
 | Node socket             | Node 22 global `WebSocket` (as `node-leg.ts` uses through `WebSocketFactory`), binary `ArrayBuffer`           | Already the pattern; injectable factory keeps tests offline                                                                           |
 | Backpressure            | Per-channel credit for `files`/`logs` (`ACK` kind); for other kinds, per-channel bounded queue, slow reader dropped after 5 s | CONTRACTS §3.2 kinds; one slow tab must not stall a session                                                                 |
 | Relay bus               | `ioredis` pub/sub, one channel per relay key (`fleet:relay:<family>:<id>`), publisher confirms delivery via a 1 s request/response on a reply channel | Already a dependency; R-7; the computer relay's seam already expects a delivery answer         |
-| Bus selection           | `FLEET_RELAY_MODE=auto|valkey|single-replica` (default `auto` = Valkey when `REDIS_URL`), `FLEET_RELAY_REQUIRE_BUS=true` fails boot without a bus | Operator settings, not feature flags (spec §8b)                                                               |
+| Bus selection           | Valkey whenever `getRedisUrl()` answers (`REDIS_URL`), in-process otherwise — no separate mode setting; `FLEET_RELAY_REQUIRE_BUS=true` fails boot without a bus | CONTRACTS R-7, §9                                                                                    |
 | Node module registry    | Compile-time array in `apps/node/src/core/link/modules/index.ts` of `NodeModule { id, tags(env), families, verbs?, open? }` | D8; no runtime loading; each epic adds one file and one array entry                                                            |
 | Self-update             | Node spawns its own package manager (`npm install -g ever-works-node@<version>` or the install path `doctor` detected) then exits code 75 for the service manager to restart | No downloader of our own; uses the registry the node came from; opt-in                                     |
 | Flags                   | `FLEET_NODE_LINK_ENABLED` (API accepts links); node has no flags, only consents                              | CONTRACTS §9                                                                                                                         |
@@ -96,18 +96,19 @@ a Valkey fan-out implementation; a `fleet_relay` health key; a node module regis
 
 ## 4. Data model
 
-### 4.1 `FleetNode` addition
+### 4.1 `FleetNode` additions (CONTRACTS §4.1, slot FL-02)
 
-| Column     | Type                                               | Notes                                                   |
-| ---------- | -------------------------------------------------- | ------------------------------------------------------- |
-| `consents` | `simple-json` nullable `{ work, attend, manage }`  | From heartbeat; `null` = never reported (older daemon)  |
+| Column                  | Type                                                          | Notes                                                                 |
+| ----------------------- | ------------------------------------------------------------- | --------------------------------------------------------------------- |
+| `consents`              | `simple-json` nullable `{ work, attend, manage, usageScan }` (CONTRACTS "jsonb"; text for SQLite portability like `modelThrottles`) | From heartbeat; `null` = never reported (older daemon) |
+| `previewProfileEnabled` | boolean, default `false`                                      | R-3; column only — FL-10 sets and reads it                             |
 
 Migration `apps/api/src/migrations/1796020000000-AddFleetNodeConsents.ts` — `ADD COLUMN consents
-text NULL`, guarded, `down` drops it. No backfill: a null row reads as `{ work: tags has
-'attended'? false : …, attend: tags includes 'attended', manage: false }` through one pure function
-`effectiveConsents(node)` in contracts (work is inferred from a non-empty lease history being
-impossible to read cheaply, so `work` is inferred `true` when the node has ever reported a
-`workerState`; documented as a best-effort inference for pre-FL-02 daemons).
+text NULL` and `ADD COLUMN previewProfileEnabled boolean NOT NULL DEFAULT false`, each guarded by
+`findColumnByName`, `down` drops both. No backfill: a null row reads through one pure function
+`effectiveConsents(node)` in contracts as `{ attend: tags include 'attended', work: true when the
+node has ever reported a workerState, manage: false, usageScan: false }` — a documented best-effort
+inference for pre-FL-02 daemons (lease history is too costly to read per row).
 
 ### 4.2 Contracts (`packages/contracts/src/fleet/`)
 
@@ -116,20 +117,29 @@ impossible to read cheaply, so `work` is inferred `true` when the node has ever 
   `FLEET_LINK_BACKOFF = { baseMs: 1000, maxMs: 30_000 }`, `FleetLinkFrameKind` (10 JSON, 11 CLOSE,
   1 DATA, 2 RESIZE, 3 EXIT, 20 FRAME, 23 TILES, 21 INPUT, 30 ACK, 31 END, 40 CLIP), `FleetLinkFamily`
   (the nine of §3.3), `FleetLinkControlMessage` union (`link.hello`, `link.ready`, `link.ping`,
-  `link.pong`, `link.pause`, `link.resume`, `link.drain`, `channel.open`, `channel.ready`,
-  `channel.refused`, `channel.close`, `operation.progress`, `operation.done`), `FleetLinkError
-  { code, hint, details }` with the §8 codes plus `resume_failed`, `FleetConsents`,
+  `link.pong`, `channel.open`, `channel.ready`, `channel.refused`, `channel.close`,
+  `operation.progress`, `operation.done`, `operation.cancel` — CONTRACTS §3.1–3.2 — plus
+  `link.pause`, `link.resume`, `link.drain`, the defaults of spec §8b until CONTRACTS names them;
+  the node→platform `session.list|event|status|attention` members are added by FL-04/FL-05 to the
+  same union), `FleetLinkError { code, hint, details }` with the §8 codes plus the `resume_failed`
+  close reason (§3.1), `FleetConsents`,
   `effectiveConsents()`, `FLEET_LINK_FAMILY_CONSENT: Record<FleetLinkFamily, 'work'|'attend'|'manage'|'work|manage'>`,
-  `FLEET_LINK_STATE_CHANGING_FAMILIES`.
+  `FLEET_LINK_VERB_CONSENT_OVERRIDES` (`{ 'health.now': 'link' }` — CONTRACTS R-31: allowed on any
+  open link, so the `machine` channel opens for that verb without `manage`, on platform and node
+  alike), `FLEET_LINK_STATE_CHANGING_FAMILIES`.
 - `fleet-link.codec.ts` — `encodeLinkFrame`, `decodeLinkFrame` (null-never-throw, cap before
   parse), `encodeControl`, `decodeControl` (`__proto__` stripped, bounded strings).
 - `fleet-node.types.ts` — `FleetNodeSelfDescription.consents?`, `FleetNodeView.consents?`,
   `FleetNodeView.link?: { state: 'connected'|'reconnecting'|'not-open'|'refused'|'unsupported-kind', since?, bytesIn, bytesOut }`,
-  `FleetHeartbeatResponse.recommendedNodeVersion?` (spec §8b).
+  `FleetHeartbeatResponse.recommendedNodeVersion?` (CONTRACTS §1.1).
 - `fleet-panic.types.ts` — `node.consent.change`, `node.link.connect`, `node.link.disconnect`,
-  `node.link.channel-open` (the last three pending spec §8b).
+  `node.link.channel-open` (CONTRACTS §7).
 - `fleet-operations.types.ts` — `FleetOperationView { id, nodeId, family, verb, state:
-  'running'|'done'|'failed', progress?: { percent?, message? }, result?, error?, startedAt, endedAt }`.
+  'running'|'done'|'failed'|'cancelled', progress?: { percent?, message? }, result?, error?,
+  startedAt, endedAt }`.
+- `fleet-jobs.types.ts` — `FLEET_MANAGEMENT_LANE_KINDS` (empty in this epic; FL-16/18/20 append
+  `vm-create`, `vm-control`, `runner-install`, `runner-control`, `usage-scan`) and
+  `FLEET_MANAGEMENT_LANE_CONSENT: Record<kind, 'manage'|'work'|'usageScan'>` (CONTRACTS R-34).
 
 ## 5. API surface
 
@@ -138,17 +148,21 @@ impossible to read cheaply, so `work` is inferred `true` when the node has ever 
 | POST   | `/api/fleet/link-token`                       | `{ nodeId, secret }` (node credential)           | `{ token, wsPath: '/ws/fleet/link', expiresInSec: 300 }` | `@Public()` + `FleetNodeAuthGuard` + `FleetEnabledGuard` | 401 undifferentiated; 404 when link flag off |
 | WS     | `/ws/fleet/link`                              | first frame `link.hello`                         | `link.ready` or close                     | token in hello                        | close 4001 (auth), 4003 (flag off), 4008 (rate)  |
 | WS     | `/ws/fleet/:family/:id`                       | first frame `{ type: 'auth', token }`            | bridged channel                           | 60 s attach token, role              | 4001; error frame on role violation              |
-| POST   | `/api/fleet/nodes/:id/channels/:family/attach-token` (generic; each epic may alias under its own path per §11.2) | `{ role: 'viewer'|'driver', params }` | `{ token, wsPath, expiresInSec: 60 }` | authenticated; `FleetAccessService.assertFamily` | `consent_missing`, `permission_denied`, `kill_switch`, `unreachable` |
 | GET    | `/api/fleet/operations/:id`                   | —                                                | `FleetOperationView`                      | authenticated; owner or family audience | `not_found`                                     |
+| DELETE | `/api/fleet/operations/:id`                   | —                                                | `202` → `operation.cancel` to the node    | authenticated; the operation's family audience | `not_found`, `unreachable`, `kill_switch` |
 | POST   | `/api/fleet/heartbeat` (existing)             | `+ consents?`                                    | `+ recommendedNodeVersion?`               | node credential                       | unchanged                                        |
 | GET    | `/api/health/ready` (existing)                | —                                                | `+ fleet_relay`                           | public                                | —                                                |
 
 Internal (not HTTP): `FleetLinkService.request(nodeId, family, verb, params, caller)` is the one
 method every other epic calls from its controller; it opens or reuses a channel, enforces the
 authoriser, correlates `requestId`, returns the result or throws a typed `FleetLinkError`.
+`FleetLinkAttachService.mint(nodeId, family, target, role, caller)` is the one viewer-token
+minter (authoriser applied); there is **no generic attach-token route** — each epic exposes it under
+its own CONTRACTS §11.2 path (`/sessions/:id/attach-token` FL-04, `/nodes/:id/logs/attach-token`
+FL-08, `/nodes/:id/desktop/*` FL-07).
 
-Rate tiers: `link-token` 20/min per node; viewer attach-token 30/min per user; hellos 10/min per
-node (U9).
+Rate tiers (defaults until CONTRACTS §10 lists them — spec §8b): `link-token` 20/min per node;
+viewer attach-token 30/min per user; hellos 10/min per node (U9).
 
 ## 6. Node side
 
@@ -190,8 +204,25 @@ node (U9).
 `program.ts start` gains `--manage` (and P3 `--auto-update`); `createNodeRuntime` gains
 `manageEnabled`; `CapabilityEnvironment` gains `managed: boolean`; `detectCapabilities` appends
 `composeModules(env).tags` (`managed` from the control module when `manageEnabled`). The heartbeat
-`describe()` adds `consents: { work: workEnabled, attend: attendEnabled, manage: manageEnabled }`,
-listed in the **newest** tier of `OPTIONAL_DESCRIPTION_FIELD_TIERS` (`heartbeat.ts:72-90`).
+`describe()` adds `consents: { work: workEnabled, attend: attendEnabled, manage: manageEnabled,
+usageScan: false }` (`usageScan` becomes FL-20's `--usage-scan`), listed in the **newest** tier of
+`OPTIONAL_DESCRIPTION_FIELD_TIERS` (`heartbeat.ts:72-90`).
+
+### 6.3a Management lane (P3, CONTRACTS R-34)
+
+`runtime.ts` gains `createManagementLane`, a sibling of `createAttendedLane` (`runtime.ts:1026-1070`):
+a worker loop that leases only `FLEET_MANAGEMENT_LANE_KINDS` whose consent
+(`FLEET_MANAGEMENT_LANE_CONSENT`) is on, with its own small concurrency (1) outside `--concurrency`;
+the work lane's lease filter excludes those kinds exactly as it excludes `computer-session` today
+(`runtime.ts:657-661`). Platform side, `FleetJobService.lease` keeps one lease endpoint; the lane
+sends its kind list as the existing attended lane does. With an empty kind set the lane is not
+started.
+
+### 6.3b Local IPC (CONTRACTS R-26)
+
+The session daemon (FL-04) and the native screen helper (FL-07) talk to the node over same-user
+local sockets (Unix socket / Windows named pipe) with a token file; neither is a network listener.
+The module registry passes each module the paths; FL-02 owns no socket of its own.
 
 ### 6.4 OS matrix
 
@@ -214,9 +245,13 @@ None.
 ## 8. Web surface
 
 - `apps/web/src/components/fleet/computer/ComputerHeader.tsx` (FL-01) gains the link line from
-  `node.link`; `apps/web/src/components/fleet/link/ConsentsCard.tsx` registered as an Overview slot;
-  `fleet/link/UpgradeRequiredSection.tsx` on the Settings tab; `fleet/link/link.shared.ts` (pure:
-  state word, missing-consent command builder, bytes formatting).
+  `node.link`; `apps/web/src/components/fleet/link/ConsentsCard.tsx` registered with FL-01's
+  `registerOverviewBlock`; `fleet/link/UpgradeRequiredSection.tsx` on the Settings tab (the card
+  and header word come from FL-03's state mapping, not a second one); `fleet/link/link.shared.ts`
+  (pure: link state word, missing-consent command builder, bytes formatting).
+- "Needs a look": `packages/agent/src/fleet/needs-a-look/producers/node-upgrade-required.producer.ts`
+  registered under FL-01's `NEEDS_A_LOOK_PRODUCERS` (CONTRACTS R-23): one `info` item per
+  below-floor node, action = copy the upgrade command.
 - Placeholder resolution in `registry.ts` reads `effectiveConsents(node)` and `node.kind` for the
   consent-missing and kind-cannot variants.
 - i18n groups: `fleet.link.*` (connected, reconnecting, notOpen, refusedByDeployment, unsupportedKind,
@@ -262,7 +297,7 @@ reconnects are driven by the node.
 
 - Audit: `node.consent.change { from, to }` (node actor), `node.link.connect|disconnect
   { linkGeneration, reason }` and `node.link.channel-open { family, target }` for state-changing
-  families (pending spec §8b).
+  families (CONTRACTS §7).
 - Metrics (Prometheus-style counters/histograms through the existing telemetry seam):
   `fleet_link_connected` gauge per node, `fleet_link_reconnects_total`, `fleet_link_channel_opens_total{family}`,
   `fleet_link_refusals_total{code}`, `fleet_link_frame_bytes_total{direction}`, `fleet_relay_bus_publish_ms`.
@@ -275,7 +310,7 @@ reconnects are driven by the node.
 | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
 | P1    | Contracts (types, codec), migration `consents`, `--manage`, heartbeat consents + tag, link-token route, link gateway + registry + authoriser, node link client + mux + module registry (control, machine router), operations endpoint, kill-switch pause, header link line, consents card, i18n | `FLEET_NODE_LINK_ENABLED` (prod off) | Conformance fixture green; node and API specs green; AW-11 specs untouched                   |
 | P2    | Valkey relay bus bound to terminal, computer and link relays; health indicator; boot check; viewer attach tokens + gateway + bridge; computer-session leg over the link with fallback             | same                           | Two-replica integration test green; AW-11 e2e green on both legs                                    |
-| P3    | Upgrade-required surfaces, `--auto-update`, `recommendedNodeVersion`, desktop shell consents                                                                                                       | same                           | Desktop shell heartbeat carries consents; self-update integration test on a container               |
+| P3    | Upgrade-required surfaces + `node-upgrade-required` producer, `--auto-update` (opt-in, spec §8b default), `recommendedNodeVersion`, the management lane (empty kind set), desktop shell consents | same                           | Desktop shell heartbeat carries consents; self-update integration test on a container; lane spec green with a test kind |
 
 ## 14. Test plan
 
@@ -330,7 +365,8 @@ reconnects are driven by the node.
 - **VII** — tokens and payloads never logged; node credential never leaves the node.
 - **VIII** — no plugin.
 - **IX** — spec is behaviour-only; this plan holds every path.
-- **X** — optional fields only; legacy leg retained one release; gateways keep their paths.
+- **X** — optional fields only; the legacy leg stays as the fallback (retiring it is a separate
+  owner decision); gateways keep their paths.
 
 ## 17. References
 

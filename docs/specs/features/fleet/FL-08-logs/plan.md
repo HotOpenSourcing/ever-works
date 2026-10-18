@@ -25,7 +25,7 @@ flowchart LR
     SVC -->|node.logs.read / follow| AUD[(fleet_audit)]
     SVC -->|channel.open family=logs| LINK[NodeLinkService FL-02<br/>relay bus Valkey]
     LINK <-->|one outbound WS per node| NODE[node link client FL-02]
-    NODE --> MOD[logs module<br/>apps/node/src/core/modules/logs]
+    NODE --> MOD[logs module<br/>apps/node/src/core/link/modules/logs]
     MOD --> OS[journalctl · log show · Get-WinEvent<br/>fs tail · docker logs · service manager]
     MOD -->|redactSecrets · 1 MiB/s pacing| NODE
     GW <-.-> LINK
@@ -68,7 +68,7 @@ handler, a `logs` tag, `node.logs.*` audit members, a Logs tab, `fleet_logs_*` t
 
 **Depends on FL-02 and FL-01 (names used below are theirs; paths per their plans):** the node link
 client and `machine`/`logs` channel dispatch (`apps/node/src/core/link/…`), the node-module
-registration contract (`apps/node/src/core/modules/…`), `NodeLinkService` on the API, the generic
+registration contract (`apps/node/src/core/link/modules/…`), `NodeLinkService` on the API, the generic
 viewer gateway `/ws/fleet/<family>/<id>` with attach tokens, `consents` on `FleetNode`, and FL-01's
 role derivation plus the computer-page tab registry `apps/web/src/components/fleet/registry.ts`.
 
@@ -140,7 +140,8 @@ All under the existing `@Controller('api/fleet')` root, new controller
 | POST   | `/nodes/:id/logs/attach-token`     | `OpenLogsDto { source: string; sources?: string[]; lines?: 1..500; follow: boolean }` | same                      | 30/min/user | `{ token, wsPath, channelId, expiresInSec: 60 }` — opens the node channel, writes `node.logs.read` (+ `follow`); `limit_exceeded` when the viewer already holds 8 channels on that node |
 | POST   | `/nodes/:id/logs/read`             | `ReadLogsDto { source: string; lines?: 1..500; filter?: string }` | same; Agents through the tool           | 30/min/user | `{ lines: FleetLogLine[], truncated, redactions }` one-shot (no follow) — the MCP/CLI/Agent path; writes `node.logs.read` |
 
-`/nodes/:id/logs/read` is a sub-path of the §11.2 `logs` root (spec §8b). Every error body is
+All three paths are listed in CONTRACTS §11.2. The 8-channel per-viewer cap is the §10 row raised
+in spec §8b (b). Every error body is
 `{ error: { code, hint, details } }` (CONTRACTS §8). Rate tiers reuse the existing `@Throttle`
 decorators as `computer.controller.ts` does.
 
@@ -151,8 +152,9 @@ redaction counters). Role is always `viewer`.
 
 ## 6. Node side
 
-**Module:** `apps/node/src/core/modules/logs/` registered through FL-02's module contract; advertises
-`logs` when `consents.manage` is true and at least one source kind is readable (CONTRACTS §1.2).
+**Module:** `apps/node/src/core/link/modules/logs/` — a `NodeModule` (FL-02 plan §6) appended to the
+compile-time array in `apps/node/src/core/link/modules/index.ts`; advertises `logs` when
+`consents.manage` is true and at least one source kind is readable (CONTRACTS §1.2).
 
 | File                                   | Responsibility                                                                                                                                                           |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -164,7 +166,7 @@ redaction counters). Role is always `viewer`.
 | `file-source.ts`                       | Tail by bytes (last 500 lines by backward scan ≤ 8 MiB), follow with rotation/truncation detection, `earlier` by backward scan                                            |
 | `container-source.ts`                  | `docker logs` read/follow; `gone` when the container disappears                                                                                                           |
 | `service-source.ts`                    | Service → source mapping per OS (table in §3), delegating to the three readers above                                                                                     |
-| `allowed-roots.ts` (`modules/shared/`) | R-18 resolver: Checkout paths + workspace root + `--files-root` extras; canonicalise with `realpath`, refuse escapes; **FL-11 reuses this file**                           |
+| `allowed-roots.ts` (`link/modules/shared/`) | R-18 resolver: Checkout paths + workspace root + `--files-root` extras; canonicalise with `realpath`, refuse escapes; FL-08 lands first (Wave 1), so FL-11 and FL-14 reuse this one file rather than adding their own resolver |
 | `log-channel.ts`                       | One open channel: initial 500, `redactSecrets` per line, NDJSON framing ≤ 64 KiB, `ACK` window 1 MiB, 1 MiB/s token bucket, oldest-drop with counter, pause/resume/follow, `earlier` |
 | `line-classifier.ts`                   | thin adapter over `classifyLogLevel` for each source's native level                                                                                                     |
 
@@ -183,15 +185,20 @@ redaction counters). Role is always `viewer`.
    module validates (source exists, readable, roots) → `channel.ready` or
    `channel.refused { code, hint }` (`invalid`, `unsupported_on_node`, `operation_failed`).
 2. Node streams the initial lines as `DATA` frames, then `JSON { type: 'logs.initial-done', count }`.
+   A one-shot read (`POST /nodes/:id/logs/read`, the Agent tool) sends §3.3's `logs.read { lines }`
+   and closes after `logs.initial-done`; a follow sends `logs.follow { on: true }`.
 3. Follow: `DATA` frames paced by credits; viewer sends `ACK [bytes]` as it consumes;
    `JSON logs.pause` → node buffers up to 1 MiB then drops oldest and counts; `logs.resume` flushes;
    `logs.follow { on: false }` stops the reader but keeps the channel; `logs.earlier { before }` →
    one batch of 500 older lines as `DATA` then `JSON logs.earlier-done { count, hasMore }`.
 4. Notices: `JSON logs.notice { kind: 'dropped' | 'gone' | 'redactions' | 'group-membership', count?, hint? }`.
-5. Close: either side `CLOSE`; node kills the reader child within 3 s. Kill switch → link refuses
-   new opens and the node closes open channels with `kill_switch` (R-24).
+5. Close: either side `CLOSE`; node kills the reader child within 3 s. Kill switch → the platform
+   sends `link.pause` (CONTRACTS §3.2), the link refuses new opens and the node closes open channels
+   with `kill_switch` (R-24).
 6. `logs.sources` is answered on the `machine` channel (one per link) so the list never opens a
-   channel of its own.
+   channel of its own. CONTRACTS §3.3 lists `logs.sources` under the `logs` family and does not
+   list `logs.initial-done`, `logs.earlier`, `logs.earlier-done` or `logs.notice`; both are the
+   §3.3 addition raised in spec §8b (a), made in the same PR.
 
 Children run with `buildNodeCheckEnv` (scrubbed env), `windowsHide: true`, and a 10 s read
 timeout for the initial batch; a timeout is `operation_failed` with the child's first stderr line
@@ -206,8 +213,11 @@ package is added; `docs/plugin-system/built-in-plugins.md` is untouched.
 
 - **Route:** `/fleet/computers/[id]?tab=logs` (FL-01 page; this epic registers the tab).
 - **Registry:** `apps/web/src/components/fleet/logs/logs-tab.registry.ts` calls FL-01's
-  `registerComputerTab({ id: 'logs', consent: 'manage', family: 'logs', order: 40, load: () => import('./LogsTab') })`
-  and `registerPaletteEntries(nodes => nodes.map(n => ({ id: `fleet.logs.${n.id}`, title: t('fleet.logs.palette', { computer: n.name }), href: … })))`.
+  `registerComputerTab({ id: 'logs', labelKey: 'fleet.computer.tabs.logs', order: 40, epic: 'FL-08', flag: 'FLEET_MACHINE_FACTS_ENABLED', consent: 'manage', load: () => import('./LogsTab') })`
+  (the entry shape FL-01's plan §6 fixes; the `logs` family audience is checked server-side and
+  rendered by the tab's own permission state). The "Logs on <computer>" palette entries are added
+  to the per-computer dynamic section FL-01 builds in
+  `apps/web/src/components/command-palette/registry/sections.ts` — no second palette registry.
 - **Components** under `apps/web/src/components/fleet/logs/`: `LogsTab.tsx` (layout, source
   selection, state card), `LogSourceTree.tsx`, `LogViewer.tsx` (windowed list, follow/pause
   state, selection), `LogViewerToolbar.tsx`, `LogViewerFooter.tsx`, `LogOpenPathField.tsx`,
@@ -265,7 +275,7 @@ fleet audit retention. The 30-second source refresh is browser-driven while the 
   kind, requester, counts, never text or absolute paths beyond the source label.
 - **Audit:** `node.logs.read` on every open and one-shot read; `node.logs.follow` when a follow
   starts; `requestedBy` `user:<id>` | `agent:<id>`; `confirmationClass: 'plain'`; `outcome`.
-- **Permissions:** family `logs` (owner-only until CONTRACTS adds the row); role derivation from
+- **Permissions:** family `logs` (CONTRACTS §2.1, default audience `owner`); role derivation from
   FL-01; `getForUser` for owner scope; Organization members via the audience only.
 - **Kill switch / drain:** refused with `kill_switch`; open channels closed; drain-all does not
   touch log channels (they are not sessions) but the link's drain closes them with the node.
@@ -286,7 +296,7 @@ fleet audit retention. The 30-second source refresh is browser-driven while the 
 | ------ | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **P1** | `FLEET_MACHINE_FACTS_ENABLED` (off) | contracts; node module (sources, four readers, channel, roots); API controller + service + audit; gateway family registration; Logs tab; tools; palette; i18n; tests |
 | **P2** | same                                | merged sources (`sources[]`), `logs.earlier`, Services/Docker row hand-offs (FL-09 hooks), Compose **Logs** entry                                       |
-| **P3** | same                                | "Open the log" action on `schedule-failed`/failed-service needs-a-look items (FL-03 producer contract), download of shown lines                        |
+| **P3** | same                                | "Open the log" positioned at the failure from the Services tab's failed rows (the "needs a look" action waits for a CONTRACTS §4.6 kind — spec §8b (c)), download of shown lines |
 
 Default off in production until ACC-FL08-01…16 are green on `develop`; flags gate behaviour, not
 merges (README D12).

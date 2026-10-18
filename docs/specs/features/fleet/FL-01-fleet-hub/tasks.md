@@ -32,11 +32,11 @@
       **Test**: `packages/contracts/src/fleet/__tests__/fleet-access.spec.ts` — null map, legacy value
       as `desktop`, partial map, 3×4 audience/role truth table.
 - [ ] **T-02** (parallel). Add `fleet-needs-a-look.types.ts` at
-      `packages/contracts/src/fleet/fleet-needs-a-look.types.ts`: the ten kinds, severity, item shape,
-      `sortNeedsALook`. **Test**: `packages/contracts/src/fleet/__tests__/fleet-needs-a-look.spec.ts`.
+      `packages/contracts/src/fleet/fleet-needs-a-look.types.ts`: the eleven kinds of CONTRACTS §4.6,
+      severity, the item shape exactly as §4.6 (no extra fields), `sortNeedsALook`. **Test**: `packages/contracts/src/fleet/__tests__/fleet-needs-a-look.spec.ts`.
 - [ ] **T-03**. Extend `FleetNodeView` in `packages/contracts/src/fleet/fleet-node.types.ts` (after
       `controlPolicy`, `:471`) with optional `isFavorite`, `hostNodeId`, `virtualKind`,
-      `controlPolicyFamilies`, `viewerRole`. Add `'node.policy'` to `FleetAuditAction` and
+      `controlPolicyFamilies`, `viewerRole`. Add `'node.policy.change'` to `FleetAuditAction` and
       `FLEET_AUDIT_ACTIONS` in `packages/contracts/src/fleet/fleet-panic.types.ts`.
       **Test**: extend `packages/contracts/src/fleet/__tests__/fleet-panic.spec.ts`; run
       `apps/api/src/fleet/__tests__/node-contract.conformance.spec.ts` unchanged.
@@ -65,8 +65,8 @@
 
 ## P1.C — Web: hub, overview, moved Computers tab
 
-- [ ] **T-08**. Create `apps/web/src/components/fleet/registry.ts` with `registerHubPanel`,
-      `registerComputerTab`, `registerOverviewSlot`, `getComputerTabs`, `resolvePlaceholder(entry, node)`
+- [ ] **T-08**. Create `apps/web/src/components/fleet/registry.ts` with `registerHubTab`,
+      `registerComputerTab`, `registerOverviewBlock` (CONTRACTS §11.1), `getComputerTabs`, `resolvePlaceholder(entry, node)`
       and the twelve fixed tab ids in order.
       **Test**: `apps/web/src/components/fleet/registry.unit.spec.ts` — order, flag off, consent
       missing, kind cannot, not shipped.
@@ -117,11 +117,12 @@
       comments stating the legacy mirror rule.
       **Test**: `pnpm --filter @ever-works/agent build` clean.
 - [ ] **T-17**. Migrations from `apps/api/`: `apps/api/src/migrations/1796010000000-AddFleetNodeControlPolicyFamilies.ts`
-      (add column + guarded backfill of `desktop` from `controlPolicy`) and
-      `apps/api/src/migrations/1796010100000-AddFleetNodeFavorite.ts`; per-step guards as in
-      `1795161700000-AddFleetModelUsageLimits.ts`.
+      (add the column only — no backfill; a missing `desktop` key reads through to `controlPolicy`,
+      CONTRACTS §2.1) and `apps/api/src/migrations/1796010100000-AddFleetNodeFavorite.ts`; per-step
+      guards as in `1795161700000-AddFleetModelUsageLimits.ts`.
       **Test**: applies twice on sqlite and Postgres; `migration:generate` afterwards is empty; a row
-      with `controlPolicy = 'org-admins'` reads `{"desktop":"org-admins"}`.
+      with `controlPolicy = 'org-admins'` and a null map yields `effectiveControlPolicy(node).desktop
+      === 'org-admins'`; writing `families.desktop = 'owner'` writes `controlPolicy = 'owner'` back.
 - [ ] **T-18**. Create `packages/agent/src/fleet/fleet-access.service.ts` (`roleFor`, `assertFamily`,
       `canAct`) over `OrganizationMemberRepository`
       (`packages/agent/src/database/repositories/organization-member.repository.ts`); register and export
@@ -134,12 +135,14 @@
       **Test**: extend `fleet.controller.spec.ts` — member of bound org sees the node; member of another
       org gets `[]` / 404; runner pill's `listForUser` unchanged.
 - [ ] **T-20**. PATCH widening: `UpdateFleetNodeDto` (`apps/api/src/fleet/dto/fleet.dto.ts:97`) gains
-      `isFavorite?`, `controlPolicyFamilies?` (custom validator), `DELETE /nodes/:id` gains
-      `confirmName`; `PATCH` routes `name/paused/disabled` through `assertFamily('machines')`,
-      favourite/policy through owner check; policy write mirrors `controlPolicy = families.desktop`
-      and audits `node.policy`.
+      `isFavorite?`, `controlPolicyFamilies?` (custom validator), `DELETE /nodes/:id` gains an
+      **optional** `confirmName` (existing callers without it keep working — Constitution X);
+      `PATCH` routes `name/paused/disabled` through `assertFamily('machines')`, favourite/policy
+      through owner check; policy write mirrors `controlPolicy = families.desktop` when `desktop`
+      changes and audits `node.policy.change`.
       **Test**: extend `fleet.controller.spec.ts` — 403 non-owner favourite; invalid family key → 400;
-      audit row `{ family, from, to }`; wrong `confirmName` → `invalid`.
+      audit row `node.policy.change { family, from, to }`; wrong `confirmName` → `invalid`; no
+      `confirmName` → 204 as today.
 - [ ] **T-21**. AW-11 compatibility: `packages/agent/src/computer/control-arbiter.service.ts:166,224,657`
       use `FleetAccessService.roleFor` and `effectiveControlPolicy(node).desktop`; keep
       `viewerRoleForNode` exported (deprecated comment) for callers outside the arbiter.
@@ -164,8 +167,8 @@
       rename/favourite.
 - [ ] **T-24**. `computer/PolicyFamiliesEditor.tsx` mounted in `SettingsTab.tsx` with the drawer's
       capability / limits / cost / lifecycle sections reused from `fleet/computers/FleetNodeDrawer.tsx`.
-      **Test**: `PolicyFamiliesEditor.unit.spec.tsx` — eleven selects, defaults, `desktop` prefilled
-      from legacy.
+      **Test**: `PolicyFamiliesEditor.unit.spec.tsx` — thirteen selects (CONTRACTS §2.1), defaults,
+      `desktop` read through from legacy.
 - [ ] **T-25**. Favourite ordering in `ComputerCards.tsx` and `FleetComputersTable.tsx`; star column
       writes through `setFavorite`.
       **Test**: extend `fleet-hub.shared.unit.spec.ts` — favourites first, then online by last check.
