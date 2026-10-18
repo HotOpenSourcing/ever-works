@@ -1,5 +1,10 @@
 import 'reflect-metadata';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    ConflictException,
+    ForbiddenException,
+    NotFoundException,
+} from '@nestjs/common';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { NeedsALookService } from '@ever-works/agent/fleet';
@@ -371,6 +376,19 @@ describe('machines-family acts — rename, pause, disable, drain, remove (FR-22,
         expect(service.deleteForUser).toHaveBeenCalledWith('the-owner', SHARED, adminCtx, {
             confirmName: 'build-01',
         });
+    });
+
+    it('asks a non-owner for the typed name before removing the owner’s computer (CONTRACTS §2.2)', async () => {
+        const { controller, service } = build({ actor: 'org-admin' });
+        const refusal = await controller.remove(auth, SHARED).catch((e) => e);
+        expect(refusal).toBeInstanceOf(ConflictException);
+        expect((refusal as ConflictException).getResponse()).toMatchObject({
+            error: {
+                code: 'confirmation_required',
+                details: { class: 'confirm-destructive', summary: 'Remove build-01 from Fleet?' },
+            },
+        });
+        expect(service.deleteForUser).not.toHaveBeenCalled();
     });
 
     it('removes for the owner without a typed name exactly as before', async () => {

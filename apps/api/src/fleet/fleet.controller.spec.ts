@@ -377,7 +377,7 @@ describe('FleetController', () => {
         );
     });
 
-    it('remove refuses a wrong typed name with invalid and nothing else runs', async () => {
+    it('remove passes a wrong typed name to the service and answers its invalid refusal', async () => {
         service.deleteForUser.mockRejectedValueOnce(
             new BadRequestException({ error: { code: 'invalid' } }),
         );

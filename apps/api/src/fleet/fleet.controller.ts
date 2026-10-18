@@ -1,6 +1,7 @@
 import {
     BadRequestException,
     Body,
+    ConflictException,
     Controller,
     Delete,
     ForbiddenException,
@@ -763,6 +764,21 @@ export class FleetController {
     ): Promise<void> {
         // Fleet hub (FL-01, FR-22): remove is a `machines`-family act.
         const actor = await this.service.resolveMachinesActor(auth.userId, id);
+        if (actor.role !== 'owner' && confirmName === undefined) {
+            // "No field = as before" protects the owner's existing callers. Someone
+            // else removing the owner's computer has no such history: the act is
+            // `confirm-destructive` (CONTRACTS §2.2), so the typed name is required.
+            const summary = `Remove ${actor.nodeName} from Fleet?`;
+            throw new ConflictException({
+                statusCode: 409,
+                message: summary,
+                error: {
+                    code: 'confirmation_required',
+                    hint: `Type ${actor.nodeName} as confirmName to remove it.`,
+                    details: { class: 'confirm-destructive', summary },
+                },
+            });
+        }
         if (actor.role === 'owner' && confirmName === undefined) {
             await this.service.deleteForUser(auth.userId, id);
         } else {

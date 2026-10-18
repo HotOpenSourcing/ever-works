@@ -1,6 +1,13 @@
 'use client';
 
-import { useState, useTransition, type FormEvent, type KeyboardEvent } from 'react';
+import {
+    useEffect,
+    useRef,
+    useState,
+    useTransition,
+    type FormEvent,
+    type KeyboardEvent,
+} from 'react';
 import { useTranslations } from 'next-intl';
 import { toast } from 'sonner';
 import {
@@ -14,7 +21,12 @@ import {
     Star,
     Trash2,
 } from 'lucide-react';
-import { fleetFamilyAllows, type FleetNodeView, type FleetViewerRole } from '@ever-works/contracts';
+import {
+    FLEET_MAX_NODE_NAME_LENGTH,
+    fleetFamilyAllows,
+    type FleetNodeView,
+    type FleetViewerRole,
+} from '@ever-works/contracts';
 import { useRouter } from '@/i18n/navigation';
 import { ROUTES } from '@/lib/constants';
 import { Button } from '@/components/ui/button';
@@ -47,9 +59,6 @@ import { captureFleetEvent } from '../fleet-telemetry';
 
 const TRIGGER =
     'inline-flex items-center justify-center w-8 h-8 rounded-md border border-border dark:border-border-dark text-text dark:text-text-dark hover:bg-surface-secondary dark:hover:bg-surface-secondary-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40';
-
-/** Server-side bounds of a node name (`FLEET_MIN/MAX_NODE_NAME_LENGTH`). */
-const NAME_MAX = 64;
 
 type DrainCount = { state: 'counting' } | { state: 'known'; count: number } | { state: 'unknown' };
 
@@ -98,6 +107,18 @@ export function ComputerActionsMenu({
     const paused = node.status === 'paused';
     const drained = node.status === 'disabled';
     const registered = getComputerActions('menu', flags);
+    const menuRef = useRef<HTMLDivElement | null>(null);
+    const focusTriggerNext = useRef(false);
+
+    // Leaving the inline rename (saved, cancelled or Escape) puts the focus
+    // back on the ⋯ button it came from, never on the page's start.
+    useEffect(() => {
+        if (renaming || !focusTriggerNext.current) return;
+        focusTriggerNext.current = false;
+        menuRef.current
+            ?.querySelector<HTMLButtonElement>('[data-testid="fleet-computer-menu-trigger"]')
+            ?.focus();
+    }, [renaming]);
 
     // ── Rename (inline) ────────────────────────────────────────────────────
     const startRename = () => {
@@ -105,11 +126,15 @@ export function ComputerActionsMenu({
         setRenameError(null);
         setRenaming(true);
     };
+    const endRename = () => {
+        focusTriggerNext.current = true;
+        setRenaming(false);
+    };
     const submitRename = (event: FormEvent) => {
         event.preventDefault();
         const name = renameValue.trim();
         if (name === node.name) {
-            setRenaming(false);
+            endRename();
             return;
         }
         startTransition(async () => {
@@ -118,7 +143,7 @@ export function ComputerActionsMenu({
                 setRenameError(result.error || t('renameFailed', { name: node.name }));
                 return;
             }
-            setRenaming(false);
+            endRename();
             toast.success(t('renamed', { name }));
             router.refresh();
         });
@@ -126,7 +151,7 @@ export function ComputerActionsMenu({
     const onRenameKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
         if (event.key === 'Escape') {
             event.preventDefault();
-            setRenaming(false);
+            endRename();
         }
     };
 
@@ -210,7 +235,8 @@ export function ComputerActionsMenu({
     };
     const nameMatches = removeName.trim() === node.name;
     const remove = () => {
-        if (!nameMatches) return;
+        // Only from the open dialog, and only with the name typed.
+        if (!removeOpen || !nameMatches) return;
         startTransition(async () => {
             const result = await deleteFleetNodeAction(node.id, removeName);
             if (!result.success) {
@@ -236,7 +262,7 @@ export function ComputerActionsMenu({
                     value={renameValue}
                     onChange={(event) => setRenameValue(event.target.value)}
                     onKeyDown={onRenameKeyDown}
-                    maxLength={NAME_MAX}
+                    maxLength={FLEET_MAX_NODE_NAME_LENGTH}
                     aria-label={t('renameLabel', { name: node.name })}
                     aria-invalid={renameError ? true : undefined}
                     aria-describedby={renameError ? 'fleet-computer-rename-error' : undefined}
@@ -250,7 +276,7 @@ export function ComputerActionsMenu({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    onClick={() => setRenaming(false)}
+                    onClick={endRename}
                     disabled={isPending}
                 >
                     {t('cancel')}
@@ -297,7 +323,7 @@ export function ComputerActionsMenu({
 
     return (
         <>
-            <div data-testid="fleet-computer-menu">
+            <div ref={menuRef} data-testid="fleet-computer-menu">
                 <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                         <button
@@ -412,6 +438,9 @@ export function ComputerActionsMenu({
 
             <Dialog open={removeOpen} onOpenChange={(open) => !open && setRemoveOpen(false)}>
                 <DialogContent>
+                    {/* Outside the form: the close button is a plain <button>, and inside
+                        the form it would SUBMIT — removing the computer it was meant to spare. */}
+                    <DialogClose onClose={() => setRemoveOpen(false)} />
                     <form
                         data-testid="fleet-computer-remove-dialog"
                         onSubmit={(event) => {
@@ -419,7 +448,6 @@ export function ComputerActionsMenu({
                             remove();
                         }}
                     >
-                        <DialogClose onClose={() => setRemoveOpen(false)} />
                         <DialogHeader>
                             <DialogTitle className="text-lg font-semibold text-text dark:text-text-dark">
                                 {t('removeTitle', { name: node.name })}

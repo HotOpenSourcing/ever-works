@@ -187,6 +187,39 @@ describe('ComputerActionsMenu — the owner', () => {
         expect(screen.queryByTestId('fleet-computer-drain-dialog')).toBeNull();
     });
 
+    it('never removes when the dialog is closed, even with the name typed', async () => {
+        actions.deleteFleetNodeAction.mockResolvedValue(ok({ deleted: true }));
+        render(<ComputerActionsMenu node={node()} />);
+        await openMenu();
+        await userEvent.click(screen.getByTestId('fleet-computer-menu-remove'));
+        await userEvent.type(screen.getByTestId('fleet-computer-remove-name'), 'build-01');
+        await userEvent.click(screen.getByRole('button', { name: 'close' }));
+        await waitFor(() =>
+            expect(screen.queryByTestId('fleet-computer-remove-dialog')).toBeNull(),
+        );
+        expect(actions.deleteFleetNodeAction).not.toHaveBeenCalled();
+    });
+
+    it('puts the focus back on the ⋯ button when the inline rename ends', async () => {
+        render(<ComputerActionsMenu node={node()} />);
+        await openMenu();
+        await userEvent.click(screen.getByTestId('fleet-computer-menu-rename'));
+        await userEvent.keyboard('{Escape}');
+        await waitFor(() =>
+            expect(screen.getByTestId('fleet-computer-menu-trigger')).toHaveFocus(),
+        );
+    });
+
+    it('accepts a name as long as the server does (FLEET_MAX_NODE_NAME_LENGTH)', async () => {
+        render(<ComputerActionsMenu node={node()} />);
+        await openMenu();
+        await userEvent.click(screen.getByTestId('fleet-computer-menu-rename'));
+        expect(screen.getByTestId('fleet-computer-rename-input')).toHaveAttribute(
+            'maxLength',
+            '200',
+        );
+    });
+
     it('removes only once the typed name matches, then leaves the page', async () => {
         actions.deleteFleetNodeAction.mockResolvedValue(ok({ deleted: true }));
         render(<ComputerActionsMenu node={node()} />);
@@ -220,6 +253,18 @@ describe('ComputerActionsMenu — organisation roles (mirrors the server)', () =
         );
         // Copying the link is not an act on the computer.
         expect(screen.queryByTestId('fleet-computer-menu-copy-link-denied')).toBeNull();
+        // Disabled, not just captioned: a click does nothing.
+        for (const act of ['rename', 'favourite', 'pause', 'drain', 'remove']) {
+            expect(
+                screen.getByTestId(`fleet-computer-menu-${act}`).closest('button'),
+            ).toBeDisabled();
+        }
+        expect(
+            screen.getByTestId('fleet-computer-menu-copy-link').closest('button'),
+        ).not.toBeDisabled();
+        await userEvent.click(screen.getByTestId('fleet-computer-menu-remove'));
+        expect(screen.queryByTestId('fleet-computer-remove-dialog')).toBeNull();
+        expect(actions.deleteFleetNodeAction).not.toHaveBeenCalled();
     });
 
     it('names the admin audience for an org admin', async () => {
