@@ -24,6 +24,11 @@ heartbeat fields (§1.1), `service-failed` (§4.6), tunnel close reasons and req
 FL-06 routes (§11.2), `node.session.pull-request.open` (§7), and §10 rows for logs, operations and
 the preview profile.
 
+**Revision 6 (2026-10-18)** — the audit of FL-16…FL-20: FL-02 creates the management lane (R-34); tool and CLI
+naming for non-plural families (§11.3); FL-01 registry hooks for Add computer and computer actions
+(§11.1); `virtualMeta` and the `providerMeta` contents (§4.1); runner states and owner (§4.11);
+`priceListVersion` and `dedupeKey` on usage samples (§4.10).
+
 **Revision 5 (2026-10-18)** — the audit of FL-11…FL-15: one confirmation mechanism for every caller,
 no tokens (§2.2); command and schedule messages (§3.3); operation states incl. `cancelled` and
 `interrupted` (§3.3); schedule-state columns, `cancelled-by-user` and `scheduledFor` (§4.4);
@@ -72,14 +77,14 @@ Rulings that settle questions more than one epic would otherwise answer differen
 | R-31 | **`health.now` is allowed on any open link** (read-only; no consent beyond the link itself).                                                                                                                                                                                                                                                                                                       | FL-03                |
 | R-32 | **An Agent may answer another Agent's session _question_ only when its owner enabled "may answer other sessions" on that Agent**; permission prompts are human-only in every case.                                                                                                                                                                                                                | FL-05, 19            |
 | R-33 | **Held Agent actions** (an Agent asked for a state-changing machine action that needs a confirmation) reuse the existing `agent_action_proposals` table; no new table.                                                                                                                                                                                                                             | FL-09, 19            |
-| R-34 | **A management lane leases `vm-create`, `vm-control`, `runner-install`, `runner-control` and `usage-scan` jobs** on nodes with the matching consent (`--manage` for VMs, `--work` for runners, `--usage-scan` for the scan), modelled on the existing attended lane; they never compete with Agent work for `--concurrency`.                                                                          | FL-02, 16, 18, 20    |
+| R-34 | **A management lane (created by FL-02 with an empty kind list, FL-02 T-27) leases `vm-create`, `vm-control`, `runner-install`, `runner-control` and `usage-scan` jobs** on nodes with the matching consent (`--manage` for VMs, `--work` for runners, `--usage-scan` for the scan), modelled on the existing attended lane; they never compete with Agent work for `--concurrency`.                                                                          | FL-02, 16, 18, 20    |
 | R-35 | **`origin`, `hostNodeId`, `virtualKind` are added by FL-16's slot; `providerPluginId`, `providerMachineRef`, `providerMeta` by FL-17's.** Both migrations guard every column with `findColumnByName` so either may land first. Child Nodes enrol with a late-minted one-time token when the guest signals readiness (`enroll --token-file`, never argv).                                              | FL-16, 17            |
 | R-36 | **"Remove from Fleet" on a cloud computer** is refused with `unsupported_on_node` and the hint "destroy it instead" until the provider reports the machine gone — an additive guard, not a removed action. Power-off and destroy stay allowed while the kill switch is on (they stop spending).                                                                                                      | FL-17                |
+| R-37 | **Cancelling a GitHub workflow run** is worded "Cancel workflow run" everywhere (never "cancel run"); the tool is `fleet_runners_cancel_run`. The Jobs view is a hub Overview panel, not a seventh tab.                                                                                                                                                                                             | FL-18                |
 | R-38 | **Owner sessions have no Run, so their action ledger is their audit rows.** Agent sessions keep the per-action ledger on their Run (`agent_run_logs`); an owner session's actions are read back from its `fleet_audit` rows (`node.session.*` with the action in `target`), and its cost shows as a session total only.                                                                 | FL-06, 20            |
 | R-39 | **One allowed-roots resolver on the node** (`apps/node/src/core/link/allowed-roots.ts`, R-18's rules) is used by logs (FL-08), files (FL-11) and checkouts (FL-14). Whichever of those lands first creates it; the others import it and never define a second one.                                                                                                                                        | FL-08, 11, 14        |
 | R-40 | **Node-side modules live under FL-02's registry**: `apps/node/src/core/link/modules/<family>.ts`, one entry each in `apps/node/src/core/link/modules/index.ts`. No epic creates `core/modules/` or `link/channels/`.                                                                                                                                                                           | all                  |
 | R-41 | **Allowed roots include only `ready` checkouts** (R-18's "every checkout path" means every checkout in state `ready`; `creating`, `missing` and `archived` ones are not roots). The machine owner lists code folders for discovery with the node option `--code-folder <path>` (repeatable); they are set on the machine only. | FL-08, 11, 14 |
-| R-37 | **Cancelling a GitHub workflow run** is worded "Cancel workflow run" everywhere (never "cancel run"); the tool is `fleet_runners_cancel_run`. The Jobs view is a hub Overview panel, not a seventh tab.                                                                                                                                                                                             | FL-18                |
 
 ## 1. Consents and capability tags
 
@@ -295,7 +300,8 @@ allowed values validated in code, as existing fleet columns are.
 | `virtualKind`             | enum null `vm · container`                        |                                                              | FL-16         |
 | `providerPluginId`        | text null                                         | cloud computers                                              | FL-17         |
 | `providerMachineRef`      | text null                                         | provider's own id                                            | FL-17         |
-| `providerMeta`            | jsonb null                                        | region, size, hourly rate, created at (no secrets)           | FL-17         |
+| `providerMeta`            | jsonb null                                        | region, size, hourly rate, created at, power timeline, idle policy, cost snapshot (no secrets) | FL-17 |
+| `virtualMeta`             | jsonb null                                        | system, image, CPUs, memory, disk (survives job-body purge)  | FL-16         |
 
 ### 4.2 `FleetSession` (new, table `fleet_sessions`, FL-04 slot 00; FL-05 slot 00 adds the last five rows)
 
@@ -429,13 +435,13 @@ kill-switch · drain · link-closed`), `requestCount`, `bytesIn`, `bytesOut`, `a
 
 `nodeId`, `fleetSessionId` null, `provider`, `providerSessionId` null, `model`, `inputTokens`,
 `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `requests`, `costCents` null,
-`bucketStart` (hour), `checkoutPath` null. Counts only — never content.
+`bucketStart` (hour), `checkoutPath` null, `priceListVersion` null (the `MODEL_LIST_PRICES` version the cost used), `dedupeKey` (provider × session × model × hour × path; unique). Counts only — never content.
 
 ### 4.11 `FleetActionsRunner` (new, table `fleet_actions_runners`, FL-18)
 
 `nodeId`, `name`, `scope` (`org · repo`), `target` (owner or owner/repo), `labels text[]`,
-`mode` (`service · docker`), `state` (`installing · idle · working · offline · removed · unknown`),
-`githubRunnerId` null, `lastSeenAt` null, `installedAt`.
+`mode` (`service · docker`), `state` (`installing · idle · working · offline · stopped · failed · removed · unknown`),
+`githubRunnerId` null, `lastSeenAt` null, `installedAt`, `ownerUserId`. FL-18 may add epic-local columns named in its plan.
 
 ## 5. Session state machine and attention
 
@@ -633,6 +639,10 @@ Node-side there are no flags, only consents.
 | `/activity?view=sessions`              | `DASHBOARD_ACTIVITY_SESSIONS`    | FL-05 |
 | `/settings/fleet` (existing)           | `DASHBOARD_SETTINGS_FLEET`       | —     |
 
+**The FL-01 registry also exposes `registerAddComputerItem` (the hub's Add computer ▾ menu) and
+`registerComputerAction` (the computer header and ⋯ menu)**, so FL-16/FL-17 add their entries without
+editing FL-01's files.
+
 **FL-01 creates every hub route file and `ROUTES` constant above** (rendering an honest "arrives
 with FL-nn" state behind the owning epic's flag); the named epic fills its tab through the
 registry and never creates a second route file or constant.
@@ -672,7 +682,10 @@ Node-facing internal endpoints stay under `/api/internal/fleet/*`.
 
 ### 11.3 Tools, MCP, CLI
 
-- Agent tools and MCP tools are named `fleet_<family>_<verb>` with plural families
+- Agent tools and MCP tools are named `fleet_<family>_<verb>`; `<family>` is the plural noun for
+  collections (`sessions`, `logs`, `commands`, …) and the API segment where that is not a plural
+  (`virtual`, `cloud`, `usage`, `status`, `nodes`); CLI groups are plural with singular aliases
+  (`fleet sessions` = `fleet session`)
   (`fleet_sessions_start`, `fleet_sessions_question`, `fleet_sessions_answer`, `fleet_logs_read`,
   `fleet_services_action`, `fleet_commands_run`, `fleet_status`, `fleet_operations_get`, …);
   read-only tools carry `readOnly: true`, the rest `destructive: true|false` and
