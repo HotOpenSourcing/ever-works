@@ -35,6 +35,21 @@ import {
  */
 const OWNER_METADATA_KEY = 'ownerUserId';
 
+/** RFC 4122-shaped id (any version) — a caller-supplied project that may name a Work. */
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Prompt-injection hardening — the agent-memory backend partitions ONLY by
+ * `project`, and a project nobody names falls back to a shared default
+ * (`ever-works`). So the project a WRITE lands in is decided here, server-side,
+ * never by the request: the Work's id when the caller may EDIT that Work, else
+ * a project private to the caller. A caller-supplied `projectId` is honoured
+ * only when it is the id of a Work the caller may edit.
+ */
+export function personalMemoryProject(userId: string): string {
+    return `user-${userId}`;
+}
+
 /**
  * REST surface for the `agent-memory` capability (follow-up to PR #1073
  * + #1081 + #1084). Lets the web admin UI list, search, save, and
@@ -42,7 +57,9 @@ const OWNER_METADATA_KEY = 'ownerUserId';
  *
  * All endpoints are JWT-protected. Reads enforce
  * `WorkOwnershipService.ensureCanView` when a `workId` is supplied so users
- * can't read another user's Work memory. Mutating, id-addressed handlers
+ * can't read another user's Work memory. Writes (`save`, `openSession`)
+ * require EDIT access and land in a server-derived project (the Work's id, or
+ * a project private to the caller) — never a caller-chosen or shared one. Mutating, id-addressed handlers
  * (`closeSession` / `deleteEntry`) require `ensureCanEdit` for Work-scoped
  * calls AND verify the target session/entry's `ownerUserId` stamp so an
  * omitted or foreign `workId` cannot be used to mutate another user's
@@ -95,13 +112,15 @@ export class AgentMemoryController {
     @ApiOperation({ summary: 'Open a memory session' })
     @ApiResponse({ status: 201, description: 'Opened session' })
     async openSession(@CurrentUser() auth: AuthenticatedUser, @Body() dto: OpenSessionDto) {
-        await this.assertWorkAccess(auth, dto.workId);
+        // Opening a session is a WRITE into a project: edit access, and a
+        // server-derived project (see `resolveWriteProject`).
+        const projectId = await this.resolveWriteProject(auth, dto.workId, dto.projectId);
         // Codex P2 on PR #1086 — the facade's openSession takes
         // `metadata` but the plugin reads `projectId` separately. Fold
-        // a caller-supplied projectId into metadata so the session
-        // actually scopes to the requested namespace.
+        // the resolved projectId into metadata so the session actually
+        // scopes to it (a caller-supplied `metadata.projectId` is overwritten).
         const metadata: Record<string, unknown> = { ...(dto.metadata ?? {}) };
-        if (dto.projectId) metadata.projectId = dto.projectId;
+        metadata.projectId = projectId;
         // Security (EW-711 #29): stamp the creating user onto the session so
         // close/delete can verify per-session ownership. The agent-memory
         // backend partitions only by `project` (shared across users), so the
@@ -171,7 +190,13 @@ export class AgentMemoryController {
     @ApiOperation({ summary: 'Persist a memory observation' })
     @ApiResponse({ status: 201, description: 'Saved record' })
     async save(@CurrentUser() auth: AuthenticatedUser, @Body() dto: SaveMemoryDto) {
-        await this.assertWorkAccess(auth, dto.workId);
+        // Prompt-injection hardening: saving is a WRITE that every later
+        // agent run in that project reads back as memory. It needs EDIT
+        // access to the Work, and the project is derived server-side — a
+        // viewer (or a chat tool steered by injected text) can no longer
+        // plant observations in a Work it may only read, nor in the shared
+        // default project.
+        const projectId = await this.resolveWriteProject(auth, dto.workId, dto.projectId);
         // Security (EW-711 #29): stamp the creating user onto the record so
         // `deleteEntry` can verify per-entry ownership. Same rationale as
         // `openSession` — the backend is project-scoped, not user-scoped, so
@@ -189,7 +214,7 @@ export class AgentMemoryController {
                     tags: dto.tags,
                     metadata,
                     sessionId: dto.sessionId,
-                    projectId: dto.projectId,
+                    projectId,
                 },
                 this.facadeOptions(auth, dto.workId),
             );
@@ -269,6 +294,42 @@ export class AgentMemoryController {
     }
 
     // ── helpers ────────────────────────────────────────────────────────
+
+    /**
+     * The project a WRITE (save / open session) lands in — never the
+     * caller's free choice, and never the backend's shared default.
+     *
+     *  - with `workId`: EDIT access is required (403/404 otherwise) and the
+     *    project is that Work's id;
+     *  - without: a caller-supplied `projectId` is honoured only when it is
+     *    the id of a Work the caller may edit; anything else — absent, a
+     *    slug, a foreign or read-only Work, an arbitrary string — lands in
+     *    the caller's own private project.
+     *
+     * The Work id (not its slug) is the partition: slugs are not unique
+     * across accounts, so a slug-named project could be shared with a
+     * stranger's Work.
+     */
+    private async resolveWriteProject(
+        auth: AuthenticatedUser,
+        workId: string | undefined,
+        requested: string | undefined,
+    ): Promise<string> {
+        if (workId) {
+            const access = await this.ownership.ensureCanEdit(workId, auth.userId);
+            return access.work.id;
+        }
+        const candidate = typeof requested === 'string' ? requested.trim() : '';
+        if (candidate && UUID_PATTERN.test(candidate)) {
+            try {
+                const access = await this.ownership.ensureCanEdit(candidate, auth.userId);
+                return access.work.id;
+            } catch {
+                // Not a Work the caller may edit — fall through to private.
+            }
+        }
+        return personalMemoryProject(auth.userId);
+    }
 
     /**
      * Enforce ownership when the caller scopes the request to a Work.

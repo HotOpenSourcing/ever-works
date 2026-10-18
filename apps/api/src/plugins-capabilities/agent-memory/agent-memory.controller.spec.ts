@@ -54,7 +54,9 @@ describe('AgentMemoryController', () => {
         };
         ownership = {
             ensureCanView: jest.fn().mockResolvedValue(undefined),
-            ensureCanEdit: jest.fn().mockResolvedValue(undefined),
+            ensureCanEdit: jest.fn().mockImplementation(async (workId: string) => ({
+                work: { id: workId, slug: `slug-of-${workId}` },
+            })),
         };
         controller = new AgentMemoryController(
             agentMemory as unknown as AgentMemoryFacadeService,
@@ -78,34 +80,41 @@ describe('AgentMemoryController', () => {
     });
 
     describe('ownership enforcement', () => {
-        it('calls WorkOwnershipService.ensureCanView when a workId is supplied on save', async () => {
+        it('requires EDIT access (not view) when a workId is supplied on save', async () => {
             await controller.save(auth, {
                 content: 'x',
                 workId: 'work-1' as any,
             });
-            expect(ownership.ensureCanView).toHaveBeenCalledWith('work-1', 'user-1');
-        });
-
-        it('skips ownership when workId is not supplied (platform-wide reads)', async () => {
-            await controller.save(auth, { content: 'x' });
+            expect(ownership.ensureCanEdit).toHaveBeenCalledWith('work-1', 'user-1');
             expect(ownership.ensureCanView).not.toHaveBeenCalled();
         });
 
-        it('lets ownership errors bubble (e.g. 403 from the underlying guard)', async () => {
-            ownership.ensureCanView.mockRejectedValueOnce(new Error('not your work'));
+        it('a save without a workId needs no Work access but lands in the caller’s private project', async () => {
+            await controller.save(auth, { content: 'x' });
+            expect(ownership.ensureCanEdit).not.toHaveBeenCalled();
+            expect(agentMemory.saveMemory).toHaveBeenCalledWith(
+                expect.objectContaining({ projectId: 'user-user-1' }),
+                expect.anything(),
+            );
+        });
+
+        it('lets ownership errors bubble (e.g. a viewer is refused with 403)', async () => {
+            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('not your work'));
             await expect(
                 controller.save(auth, { content: 'x', workId: 'work-1' as any }),
             ).rejects.toThrow('not your work');
+            expect(agentMemory.saveMemory).not.toHaveBeenCalled();
         });
     });
 
     describe('save', () => {
-        it('forwards content + tags + metadata + sessionId + projectId to the facade', async () => {
+        it('forwards content + tags + metadata + sessionId to the facade, in the Work’s project', async () => {
             await controller.save(auth, {
                 content: 'remember this',
                 tags: ['bug'],
                 metadata: { file: 'a.ts' },
                 sessionId: 'sess-9',
+                workId: 'work-1' as any,
                 projectId: 'proj-A',
             });
             expect(agentMemory.saveMemory).toHaveBeenCalledWith(
@@ -115,9 +124,35 @@ describe('AgentMemoryController', () => {
                     // Security (EW-711 #29): owner stamp folded into record metadata.
                     metadata: { file: 'a.ts', ownerUserId: 'user-1' },
                     sessionId: 'sess-9',
-                    projectId: 'proj-A',
+                    // Server-derived: the Work's id, never the caller's projectId.
+                    projectId: 'work-1',
                 }),
-                expect.objectContaining({ userId: 'user-1' }),
+                expect.objectContaining({ userId: 'user-1', workId: 'work-1' }),
+            );
+        });
+
+        it('never writes into a caller-named or shared project', async () => {
+            await controller.save(auth, { content: 'x', projectId: 'ever-works' });
+            expect(agentMemory.saveMemory).toHaveBeenCalledWith(
+                expect.objectContaining({ projectId: 'user-user-1' }),
+                expect.anything(),
+            );
+        });
+
+        it('honours a caller projectId only when it is the id of a Work the caller may edit', async () => {
+            const workId = '0b6c1d2e-3f40-4a5b-8c6d-7e8f9a0b1c2d';
+            await controller.save(auth, { content: 'x', projectId: workId });
+            expect(ownership.ensureCanEdit).toHaveBeenCalledWith(workId, 'user-1');
+            expect(agentMemory.saveMemory).toHaveBeenLastCalledWith(
+                expect.objectContaining({ projectId: workId }),
+                expect.anything(),
+            );
+
+            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('viewer only'));
+            await controller.save(auth, { content: 'y', projectId: workId });
+            expect(agentMemory.saveMemory).toHaveBeenLastCalledWith(
+                expect.objectContaining({ projectId: 'user-user-1' }),
+                expect.anything(),
             );
         });
     });
@@ -151,15 +186,28 @@ describe('AgentMemoryController', () => {
             expect(result.session).toEqual({ id: 's1', startedAt: 'now' });
             // Security (EW-711 #29): owner stamp is folded into session metadata.
             expect(agentMemory.openSession).toHaveBeenCalledWith(
-                { from: 'web', ownerUserId: 'user-1' },
+                { from: 'web', ownerUserId: 'user-1', projectId: 'user-user-1' },
                 expect.objectContaining({ userId: 'user-1' }),
+            );
+        });
+
+        it('openSession requires EDIT access and scopes to the Work’s project, ignoring a caller projectId', async () => {
+            await controller.openSession(auth, {
+                workId: 'work-1' as any,
+                projectId: 'someone-elses-project',
+                metadata: { projectId: 'forged' },
+            } as any);
+            expect(ownership.ensureCanEdit).toHaveBeenCalledWith('work-1', 'user-1');
+            expect(agentMemory.openSession).toHaveBeenCalledWith(
+                { projectId: 'work-1', ownerUserId: 'user-1' },
+                expect.objectContaining({ userId: 'user-1', workId: 'work-1' }),
             );
         });
 
         it('openSession owner stamp cannot be spoofed from the request body', async () => {
             await controller.openSession(auth, { metadata: { ownerUserId: 'user-2' } as any });
             expect(agentMemory.openSession).toHaveBeenCalledWith(
-                { ownerUserId: 'user-1' },
+                { ownerUserId: 'user-1', projectId: 'user-user-1' },
                 expect.objectContaining({ userId: 'user-1' }),
             );
         });
