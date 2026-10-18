@@ -132,7 +132,29 @@ describe('MeetingsController', () => {
         it('no workId (an org-wide meeting, or detaching) needs no Work check', async () => {
             await controller.create(auth, { title: 'Sync', startedAt: body.startedAt } as never);
             await controller.update(auth, 'meeting-1', { workId: null } as never);
+            service.getForUser.mockResolvedValueOnce(meeting({ workId: null }));
+            await controller.update(auth, 'meeting-1', { title: 'Renamed' } as never);
             expect(ownership.ensureCanEdit).not.toHaveBeenCalled();
+        });
+
+        // CodeRabbit on #2769: a patch that leaves `workId` out keeps the
+        // meeting on its CURRENT Work — checked against that Work.
+        it("update without workId is checked against the meeting's current Work", async () => {
+            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('forbidden'));
+            await expect(
+                controller.update(auth, 'meeting-1', { title: 'Renamed' } as never),
+            ).rejects.toThrow('forbidden');
+            expect(ownership.ensureCanEdit).toHaveBeenCalledWith('work-9', 'user-1');
+            expect(service.updateForUser).not.toHaveBeenCalled();
+        });
+
+        it("a transcript needs edit access to the meeting's Work (it feeds its memory)", async () => {
+            ownership.ensureCanEdit.mockRejectedValueOnce(new Error('forbidden'));
+            await expect(
+                controller.ingestTranscript(auth, 'meeting-1', { transcriptText: 'x' }),
+            ).rejects.toThrow('forbidden');
+            expect(ownership.ensureCanEdit).toHaveBeenCalledWith('work-9', 'user-1');
+            expect(service.ingestTranscriptForUser).not.toHaveBeenCalled();
         });
 
         it('fails closed when the ownership service is not bound', async () => {
