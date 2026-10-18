@@ -53,6 +53,10 @@ describe('FleetController', () => {
         listVisibleForUser: jest.Mock;
         setFavoriteForUser: jest.Mock;
         setControlPolicyFamiliesForUser: jest.Mock;
+        // Fleet hub (FL-01, FR-22) — who a machines-family act runs as. The
+        // caller owns the node here; fleet-hub.controller.spec.ts covers the
+        // organisation roles.
+        resolveMachinesActor: jest.Mock;
     };
     let jobs: {
         loadByNodeForUser: jest.Mock;
@@ -129,6 +133,12 @@ describe('FleetController', () => {
             ]),
             setFavoriteForUser: jest.fn(async () => ({ ...nodeView, isFavorite: true })),
             setControlPolicyFamiliesForUser: jest.fn(async () => nodeView),
+            resolveMachinesActor: jest.fn(async (userId: string) => ({
+                ownerUserId: userId,
+                role: 'owner',
+                nodeName: nodeView.name,
+                ctx: {},
+            })),
         };
         jobs = {
             loadByNodeForUser: jest.fn(async () => ({})),
@@ -353,6 +363,27 @@ describe('FleetController', () => {
     it('remove is owner-scoped', async () => {
         await controller.remove(auth, nodeView.id);
         expect(service.deleteForUser).toHaveBeenCalledWith('user-1', nodeView.id);
+    });
+
+    // Fleet hub (FL-01, T-20, CONTRACTS §2.2) — the optional typed name.
+    it('remove forwards a typed name to the confirm-destructive check', async () => {
+        await controller.remove(auth, nodeView.id, 'build-01');
+        expect(service.resolveMachinesActor).toHaveBeenCalledWith('user-1', nodeView.id);
+        expect(service.deleteForUser).toHaveBeenCalledWith(
+            'user-1',
+            nodeView.id,
+            {},
+            { confirmName: 'build-01' },
+        );
+    });
+
+    it('remove refuses a wrong typed name with invalid and nothing else runs', async () => {
+        service.deleteForUser.mockRejectedValueOnce(
+            new BadRequestException({ error: { code: 'invalid' } }),
+        );
+        await expect(controller.remove(auth, nodeView.id, 'wrong')).rejects.toBeInstanceOf(
+            BadRequestException,
+        );
     });
 
     describe('detail — the node drawer payload (EW-776)', () => {

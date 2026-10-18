@@ -60,6 +60,13 @@ function build(
         ]),
         getVisibleForUser: jest.fn(async () => ({ view: nodeView, role: 'owner' })),
         deleteForUser: jest.fn(async () => undefined),
+        // Fleet hub (FL-01, FR-22): remove resolves who acts first (the owner here).
+        resolveMachinesActor: jest.fn(async (userId: string) => ({
+            ownerUserId: userId,
+            role: 'owner',
+            nodeName: nodeView.name,
+            ctx: {},
+        })),
         rotateCredentialForUser: jest.fn(async () => ({ token: 'one-time', nodeId: NODE })),
         unenrollByCredential: jest.fn(async () => true),
     };
