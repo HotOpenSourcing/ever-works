@@ -2,7 +2,7 @@ import {
     AppChangeRequestService,
     AppWorksModule as AgentAppWorksModule,
 } from '@ever-works/agent/app-works';
-import { Global, Module } from '@nestjs/common';
+import { Global, Logger, Module } from '@nestjs/common';
 import {
     AgentsModule as AgentAgentsModule,
     AgentRepository,
@@ -83,6 +83,7 @@ import {
     inboundEmailTaskTitle,
 } from './inbound-email-task-chat';
 import { UploadsModule } from '../uploads/uploads.module';
+import { assertNoAlwaysProtectedPaths } from './agent-git-protected-paths';
 import { UploadsService } from '../uploads/uploads.service';
 
 // Phase 16.6 / 16.7 — commitToRepo / openPullRequest tools.
@@ -238,14 +239,19 @@ const HELD_FOR_APPROVAL_NOTE =
  * APW-08 P0 — the protected RELEASE branches an Agent may never commit to.
  *
  * This list is the FLOOR and is deliberately NOT configurable: `main`,
- * `master` and `stage` are the branches a release is cut from, and an
- * Agent pushing straight to one is the defect this exists to make
- * impossible. The Work's effective merge policy `protectedBranches`
+ * `master` and `stage` are the branches a release is cut from, `develop` is
+ * the integration branch every cascade starts from (and is already in
+ * `PLATFORM_DEFAULT_MERGE_POLICY.protectedBranches` — the floor makes sure an
+ * override that drops it cannot expose it), and an Agent pushing straight to
+ * one is the defect this exists to make impossible. The Work's effective merge policy `protectedBranches`
  * (`PLATFORM_DEFAULT_MERGE_POLICY` and its tenant/organization/Work/Agent
  * overrides, resolved by `MergePolicyService`) is unioned ON TOP of it, so
  * an operator can protect MORE branches at any scope — never fewer.
  */
-const PROTECTED_RELEASE_BRANCHES: readonly string[] = ['main', 'master', 'stage'];
+const PROTECTED_RELEASE_BRANCHES: readonly string[] = ['main', 'master', 'stage', 'develop'];
+
+/** Logger for the Agent git tool adapter's advisory warnings. */
+const agentGitToolsLogger = new Logger('AgentGitFacade');
 
 /**
  * APW-08 P0 (T3, APW08-G24) — the working copy a Work's Agent git operations
@@ -1344,6 +1350,18 @@ async function assertRealWriteTarget(
                             path: normalizeRepoPath('commitToRepo', f?.path),
                             body: f.body,
                         }));
+                        // Prompt-injection hardening — for EVERY Work kind (not only
+                        // App Works, whose change gate below already refuses
+                        // workflows): an Agent never writes a GitHub workflow or
+                        // composite action. For a non-App Work this push goes out on
+                        // the owner's token, whose `workflow` scope exists exactly so
+                        // it can change these files. Refused before anything is
+                        // cloned, written or pushed.
+                        assertNoAlwaysProtectedPaths(
+                            'commitToRepo',
+                            writes.map((w) => w.path),
+                            'Nothing was written, committed or pushed.',
+                        );
                         const namedTarget = requestedBranch || base;
                         if (namedTarget) {
                             assertNotProtectedBranch(
@@ -1578,6 +1596,65 @@ async function assertRealWriteTarget(
                         });
                     },
                     async openPullRequest(input) {
+                        /**
+                         * Refuse a pull request whose diff touches an always-protected
+                         * path (`agent-git-protected-paths.ts`). A diff too large to read
+                         * whole is refused too — the protected file could be in the part
+                         * the provider dropped. A provider with no compare capability is
+                         * let through with a warning: the write-time floor in
+                         * `commitToRepo` still holds for everything an Agent pushes.
+                         */
+                        const assertPullRequestTouchesNoWorkflows = async (
+                            prTarget: { owner: string; repo: string },
+                            prBase: string,
+                            prHead: string,
+                            options: { providerId: string; userId: string; workId: string },
+                        ): Promise<void> => {
+                            if (typeof git.getCompareDiff !== 'function') {
+                                agentGitToolsLogger.warn(
+                                    `openPullRequest: no compare capability for ${prTarget.owner}/${prTarget.repo}; ` +
+                                        'the workflow-path check relies on the commit-time floor.',
+                                );
+                                return;
+                            }
+                            let diff: Awaited<ReturnType<typeof git.getCompareDiff>>;
+                            try {
+                                diff = await git.getCompareDiff(
+                                    prTarget.owner,
+                                    prTarget.repo,
+                                    prBase,
+                                    prHead,
+                                    { maxFiles: 300 },
+                                    options as any,
+                                );
+                            } catch (err) {
+                                // Matched by `name` (the facade exception filter's own
+                                // posture): the class is not on the facades barrel.
+                                if ((err as Error)?.name === 'GitOperationNotSupportedError') {
+                                    agentGitToolsLogger.warn(
+                                        `openPullRequest: ${prTarget.owner}/${prTarget.repo} cannot be compared ` +
+                                            `(${(err as Error).message}); the workflow-path check relies on the commit-time floor.`,
+                                    );
+                                    return;
+                                }
+                                throw new Error(
+                                    `openPullRequest: the changes between '${prBase}' and '${prHead}' could not ` +
+                                        `be read, so they were not checked for workflow files ` +
+                                        `(${(err as Error)?.message ?? err}). The pull request was not opened.`,
+                                );
+                            }
+                            if (diff.truncated) {
+                                throw new Error(
+                                    `openPullRequest: the diff between '${prBase}' and '${prHead}' is too large ` +
+                                        `to check for workflow files. The pull request was not opened.`,
+                                );
+                            }
+                            assertNoAlwaysProtectedPaths(
+                                'openPullRequest',
+                                diff.files.flatMap((file) => [file.path, file.previousPath]),
+                                'The pull request was not opened.',
+                            );
+                        };
                         const { userId, workId, title, body, draft } = input;
                         void input.agentId;
                         // APW-08 P0 — the pull request names a REAL target. It used to
@@ -1676,6 +1753,16 @@ async function assertRealWriteTarget(
                                     `${target.owner}/${target.repo}. Push the branch before opening a pull request.`,
                             );
                         }
+                        // Prompt-injection hardening — for EVERY Work kind: a pull
+                        // request that changes a GitHub workflow or composite action
+                        // is not opened by an Agent (opening one already RUNS the
+                        // repository's `pull_request` workflows from the head). Read
+                        // from the provider's own diff of the VERIFIED head.
+                        await assertPullRequestTouchesNoWorkflows(target, base, head, {
+                            providerId,
+                            userId,
+                            workId,
+                        });
                         // APW-08 T17 — an App Work's pull request is judged by the
                         // same gate as the finalize paths, on the provider's own
                         // diff of the VERIFIED head.
