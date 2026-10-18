@@ -88,9 +88,13 @@ function makeFacade(opts: FacadeOpts = {}) {
             createdAt: '',
             updatedAt: '',
         }),
-        getPullRequestStatus: jest
-            .fn()
-            .mockResolvedValue(status ? { number: 7, merged: false, checks: [], ...status } : null),
+        getPullRequestStatus: jest.fn().mockResolvedValue(
+            // The live base defaults to the planned one (ACTOR's
+            // `feature/x`); a test that needs another passes `baseRef`.
+            status
+                ? { number: 7, merged: false, checks: [], baseRef: 'feature/x', ...status }
+                : null,
+        ),
     };
     const enforcer: MergePolicyEnforcer = {
         canAgentMerge: jest.fn().mockResolvedValue(opts.decision ?? ALLOW),
@@ -190,13 +194,15 @@ describe('GitFacadeService.mergePullRequest — merge policy', () => {
         expect((error as MergePolicyRefusedError).policySource).toBe('work');
     });
 
-    it('looks the base branch up through the provider when the caller did not supply it', async () => {
-        const { facade, plugin, enforcer } = makeFacade({ decision: ALLOW });
+    it('judges the LIVE base when the caller did not supply one (works-security lane 3a)', async () => {
+        const { facade, enforcer } = makeFacade({
+            decision: ALLOW,
+            status: { state: 'open', ciState: 'passing', headSha: HEAD, baseRef: 'main' },
+        });
         await facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, {
             agentId: 'agent-1',
             taskId: 'task-1',
         });
-        expect(plugin.getPullRequest).toHaveBeenCalledWith('o', 'r', 7, 'tok');
         expect(enforcer.canAgentMerge).toHaveBeenCalledWith(
             expect.objectContaining({ targetBranch: 'main' }),
         );
@@ -327,7 +333,10 @@ describe('GitFacadeService.mergePullRequest — merge approval gate (slice AE)',
     // nobody can name) still needs a recorded human approval at merge time.
 
     it('requires an approval for a floor base under a policy that asked for none', async () => {
-        const { facade, plugin, verifier, enforcer } = makeFacade({ policy: NO_APPROVAL_NEEDED });
+        const { facade, plugin, verifier, enforcer } = makeFacade({
+            policy: NO_APPROVAL_NEEDED,
+            status: { state: 'open', ciState: 'passing', headSha: HEAD, baseRef: 'main' },
+        });
         await facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, {
             ...ACTOR,
             targetBranch: 'main',
@@ -342,6 +351,7 @@ describe('GitFacadeService.mergePullRequest — merge approval gate (slice AE)',
     it('refuses a floor base with no approval on record, whatever the policy said', async () => {
         const { facade, plugin } = makeFacade({
             policy: NO_APPROVAL_NEEDED,
+            status: { state: 'open', ciState: 'passing', headSha: HEAD, baseRef: 'develop' },
             verdict: {
                 approved: false,
                 code: 'approval-missing',
@@ -408,6 +418,17 @@ describe('GitFacadeService.mergePullRequest — merge approval gate (slice AE)',
             targetBranch: 'main',
         });
         expect(main.verifier.verifyMergeApproval).toHaveBeenCalled();
+    });
+
+    it('fails closed when the provider reports no base, whatever the caller planned', async () => {
+        const { facade, plugin, verifier } = makeFacade({
+            status: { state: 'open', ciState: 'passing', headSha: HEAD, baseRef: null },
+        });
+        await expect(
+            facade.mergePullRequest('o', 'r', 7, undefined, OPTIONS, ACTOR),
+        ).rejects.toMatchObject({ code: 'target-branch-unknown' });
+        expect(verifier.verifyMergeApproval).not.toHaveBeenCalled();
+        expect(plugin.mergePullRequest).not.toHaveBeenCalled();
     });
 
     it('reads the floor off the LIVE base when the caller named none', async () => {

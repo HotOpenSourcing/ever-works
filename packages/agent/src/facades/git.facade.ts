@@ -1285,11 +1285,24 @@ export class GitFacadeService implements IGitFacade {
         // with the plan is refused outright — the merge would land somewhere
         // nobody planned, and nobody approved.
         const liveBase = live.baseRef && live.baseRef.trim() ? live.baseRef : null;
-        if (
-            liveBase &&
-            agentActor.targetBranch &&
-            !sameMergeBranch(liveBase, agentActor.targetBranch)
-        ) {
+        // Fail CLOSED when the provider reports no base: the floor and the
+        // matrix are judged against the live base and nothing else, so a
+        // merge whose base cannot be read is refused rather than judged
+        // against what the caller planned.
+        if (!liveBase) {
+            throw new MergePolicyRefusedError(
+                {
+                    allowed: false,
+                    code: 'target-branch-unknown',
+                    reason:
+                        `The provider did not report the base branch of pull request #${prNumber}, so ` +
+                        'the protected-branch rules cannot be evaluated against where it would land.',
+                    source: policySource,
+                },
+                options.providerId,
+            );
+        }
+        if (agentActor.targetBranch && !sameMergeBranch(liveBase, agentActor.targetBranch)) {
             throw new MergePolicyRefusedError(
                 {
                     allowed: false,
@@ -1303,10 +1316,9 @@ export class GitFacadeService implements IGitFacade {
                 options.providerId,
             );
         }
-        const floorBase = liveBase ?? agentActor.targetBranch ?? null;
         if (
             !requiresApproval &&
-            mergeTargetNeedsFloorApproval(floorBase, { humanScopeWaivesApproval })
+            mergeTargetNeedsFloorApproval(liveBase, { humanScopeWaivesApproval })
         ) {
             requiresApproval = true;
         }
@@ -1400,20 +1412,9 @@ export class GitFacadeService implements IGitFacade {
         // Resolve the base branch when the caller did not supply it — the
         // protected-branch rule is worthless without it, and the decision
         // point refuses on an unknown target rather than guessing.
-        // The live base first (works-security lane 3a): it is the branch the
-        // provider would actually merge into.
-        let targetBranch = liveBase ?? agentActor.targetBranch ?? null;
-        if (!targetBranch) {
-            try {
-                const pr = await this.getPullRequest(owner, repo, prNumber, options);
-                targetBranch = pr?.base ?? null;
-            } catch (error) {
-                this.logger.warn(
-                    `Merge policy: could not read ${owner}/${repo}#${prNumber} to determine its ` +
-                        `base branch: ${error instanceof Error ? error.message : String(error)}`,
-                );
-            }
-        }
+        // The live base (works-security lane 3a): the branch the provider would
+        // actually merge into, already checked against the plan above.
+        const targetBranch = liveBase;
 
         // (5) The matrix. `humanApproved` now comes from the RECORD, never
         // from the caller.
