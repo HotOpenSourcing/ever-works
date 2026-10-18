@@ -179,12 +179,12 @@ describe('IntegrationInboxController', () => {
         expect(items.reply).not.toHaveBeenCalled();
     });
 
-    // Works-security lane 3a — an approval reply decides the proposal (the
-    // merge verifier accepts it as THE human merge approval) and an escalation
-    // reply resolves it: both are human gates, refused to an integration key
-    // even acting as the recipient. Questions are still answered.
+    // Works-security lane 3a — approval and escalation replies stay open to an
+    // integration: the reply is the recipient's own decision relayed by it (Ever
+    // Gauzy forwards what the person answered in the Gauzy Inbox), and acting as
+    // anybody but the recipient is still refused (`act_as_forbidden` above).
     it.each([['approval'], ['escalation']])(
-        'refuses answering an %s (422 domain_rule) and never reaches InboxService.reply',
+        "relays the recipient's answer to an %s through InboxService.reply",
         async (kind) => {
             const { controller, inbox, items } = setup();
             inbox.get.mockResolvedValue({
@@ -192,32 +192,13 @@ describe('IntegrationInboxController', () => {
                 etag: '"1"',
                 recipientUserId: RECIPIENT,
             });
-            const reply = controller.reply(
-                as(RECIPIENT),
-                'item-1',
-                { optionId: 'approve' },
-                req(),
-                res(),
-            );
-            await expect(reply).rejects.toBeInstanceOf(IntegrationHttpException);
-            await expect(reply).rejects.toMatchObject({
-                code: 'domain_rule',
-                response: { error: { details: { reason: 'human_session_required', kind } } },
+            await controller.reply(as(RECIPIENT), 'item-1', { optionId: 'approve' }, req(), res());
+            expect(items.reply).toHaveBeenCalledWith(RECIPIENT, 'item-1', {
+                text: null,
+                optionId: 'approve',
             });
-            expect(items.reply).not.toHaveBeenCalled();
         },
     );
-
-    it('still answers a question as the recipient', async () => {
-        const { controller, inbox, items } = setup();
-        inbox.get.mockResolvedValue({
-            dto: dto(1, { kind: 'question' }),
-            etag: '"1"',
-            recipientUserId: RECIPIENT,
-        });
-        await controller.reply(as(RECIPIENT), 'item-1', { text: 'Use Postgres' }, req(), res());
-        expect(items.reply).toHaveBeenCalled();
-    });
 
     it('passes an already-answered 409 through', async () => {
         const { controller, items } = setup();

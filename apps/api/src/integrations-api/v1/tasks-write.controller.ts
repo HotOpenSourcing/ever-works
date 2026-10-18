@@ -256,8 +256,8 @@ export class IntegrationTransitionTaskDto {
 }
 
 /**
- * Works-security lane 3a — the fields of a recurring template or a scheduled
- * Task an integration may not change: what the dispatched agent reads (title,
+ * Works-security lane 3a — the fields of a recurring Task template an
+ * integration may not change: what the dispatched agent reads (title,
  * description) and which Work's repository it runs in.
  */
 const AUTONOMOUS_TEMPLATE_FIELDS = ['title', 'description', 'workId'] as const;
@@ -589,15 +589,12 @@ export class IntegrationTasksWriteController {
         );
         if (fields.length === 0) return;
         const task = await this.tasks.getOne(userId, id, this.scope.getScope() as never);
-        const scheduled = !!task.scheduledAt && !task.scheduleClaimedAt;
-        if (!task.isRecurring && !scheduled) return;
+        if (!task.isRecurring) return;
         throw new IntegrationHttpException(
             422,
             'domain_rule',
-            `An integration cannot change ${fields.join(', ')} on a ${
-                task.isRecurring ? 'recurring' : 'scheduled'
-            } Task: every run it starts dispatches that text to an agent. A person edits it in Ever Works.`,
-            { fields, reason: task.isRecurring ? 'recurring_template' : 'scheduled_task' },
+            `An integration cannot change ${fields.join(', ')} on a recurring Task template: every run it starts dispatches that text to an agent. A person edits it in Ever Works.`,
+            { fields, reason: 'recurring_template' },
         );
     }
 
@@ -634,12 +631,14 @@ export class IntegrationTasksWriteController {
             await this.resources.get('task', organizationId, dto.parentTaskId, source);
         }
 
-        // Works-security lane 3a — a recurring template (and a Task waiting on
-        // its one-shot schedule) dispatches its title and description to an
-        // agent on its own, at every future fire, with no person in between.
-        // An integration rewriting that text — or moving it to another Work's
-        // repository — would be authoring the next autonomous runs, so it may
-        // not. Everything else (priority, labels, dates, teams) stays open.
+        // Works-security lane 3a — a recurring template dispatches its title and
+        // description to an agent on its own, at every future fire, with no
+        // person in between. An integration rewriting that text — or moving it
+        // to another Work's repository — would be authoring the next autonomous
+        // runs, so it may not. Everything else (priority, labels, dates, teams)
+        // stays open, and so does every other Task, a scheduled one included:
+        // integrations mirror people's edits of those (Ever Gauzy never syncs a
+        // recurring template, only its instances).
         await this.refuseAutonomousTemplateRewrite(user.userId, id, dto);
 
         const patch: Record<string, unknown> = {};

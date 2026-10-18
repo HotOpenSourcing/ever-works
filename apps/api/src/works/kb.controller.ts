@@ -407,12 +407,16 @@ export class KbController {
         // Appended LAST so positional callers (specs) keep their meaning.
         @Req() req?: MachinePrincipalRequest,
     ) {
-        // Works-security lane 3a — accepting IS the review gate.
+        // Works-security lane 3a — accepting IS the review gate: never a
+        // fleet run's (it would accept its own document). An integration key
+        // is not refused here — it relays a person's review decision through
+        // its own API (`POST /api/integrations/v1/kb/documents/:id/accept`).
         refuseMachinePrincipalAction(
             auth,
             req,
             'accept a proposed Knowledge Base document',
             'accepting is the review; a person accepts it in the app.',
+            ['fleet-run'],
         );
         return this.kb.acceptDocument(workId, docId, auth.userId);
     }

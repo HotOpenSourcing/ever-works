@@ -456,7 +456,9 @@ export class IntegrationKbController {
                 // Works-security lane 3a — either way it lands `proposed`: an
                 // integration key is a machine credential, and an `accepted`
                 // document feeds every later agent prompt. The M7 review gate
-                // applies, and a person accepts it in Ever Works.
+                // applies: a person accepts it in Ever Works, or in the
+                // integration's own review queue, which relays the decision
+                // through `POST /kb/documents/:id/accept`.
                 reviewState: 'proposed' as never,
             };
             // Before the create: filing afterwards would leave the document
@@ -561,17 +563,6 @@ export class IntegrationKbController {
         if (Object.keys(patch).length === 0) {
             throw validationFailed('body', 'must change at least one field');
         }
-        // Works-security lane 3a — a content edit by an integration re-enters
-        // the review gate, exactly like its create: otherwise a key could
-        // rewrite an accepted document straight into every later prompt.
-        if (
-            patch.title !== undefined ||
-            patch.body !== undefined ||
-            patch.description !== undefined ||
-            patch.class !== undefined
-        ) {
-            patch.reviewState = 'proposed' as KbDocumentPatch['reviewState'];
-        }
         const organizationId = this.organizationId();
         const current = await this.kb.getDocument(organizationId, id);
         // Malformed or stale If-Match first (400 / 412), before any other rule.
@@ -635,20 +626,26 @@ export class IntegrationKbController {
     @RequireScopes('kb:write')
     @ApiOperation({ summary: 'Accept a proposed (agent-written) document' })
     async acceptDocument(
+        @CurrentUser() user: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
+        @Res({ passthrough: true }) res: Response,
     ): Promise<IntegrationKbDocumentDto> {
-        // Works-security lane 3a — accepting IS the review gate, a human
-        // decision: an integration key may not make it, with or without
-        // X-Act-As-User (it is still the key's credential, not a person in a
-        // session). A document an integration writes lands `proposed`, and a
-        // person accepts it in Ever Works. The route stays so a client gets a
-        // stable `422 domain_rule` instead of a 404.
-        throw new IntegrationHttpException(
-            422,
-            'domain_rule',
-            'Accepting a proposed document is a review decision a person makes in Ever Works; an integration key cannot.',
-            { reason: 'human_session_required', documentId: id },
-        );
+        // Works-security lane 3a — kept open to integration keys on purpose:
+        // this is how an integration RELAYS a person's review decision (Ever
+        // Gauzy calls it when a reviewer approves the page in Gauzy's own
+        // review queue). A document an integration creates lands `proposed`,
+        // so the review happens there and this route records its outcome.
+        const organizationId = this.organizationId();
+        const current = await this.kb.getDocument(organizationId, id);
+        await asDomainRule(async () => {
+            if (current.workId) {
+                await this.knowledgeBase.acceptDocument(current.workId, id, user.userId);
+                return;
+            }
+            await this.assertOrganizationAdmin(organizationId, user.userId);
+            await this.knowledgeBase.acceptOrgDocument(organizationId, id, user.userId);
+        });
+        return this.sendDocument(res, await this.kb.getDocument(organizationId, id));
     }
 
     @Post('documents/:id/archive')
