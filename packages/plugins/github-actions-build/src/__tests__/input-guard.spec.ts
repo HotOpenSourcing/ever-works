@@ -64,14 +64,14 @@ describe('unsafeWorkflowTextCause — the three classes', () => {
 		['a\rb', 'lineBreak'],
 		// YamlDotNet (the Actions runner's parser) breaks lines on these three too.
 		['a\u0085b', 'lineBreak'],
-		['a b', 'lineBreak'],
-		['a b', 'lineBreak'],
+		['a\u2028b', 'lineBreak'],
+		['a\u2029b', 'lineBreak'],
 		['a\tb', 'controlCharacter'],
 		['a\u0000b', 'controlCharacter'],
 		['a\u001bb', 'controlCharacter'],
 		['a\u007fb', 'controlCharacter'],
 		['a\u009bb', 'controlCharacter'],
-		['﻿a', 'controlCharacter']
+		['\ufeffa', 'controlCharacter']
 	])('%j → %s', (value, cause) => {
 		expect(unsafeWorkflowTextCause(value)).toBe(cause);
 	});

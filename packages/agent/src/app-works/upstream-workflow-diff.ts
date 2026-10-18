@@ -63,7 +63,7 @@ export function holdsForWorkflowReview(changes: UpstreamWorkflowChanges): boolea
  * control characters (a path is upstream-authored text), at most 300 characters.
  */
 function displayPath(path: string): string {
-    return path.replace(/[\u0000-\u001f\u007f-\u009f  ]/g, ' ').slice(0, 300);
+    return path.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ' ').slice(0, 300);
 }
 
 /**

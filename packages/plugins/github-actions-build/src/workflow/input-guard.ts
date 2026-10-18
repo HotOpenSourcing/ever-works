@@ -72,10 +72,10 @@ export class WorkflowInputRefusedError extends Error {
 }
 
 /** CR, LF, and the three code points YAML 1.1 parsers (YamlDotNet among them) also break lines on. */
-const LINE_BREAK = /[\n\r\u0085  ]/;
+const LINE_BREAK = /[\n\r\u0085\u2028\u2029]/;
 
 /** C0 (incl. tab), DEL, C1 and the BOM. Line breaks are matched first by {@link LINE_BREAK}. */
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f﻿]/;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\ufeff]/;
 
 /** schema.md §0 `EnvName` — a build argument, a `fromEnv` and a build value name. */
 export const WORKFLOW_ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]{0,127}$/;
