@@ -1,10 +1,12 @@
 import 'server-only';
 import type {
+    FleetControlPolicyFamiliesInput,
     FleetEnrollableNodeKind,
     FleetNodeLimitCeiling,
     FleetNodeView,
+    NeedsALookItem,
 } from '@ever-works/contracts';
-import { serverFetch, serverMutation } from './server-api';
+import { ApiResponseError, serverFetch, serverMutation } from './server-api';
 
 /**
  * Fleet (Wave 12, slice 1) — web client for the fleet node registry
@@ -117,7 +119,28 @@ export interface UpdateFleetNodePayload {
      * Crossing it drains the node until it is re-enabled.
      */
     dailyCostCeilingCents?: number | null;
+    /** Fleet hub (FL-01) — the owner's star. Owner only. */
+    isFavorite?: boolean;
+    /**
+     * Fleet hub (FL-01) — a PARTIAL family → audience map (CONTRACTS §2.1).
+     * Families named change; the rest keep theirs. Owner only; audited as
+     * `node.policy.change`.
+     */
+    controlPolicyFamilies?: FleetControlPolicyFamiliesInput;
 }
+
+/**
+ * Fleet hub (FL-01) — one read of "what needs a look" (CONTRACTS §4.6).
+ * `partial` is true when the API skipped a producer that failed (spec U11):
+ * the list is what the others said, not proof that nothing needs a look.
+ */
+export interface FleetNeedsALookResult {
+    items: NeedsALookItem[];
+    partial: boolean;
+}
+
+/** The response header the API sets on a partial needs-a-look answer. */
+export const FLEET_PARTIAL_HEADER = 'x-fleet-partial';
 
 export interface SetFleetExecutionPreferencePayload {
     scopeType: FleetExecutionScopeType;
@@ -131,9 +154,80 @@ export interface SetFleetExecutionPreferencePayload {
 // `/api`. Matches every other helper in this folder.
 const BASE = '/fleet';
 
+/** Read a needs-a-look answer off a raw response: the list, and whether a producer was skipped. */
+async function readNeedsALook(response: Response): Promise<FleetNeedsALookResult> {
+    if (!response.ok) {
+        throw new ApiResponseError(
+            `Could not load what needs a look (${response.status})`,
+            response.status,
+        );
+    }
+    const body = (await response.json().catch(() => [])) as unknown;
+    return {
+        items: Array.isArray(body) ? (body as NeedsALookItem[]) : [],
+        partial: response.headers.get(FLEET_PARTIAL_HEADER) === 'true',
+    };
+}
+
 export const fleetAPI = {
     listNodes: async () => {
         return serverFetch<FleetNodeView[]>(`${BASE}/nodes`);
+    },
+
+    /**
+     * Fleet hub (FL-01) — every computer the caller may SEE: their own plus
+     * those shared with them through an Organization, each row carrying
+     * `viewerRole`. `listNodes` stays the owner-only list Settings → Fleet
+     * and the panic controls read.
+     */
+    listVisibleNodes: async () => {
+        return serverFetch<FleetNodeView[]>(`${BASE}/nodes?scope=visible`);
+    },
+
+    /** Fleet hub (FL-01) — what needs a look across every computer the caller may see. */
+    needsALook: async (): Promise<FleetNeedsALookResult> => {
+        return readNeedsALook(
+            await serverFetch<Response>(`${BASE}/needs-a-look`, {
+                rawResponse: true,
+                cache: 'no-store',
+            }),
+        );
+    },
+
+    /** Fleet hub (FL-01) — what needs a look on one computer (404 when the caller may not see it). */
+    nodeNeedsALook: async (nodeId: string): Promise<FleetNeedsALookResult> => {
+        return readNeedsALook(
+            await serverFetch<Response>(
+                `${BASE}/nodes/${encodeURIComponent(nodeId)}/needs-a-look`,
+                {
+                    rawResponse: true,
+                    cache: 'no-store',
+                },
+            ),
+        );
+    },
+
+    /** Fleet hub (FL-01) — star or unstar a computer (owner only). */
+    setFavorite: async (nodeId: string, isFavorite: boolean) => {
+        return serverMutation<FleetNodeView>({
+            endpoint: `${BASE}/nodes/${encodeURIComponent(nodeId)}`,
+            data: { isFavorite },
+            method: 'PATCH',
+            wrapInData: false,
+        });
+    },
+
+    /** Fleet hub (FL-01) — change who may act in some action families (owner only). */
+    setPolicyFamilies: async (
+        nodeId: string,
+        controlPolicyFamilies: FleetControlPolicyFamiliesInput,
+    ) => {
+        return serverMutation<FleetNodeView>({
+            endpoint: `${BASE}/nodes/${encodeURIComponent(nodeId)}`,
+            data: { controlPolicyFamilies },
+            method: 'PATCH',
+            wrapInData: false,
+        });
     },
 
     createEnrollmentToken: async (payload: CreateFleetEnrollmentTokenPayload) => {
