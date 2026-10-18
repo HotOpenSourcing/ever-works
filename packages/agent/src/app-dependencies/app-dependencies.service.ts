@@ -1214,7 +1214,17 @@ export class AppDependenciesService {
             );
         }
         if (!this.facade) {
-            return { kind, state: 'failed', reason: 'providerNotSupported', transient: false };
+            // Recorded, not just answered: the runner schedules nothing behind a definite
+            // reason, so a row left as it was would read the PREVIOUS attempt's reason forever
+            // (prod 2026-10-18: `provisioning / clusterUnreachable` under a run that said
+            // `providerNotSupported`), and the Deploy refusal could only say "not ready yet".
+            this.logger.warn(
+                `${kind} of work ${workId}: no dependency facade is bound in this process, so no provider can be reached.`,
+            );
+            return this.recordAttemptFailure(row, 'providerNotSupported', false, {
+                providerPluginId: row.providerPluginId ?? '',
+                providerId: row.providerId ?? '',
+            });
         }
 
         const prepared = await this.prepareTarget(workId);
@@ -1241,7 +1251,17 @@ export class AppDependenciesService {
         const entry = snapshot?.dependencies.find((candidate) => candidate.kind === kind);
         const resolved = await this.facade.resolve(row.providerPluginId, row.providerId, kind);
         if (!resolved) {
-            return { kind, state: 'failed', reason: 'providerNotSupported', transient: false };
+            // The stored (plugin, provider) pair no longer resolves in THIS process — the plugin
+            // is not in its registry, or no longer publishes that descriptor. Said by name, and
+            // recorded on the row (see the facade-less branch above for why).
+            this.logger.warn(
+                `${kind} of work ${workId}: the stored provider '${row.providerPluginId}/${row.providerId}' ` +
+                    'does not resolve in this process (plugin not registered, or descriptor not published).',
+            );
+            return this.recordAttemptFailure(row, 'providerNotSupported', false, {
+                providerPluginId: row.providerPluginId ?? '',
+                providerId: row.providerId ?? '',
+            });
         }
 
         const ctx = await this.buildContext(
@@ -1337,6 +1357,11 @@ export class AppDependenciesService {
     ): Promise<AppDependencyAttemptResult> {
         const resolved = await this.facade?.resolve(row.providerPluginId, row.providerId, row.kind);
         if (!this.facade || !resolved) {
+            // A refresh keeps the row's status (FR-48), but the cause is still said by name.
+            this.logger.warn(
+                `Refresh of ${row.kind} for work ${row.workId}: the stored provider ` +
+                    `'${row.providerPluginId}/${row.providerId}' does not resolve in this process.`,
+            );
             return { kind: row.kind, state: 'failed', reason: 'providerNotSupported' };
         }
 
