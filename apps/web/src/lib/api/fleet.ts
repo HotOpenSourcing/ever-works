@@ -252,10 +252,15 @@ export const fleetAPI = {
         });
     },
 
-    deleteNode: async (nodeId: string) => {
+    /**
+     * Remove a node. `confirmName` (Fleet hub, CONTRACTS §2.2) is the typed
+     * name the API checks when it is sent; without it the call is exactly
+     * what it always was.
+     */
+    deleteNode: async (nodeId: string, confirmation?: { confirmName: string }) => {
         return serverMutation<void>({
             endpoint: `${BASE}/nodes/${encodeURIComponent(nodeId)}`,
-            data: {},
+            data: confirmation ?? {},
             method: 'DELETE',
             wrapInData: false,
         });
