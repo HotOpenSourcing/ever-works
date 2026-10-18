@@ -255,6 +255,15 @@ describe('SSRF: every connection resolves through the guarded, pinned lookup (re
 		expect(config.httpsAgent.options.lookup).toBe(guardedLookup);
 	});
 
+	// CodeRabbit on #2769: through an environment proxy the guarded lookup would
+	// resolve the proxy's host and the proxy the target — outside the guard.
+	it('never goes through an environment proxy (HTTP_PROXY / HTTPS_PROXY)', async () => {
+		axiosGetMock.mockResolvedValueOnce(okHtmlResponse(articleHtml));
+		await new LocalContentExtractorPlugin().extract({ url: 'https://example.com/a' } as ContentExtractionOptions);
+		const config = axiosGetMock.mock.calls.at(-1)![1] as Record<string, any>;
+		expect(config.proxy).toBe(false);
+	});
+
 	it('refuses a name that resolves to a private, metadata or IPv4-mapped address', async () => {
 		const dns = await import('node:dns');
 		const { guardedLookup } = await import('../local-content-extractor.plugin.js');

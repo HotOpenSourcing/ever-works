@@ -191,6 +191,11 @@ export class LocalContentExtractorPlugin implements IPlugin, IContentExtractorPl
 				// address (no DNS-rebinding window).
 				httpAgent: guardedHttpAgent,
 				httpsAgent: guardedHttpsAgent,
+				// Security (SSRF): never through an environment proxy
+				// (HTTP_PROXY / HTTPS_PROXY). Through a proxy the guarded lookup
+				// resolves the PROXY's host, and the proxy resolves the target
+				// itself — outside the check above (CodeRabbit on #2769).
+				proxy: false,
 				maxRedirects: 5,
 				// Security (SSRF): the lexical guard above only vets the INITIAL
 				// url. axios/follow-redirects will transparently follow up to 5
