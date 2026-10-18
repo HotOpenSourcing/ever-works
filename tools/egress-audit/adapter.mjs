@@ -35,6 +35,9 @@ const SIGN_IN_ROUTE = '/en/login';
 /** Where the web app sends a visitor without a session. */
 const SIGNED_OUT_PATH = /^\/(en\/)?(login|register|forgot-password|reset-password|resend-verification)(\/|$)/;
 
+/** How long the web app may take to answer its first request. */
+const WEB_READY_TIMEOUT_MS = 5 * 60 * 1000;
+
 /** A page behind the sign-in, opened to prove the session holds. */
 const SIGNED_IN_CHECK_PAGE = '/en/settings';
 
@@ -167,6 +170,21 @@ export default {
 	 * 200), so the positive walk is known to have reached the module's page.
 	 */
 	async uiLogin(page, ctx) {
+		// The web app starts next to the API; wait until it answers before the first page is opened.
+		const deadline = Date.now() + WEB_READY_TIMEOUT_MS;
+		let answer = 'no answer';
+		while (Date.now() < deadline) {
+			try {
+				const response = await ctx.fetch(`${ctx.baseUrl}${SIGN_IN_ROUTE}`, { redirect: 'manual' });
+				answer = `HTTP ${response.status}`;
+				if (response.status < 500) break;
+			} catch (error) {
+				answer = String(error?.message ?? error).split('\n')[0];
+			}
+			await new Promise((resolve) => setTimeout(resolve, 3_000));
+		}
+		ctx.log(`adapter: the web app answers ${SIGN_IN_ROUTE} (${answer})`);
+
 		await page.goto(`${ctx.baseUrl}${SIGN_IN_ROUTE}`, { waitUntil: 'load', timeout: 120_000 });
 		await page.fill('input[name="email"]', ADMIN.email, { timeout: 30_000 });
 		await page.fill('input[name="password"]', ADMIN.password, { timeout: 30_000 });
