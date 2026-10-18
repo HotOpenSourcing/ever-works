@@ -95,6 +95,8 @@ describe('normalizeGitHubIssue', () => {
             normalizeGitHubIssue(issueBody({}, { author_association: 'member' }))?.payload
                 .authorAssociation,
         ).toBe('MEMBER');
+        // The author's account type rides along for the filer's bot allow-list.
+        expect(normalizeGitHubIssue(issueBody())?.payload).toMatchObject({ authorType: 'User' });
         // Absent stays absent — every consumer reads that as an outsider.
         expect(normalizeGitHubIssue(issueBody())?.payload).not.toHaveProperty('authorAssociation');
     });

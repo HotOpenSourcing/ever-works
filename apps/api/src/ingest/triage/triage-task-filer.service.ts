@@ -93,14 +93,27 @@ export const TRIAGE_OUTSIDE_AUTHOR_LABEL = 'outside-author';
  * value — an event ingested before the field existed, or a payload
  * without it — is an outsider: fail closed.
  */
-export function isOutsiderGithubIssue(event: Pick<IngestedEvent, 'kind' | 'payload'>): boolean {
+export function isOutsiderGithubIssue(
+    event: Pick<IngestedEvent, 'kind' | 'payload'>,
+    trustedBots: readonly string[] = [],
+): boolean {
     if (event.kind !== 'github.issue') return false;
-    const association = (event.payload as Record<string, unknown> | null | undefined)
-        ?.authorAssociation;
-    return !(
+    const payload = (event.payload ?? {}) as Record<string, unknown>;
+    const association = payload.authorAssociation;
+    if (
         typeof association === 'string' &&
         STEERING_AUTHOR_ASSOCIATIONS.has(association.trim().toUpperCase())
-    );
+    ) {
+        return false;
+    }
+    // A GitHub App the operator trusts to open issues (Dependabot, Renovate
+    // by default — `GITHUB_ISSUE_INTAKE_TRUSTED_BOTS`): matched on the login
+    // AND `type: Bot`. GitHub reserves the `[bot]` suffix for Apps, so no
+    // person can take one of these names.
+    const author = typeof payload.author === 'string' ? payload.author.trim().toLowerCase() : '';
+    const isBot =
+        typeof payload.authorType === 'string' && payload.authorType.toLowerCase() === 'bot';
+    return !(isBot && author.length > 0 && trustedBots.includes(author));
 }
 
 /** `file()`'s internal result — carries the Task so a caller can name it. */
@@ -511,7 +524,7 @@ export class TriageTaskFilerService implements OnModuleInit {
         // trigger matcher) — it just files nothing, here and on a re-file,
         // unless the operator opted back in. Checked first: nothing below
         // (not even the Work lookup) is spent on it.
-        const outsider = isOutsiderGithubIssue(event);
+        const outsider = isOutsiderGithubIssue(event, config.githubIssueIntake.trustedBots());
         if (outsider && !config.githubIssueIntake.fileOutsiderIssues()) {
             this.logger.debug(
                 `Triage: ${event.source}/${externalIssueId} was opened by an author who is not an OWNER, MEMBER or COLLABORATOR; nothing filed (GITHUB_ISSUE_INTAKE_OUTSIDERS is off)`,

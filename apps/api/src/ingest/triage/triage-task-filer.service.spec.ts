@@ -262,6 +262,69 @@ describe('TriageTaskFilerService', () => {
             expect(chat.post).toHaveBeenCalledTimes(1);
         });
 
+        describe('trusted GitHub App bots (Dependabot, Renovate by default)', () => {
+            const originalBots = process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
+            afterEach(() => {
+                if (originalBots === undefined) delete process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
+                else process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS = originalBots;
+            });
+            const byBot = (author: string, authorType: string | undefined = 'Bot') =>
+                storedEvent({
+                    payload: {
+                        ...storedEvent().payload,
+                        author,
+                        ...(authorType === undefined ? {} : { authorType }),
+                        authorAssociation: 'NONE',
+                    },
+                });
+
+            it.each(['dependabot[bot]', 'renovate[bot]', 'Dependabot[bot]'])(
+                'files a Task for an issue opened by %s (type Bot), unlabelled',
+                async (login) => {
+                    delete process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS;
+                    delete process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
+                    const { filer, tasks } = build();
+                    const result = await filer.process(byBot(login));
+                    expect(result).toEqual({ outcome: 'filed', taskId: 'task-1' });
+                    expect(tasks.create.mock.calls[0][1].labels).not.toContain(
+                        TRIAGE_OUTSIDE_AUTHOR_LABEL,
+                    );
+                },
+            );
+
+            it('never trusts the name without `type: Bot`, nor an unlisted bot', async () => {
+                delete process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS;
+                delete process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
+                for (const event of [
+                    byBot('dependabot[bot]', 'User'),
+                    byBot('dependabot[bot]', undefined),
+                    byBot('some-other[bot]'),
+                ]) {
+                    const { filer, tasks } = build();
+                    expect(await filer.process(event)).toEqual({
+                        outcome: 'skipped',
+                        reason: 'outsider-author',
+                    });
+                    expect(tasks.create).not.toHaveBeenCalled();
+                }
+            });
+
+            it('GITHUB_ISSUE_INTAKE_TRUSTED_BOTS replaces the list; `none` empties it', async () => {
+                delete process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS;
+                process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS = 'some-other[bot]';
+                expect((await build().filer.process(byBot('some-other[bot]'))).outcome).toBe(
+                    'filed',
+                );
+                expect((await build().filer.process(byBot('dependabot[bot]'))).outcome).toBe(
+                    'skipped',
+                );
+                process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS = 'none';
+                expect((await build().filer.process(byBot('dependabot[bot]'))).outcome).toBe(
+                    'skipped',
+                );
+            });
+        });
+
         it('GITHUB_ISSUE_INTAKE_OUTSIDERS=true files it, labelled as an outside author', async () => {
             process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS = 'true';
             const { filer, tasks } = build();

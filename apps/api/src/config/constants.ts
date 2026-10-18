@@ -50,6 +50,13 @@ export const DEFAULT_TRUSTED_REVIEW_BOTS = [
     'greptile-apps[bot]',
 ] as const;
 
+/**
+ * GitHub App bots whose issues file a triage Task even though they are not
+ * repository collaborators (F6). Override with
+ * `GITHUB_ISSUE_INTAKE_TRUSTED_BOTS`.
+ */
+export const DEFAULT_ISSUE_INTAKE_TRUSTED_BOTS = ['dependabot[bot]', 'renovate[bot]'] as const;
+
 export enum AuthProvider {
     LOCAL = 'local',
     GITHUB = 'github',
@@ -308,6 +315,27 @@ export const config = {
     githubIssueIntake: {
         fileOutsiderIssues: (): boolean =>
             (process.env.GITHUB_ISSUE_INTAKE_OUTSIDERS ?? '').trim().toLowerCase() === 'true',
+        /**
+         * GitHub App bots whose issues still file a Task although their
+         * `author_association` is not OWNER / MEMBER / COLLABORATOR —
+         * `GITHUB_ISSUE_INTAKE_TRUSTED_BOTS`, comma separated; unset or blank
+         * → `dependabot[bot]`, `renovate[bot]`; the literal `none` → nobody.
+         * Matched on the issue author's login AND `type: Bot` (GitHub reserves
+         * the `[bot]` suffix for Apps, so a person cannot take one of these
+         * names).
+         */
+        trustedBots: (): string[] => {
+            const raw = (process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS ?? '').trim();
+            if (raw === '') return [...DEFAULT_ISSUE_INTAKE_TRUSTED_BOTS];
+            if (raw.toLowerCase() === 'none') return [];
+            const parsed = raw
+                .split(',')
+                .map((value) => value.trim().replace(/^@/, '').toLowerCase())
+                .filter((value) => value.length > 0);
+            return parsed.length > 0
+                ? Array.from(new Set(parsed))
+                : [...DEFAULT_ISSUE_INTAKE_TRUSTED_BOTS];
+        },
     },
 
     /**

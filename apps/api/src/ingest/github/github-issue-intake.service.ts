@@ -131,6 +131,8 @@ export function normalizeGitHubIssue(body: GitHubIssuesWebhookBody): IngestedEve
     // The raw GitHub value, upper-cased and bounded; absent when GitHub sent
     // none (every consumer treats absent as an outsider — fail closed).
     const authorAssociation = nonEmpty(issue.author_association)?.toUpperCase().slice(0, 40);
+    // `Bot` for a GitHub App (the triage filer's bot allow-list requires it).
+    const authorType = nonEmpty(issue.user?.type)?.slice(0, 40);
     const actor = nonEmpty(body.sender?.login) ?? author ?? 'unknown';
     const url = httpsUrl(issue.html_url);
     const updatedAt = isoOrNow(issue.updated_at ?? issue.created_at);
@@ -181,6 +183,7 @@ export function normalizeGitHubIssue(body: GitHubIssuesWebhookBody): IngestedEve
             assignees,
             ...(author ? { author } : {}),
             ...(authorAssociation ? { authorAssociation } : {}),
+            ...(authorType ? { authorType } : {}),
             ...(url ? { url } : {}),
             ...(bodyText ? { body: capped(bodyText, INGESTED_EVENT_TEXT_MAX_CHARS) } : {}),
             ...(label ? { label } : {}),
