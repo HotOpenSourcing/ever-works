@@ -142,6 +142,64 @@ describe('DefaultInboundEmailDispatcher', () => {
         );
     });
 
+    describe('the trusted-sender rule (review of #2769)', () => {
+        afterEach(() => {
+            delete process.env.INBOUND_EMAIL_TRUSTED_SENDERS;
+        });
+
+        async function spawnFrom(
+            from: string,
+            setup?: (svc: any) => void,
+            metadata?: Record<string, unknown>,
+        ) {
+            const svc = await build(true);
+            addresses.findById.mockResolvedValue(inboundAddress);
+            assignments.findByEmailAddress.mockResolvedValue([
+                { agentId: 'agent-1', dispatchMode: 'task-spawn' },
+            ]);
+            setup?.(svc);
+            await svc.dispatch({ ...basePayload, from, ...(metadata ? { metadata } : {}) });
+            return taskSpawner.spawnTaskForInboundEmail.mock.calls.at(-1)[0];
+        }
+
+        it('marks an unknown sender untrusted', async () => {
+            expect((await spawnFrom('stranger@evil.test')).senderTrusted).toBe(false);
+        });
+
+        it("trusts the owner's verified account email", async () => {
+            const input = await spawnFrom('Owner <OWNER@acme.test>', (svc) => {
+                svc.users = {
+                    findById: jest.fn(async () => ({
+                        email: 'owner@acme.test',
+                        emailVerified: true,
+                    })),
+                };
+            });
+            expect(input.senderTrusted).toBe(true);
+        });
+
+        it('does not trust an UNVERIFIED account email', async () => {
+            const input = await spawnFrom('owner@acme.test', (svc) => {
+                svc.users = {
+                    findById: jest.fn(async () => ({
+                        email: 'owner@acme.test',
+                        emailVerified: false,
+                    })),
+                };
+            });
+            expect(input.senderTrusted).toBe(false);
+        });
+
+        it('trusts a configured sender unless the provider reports a failed authentication', async () => {
+            process.env.INBOUND_EMAIL_TRUSTED_SENDERS = '@partner.test';
+            expect((await spawnFrom('ops@partner.test')).senderTrusted).toBe(true);
+            const forged = await spawnFrom('ops@partner.test', undefined, {
+                headers: [{ Name: 'Received-SPF', Value: 'fail (domain does not designate)' }],
+            });
+            expect(forged.senderTrusted).toBe(false);
+        });
+    });
+
     // Review 2026-10-17 F15 (P1): an address can serve several agents; a push the
     // caller authorized for ONE agent goes to that agent, never assignments[0].
     it('routes to the agent the caller named, not the first assignment of the address', async () => {

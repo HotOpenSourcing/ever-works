@@ -166,16 +166,29 @@ flowchart LR
     D -->|conversation| C[Append to an email thread<br/>Agent replies in dialogue]
 ```
 
-- **`task-spawn`** (default) — the message is persisted, then a [Task](./tasks.md) is created for it: the title is the subject trimmed to 200 characters (or `Inbound email from <sender>` when the subject is empty), the body becomes the description (capped at 8,000 characters), the task is labelled `inbound-email`, created-by the receiving Agent, and assigned to it so the task-tracking flow dispatches an agent run. The message's delivery status flips to `delivered` once the Task exists.
+- **`task-spawn`** (default) — the message is persisted, then a [Task](./tasks.md) is created for it: the title is the subject trimmed to 200 characters (or `Inbound email from <sender>` when the subject is empty), the body becomes the description as fenced, untrusted data (capped at 12,000 bytes), the task is labelled `inbound-email`, created-by the receiving Agent, and assigned to it so the task-tracking flow dispatches an agent run. The message's delivery status flips to `delivered` once the Task exists.
 - **`conversation`** — no Task is created. The message is filed against a per-Agent thread keyed on the **normalized subject**: `Re:` / `Fwd:` / `Fw:` prefixes are stripped, whitespace is collapsed, the result is lowercased and capped at 200 characters (an empty subject becomes `(no subject)`). A matching thread is reused and its `lastMessageAt` bumped; otherwise a new one is created with the sender as a participant. The Agent's chat-reply path consumes the thread. Use this for back-and-forth that isn't a discrete unit of work ("FYI, the deploy finished").
 
 **What is kept.** Each inbound message is stored with its sender, `To` and `Cc` recipients, subject, bodies, the provider's metadata (spam score, headers — bounded in size) and its attachments. Attachments go through the same upload checks as any file you upload (allowed types verified by content, size limit), up to 20 per message and 25 MB in total, and are owned by the address's owner. One that is refused is still listed on the message, with the reason. The message, any conversation it starts and any Task it spawns belong to the address's organization (or to you personally, for an address outside any organization); a spawned Task's description lists the attachments.
 
 Two failure modes are silent by design and useful to know when debugging: if no registered address matches any recipient, the webhook is acked and nothing is stored; and if the Task-spawner adapter is not bound in a given deployment, a `task-spawn` message is still persisted, just without a Task.
 
+:::caution Who can wake an Agent by email
+Email text is written by the sender, so the platform treats every inbound body, subject and sender name as **untrusted data**: a spawned Task's description and a joined reply wrap it in delimiters the Agent is told are data, not instructions, and any `@mention` or `[[doc]]` link inside it is defused.
+
+One **trusted-sender rule** decides whether an email may wake the receiving Agent, for the first email of a thread and every reply alike. A sender is trusted when its address is one of the owner's own **verified** addresses (their verified account email, or a verified address they own — which is how one of their Agents mails another) or is listed in `INBOUND_EMAIL_TRUSTED_SENDERS` (comma-separated addresses or `@domain` entries) — **and**, when the provider passes an SPF / DKIM / DMARC verdict through (Postmark's `Authentication-Results` / `Received-SPF` headers, for example), that verdict is a pass.
+
+- **Trusted:** as before — a joined reply mentions the receiving Agent so it picks it up; a new email files its Task as before.
+- **Anyone else:** the Task is still created and assigned (labelled `awaiting-owner`, and its description tells the Agent to wait), or the reply is still filed on the Task, but no Agent is woken. The owner gets an Inbox notice and decides.
+
+`INBOUND_EMAIL_AUTO_DISPATCH_ALL=true` (the older `INBOUND_EMAIL_REPLY_AUTO_DISPATCH=true` still works) restores the old behaviour for every sender.
+
+**From can be forged.** Where the provider passes no authentication verdict through, a trusted address is trusted on its spelling alone, so a spoofed `From` of a trusted address would be believed. Prefer a provider configuration that forwards authentication results, and keep the trusted list short.
+:::
+
 :::note How replies thread
 
-Every message the platform sends carries a `Message-ID`, and replies are matched on the standard `In-Reply-To` / `References` headers — only ever against the same Agent's own mail. In `conversation` mode a reply joins the conversation of the message it answers, whatever its subject; with no match, the normalized subject decides. In `task-spawn` mode a reply to a message that belongs to a Task is posted on that Task's chat (the receiving Agent is mentioned, so it picks the reply up) instead of creating a new Task; with no match, or if posting fails, a new Task is created as before. A Task slug in the subject (`[ACME-123]`) is not used for threading.
+Every message the platform sends carries a `Message-ID`, and replies are matched on the standard `In-Reply-To` / `References` headers — only ever against the same Agent's own mail, and only when the **sender is a participant** of the referenced thread (it was one of the `From` / `To` / `Cc` / `Bcc` addresses of those messages). In `conversation` mode a reply joins the conversation of the message it answers, whatever its subject; with no match, the normalized subject decides — but a subject only ever joins a conversation its sender already takes part in, so two senders using the same subject never share a thread. In `task-spawn` mode a reply to a message that belongs to a Task is posted on that Task's chat, clearly marked as external mail, instead of creating a new Task; with no match, or if posting fails, a new Task is created as before. A Task slug in the subject (`[ACME-123]`) is not used for threading.
 
 To answer in the same thread, pass `inReplyToMessageId` (an email message id — a spawned Task's description names it) to `POST /api/email/messages` or to the Agent's `sendEmail` tool.
 

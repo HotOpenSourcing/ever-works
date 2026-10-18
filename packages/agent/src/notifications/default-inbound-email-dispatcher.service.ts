@@ -5,7 +5,9 @@ import {
     AgentEmailAssignmentRepository,
     EmailMessageRepository,
     EmailConversationRepository,
+    UserRepository,
 } from '@src/database';
+import { isTrustedSender } from './inbound-email-trust';
 import type {
     EmailMessage,
     EmailMessageAttachmentRecord,
@@ -256,7 +258,38 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
         @Optional()
         @Inject(INBOUND_EMAIL_ATTACHMENT_STORE)
         private readonly attachmentStore?: InboundEmailAttachmentStore,
+        // Prompt-injection hardening — the owner's verified account email, one
+        // of the addresses the trusted-sender rule accepts. @Optional() and
+        // appended LAST; unbound, only their own mailboxes and the configured
+        // list are trusted (more mail waits for the owner, never less).
+        @Optional() private readonly users?: UserRepository,
     ) {}
+
+    /**
+     * Prompt-injection hardening — whether this email's sender is trusted
+     * (`inbound-email-trust.ts`). Never throws: a lookup that fails trusts
+     * nobody beyond the configured list.
+     */
+    private async senderTrusted(
+        payload: AgentInboundEmailDispatchPayload,
+        address: TenantEmailAddress,
+    ): Promise<boolean> {
+        const ownerAddresses: string[] = [];
+        try {
+            const user = await this.users?.findById(address.userId);
+            if (user?.email && user.emailVerified) ownerAddresses.push(user.email);
+        } catch {
+            // Fall through: the configured list still applies.
+        }
+        try {
+            for (const own of await this.addresses.findAllByUser(address.userId)) {
+                if (own.verified && !own.disabledAt) ownerAddresses.push(own.address);
+            }
+        } catch {
+            // Same.
+        }
+        return isTrustedSender({ from: payload.from, ownerAddresses, metadata: payload.metadata });
+    }
 
     async dispatch(
         payload: AgentInboundEmailDispatchPayload,
@@ -341,6 +374,8 @@ export class DefaultInboundEmailDispatcher implements AgentInboundEmailDispatche
                 subject: payload.subject,
                 bodyText: payload.bodyText,
                 from: payload.from,
+                // One trusted-sender rule for new emails and replies alike.
+                senderTrusted: await this.senderTrusted(payload, address),
                 // EW-P4-3 — the Task lives where the receiving address does.
                 tenantId: address.tenantId ?? null,
                 organizationId: address.organizationId ?? null,

@@ -78,6 +78,7 @@ import {
     formatInboundEmailChatPost,
     formatInboundEmailTaskDescription,
     inboundEmailAttachmentList,
+    inboundEmailAwaitingOwnerNote,
     inboundEmailReplyAutoDispatchEnabled,
     inboundEmailReplyHint,
     inboundEmailTaskTitle,
@@ -166,7 +167,12 @@ import { McpModule, McpToolSource } from '@ever-works/agent/mcp';
 // domain tool source below. The agent-side InboxModule imports the
 // agent-side AgentsModule / AgentApprovalsModule / NotificationsModule
 // (never anything api-side), so no cycle is introduced.
-import { InboxModule as AgentInboxModule, InboxService } from '@ever-works/agent/inbox';
+import {
+    INBOX_PRODUCER,
+    InboxModule as AgentInboxModule,
+    InboxService,
+    type InboxProducer,
+} from '@ever-works/agent/inbox';
 // Named Conversations — ConversationMessageService backs the
 // AGENT_RUN_CONVERSATION_REPLY_POSTER binding below. The agent-side
 // ConversationsModule imports only DatabaseModule and the agent-side
@@ -645,112 +651,176 @@ async function assertRealWriteTarget(
         // before, so a reply is never lost.
         {
             provide: INBOUND_EMAIL_TASK_SPAWNER,
-            inject: [TasksService, TaskChatService, AgentRepository],
+            // The Inbox producer is APPENDED and optional: it files the owner's
+            // notice for an email from an untrusted sender.
+            inject: [
+                TasksService,
+                TaskChatService,
+                AgentRepository,
+                { token: INBOX_PRODUCER, optional: true },
+            ],
             useFactory: (
                 tasks: TasksService,
                 chat: TaskChatService,
                 agents: AgentRepository,
-            ): InboundEmailTaskSpawner => ({
-                async spawnTaskForInboundEmail({
-                    agentId,
-                    userId,
-                    emailMessageId,
-                    subject,
-                    bodyText,
-                    from,
-                    tenantId,
-                    organizationId,
-                    attachments,
-                }) {
-                    // Prompt-injection hardening: the title and description are
-                    // part of the receiving Agent's prompt, and every byte of them
-                    // is the sender's. Both are defused, and the body is fenced as
-                    // untrusted data exactly like a reply joined onto a Task.
-                    const title = inboundEmailTaskTitle(subject, from);
-                    const body = formatInboundEmailTaskDescription({
-                        emailMessageId,
-                        from,
-                        subject: subject ?? '',
-                        bodyText: bodyText ?? '',
-                    });
-                    // EW-P4-3 — a public webhook has no request scope, so the
-                    // Task is placed explicitly: where its assignee, the
-                    // receiving Agent, lives. Not the address's scope: an
-                    // address may be bound to an Agent of another scope (a
-                    // personal Agent on an org address), and `addAssignee`
-                    // then could not reach the Agent from the Task (review on
-                    // #2612). The address's tenant / organization (`tenantId`
-                    // / `organizationId`) is still stamped on the email row.
-                    // An Agent that cannot be resolved keeps the old,
-                    // unscoped create.
-                    void tenantId;
-                    void organizationId;
-                    const agent = await agents.findByIdAndUser(agentId, userId).catch(() => null);
-                    const scope =
-                        agent && (agent.tenantId || agent.organizationId)
-                            ? {
-                                  tenantId: agent.tenantId ?? null,
-                                  organizationId: agent.organizationId ?? null,
-                              }
-                            : undefined;
-                    const data = {
-                        title,
-                        // EW-P4-3 — the attachments it came with, and the
-                        // message id the agent replies in thread with.
-                        description:
-                            `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}`.trim(),
-                        labels: ['inbound-email'],
-                        createdByType: 'agent' as const,
-                        createdById: agentId,
-                    };
-                    const task = scope
-                        ? await tasks.create(userId, data, scope)
-                        : await tasks.create(userId, data);
-                    // Assign the receiving agent so the task-tracking flow
-                    // fans out agent-task-execute for it.
-                    await tasks.addAssignee(userId, task.id, 'agent', agentId);
-                    return { taskId: task.id };
-                },
-                async appendInboundEmailToTask({
-                    taskId,
-                    agentId,
-                    userId,
-                    emailMessageId,
-                    subject,
-                    bodyText,
-                    from,
-                    attachments,
-                }) {
-                    const agent = await agents.findByIdAndUser(agentId, userId);
-                    if (!agent?.slug) return null;
-                    // Prompt-injection hardening: filed on the Task as clearly
-                    // EXTERNAL mail with NO live mention, so an outside sender can
-                    // never start or steer one of the owner's Agents by replying;
-                    // a person mentions the Agent to have it act. The operator
-                    // switch restores the old auto-pickup (the dispatcher still
-                    // only joins a thread the sender participates in).
-                    const liveMention = inboundEmailReplyAutoDispatchEnabled();
-                    await chat.post(
+                inbox?: InboxProducer | null,
+            ): InboundEmailTaskSpawner => {
+                /** Best-effort Inbox notice for an email that did not wake the Agent. */
+                const noticeUntrusted = async (
+                    userId: string,
+                    input: { agentId: string; from: string; taskId: string; joined: boolean },
+                ): Promise<void> => {
+                    if (!inbox) return;
+                    try {
+                        await inbox.notice(userId, {
+                            title: input.joined
+                                ? 'A reply from an untrusted sender is waiting for you'
+                                : 'An email from an untrusted sender is waiting for you',
+                            body:
+                                `An email from ${String(input.from).slice(0, 200)} ` +
+                                (input.joined
+                                    ? 'was added to the Task as external mail'
+                                    : 'was filed as a Task') +
+                                ', but the agent was NOT started, because the sender is not on the ' +
+                                'trusted list (INBOUND_EMAIL_TRUSTED_SENDERS). Review it and mention ' +
+                                'or start the agent if you want it handled.',
+                            agentId: input.agentId,
+                            taskId: input.taskId,
+                        });
+                    } catch {
+                        // The Task / chat post already exists; the notice is extra.
+                    }
+                };
+                return {
+                    async spawnTaskForInboundEmail({
+                        agentId,
                         userId,
-                        {
-                            taskId,
-                            authorType: 'user',
-                            authorId: userId,
-                            body: formatInboundEmailChatPost({
-                                agentSlug: agent.slug,
-                                liveMention,
-                                emailMessageId,
+                        emailMessageId,
+                        subject,
+                        bodyText,
+                        from,
+                        tenantId,
+                        organizationId,
+                        attachments,
+                        senderTrusted,
+                    }) {
+                        // Prompt-injection hardening: the title and description are
+                        // part of the receiving Agent's prompt, and every byte of them
+                        // is the sender's. Both are defused, and the body is fenced as
+                        // untrusted data exactly like a reply joined onto a Task.
+                        const title = inboundEmailTaskTitle(subject, from);
+                        const body = formatInboundEmailTaskDescription({
+                            emailMessageId,
+                            from,
+                            subject: subject ?? '',
+                            bodyText: bodyText ?? '',
+                        });
+                        // EW-P4-3 — a public webhook has no request scope, so the
+                        // Task is placed explicitly: where its assignee, the
+                        // receiving Agent, lives. Not the address's scope: an
+                        // address may be bound to an Agent of another scope (a
+                        // personal Agent on an org address), and `addAssignee`
+                        // then could not reach the Agent from the Task (review on
+                        // #2612). The address's tenant / organization (`tenantId`
+                        // / `organizationId`) is still stamped on the email row.
+                        // An Agent that cannot be resolved keeps the old,
+                        // unscoped create.
+                        void tenantId;
+                        void organizationId;
+                        const agent = await agents
+                            .findByIdAndUser(agentId, userId)
+                            .catch(() => null);
+                        const scope =
+                            agent && (agent.tenantId || agent.organizationId)
+                                ? {
+                                      tenantId: agent.tenantId ?? null,
+                                      organizationId: agent.organizationId ?? null,
+                                  }
+                                : undefined;
+                        // Prompt-injection hardening — one trusted-sender rule for new
+                        // emails and replies: an untrusted sender's Task waits for the
+                        // owner (labelled, said in its description, Inbox notice).
+                        const trusted =
+                            senderTrusted === true || inboundEmailReplyAutoDispatchEnabled();
+                        const data = {
+                            title,
+                            // EW-P4-3 — the attachments it came with, and the
+                            // message id the agent replies in thread with.
+                            description:
+                                `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}${trusted ? '' : inboundEmailAwaitingOwnerNote()}`.trim(),
+                            labels: trusted
+                                ? ['inbound-email']
+                                : ['inbound-email', 'awaiting-owner'],
+                            createdByType: 'agent' as const,
+                            createdById: agentId,
+                        };
+                        const task = scope
+                            ? await tasks.create(userId, data, scope)
+                            : await tasks.create(userId, data);
+                        // Assign the receiving agent so the task-tracking flow
+                        // fans out agent-task-execute for it.
+                        await tasks.addAssignee(userId, task.id, 'agent', agentId);
+                        if (!trusted) {
+                            await noticeUntrusted(userId, {
+                                agentId,
                                 from,
-                                subject,
-                                bodyText,
-                                attachments,
-                            }),
-                        },
-                        liveMention ? { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) } : {},
-                    );
-                    return { taskId };
-                },
-            }),
+                                taskId: task.id,
+                                joined: false,
+                            });
+                        }
+                        return { taskId: task.id };
+                    },
+                    async appendInboundEmailToTask({
+                        taskId,
+                        agentId,
+                        userId,
+                        emailMessageId,
+                        subject,
+                        bodyText,
+                        from,
+                        attachments,
+                        senderTrusted,
+                    }) {
+                        const agent = await agents.findByIdAndUser(agentId, userId);
+                        if (!agent?.slug) return null;
+                        // Prompt-injection hardening: filed on the Task as clearly
+                        // EXTERNAL mail with NO live mention, so an outside sender can
+                        // never start or steer one of the owner's Agents by replying;
+                        // a person mentions the Agent to have it act. The operator
+                        // switch restores the old auto-pickup (the dispatcher still
+                        // only joins a thread the sender participates in).
+                        // Prompt-injection hardening — a trusted sender's reply wakes the
+                        // agent as it always did; anyone else's is filed as external mail
+                        // and the owner is told. The operator switch wakes it for all.
+                        const liveMention =
+                            senderTrusted === true || inboundEmailReplyAutoDispatchEnabled();
+                        await chat.post(
+                            userId,
+                            {
+                                taskId,
+                                authorType: 'user',
+                                authorId: userId,
+                                body: formatInboundEmailChatPost({
+                                    agentSlug: agent.slug,
+                                    liveMention,
+                                    emailMessageId,
+                                    from,
+                                    subject,
+                                    bodyText,
+                                    attachments,
+                                }),
+                            },
+                            liveMention
+                                ? { ownedAgentSlugs: new Map([[agent.slug, agent.id]]) }
+                                : {},
+                        );
+                        if (!liveMention) {
+                            await noticeUntrusted(userId, { agentId, from, taskId, joined: true });
+                        }
+                        return { taskId };
+                    },
+                };
+            },
         },
         // EW-P4-3 — INBOUND_EMAIL_ATTACHMENT_STORE binding: inbound email
         // attachments go through the SAME upload pipeline as any file a user

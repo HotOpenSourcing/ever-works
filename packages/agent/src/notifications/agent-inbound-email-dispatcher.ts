@@ -182,6 +182,14 @@ export interface InboundEmailTaskSpawnerInput {
         stored: boolean;
         uploadId?: string | null;
     }[];
+    /**
+     * Prompt-injection hardening — whether the sender passed the trusted-sender
+     * rule (`inbound-email-trust.ts`): one of the owner's verified addresses or
+     * `INBOUND_EMAIL_TRUSTED_SENDERS`, with any provider SPF/DKIM/DMARC verdict
+     * a pass. Absent = not trusted. An untrusted email never wakes an Agent:
+     * its Task / reply is filed and the owner is told.
+     */
+    senderTrusted?: boolean;
 }
 
 /**

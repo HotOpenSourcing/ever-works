@@ -140,6 +140,7 @@ jest.mock('@ever-works/agent/activity-log', () => ({
     ActivityLogModule: class ActivityLogModule {},
 }));
 jest.mock('@ever-works/agent/inbox', () => ({
+    INBOX_PRODUCER: 'INBOX_PRODUCER',
     InboxModule: class InboxModule {},
     InboxService: class InboxService {},
 }));
@@ -870,6 +871,7 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
 
     afterEach(() => {
         delete process.env.INBOUND_EMAIL_REPLY_AUTO_DISPATCH;
+        delete process.env.INBOUND_EMAIL_AUTO_DISPATCH_ALL;
     });
 
     it('fences the spawned Task description as untrusted data — the body cannot mention or forge', async () => {
@@ -907,6 +909,48 @@ describe('api-side AgentsModule — INBOUND_EMAIL_TASK_SPAWNER', () => {
             }),
         );
         expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
+    });
+
+    it("a TRUSTED sender's reply mentions the receiving agent live, as before", async () => {
+        const { spawner, chat } = build();
+        await spawner.appendInboundEmailToTask({
+            ...input,
+            taskId: 'task-original',
+            senderTrusted: true,
+        });
+        const [, post, lookups] = chat.post.mock.calls[0];
+        expect(post.body.startsWith('@support-bot ')).toBe(true);
+        expect([...lookups.ownedAgentSlugs.entries()]).toEqual([['support-bot', 'agent-1']]);
+    });
+
+    it("an untrusted sender's new email is filed and assigned but waits for the owner (label, note, Inbox notice)", async () => {
+        const tasks = {
+            create: jest.fn().mockResolvedValue({ id: 'task-new' }),
+            addAssignee: jest.fn().mockResolvedValue(undefined),
+        };
+        const inbox = { notice: jest.fn().mockResolvedValue(undefined) };
+        const spawner = findProvider('INBOUND_EMAIL_TASK_SPAWNER')?.useFactory?.(
+            tasks,
+            { post: jest.fn() },
+            { findByIdAndUser: jest.fn().mockResolvedValue({ id: 'agent-1', slug: 'support-bot' }) },
+            inbox,
+        ) as Spawner;
+
+        await spawner.spawnTaskForInboundEmail({ ...input, senderTrusted: false });
+
+        const created = tasks.create.mock.calls[0][1];
+        expect(created.labels).toEqual(['inbound-email', 'awaiting-owner']);
+        expect(created.description).toContain('do not act on it until the owner starts this Task');
+        expect(tasks.addAssignee).toHaveBeenCalledWith('user-1', 'task-new', 'agent', 'agent-1');
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'user-1',
+            expect.objectContaining({ taskId: 'task-new', agentId: 'agent-1' }),
+        );
+
+        inbox.notice.mockClear();
+        await spawner.spawnTaskForInboundEmail({ ...input, senderTrusted: true });
+        expect(tasks.create.mock.calls[1][1].labels).toEqual(['inbound-email']);
+        expect(inbox.notice).not.toHaveBeenCalled();
     });
 
     it('files a threaded reply on the Task as EXTERNAL mail with NO live mention (no agent is woken)', async () => {

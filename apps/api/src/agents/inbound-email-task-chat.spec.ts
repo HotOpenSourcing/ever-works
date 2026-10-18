@@ -257,6 +257,12 @@ describe('inbound-email spawned Task description', () => {
 describe('INBOUND_EMAIL_REPLY_AUTO_DISPATCH', () => {
     afterEach(() => {
         delete process.env.INBOUND_EMAIL_REPLY_AUTO_DISPATCH;
+        delete process.env.INBOUND_EMAIL_AUTO_DISPATCH_ALL;
+    });
+
+    it('accepts the newer INBOUND_EMAIL_AUTO_DISPATCH_ALL name too', () => {
+        process.env.INBOUND_EMAIL_AUTO_DISPATCH_ALL = 'true';
+        expect(inboundEmailReplyAutoDispatchEnabled()).toBe(true);
     });
 
     it('is off unless set to exactly true', () => {
