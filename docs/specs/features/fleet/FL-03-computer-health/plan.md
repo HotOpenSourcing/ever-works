@@ -74,14 +74,14 @@ field; any history table; any wake code or `macAddress`; any `health` jsonb; the
 | ----------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Probes                  | `node:os` for CPU (delta via the existing `ResourceProbe`), memory, load, uptime; shell-outs for services, reboot, GPU, all with a 2 s budget and injected runner | Zero new dependencies; same injection pattern as `telemetry-probe.ts`             |
 | Snapshot on the row     | `simple-json` `health` column (`FleetNodeHealthSnapshot & { at }`)                                                   | CONTRACTS §4.1; one row read per card                                                             |
-| History                 | One table `fleet_node_health_samples` with `resolution: 'raw' | 'hour'` and `(nodeId, resolution, at)` index          | CONTRACTS §4.5 columns + one discriminator (spec §8b); one retention job                          |
-| Roll-up                 | Hourly cron task on the configured job runtime: `INSERT … SELECT avg/max … GROUP BY date_trunc('hour')` then delete raw > 7 d, hour > 90 d | Constitution IV; idempotent via `ON CONFLICT (nodeId, resolution, at) DO NOTHING` |
+| History                 | One table `fleet_node_health_samples` with `resolution: 'raw' | 'hourly'` and `(nodeId, resolution, at)` index        | CONTRACTS §4.5 (columns and discriminator exactly); one retention job                              |
+| Roll-up                 | Hourly cron task on the configured job runtime: `INSERT … SELECT avg(…) … GROUP BY` the hour, then delete raw > 7 d, hourly > 90 d; means only until spec §8b (a) is answered | Constitution IV; idempotent via `ON CONFLICT (nodeId, resolution, at) DO NOTHING` |
 | Write path              | `FleetNodeHealthService.record(nodeId, snapshot)` behind `FLEET_HEALTH_HISTORY_ENABLED`, min 55 s between rows per node (in-memory last-write map + DB unique) | Never on the heartbeat's critical path (fire-and-forget with error log)            |
 | State derivation        | Pure `resolveComputerState(view): ComputerState` in contracts                                                        | Web, API, tools and tests share one function; must agree with `runnerRowState`                   |
 | Wake                    | Sibling sends a UDP magic packet (`dgram`, broadcast to 255.255.255.255:9 and the subnet broadcast)                 | No library; 102-byte frame; the only way for an outbound-only fleet                              |
 | Network identity        | `lanId = sha256(ownerId ‖ primary interface CIDR)` first 16 hex                                                      | Match siblings without storing addresses                                                          |
 | Chart                   | Existing charting dependency in `apps/web` (recharts, used by the runs ledger) with a text summary                   | No new dependency                                                                                 |
-| Flags / limits          | `FLEET_HEALTH_HISTORY_ENABLED`; sample 60 s / 7 d / 90 d; wake 3 per 5 min; refresh 10 per min                         | CONTRACTS §9, §10 (+ two rate limits stated in the spec)                                          |
+| Flags / limits          | `FLEET_HEALTH_HISTORY_ENABLED`; sample 60 s / 7 d / 90 d; wake 3 per 5 min; refresh 10 per min                         | CONTRACTS §9, §10; the two rates are spec §8b (c) defaults until §10 lists them                   |
 
 ## 4. Data model
 
@@ -109,19 +109,20 @@ Additions: `FleetNodeSelfDescription.health?`, `.macAddress?`, `.lanId?`; `Fleet
 
 - `fleet-node.entity.ts`: `health` (`simple-json`, nullable), `macAddress` (`varchar(17)`, nullable,
   owner-only), `lanId` (`varchar(16)`, nullable), `lastWakeAttemptAt` (`PortableDateColumn`, nullable).
-- New `packages/agent/src/entities/fleet-node-health-sample.entity.ts` → `fleet_node_health_samples`:
-  `id uuid`, `nodeId uuid`, `resolution varchar(4)`, `at` timestamptz, `cpuPercent`, `memPercent`,
-  `memTotalMiB`, `diskPercent`, `diskFreeMiB`, `loadAvg1`, `uptimeSec`, `gpu simple-json null`,
-  `pendingReboot boolean`, `failedServices int`, `cpuMax`/`memMax`/`diskMax` (nullable, roll-ups only).
-  Unique `(nodeId, resolution, at)`; index `(resolution, at)` for the sweep. Registered in
-  `packages/agent/src/entities/index.ts` and `database/_entities-inventory.ts`.
+- New `packages/agent/src/entities/fleet-node-health-sample.entity.ts` → `fleet_node_health_samples`
+  with exactly the CONTRACTS §4.5 columns: `id uuid`, `nodeId uuid`, `at` timestamptz, `resolution
+  varchar(8)` (`raw|hourly`), `cpuPercent`, `memPercent`, `memTotalMiB`, `diskPercent`,
+  `diskFreeMiB`, `loadAvg1`, `uptimeSec`, `gpu simple-json null`, `pendingReboot boolean`,
+  `failedServices int`. (Peak columns wait on spec §8b (a).) Unique `(nodeId, resolution, at)`;
+  index `(resolution, at)` for the sweep. Registered in `packages/agent/src/entities/index.ts` and
+  `database/_entities-inventory.ts`.
 
-### 4.3 Migrations
+### 4.3 Migrations (CONTRACTS §13 slots, both shipped in P1)
 
 | Slot                                               | Contents                                                                                   |
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `1796030000000-CreateFleetNodeHealthSamples`       | `CREATE TABLE fleet_node_health_samples` + indexes; `ADD COLUMN fleet_nodes.health text NULL` |
-| `1796030100000-AddFleetNodeWakeFields`             | `ADD COLUMN macAddress varchar(17) NULL`, `lanId varchar(16) NULL`, `lastWakeAttemptAt` timestamptz NULL (`lanId` pending spec §8b) |
+| `1796030000000-CreateFleetNodeHealthSamples`       | `CREATE TABLE fleet_node_health_samples` + indexes (the writer arrives in P2)              |
+| `1796030100000-AddFleetNodeWakeFields`             | `ADD COLUMN health text NULL` (the snapshot, P1), `macAddress varchar(17) NULL`, `lanId varchar(16) NULL`, `lastWakeAttemptAt` timestamptz NULL (read and written from P3), each guarded by `findColumnByName` |
 
 ## 5. API surface
 
@@ -131,7 +132,7 @@ Under `@Controller('api/fleet')`, `FleetEnabledGuard`, authenticated; new file
 | Method | Path                               | DTO / query                              | Returns                                     | Family / consent                | Errors                                                                              |
 | ------ | ---------------------------------- | ---------------------------------------- | ------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------- |
 | GET    | `/nodes/:id/health`                | —                                        | `{ snapshot: FleetNodeHealthStored | null, state, canWake }` | `view`                   | `not_found`                                                                          |
-| POST   | `/nodes/:id/health`                | — (refresh now)                          | `FleetNodeHealthStored`                     | `machines` + node `manage`      | `unreachable`, `consent_missing`, `permission_denied`, `kill_switch`, `limit_exceeded` (10/min) |
+| POST   | `/nodes/:id/health`                | — (refresh now)                          | `FleetNodeHealthStored`                     | `view`; any open link, no further consent (CONTRACTS R-31, §2.1) | `unreachable` (link down), `consent_missing` (enrol-only node — no link possible), `kill_switch`, `limit_exceeded` (10/min) |
 | GET    | `/nodes/:id/health/history`        | `range: 1h|24h|7d|90d`, `metrics?`       | `{ resolution, points: [{ at, cpu, mem, disk }] }` (≤ 500) | `view`              | `not_found`, `invalid`; `{ disabled: true }` when the flag is off                   |
 | POST   | `/nodes/:id/wake`                  | —                                        | `202 { via: { nodeId, name }, listenUntil }` | `machines` on target; sibling must advertise `wake` and `manage` | `unsupported_on_node` (no MAC / no sibling), `unreachable` (sibling link down), `kill_switch`, `limit_exceeded` (3 per 5 min), `permission_denied` |
 | GET    | `/needs-a-look` (FL-01)            | —                                        | items from the five producers               | —                               | —                                                                                   |
@@ -149,7 +150,9 @@ hints: `unreachable` → `"last seen {relative}; wake it from {sibling}?"` when 
 - **Verbs on the `machine` channel:** `health.now` → runs the probe, replies `{ snapshot }`;
   `wake.send { macAddress }` → validates the MAC, sends 3 magic packets 200 ms apart to
   `255.255.255.255:9` and the interface's broadcast, replies `{ sent: 3 }`.
-- **Consent:** `machine` family → `manage` (CONTRACTS §3.3); the module refuses both verbs without it.
+- **Consent:** `health.now` is answered on any open link with no consent beyond the link itself
+  (CONTRACTS R-31) — the `machine` channel opens for it even on a `--work`- or `--attend`-only node;
+  `wake.send` needs `manage` on the sending sibling and the module refuses it without.
 
 ### 6.2 Probe `apps/node/src/core/health-probe.ts`
 
@@ -175,38 +178,41 @@ None.
 
 ## 8. Web surface
 
-- Slots (FL-01 registry): `overview/HealthMetrics.tsx` (six cards + reboot line + Refresh now),
+- Overview blocks (FL-01 `registerOverviewBlock`): `overview/HealthMetrics.tsx` (six cards + reboot line + Refresh now),
   `overview/HealthHistoryChart.tsx` (ranges, toggles, a11y summary), `overview/WakePanel.tsx`
   under `apps/web/src/components/fleet/health/`; card cells and sparkline in
   `apps/web/src/components/fleet/overview/ComputerCards.tsx` read `node.health`.
 - `fleet/health/computer-state.shared.ts` re-exports `resolveComputerState` and maps states to
   i18n keys; `ComputerHeader.tsx` and `FleetComputersTable.tsx` (FL-01) use it for the word + action.
 - Producers' actions resolve to routes (`DASHBOARD_FLEET_COMPUTER(id, 'overview')`, `… 'settings'`)
-  or commands (`fleet.commands.clearQuarantine`, `fleet.commands.startWithConsent`).
+  or copyable machine commands (`fleet.fixCommands.clearQuarantine`,
+  `fleet.fixCommands.startWithConsent`, `fleet.fixCommands.upgrade` — not `fleet.commands.*`, which
+  is FL-12's Commands namespace).
 - BFF: `fleetAPI.health(id)`, `refreshHealth(id)`, `healthHistory(id, range)`, `wake(id)` in
   `apps/web/src/lib/api/fleet.ts`; server actions in `apps/web/src/lib/actions/fleet.ts`.
 - i18n groups: `fleet.health.*` (cards, units, stale, noSnapshot, footprint, refreshNow, refreshDisabled*),
   `fleet.states.*` (eleven sentences + actions; extends FL-01's keys), `fleet.needsALook.kinds.*`
   (diskLow critical/warn, throttled, limited, quarantined, consentMissing, helperUntrusted),
   `fleet.wake.*` (button, waking, back, notYet, noSibling, noMac, rateLimited), `fleet.history.*`
-  (ranges, metrics, off, empty, summary), `fleet.commands.*`.
+  (ranges, metrics, off, empty, summary), `fleet.fixCommands.*`.
 - Playwright: `apps/web/e2e/flow-fleet-health.spec.ts` (cards, metric slot states, state
   sentences, producers), `flow-fleet-health-history.spec.ts` (flag on/off, ranges),
   `flow-fleet-wake-refresh.spec.ts` (disabled variants, refresh via harness, wake via harness).
 
 ## 9. Agent / MCP / CLI surface
 
-Defined here, shipped in FL-19's catalogue (CONTRACTS §11.3): `fleet_health_get` (`readOnly: true`),
-`fleet_health_history` (`readOnly: true`), `fleet_health_refresh` (`destructive: false`,
-`confirmationClass: 'plain'`), `fleet_nodes_wake` (`destructive: false`, `confirmationClass: 'plain'`),
-`fleet_needs_a_look_list` (`readOnly: true`). CLI: `ever-works fleet health get|history|refresh`,
-`ever-works fleet nodes wake`. All return the same envelopes as the API.
+Defined here under the names FL-19's catalogue (plan §9.1) uses, CONTRACTS §11.3 shapes:
+`fleet_nodes_health` (`readOnly: true`; `range?` returns history, `fresh: true` runs Refresh now —
+a read under R-31), `fleet_nodes_needs_a_look` (`readOnly: true`), `fleet_nodes_wake`
+(`destructive: false`, `confirmationClass: 'plain'`); the fleet-wide list rides FL-19's
+`fleet_status`. CLI: `ever-works fleet nodes health [--range] [--fresh]`, `ever-works fleet nodes
+wake`. All return the same envelopes as the API.
 
 ## 10. Background jobs
 
 | Task                           | File                                                              | Trigger               | What                                                                                                  | Idempotency                                   |
 | ------------------------------ | ----------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| `fleet-health-rollup`          | `packages/tasks/src/tasks/trigger/fleet-health-rollup.task.ts`    | cron `7 * * * *`      | Roll raw rows of the previous hour into one `hour` row per node (mean + max); delete raw > 7 d, hour > 90 d | `ON CONFLICT DO NOTHING` on the unique key; deletes bounded by `at` |
+| `fleet-health-rollup`          | `packages/tasks/src/tasks/trigger/fleet-health-rollup.task.ts`    | cron `7 * * * *`      | Roll raw rows of the previous hour into one `hourly` row per node (means); delete raw > 7 d, hourly > 90 d | `ON CONFLICT DO NOTHING` on the unique key; deletes bounded by `at` |
 
 Registered in `packages/tasks/src/tasks/trigger/index.ts` beside `fleet-job-lease-sweeper`; runs
 with `TriggerInternalModule` (that task's header warns it fails silently otherwise). Sample writes
@@ -219,10 +225,11 @@ are inline from the heartbeat path through `FleetNodeHealthService` (not a job: 
   bounded (64 chars) and sanitised like `workerStateReason`.
 - `macAddress` is stored for the owner's computers only, shown masked (`…:3f:9a`) and never returned
   to a non-owner viewer; `lanId` is a salted hash.
-- Reach actions: `FleetAccessService.assertFamily(node, caller, 'machines')` (FL-01), consent checks
-  and kill switch through `FleetLinkService` (FL-02); the sibling's own `manage` consent is required
-  for `wake.send`; the node validates the MAC format and refuses broadcast to anything but its own
-  interface's network.
+- Reach actions: Wake → `FleetAccessService.assertFamily(node, caller, 'machines')` (FL-01) on the
+  target; Refresh now → `assertFamily(node, caller, 'view')` (CONTRACTS §2.1) with no consent beyond
+  the open link (R-31); consent checks and kill switch through `FleetLinkService` (FL-02); the
+  sibling's own `manage` consent is required for `wake.send`; the node validates the MAC format and
+  refuses broadcast to anything but its own interface's network.
 - Rate limits: refresh 10/min/node, wake 3 per 5 min/node, enforced in the service and documented
   in the error hint.
 - Audit: `node.wake { target, via }`; `node.model-throttle-clear` existing; reads unaudited.
@@ -240,12 +247,13 @@ are inline from the heartbeat path through `FleetNodeHealthService` (not a job: 
 
 | Phase | Ships                                                                                                                                                       | Flag                                   | Green means                                                                                     |
 | ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| P1    | Contracts, node probe + heartbeat tier, `health` column (migration 00's column part), state function, sentences on cards/header/table, five producers, metric slot | none beyond `FLEET_ENABLED` (telemetry) | Conformance fixture green; cards show real numbers; producers' truth tables green           |
-| P2    | Samples table (migration 00's table part), writer, roll-up task, history endpoint, chart + sparkline                                                           | `FLEET_HEALTH_HISTORY_ENABLED` (prod off) | Retention test green; chart renders fixtures                                                  |
-| P3    | Wake fields (migration 01), health module verbs, wake and refresh endpoints and buttons, tool shapes handed to FL-19                                            | same                                   | Harness: refresh round-trip; wake through a sibling; rate limits                               |
+| P1    | Contracts, node probe + heartbeat tier, both migrations (00 table, 01 `health` + wake columns), state function, sentences on cards/header/table, five producers, metric block | none beyond `FLEET_ENABLED` (telemetry) | Conformance fixture green; cards show real numbers; producers' truth tables green           |
+| P2    | Sample writer, roll-up task, history endpoint, chart + sparkline                                                                                               | `FLEET_HEALTH_HISTORY_ENABLED` (prod off) | Retention test green; chart renders fixtures                                                  |
+| P3    | Health module verbs, wake and refresh endpoints and buttons (MAC/`lanId` already reported by the P1 heartbeat), tool shapes handed to FL-19                    | same                                   | Harness: refresh round-trip on a `--work`-only node; wake through a sibling; rate limits       |
 
-Note: migration 00 ships whole in P1 (table + column) even though the writer arrives in P2 — one
-slot, one PR (program rule 10).
+Note: both migrations ship in P1 because CONTRACTS §13 puts the `health` snapshot column in slot
+01 with the wake fields; the table (slot 00) waits for its writer in P2 and the wake columns for P3
+— one slot, one PR, nothing re-stamped (program rule 10).
 
 ## 14. Test plan
 
@@ -256,17 +264,18 @@ slot, one PR (program rule 10).
 - **Node (Vitest)** `apps/node/src/core/health-probe.spec.ts` — every sub-probe with a fake runner
   per OS; a hanging runner drops its field in 2 s; MAC/lanId derivation; `apps/node/src/core/heartbeat.spec.ts`
   extend (`health`, `macAddress`, `lanId` in the newest tier, dropped on 400);
-  `apps/node/src/core/link/modules/health.spec.ts` — `health.now`, `wake.send` (3 packets, MAC
-  validation, refused without `manage`), `wake` tag conditions.
+  `apps/node/src/core/link/modules/health.spec.ts` — `health.now` answered on a `--work`-only link
+  (R-31), `wake.send` (3 packets, MAC validation, refused without `manage`), `wake` tag conditions.
 - **Agent (Jest)** `packages/agent/src/fleet/__tests__/fleet.service.health.spec.ts` — snapshot stored
   with receipt time, absent fields never overwrite; `fleet-node-health.service.spec.ts` — 55 s floor,
   flag off writes nothing, write failure logged not thrown; `needs-a-look.producers.spec.ts` — each
   producer's condition, severity, action, stable id; `helper-untrusted` silent without the field.
 - **API (Jest)** `apps/api/src/fleet/fleet-health.controller.spec.ts` — GET shapes; POST refresh
-  codes (`unreachable`, `consent_missing`, `permission_denied`, `kill_switch`, 11th → `limit_exceeded`);
+  allowed for a `view`-audience member on a `--work`-only node; refresh codes (`unreachable`,
+  `consent_missing` for an enrol-only node, `kill_switch`, 11th → `limit_exceeded`; a stranger 404s);
   history ranges and `{ disabled }`; wake preconditions and the 4th attempt;
   `apps/api/src/fleet/__tests__/node-contract.conformance.spec.ts` extend fixture with `health`.
-- **Tasks (Jest)** `packages/tasks/src/__tests__/fleet-health-rollup.task.spec.ts` — roll-up mean/max,
+- **Tasks (Jest)** `packages/tasks/src/__tests__/fleet-health-rollup.task.spec.ts` — roll-up means into `hourly` rows,
   idempotent re-run, retention boundaries at ±1 min.
 - **Web unit (Vitest)** `computer-state.shared.unit.spec.ts`, `HealthMetrics.unit.spec.tsx` (six
   cards, "—", stale, footprint line), `HealthHistoryChart.unit.spec.tsx` (gaps, off, empty, summary

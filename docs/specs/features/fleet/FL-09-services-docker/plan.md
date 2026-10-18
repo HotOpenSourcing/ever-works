@@ -55,7 +55,7 @@ browser. The platform stores audit rows only; operation records live on the node
 | Shell resolution per OS                                    | `apps/node/src/core/screen/terminal-channel.ts:27-34`                                                                 | the shells offered for "Shell inside" default to the image's `bash`/`sh`, not this; cited for the win32 convention |
 | Secret scanner                                             | `packages/contracts/src/secret/secret-patterns.ts`                                                                    | command lines, env values, operation output                                    |
 | Fleet audit writer + `REDACTED_KEY_RE`                     | `packages/agent/src/fleet/fleet-audit.service.ts:55`, `:96-137`                                                       | all action rows via `tryRecord`                                               |
-| Audit action union (no `node.service.*` members yet)       | `packages/contracts/src/fleet/fleet-panic.types.ts:60-148`                                                            | 21 new members                                                                |
+| Audit action union (no `node.service.*` members yet)       | `packages/contracts/src/fleet/fleet-panic.types.ts:60-148`                                                            | 19 new members (CONTRACTS §7)                                                 |
 | Control policy: `canControl`, roles `owner \| stranger`    | `packages/agent/src/computer/control-policy.ts:32-49`                                                                 | FL-01 generalises to families; this epic consumes `assertFamily`              |
 | Owner-scoped node lookup                                   | `packages/agent/src/fleet/fleet.service.ts:958`, `:995`                                                               | every route                                                                   |
 | Kill switch                                                | `packages/agent/src/fleet/fleet-kill-switch.service.ts:119`                                                           | guard step                                                                    |
@@ -63,7 +63,7 @@ browser. The platform stores audit rows only; operation records live on the node
 | Health sample `failedServices` (CONTRACTS §4.5, FL-03)     | not in code yet                                                                                                       | filled from the services module                                               |
 | Agent tool factory                                         | `packages/agent/src/fleet/agent-fleet-tools.ts:32-80`                                                                 | pattern for the three tool files                                              |
 | MCP whitelist with `readOnlyHint` / `destructiveHint`      | `apps/mcp/src/openapi-tools/whitelist.ts:1-21`, `:475-530`                                                            | new entries                                                                   |
-| Approval queue (`agent_action_proposals`, no DB check on `actionType`) | `packages/agent/src/entities/agent-action-proposal.entity.ts` (AW-11 plan §1.4)                            | held Agent actions (`fleet_machine_action`)                                   |
+| Approval queue (`agent_action_proposals`, no DB check on `actionType`) | `packages/agent/src/entities/agent-action-proposal.entity.ts` (AW-11 plan §1.4)                            | held Agent actions (`fleet_machine_action`), as CONTRACTS R-33 requires       |
 | Terminal renderer, FL-04 sessions                          | R-21; FL-04 `FleetSessionService`                                                                                     | "Shell inside" is an owner Session                                            |
 | Playwright convention                                      | `apps/web/e2e/flow-fleet-runner-pill.spec.ts:1-27`                                                                    | `flow-fleet-services.spec.ts`, `flow-fleet-docker.spec.ts`                    |
 
@@ -79,7 +79,7 @@ operation runner, `NodeLinkService`, gateway), FL-01 (tab/block registry, role d
 | systemd                 | `systemctl [--user] list-units --type=service --all --output=json --no-pager` (text fallback < v246) + `list-unit-files` for enablement; `show -p MainPID,ActiveEnterTimestamp` | one JSON call per scope; MainPID feeds CPU/mem from the processes module                 |
 | launchd + Homebrew      | `launchctl print system` / `print gui/<uid>` (parsed), `brew services list --json`; actions `launchctl bootstrap|bootout|enable|disable`, `brew services start|stop|restart|run` | the two managers a Mac actually has                                                 |
 | Windows services        | PowerShell encoded command: `Get-CimInstance Win32_Service` (Name, DisplayName, State, StartMode, ProcessId) → JSON; actions `Start-/Stop-/Restart-Service`, `Set-Service -StartupType` | one call gives PID for stats; encoded command avoids quoting                      |
-| Root rule               | `modules/shared/root-runner.ts`: Unix `sudo -n <argv>`; refuse on exit 1 with "password is required"; Windows: `[Security.Principal.WindowsPrincipal]::IsInRole(Administrator)` probe, refuse with an elevated command | README §3; no password ever crosses the wire                            |
+| Root rule               | `modules/shared/root-runner.ts`: Unix `sudo -n <argv>`; refuse on exit 1 with "password is required"; Windows: `[Security.Principal.WindowsPrincipal]::IsInRole(Administrator)` probe, refuse with an elevated command; the refusal is the CONTRACTS §8 code `root_required` (409) with the command as `hint` | README §3; no password ever crosses the wire                            |
 | Blast radius            | `modules/shared/blast-radius.ts`: table of unit/service/label patterns per OS → `{ kind: network \| ssh \| vpn \| docker \| node, sentence }`; `node` kind also matches the node's own service unit name derived from how it was installed (`packaging/systemd/ever-works-node@.service`, launchd label, NSSM/Task name) | one truth table, testable                                   |
 | Processes               | Linux/macOS `ps -eo pid,ppid,user,%cpu,%mem,rss,etimes,comm,args --sort=-%cpu` (macOS: `-r`), top 300; Windows `Get-Process -IncludeUserName` when admin else `Win32_Process` + `GetOwner`, CPU% from two `CPU` samples 1 s apart | portable; argv never shelled                                              |
 | GPU stats               | `nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total --format=csv,noheader`; AMD `/sys/class/drm/card*/device/{gpu_busy_percent,mem_info_vram_used,mem_info_vram_total}`; Apple `system_profiler SPDisplaysDataType -json` (model, memory) and `utilisation: null` | extends `gpu-probe.ts` vendors; honest null                     |
@@ -87,7 +87,7 @@ operation runner, `NodeLinkService`, gateway), FL-01 (tab/block registry, role d
 | Run validation          | `modules/docker/run-request.ts`: allow-list of flags built from the dialog fields; bind-mount source must be under allowed roots (FL-08's `allowed-roots.ts`) or a named volume; refuse `--privileged`, `--pid=host`, `--network=host`, `--cap-add`, `/var/run/docker.sock` | spec FR-28                                                      |
 | Operations              | FL-02 operation runner: child stdout/stderr → `operation.progress { operationId, line, percent? }`; pull percent parsed from Docker's layer lines; record kept on node (last 20, ≤ 1 MiB each) | spec FR-27; survives link drops                                              |
 | Compose picture         | pure layout in web (`compose-layout.ts`: layered DAG by `depends_on`, longest-path layering, barycentric ordering) rendered as SVG                                    | no graph library; deterministic layout testable                                            |
-| Confirmation            | API-side `confirm` object on every action POST: `{ class, typedName? }` must equal the server's computed class (list rows carry `confirmationClass` and `blastRadius`); mismatch → `confirmation_required` with the class as hint | CONTRACTS §8 `confirmation_required`; server decides, UI echoes      |
+| Confirmation            | Every action POST carries the CONTRACTS §2.2 fields for the server's computed class (list rows carry `confirmationClass` and `blastRadius`): `confirm: true` (`confirm`), `confirmName: "<target>"` (`confirm-destructive`), `acknowledgeBlastRadius: true` (`blast-radius`, plus `confirm: true`); a missing or insufficient field → `confirmation_required` with the class and, for `blast-radius`, the sentence | CONTRACTS §2.2 and §8; server decides, UI echoes      |
 | Agent approvals         | held call → `agent_action_proposals` row `actionType: 'fleet_machine_action'` with the tool call as payload; approve → re-run with `confirm` satisfied               | AW-11 precedent (plain varchar, no migration)                                               |
 | Shell inside (P3)       | daemon session `command: ['docker','exec','-it',<id>,<shell>]`, kind `owner`, `provider: 'shell'`, title `Shell · inside <name>` via FL-04 `FleetSessionService.startOwner` | R-5 / spec FR-35                                                                       |
 
@@ -103,7 +103,8 @@ actions, an `agent_action_proposals` row (existing table, new `actionType` strin
 
 - `fleet-machine-actions.types.ts` — `FleetConfirmationClass` (`plain · confirm · confirm-destructive · blast-radius`),
   `FleetBlastRadius { kind: 'network'|'ssh'|'vpn'|'docker'|'node'; sentence: string }`,
-  `FleetActionConfirm { class; typedName? }`, `FleetRootRequirement { required: boolean; preauthorized: boolean | null; command: string }`,
+  `FleetActionConfirmFields { confirm?: true; confirmName?: string; acknowledgeBlastRadius?: true }` (the CONTRACTS §2.2 request fields),
+  `FleetRootRequirement { required: boolean; preauthorized: boolean | null; command: string }`,
   `FleetOperationRef { operationId }`.
 - `fleet-services.types.ts` — `FleetServiceManager` (`systemd · launchd · brew · windows`),
   `FleetServiceScope` (`system · user`), `FleetServiceState` (`running · failed · inactive · activating · deactivating · unknown`),
@@ -119,7 +120,7 @@ actions, an `agent_action_proposals` row (existing table, new `actionType` strin
   `FleetComposeProject { name, status, serviceCount, configFiles[], filesMissing }`,
   `FleetComposeDescription { services: { name, image, state, health, cpuPercent?, memBytes?, ports[], networks[], volumes[], mounts[], dependsOn: { service, condition }[] }[], networks[], volumes[] }`,
   `FLEET_DOCKER_NAME_PATTERN`, `FLEET_IMAGE_REF_PATTERN`.
-- `fleet-panic.types.ts` — add the 21 §7 members (`node.service.*` ×5, `node.docker.container.*` ×6,
+- `fleet-panic.types.ts` — add the 19 §7 members (`node.service.*` ×5, `node.docker.container.*` ×6,
   `node.docker.image.*` ×3, `node.compose.*` ×4, `node.process.signal`) to `FleetAuditAction` and
   `FLEET_AUDIT_ACTIONS`.
 - `fleet-jobs.types.ts` — `FLEET_SERVICES_CAPABILITY = 'services'`, `FLEET_PROCESSES_CAPABILITY = 'processes'`.
@@ -133,27 +134,27 @@ family → kill switch → `confirm` check) before the service call. Errors: `{ 
 | Method | Path                                                 | DTO (`apps/api/src/fleet/<area>/dto/`)                                   | Family       | Tier        | Returns / errors                                                                                                              |
 | ------ | ---------------------------------------------------- | ------------------------------------------------------------------------ | ------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/nodes/:id/services`                                | `?scope=system\|user\|all&find=`                                          | `view`       | 60/min      | `FleetService[]` (rows carry class, blast radius, root requirement); `unreachable`, `consent_missing`, `kill_switch`           |
-| POST   | `/nodes/:id/services/:name/:action`                  | `ServiceActionDto { scope; confirm: FleetActionConfirm }`                | `services`   | 30/min      | `{ state, since?, exitCode? }`; `confirmation_required`, `permission_denied`, `operation_failed` (`details.reason: 'root-required'`, `hint` = command), `invalid` |
+| POST   | `/nodes/:id/services/:name/:action`                  | `ServiceActionDto { scope } & FleetActionConfirmFields`                  | `services`   | 30/min      | `{ state, since?, exitCode? }`; `confirmation_required`, `permission_denied`, `root_required` (`hint` = command), `invalid` |
 | GET    | `/nodes/:id/processes`                               | `?sort=cpu\|mem&find=`                                                    | `view`       | 30/min      | `{ gpus: FleetGpu[], processes: FleetProcess[] (≤ 300), sampledAt }`                                                          |
-| POST   | `/nodes/:id/processes/:pid/signal`                   | `SignalDto { signal: 'TERM'\|'KILL'; confirm }`                           | `processes`  | 30/min      | `{ sent: true, stillRunningAfterMs? }`; `invalid` (protected pid), root rule as above                                          |
+| POST   | `/nodes/:id/processes/:pid/signal`                   | `SignalDto { signal: 'TERM'\|'KILL' } & FleetActionConfirmFields`         | `processes`  | 30/min      | `{ sent: true, stillRunningAfterMs? }`; `invalid` (protected pid), `root_required` as above                                    |
 | GET    | `/nodes/:id/docker/containers`                       | —                                                                        | `view`       | 60/min      | `FleetContainer[]`; `unsupported_on_node` when Docker absent (hint: install), `operation_failed` daemon down                   |
-| POST   | `/nodes/:id/docker/containers`                       | `RunContainerDto { request: FleetRunRequest; confirm }`                  | `docker`     | 10/min      | `202 { operationId }`; `invalid` (dangerous option / mount outside roots)                                                     |
-| POST   | `/nodes/:id/docker/containers/:cid/:action`          | `ContainerActionDto { confirm; shell?: 'bash'\|'sh' }` (`exec`, P3)       | `docker`     | 30/min      | `{ state }` or, for `exec`, `{ sessionId }`; `remove` requires `confirm.typedName === name`                                   |
+| POST   | `/nodes/:id/docker/containers`                       | `RunContainerDto { request: FleetRunRequest } & FleetActionConfirmFields` | `docker`    | 10/min      | `202 { operationId }`; `invalid` (dangerous option / mount outside roots)                                                     |
+| POST   | `/nodes/:id/docker/containers/:cid/:action`          | `ContainerActionDto { shell?: 'bash'\|'sh' } & FleetActionConfirmFields` (`exec`, P3) | `docker` | 30/min | `{ state }` or, for `exec`, `{ sessionId }`; `remove` requires `confirmName === <container name>`                     |
 | GET    | `/nodes/:id/docker/images`                           | —                                                                        | `view`       | 60/min      | `FleetImage[]`                                                                                                                |
-| POST   | `/nodes/:id/docker/images/pull`                      | `PullDto { ref; confirm }`                                               | `docker`     | 10/min      | `202 { operationId }`                                                                                                         |
-| POST   | `/nodes/:id/docker/images/:ref/remove`               | `ImageRemoveDto { confirm }`                                             | `docker`     | 30/min      | `{ removed: string[] }`; `busy` when in use (hint names the container)                                                        |
-| POST   | `/nodes/:id/docker/images/prune`                     | `PruneDto { confirm }`                                                   | `docker`     | 10/min      | `202 { operationId }`; `{ reclaimedBytes: 0 }` immediately when nothing to do (no audit)                                      |
-| GET    | `/nodes/:id/docker/compose`                          | —                                                                        | `view`       | 60/min      | `FleetComposeProject[]`                                                                                                       |
-| GET    | `/nodes/:id/docker/compose/:project`                 | —                                                                        | `view`       | 60/min      | `FleetComposeDescription`                                                                                                     |
-| POST   | `/nodes/:id/docker/compose/:project/:action`         | `ComposeActionDto { action: up\|down\|restart\|pull; service?; confirm }` | `docker`     | 10/min      | `202 { operationId }`                                                                                                         |
+| POST   | `/nodes/:id/docker/images`                           | `PullDto { ref } & FleetActionConfirmFields` (pull)                      | `docker`     | 10/min      | `202 { operationId }`                                                                                                         |
+| POST   | `/nodes/:id/docker/images/:iid/:action`              | `ImageActionDto & FleetActionConfirmFields` — `:action` = `remove`        | `docker`     | 30/min      | `{ removed: string[] }`; `busy` when in use (hint names the container)                                                        |
+| DELETE | `/nodes/:id/docker/images?unused=true`               | `FleetActionConfirmFields` (prune)                                       | `docker`     | 10/min      | `202 { operationId }`; `{ reclaimedBytes: 0 }` immediately when nothing to do (no audit)                                      |
+| GET    | `/nodes/:id/docker/compose`                          | `?project=<name>` returns that project's `FleetComposeDescription`        | `view`       | 60/min      | `FleetComposeProject[]` / `FleetComposeDescription`                                                                           |
+| POST   | `/nodes/:id/docker/compose/:project/:action`         | `ComposeActionDto { service? } & FleetActionConfirmFields` — `:action` = `up\|down\|restart\|pull` | `docker` | 10/min | `202 { operationId }`                                                                                          |
 | GET    | `/operations/:id`                                    | FL-02                                                                    | `view`       | —           | operation record                                                                                                              |
 
-Sub-paths beyond the §11.2 list are flagged in spec §8b. `:ref` for images is the image id (never
-a tag with `/` in the path).
+Every path above is listed in CONTRACTS §11.2 (pull is `POST` on the images collection; prune is
+`DELETE` on it with `unused=true`; a project's description is the compose collection filtered by
+`project`). `:iid` is the image id — never a tag with `/` in the path.
 
 ## 6. Node side
 
-Three modules under `apps/node/src/core/modules/`, each registered through FL-02's module contract
+Three modules under `apps/node/src/core/link/modules/`, each registered through FL-02's module contract
 and advertising its tag under `consents.manage`: `services` (when a manager is detected),
 `processes` (always under `manage`), and the existing `docker` tag (unchanged; the docker module
 registers only when `docker` is present).
@@ -193,7 +194,7 @@ registers only when `docker` is present).
 **Link usage** (`machine` family, one channel per link, CONTRACTS §3.3):
 
 - `services.list { scope }` → `{ services: FleetService[] }`; `services.action { name, scope, action }` →
-  `{ state, since, exitCode }` or `{ error }` (`operation_failed` + `details.reason: 'root-required'` + `hint`).
+  `{ state, since, exitCode }` or `{ error }` (`root_required` + `hint` = the exact command).
   The confirmation is checked on the **platform** (the node trusts the platform's `confirm` check, and
   records the class in its own log line).
 - `processes.list { sort }` → `{ gpus, processes, sampledAt }`; `processes.signal { pid, signal }`.
@@ -203,7 +204,9 @@ registers only when `docker` is present).
   creates the `FleetSession` row).
 - `docker.run { request }`, `docker.image.pull { ref }`, `docker.image.prune`, `compose.action { project, action, service? }`
   → `{ operationId }` immediately; progress on channel 0 (`operation.progress`, `operation.done`).
-- Every reply carries `requestId`; the kill switch makes the link refuse all of them (R-24).
+- Every reply carries `requestId`; the kill switch (`link.pause`, CONTRACTS §3.2) makes the link
+  refuse every state-changing one with `kill_switch` (R-24); lists keep answering from the last
+  reply on the platform side.
 
 ## 7. Plugin surface
 
@@ -215,8 +218,10 @@ None (README D8). `docs/plugin-system/built-in-plugins.md` untouched.
   `&view=containers|images|compose&project=<name>&compose=picture|list|logs`.
 - **Registry:** `apps/web/src/components/fleet/services/services-tab.registry.ts`,
   `fleet/docker/docker-tab.registry.ts` (also registers the Overview **Runs here** block),
-  `fleet/processes/processes-tab.registry.ts` — `registerComputerTab({ consent: 'manage', family })`
-  + palette entries.
+  `fleet/processes/processes-tab.registry.ts` — FL-01's `registerComputerTab({ id, labelKey, order,
+  epic: 'FL-09', flag: 'FLEET_MACHINE_FACTS_ENABLED', consent: 'manage', load })` (FL-01 plan §6
+  entry shape) and, for **Runs here**, `registerOverviewBlock` (CONTRACTS §11.1); palette entries go
+  into FL-01's per-computer dynamic section `apps/web/src/components/command-palette/registry/sections.ts`.
 - **Components:**
   - `fleet/shared/`: `ConfirmActionDialog.tsx` (the four classes, red button for blast radius,
     typed-name field), `RootRequiredDialog.tsx`, `OperationCard.tsx` + `use-operation.ts` (FL-02
@@ -230,7 +235,7 @@ None (README D8). `docs/plugin-system/built-in-plugins.md` untouched.
     `ComposeProject.tsx`, `ComposePicture.tsx` (SVG), `compose-layout.ts` (pure DAG layout),
     `ComposeServiceTable.tsx`, `RunsHereBlock.tsx`, `docker.shared.ts`.
 - **BFF:** `apps/web/src/app/api/fleet/nodes/[id]/{services,processes,docker}/**/route.ts`, thin
-  proxies; the `confirm` object is forwarded verbatim.
+  proxies; the §2.2 confirmation fields are forwarded verbatim.
 - **i18n groups** (`fleet.*`): `fleet.computer.tabs.{services,docker,processes}`;
   `fleet.services.{title,find,scopeSystem,scopeUser,failedFirst,atBoot,atLogin,since,start,stop,restart,enableAtBoot,disableAtBoot,log,copyName,thisNode,riskTooltip,states.*,empty,noManager}`;
   `fleet.processes.{title,busiest,columns.*,stop,kill,stillRunning,protectedNode,protectedInit,gpu.{title,utilizationUnavailable,shared}}`;
@@ -256,14 +261,16 @@ None (README D8). `docs/plugin-system/built-in-plugins.md` untouched.
 | `fleet_docker_run`                | `destructive: false`, `confirm`; explicit grant (spec §8b)  | POST containers                                                                   |
 | `fleet_docker_images_list`        | `readOnly: true`                                            | GET images                                                                        |
 | `fleet_docker_image_action`       | `pull`: `destructive: false`; `remove`/`prune`: `destructive: true` | POST pull / remove / prune                                                 |
-| `fleet_compose_list`, `fleet_compose_describe` | `readOnly: true`                               | GET compose, GET project                                                          |
-| `fleet_compose_action`            | `destructive: true` (`down`), `confirm`                     | POST compose action                                                               |
+| `fleet_docker_compose_list`, `fleet_docker_compose_describe` | `readOnly: true`                 | GET compose, GET compose `?project=`                                              |
+| `fleet_docker_compose_action`     | `destructive: true` (`down`), `confirm`                     | POST compose action                                                               |
 | `fleet_docker_exec` (P3)          | `destructive: false`, `plain`                               | POST container `exec` → `{ sessionId }`                                           |
 
 Agent tool files: `packages/agent/src/fleet/{services,processes,docker}/agent-fleet-*-tools.ts`
 (descriptor factories next to `buildFleetTools`). MCP: whitelist entries with
-`readOnlyHint`/`destructiveHint`; `omitArgs: ['confirm']` is **not** applied — the tool fills `confirm`
-from the server's computed class after any Approval resolves. CLI (FL-19):
+`readOnlyHint`/`destructiveHint`; the confirmation fields are **not** omitted — the tool fills
+`confirm` / `confirmName` / `acknowledgeBlastRadius` (CONTRACTS §2.2) for the server's computed class
+after any Approval resolves (R-33). Tool names follow the permission family (`docker` governs Compose,
+CONTRACTS §2.1, §11.3). CLI (FL-19):
 `ever-works fleet services list|start|stop|restart|enable|disable`, `fleet processes list|signal`,
 `fleet docker containers|images|run|pull|prune|compose …`, exit `0/1/2`.
 
@@ -271,8 +278,10 @@ from the server's computed class after any Approval resolves. CLI (FL-19):
 
 None on the platform. Operations run on the node under FL-02's runner with a 60-minute cap (the
 6 h cap in CONTRACTS §6 is for schedules, not operations); an operation past its cap is killed on
-the node and reported `operation_failed` with hint `timed out after 60 min`. Approval expiry for
-held Agent actions follows the existing approvals sweep.
+the node and reported `operation_failed` with hint `timed out after 60 min`. At most 5 machine
+operations run at once per node (a sixth answers `busy`) and the node keeps the last 20 records;
+these three numbers are the §10 rows raised in spec §8b. Approval expiry for held Agent actions
+follows the existing approvals sweep.
 
 ## 11. Security & permissions
 
@@ -310,7 +319,7 @@ held Agent actions follows the existing approvals sweep.
 | ------ | ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **P1** | `FLEET_MACHINE_FACTS_ENABLED` (off) | contracts (services, processes, actions, audit members); shared root-runner / blast-radius / argv-safety; services + processes modules; two controllers; MachineActionGuard; Services + Processes tabs; shared dialogs; tools; palette; i18n; tests; `failedServices` feed |
 | **P2** | same                                | docker module (containers, images, run, operations); controller; Docker tab (Containers, Images), Run dialog, OperationCard (if FL-02 did not ship it), Runs here block; docker tools |
-| **P3** | same                                | compose readers + actions; Compose views (picture/list/logs); exec → owner Session (FL-04); `fleet_compose_*`, `fleet_docker_exec`                                      |
+| **P3** | same                                | compose readers + actions; Compose views (picture/list/logs); exec → owner Session (FL-04); `fleet_docker_compose_*`, `fleet_docker_exec`                               |
 
 Default off in production until ACC-FL09-01…15 (P1) are green on `develop`.
 
@@ -318,7 +327,7 @@ Default off in production until ACC-FL09-01…15 (P1) are green on `develop`.
 
 | Package              | Runner     | Tests                                                                                                                                                                                                                                                                                                                                                           |
 | -------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/contracts` | Vitest     | `src/fleet/__tests__/fleet-machine-actions.spec.ts`, `fleet-services.spec.ts`, `fleet-processes.spec.ts`, `fleet-docker.spec.ts` (guards, name patterns reject metacharacters, 300 constant), `fleet-panic.spec.ts` (21 members)                                                                                                                              |
+| `packages/contracts` | Vitest     | `src/fleet/__tests__/fleet-machine-actions.spec.ts`, `fleet-services.spec.ts`, `fleet-processes.spec.ts`, `fleet-docker.spec.ts` (guards, name patterns reject metacharacters, 300 constant), `fleet-panic.spec.ts` (19 members)                                                                                                                              |
 | `apps/node`          | Vitest     | `modules/shared/root-runner.spec.ts` (sudo -n refusal text → command; admin probe), `blast-radius.spec.ts` (table per OS incl. node's own unit), `argv-safety.spec.ts`; `services/*.spec.ts` with fixtures (systemd json + text, launchctl print, brew json, CIM json; ordering; at-boot); `processes/*.spec.ts` (ps parsers per OS, CPU% two-sample, protected pids, command redaction); `docker/*.spec.ts` (ps/images/compose fixtures, run-request refusals, env via environment not argv, operation progress parsing, exec shell detection) |
 | `packages/agent`     | Jest       | `fleet/machine-actions/__tests__/machine-action.guard.spec.ts` (every §8 code; `confirm` mismatch → `confirmation_required`; typed name), `fleet/{services,processes,docker}/__tests__/*.service.spec.ts` (audit rows carry names only; outcome refused), `agent-fleet-*-tools.spec.ts` (annotations; Approval creation for blast-radius/destructive below trust) |
 | `apps/api`           | Jest       | `fleet/{services,processes,docker}/*.controller.spec.ts` (DTOs, tiers, 404 under flag), `apps/api/test/fleet-machine-actions.e2e-spec.ts` (fake link peer: list, action, root refusal envelope, operation lifecycle)                                                                                                                                              |

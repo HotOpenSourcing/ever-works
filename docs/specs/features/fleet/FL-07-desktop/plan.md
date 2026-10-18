@@ -74,7 +74,7 @@ keyframes at ≤ 1 fps into the recording writer. Input goes the other way: a co
 | Link thresholds (degrade 3 frames / 1500 ms for 5 s; stall 6 s / 20 s / 45 s)                           | `packages/contracts/src/computer/computer-link.policy.ts:15-32`                                                                                                                                                                                                                                           | Same numbers for the desktop source.                                                                                                                                               |
 | Session statuses, channels, unwatchable reasons, control policies, session view                        | `packages/contracts/src/computer/computer-session.types.ts:29-124`                                                                                                                                                                                                                                        | `COMPUTER_UNWATCHABLE_REASONS` extended; `ComputerSessionView` gains `source`, `displayId`, recording fields.                                                                       |
 | Control types: idle 10 min, ceiling 60 min, disconnect 30 s, request 60 s, blocked shortcuts            | `packages/contracts/src/computer/computer-control.types.ts:20-33, 140-191`                                                                                                                                                                                                                                | Unchanged.                                                                                                                                                                         |
-| Control arbiter (CAS lock on `fleet_nodes`) and its event                                               | `packages/agent/src/computer/control-arbiter.service.ts:1-80`; lock columns `packages/agent/src/entities/fleet-node.entity.ts:512-564`                                                                                                                                                                      | Used as-is for desktop views; the Agent as an actor is a new `requestedBy` kind on the same lock.                                                                                   |
+| Control arbiter (CAS lock on `fleet_nodes`) and its event                                               | `packages/agent/src/computer/control-arbiter.service.ts:1-80`; lock columns `packages/agent/src/entities/fleet-node.entity.ts:520-578` (EXISTING-SUBSTRATE §2.2)                                                                                                                                             | Used as-is for desktop views; the Agent as an actor is a new `requestedBy` kind on the same lock.                                                                                   |
 | Session policy: watchability precedence, required capabilities, limits, expiry                          | `packages/agent/src/computer/computer-session.policy.ts:72-137, 194-301`                                                                                                                                                                                                                                  | `resolveWatchability` gains the source dimension; limits reused.                                                                                                                   |
 | Session entity: `recorded`, `recordingSkippedReason` (never written)                                    | `packages/agent/src/entities/computer-session.entity.ts:92-98`; only read at `packages/agent/src/computer/computer-session.service.ts:750`                                                                                                                                                                | Slot 01 adds the recording index columns; `DesktopRecordingService` is the first writer.                                                                                            |
 | Node columns: `controlPolicy`, `recordWatchSessions`, `recordingRetentionDays`                         | `packages/agent/src/entities/fleet-node.entity.ts:495-510`; read at `packages/agent/src/fleet/fleet.service.ts:1758-1759`                                                                                                                                                                                | `controlPolicy` becomes the family map (FL-01); the two recording columns get their first writer.                                                                                  |
@@ -110,7 +110,7 @@ yet (FL-01 creates it and the registry).
 | Virtual displays (P3, Linux)    | A dedicated `virtual-display` helper subcommand: adds an `xrandr` mode on a free connector of the running X server and registers it with the compositor's display configuration when one is present; refuses otherwise with the compositor named | Keeps the capability inside the helper, root-free where the X server allows, honest where it does not.                                                                                           |
 | Tile encoding                   | 64 × 64 tiles, byte-compare against the previous downscaled frame, `jpeg-encoder` (0.6.x) per changed tile, `TILES` payload `[w u16][h u16][count u16]{x u16,y u16,w u16,h u16,len u32,jpeg}`; a `FRAME` keyframe every `keyframeMs` as the existing `ComputerScreenFrame` encoding | CONTRACTS §3.2 fixes the kinds; this plan binds the field widths (dimensions fit u16 under `COMPUTER_MAX_DIMENSION` 8192).                                                                        |
 | Downscale                       | Box-average to the preset width in the helper before diffing                                                                                                        | Diffing at output resolution keeps tiles stable and CPU bounded.                                                                                                                                 |
-| Helper ↔ node IPC               | Length-prefixed binary messages (`[len u32][type u8][payload]`) over stdio when the helper is a direct child (Linux); over a same-user Unix domain socket (`0600`, in the node config dir) on macOS when the node is not in the GUI session; over a named pipe with an owner-only DACL on Windows | Mirrors the job-launcher protocol style (`apps/node/native/windows-job-launcher/src/protocol.rs`); no network listener anywhere (D2; §8b asks to confirm local IPC is inside D2).                  |
+| Helper ↔ node IPC               | Length-prefixed binary messages (`[len u32][type u8][payload]`) over stdio when the helper is a direct child (Linux); over a same-user Unix domain socket (`0600`, in the node config dir) on macOS when the node is not in the GUI session; over a named pipe with an owner-only DACL on Windows | Mirrors the job-launcher protocol style (`apps/node/native/windows-job-launcher/src/protocol.rs`); no network listener anywhere; same-user local IPC is inside D2 (CONTRACTS R-26).                |
 | Admission record                | `helper-policy.json` in the node config dir, `0600`/icacls-locked like the credential file: `{ path, sha256, level, version, acknowledgedAt, signer? }`             | Same persistence posture as the node secret; re-read and re-verified before every helper start.                                                                                                  |
 | Fingerprint source              | `helper-manifest.json` baked into the `ever-works-node` package at publish: `{ version, targets: { <target>: { sha256, url, signedSha256?, signer? } } }`           | The node knows which helper versions it accepts without a network call; `helper install` downloads from `url`, verifies, then asks for `admit`.                                                 |
 | Signed verification (P3)        | macOS: `codesign --verify --strict` + Team ID from the manifest; Windows: the existing Authenticode broker (subject + leaf cert SHA-256)                              | Reuses what exists; no new verifier on Windows.                                                                                                                                                  |
@@ -153,10 +153,14 @@ plan reads `controlPolicy.desktop`.
 | `recordingStoppedReason` | `varchar(24)` null                              | `size-cap · time-cap · storage-failed · view-ended · deleted`              |
 | `agentId`              | **widened to nullable**                           | a Desktop view from the computer page has no Agent                          |
 
-Migration `apps/api/src/migrations/1796070100000-AddComputerSessionRecordingRef.ts`: eight
-`ADD COLUMN`, one `ALTER COLUMN agentId DROP NOT NULL`, indexes `idx_computer_sessions_recording_expires(recordingExpiresAt)`
-and `idx_computer_sessions_fleet_session(fleetSessionId)`; FK `fleetSessionId → fleet_sessions`
-only if FL-04's table exists at merge time (guarded `hasTable`). `down` reverses exactly.
+Migration `apps/api/src/migrations/1796070100000-AddComputerSessionRecordingColumns.ts` (class
+`AddComputerSessionRecordingColumns1796070100000`, the CONTRACTS §13 name): eight portable
+`TableColumn` additions (varchar enums validated in code and `bigint`/`int`/`PortableDateColumn`
+types as the sibling columns use — CONTRACTS §4 storage note; runs on SQLite and Postgres), one
+`queryRunner.changeColumn` making `agentId` nullable (TypeORM rebuilds the table on SQLite), indexes
+`idx_computer_sessions_recording_expires(recordingExpiresAt)` and
+`idx_computer_sessions_fleet_session(fleetSessionId)`; FK `fleetSessionId → fleet_sessions` only if
+FL-04's table exists at merge time (guarded `hasTable`). `down` reverses exactly.
 `agent_runs.computerRecordedAt` from the AW-11 plan is **not** added: the receipt joins on
 `computer_sessions.runId` with `recordingRef IS NOT NULL` (one indexed lookup).
 
@@ -175,11 +179,12 @@ only if FL-04's table exists at merge time (guarded `hasTable`). `down` reverses
   from `COMPUTER_MAX_DIMENSION`; `DESKTOP_TILE_SIZE = 64`.
 - `fleet-helper.types.ts` _(new)_: `FleetHelperManifest`, `FleetHelperPolicyRecord` (no secret
   fields), `FleetHelperStatusView { present, admitted, level, version, fingerprintPrefix, verifiedAt, reason? }`.
-- `fleet-node.types.ts`: `FleetNodeView.helperTrust`, heartbeat `helper?: FleetHelperStatusView`,
-  `displays?: FleetDisplayView[]`, `desktopReasons?: FleetDesktopReason[]` (all optional).
+- `fleet-node.types.ts`: `FleetNodeView.helperTrust`, heartbeat `helperTrust` (CONTRACTS §1.1) plus
+  `helper?: FleetHelperStatusView`, `displays?: FleetDisplayView[]`, `desktopReasons?: FleetDesktopReason[]`,
+  `helperEvents?` (all optional; the four beyond `helperTrust` are the §1.1 addition raised in spec §8b).
 - `fleet-panic.types.ts`: audit members `node.desktop.view`, `node.desktop.control.take|release|request`,
   `node.desktop.display.set|add|remove`, `node.desktop.recording.start|stop|delete`,
-  `node.helper.admit|revoke` (§8b flags the three not yet in CONTRACTS §7).
+  `node.helper.admit|revoke|verify-failed` (all in CONTRACTS §7).
 - `packages/contracts/src/computer/computer-session.types.ts`: `COMPUTER_UNWATCHABLE_REASONS` +
   the eight; `ComputerSessionView.source` (optional, default `browser`).
 
@@ -206,12 +211,13 @@ flag guard; authenticated; family check `desktop` through FL-01's role derivatio
 | GET    | `/recordings`                          | `?limit`                                                           | `FleetDesktopViewView[]` with recording     | —                                                                                            | 60/min     |
 | GET    | `/recordings/:viewId`                  | —                                                                  | `{ index, chunks[], controlSpans[] }`       | `not_found`                                                                                  | 60/min     |
 | GET    | `/recordings/:viewId/chunks/:seq`      | —                                                                  | bytes (`attachment`, `nosniff`)             | `not_found`                                                                                  | 120/min    |
-| DELETE | `/recordings/:viewId`                  | `{ confirmationToken }`                                            | `204`                                       | `confirmation_required` (class `confirm`)                                                    | 10/min     |
-| POST   | `/displays/virtual` (P3)               | `{ name, size }` + confirmation                                    | `202 { operationId }`                       | `unsupported_on_node`, `confirmation_required`                                               | 5/min      |
-| DELETE | `/displays/virtual/:displayId` (P3)    | confirmation                                                       | `202`                                       | same                                                                                         | 5/min      |
+| DELETE | `/recordings/:viewId`                  | `{ confirm: true }` (CONTRACTS §2.2)                               | `204`                                       | `confirmation_required` (class `confirm`)                                                    | 10/min     |
+| POST   | `/displays/virtual` (P3)               | `{ name, size, confirm: true }`                                    | `202 { operationId }`                       | `unsupported_on_node`, `confirmation_required`                                               | 5/min      |
+| DELETE | `/displays/virtual/:displayId` (P3)    | `{ confirm: true }`                                                | `202`                                       | same                                                                                         | 5/min      |
 
-Node-facing: none new over HTTP — the desktop rides the link; `helperTrust`, `helper`, `displays`,
-`desktopReasons` ride the existing heartbeat (`POST /api/fleet/heartbeat`, optional fields).
+Node-facing: none new over HTTP — the desktop rides the link; `helperTrust` (CONTRACTS §1.1) and
+`helper`, `displays`, `desktopReasons`, `helperEvents` (the §1.1 addition raised in spec §8b) ride the
+existing heartbeat (`POST /api/fleet/heartbeat`, optional fields).
 Viewer socket: `wss://<api>/ws/fleet/desktop/:viewId` (FL-02 gateway, same rules as
 `computer-ws.service.ts:26-45`).
 
@@ -232,7 +238,7 @@ DTOs in `apps/api/src/fleet/desktop/dto/fleet-desktop.dto.ts` (`class-validator`
 | `apps/node/src/core/screen/helper/helper-trust.ts` _(new)_              | Reads `helper-policy.json`; verifies SHA-256 (hash-pinned) or signature (signed; Windows reuses `windows-job-helper-trust.internal.ts` broker, macOS `codesign`) **immediately before each start**; returns `helperTrust` and a `FleetDesktopReason` on failure. |
 | `apps/node/src/core/screen/helper/helper-admission.ts` _(new)_          | `install` (download from manifest URL, verify, stage), `admit` (print both fingerprints, require typed `admit`, write policy, audit via heartbeat `helperEvents`), `revoke`, `status`. |
 | `apps/node/src/core/screen/desktop-host.ts` _(new)_                     | The node-internal hook for FL-10 (`openUrl`) and FL-11 (`pasteText`): available only when the backend is available; refuses with the same reasons.                          |
-| `apps/node/src/core/link/channels/desktop-channel.ts` _(FL-02 dir, new file)_ | The `desktop` family: one channel per view; wraps helper output into `FRAME`/`TILES`/`JSON stats`; applies `INPUT` through the injector; handles `desktop.quality|refresh|displays|setDisplay`. |
+| `apps/node/src/core/link/modules/desktop.ts` _(new file in FL-02's module registry; one entry appended to `apps/node/src/core/link/modules/index.ts`)_ | The `desktop` family as a `NodeModule` (FL-02 plan §6): one channel per view; wraps helper output into `FRAME`/`TILES`/`JSON stats`; applies `INPUT` through the injector; handles `desktop.quality|refresh|displays|setDisplay|openUrl`; honours the shared `paused` flag set by `link.pause`. |
 | `apps/node/src/cli/program.ts`                                          | New verbs: `helper install [--version] [--target]`, `helper admit [--path]`, `helper revoke`, `helper status [--json]`.                                                     |
 | `apps/node/src/core/capabilities.ts`                                    | Advertise `screen:desktop` (admitted + attended + reasons empty), `helper:screen` (admitted), `screen:browser` (alias of `screen`), `input` (browser backend has `dispatchInput` or helper admitted). Remove the stale comment. |
 | `apps/node/src/core/runtime.ts`                                         | `selectAttendedCapture` returns both backends; heartbeat telemetry carries `helper`, `displays`, `desktopReasons`, `helperTrust`.                                            |
@@ -278,6 +284,13 @@ either          CLOSE(11)   reason: node-unavailable | closed-by-user | stopped 
 Reconnect: the node presents its `linkGeneration`; a `desktop` channel resumes if the helper still
 has the capture (the viewer sees a stall, not an end); otherwise `resume_failed` and the viewer
 reconnects a fresh view (CONTRACTS §3.1).
+
+CONTRACTS §3.3 fixes `desktop.quality`, `desktop.refresh`, `desktop.displays`, `desktop.setDisplay`,
+`desktop.openUrl` and the open params `{ source, display?, profile? }`. The `viewId` and `quality`
+open params and the `desktop.stats`, `desktop.mode` and `desktop.displayChanged` messages above are
+additive and are the §3.3 addition raised in spec §8b; the builder adds them to CONTRACTS in the
+same PR. `desktop.openUrl { requestId, url }` (FL-10's hook, R-3) is answered `{ requestId, ok }` or
+refused with the desktop reason.
 
 ---
 
@@ -369,13 +382,16 @@ re-exported through `@ever-works/agent/tasks`, so `_tasks-symbols.ts` needs no e
   a full hash under a key the redactor would eat, never text.
 - **Audit (one writer, `FleetAuditService`)**: `node.desktop.view` (open), `node.desktop.display.set`,
   `node.desktop.control.take|release|request`, `node.desktop.recording.start|stop|delete`,
-  `node.helper.admit|revoke` (from the node's heartbeat `helperEvents`, de-duplicated by event id),
-  `node.desktop.display.add|remove` (P3); `requestedBy` = `user:<id>` | `agent:<id>`;
-  `confirmationClass` recorded.
+  `node.helper.admit|revoke|verify-failed` (from the node's heartbeat `helperEvents`, de-duplicated
+  by event id), `node.desktop.display.add|remove` (P3); `requestedBy` = `user:<id>` | `agent:<id>`;
+  `confirmationClass` recorded. Browser-source views opened from Agent → Computer keep writing the
+  existing `computer.*` names (`packages/contracts/src/fleet/fleet-panic.types.ts:100-114`) exactly as
+  today; only Desktop-source views write `node.desktop.*`, so no action is audited twice.
 - **Permission:** FL-01's `resolveNodeRole(user, node)` → audience check on `controlPolicy.desktop`
   for watch and control; Agents additionally need the tool grant (AW-15) and trust level (AW-24).
-- **Kill switch (R-24):** `channel.open` refused `kill_switch`; the relay ends every desktop view
-  within 5 s (`stopped`), releasing control and closing recordings first.
+- **Kill switch (R-24):** the platform sends `link.pause` (CONTRACTS §3.2), so the node drops every
+  `INPUT` at once; `channel.open` is refused `kill_switch`; the relay ends every desktop view within
+  5 s (`stopped`), releasing control and closing recordings first.
 - **Helper least privilege:** the helper receives no environment but `DISPLAY`/`XAUTHORITY` (Linux)
   and the IPC path; it never reads the clipboard (FL-11 writes to it only on an explicit paste),
   never touches files, never opens sockets.
@@ -389,7 +405,7 @@ re-exported through `@ever-works/agent/tasks`, so `_tasks-symbols.ts` needs no e
 - Metrics: `fleet_desktop_first_frame_ms`, `fleet_desktop_tiles_per_sec`, `fleet_desktop_bytes_out`,
   `fleet_desktop_input_rtt_ms`, `fleet_helper_restarts_total`, `fleet_helper_admissions_total{level}`,
   `fleet_recording_bytes_total`, `fleet_recording_gc_deleted_total`.
-- Health: `GET /api/health` `fleet.relay` (FL-02) covers desktop relays.
+- Health: `GET /api/health/ready` `fleet_relay` (FL-02, CONTRACTS R-7) covers desktop relays.
 - Node `doctor` prints helper status, level, fingerprint prefix, permission facts and display count.
 
 ---
@@ -429,7 +445,7 @@ Runners: `packages/contracts`, `apps/node`, `apps/web` unit → **Vitest**; `pac
   `helper/helper-trust.spec.ts` (altered file refused before spawn; policy parse; signed path on a
   fixture), `helper/helper-admission.spec.ts` (both fingerprints printed; `admit` typed; revoke
   stops), `helper/helper-process.spec.ts` (restart cap; releaseAll on disconnect),
-  `desktop-host.spec.ts`, `apps/node/src/core/link/channels/desktop-channel.spec.ts` (message
+  `desktop-host.spec.ts`, `apps/node/src/core/link/modules/desktop.spec.ts` (message
   table above; INPUT dropped while watching), `capabilities.spec.ts` (tags iff facts; `input` rule),
   `apps/node/src/cli/program.helper.spec.ts`.
 - **Agent (Jest)** `packages/agent/src/fleet/desktop/__tests__/desktop-view.service.spec.ts`
@@ -465,7 +481,7 @@ Runners: `packages/contracts`, `apps/node`, `apps/web` unit → **Vitest**; `pac
 | Agent-driven input misused                                                 | M   | H   | Default denied; same grant as a person; `busy` under a person; every event recorded and audited.                                           |
 | Relay replica restart loses a live view                                    | M   | L   | Same as AW-11: the view ends with `error`, Reconnect offered; recordings are in storage.                                                   |
 | FL-02 link lands later than planned                                        | M   | H   | FL-07 is blocked by FL-02 by design; the helper crate and admission (P1 node-side) can land first behind the flag with no link path.         |
-| Local IPC judged outside D2                                                | L   | M   | §8b flags it; fallback is child-stdio only (Linux-first), with macOS/Windows following a README ruling.                                     |
+| Local IPC judged outside D2                                                | L   | M   | Settled by CONTRACTS R-26 (same-user local IPC is inside D2); child stdio stays the Linux path.                                           |
 
 ---
 

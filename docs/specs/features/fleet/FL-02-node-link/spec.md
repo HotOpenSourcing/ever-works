@@ -62,8 +62,10 @@ Three phases, each independently shippable:
   computer relay and link channels; single-replica fallback reported in health; viewer attach
   tokens and the viewer gateway that bridges a browser socket to a node channel; the operations
   endpoint; the existing computer-session leg moved onto the link with the old leg kept as fallback.
-- **P3 — Lifecycle and parity.** The upgrade-required flow in the hub and an opt-in auto-update
-  check on the node; `apps/desktop-node` consents in its wizard and tray.
+- **P3 — Lifecycle, management lane and parity.** The upgrade-required flow in the hub (with the
+  `node-upgrade-required` "needs a look" producer) and an opt-in auto-update check on the node; the
+  node's **management lane** that later epics' machine jobs ride (CONTRACTS R-34);
+  `apps/desktop-node` consents in its wizard and tray.
 
 ---
 
@@ -98,7 +100,11 @@ epic ships the registry and the control module; FL-03 adds the first `machine` v
 session module, and so on. A fourth consent, **`--manage`**, joins `--work` and `--attend`: it is
 what every machine-management family (logs, services, Docker, processes, ports, files, commands,
 schedules, checkout discovery, owner sessions, wake) requires, and it is reported in every
-heartbeat so the hub can say, per tab, which consent a computer is missing.
+heartbeat so the hub can say, per tab, which consent a computer is missing. The heartbeat reports
+all four consents of CONTRACTS §1.1 — `work`, `attend`, `manage` and `usageScan` — with `usageScan`
+always false until FL-20 adds its `--usage-scan` flag. The node's own local conversations with its
+session daemon (FL-04) and its screen helper (FL-07) are same-user local sockets protected by a
+token, not network listeners, and so stay inside the outbound-only rule (CONTRACTS R-26).
 
 Finally, the node's own lifecycle gets two honest surfaces: a computer below the platform's version
 floor already keeps heartbeating but is refused work; this epic shows that state in the hub with
@@ -122,16 +128,17 @@ so its computers stop reading "not available on this kind of computer yet".
 | Reach a machine live                                | One outbound WebSocket exists, opened per **computer session** so quality/refresh/input reach the capture (`apps/node/src/core/screen/node-leg.ts:12-35`); its server end is the computer gateway (`apps/api/src/computer/computer-ws.service.ts:27-60`). | It is keyed to one live view and one job; it carries only computer frames; there is no way to open a second kind of channel on it. Every later epic would need its own leg.                                                                                                                                                 |
 | Ask for consent                                     | Three consents: enrol, `--work`, `--attend` (`apps/node/src/cli/program.ts:1548-1552`; `apps/node/src/core/runtime.ts:476-480`).                                                                                                      | Nothing covers "manage this machine". The heartbeat does not report consents at all (`packages/contracts/src/fleet/fleet-node.types.ts` — no `consents` field; `apps/node/src/core/heartbeat.ts:72-90` tiers list none), so the hub cannot say which one is missing.                                                             |
 | Serve a viewer from any API replica                 | Relays are in-memory per process with a declared cross-replica seam whose default is a no-op (`apps/api/src/terminal/terminal-relay.registry.ts:71-82, 130`; `apps/api/src/computer/computer-relay.registry.ts:29-34`).                 | Two replicas, one session: only the replica that holds the relay can serve it. Redis is already a dependency (`apps/api/package.json:74` `ioredis`; `apps/api/src/health/service-detection.ts:28-30` `getRedisUrl`) but nothing fleet-related uses it, and health says nothing about relays (`apps/api/src/health/health.controller.ts:85-100`). |
-| Add a machine fact                                  | The node has no module system: executors are registered by hand in the runtime (`apps/node/src/core/runtime.ts:960-968`), capability tags are computed in one function (`apps/node/src/core/capabilities.ts:277-330`).                | Each of FL-03…FL-14 would edit the same two files.                                                                                                                                                                                                                                                                                 |
+| Add a machine fact                                  | The node has no module system: executors are registered by hand in the runtime (`apps/node/src/core/runtime.ts:737-749`, `:947`, `:1062`; EXISTING-SUBSTRATE §1.5), capability tags are computed in one function (`apps/node/src/core/capabilities.ts:277-330`); no plugin loading exists on the node (EXISTING-SUBSTRATE §1.14). | Each of FL-03…FL-14 would edit the same two files.                                                                                                                                                                                                                                                                                 |
 | Stop everything                                     | The kill switch is read fail-closed by dispatch, routing and lease (`packages/agent/src/fleet/fleet-kill-switch.service.ts:23-40`).                                                                                                    | No live channel consults it; a leg opened before the stop keeps forwarding input.                                                                                                                                                                                                                                                  |
-| Keep nodes current                                  | `FLEET_MIN_NODE_VERSION` floor; a below-floor node keeps beating and is refused work (`fleet-node.types.ts:563-584`; `apps/node/src/core/node-lifecycle.ts:8-25`).                                                                     | The verdict lives in a drawer badge and `doctor`; there is no self-update and no canary (`docs/features/fleet.md` §"Keeping nodes current").                                                                                                                                                                                       |
+| Keep nodes current                                  | `FLEET_MIN_NODE_VERSION` floor; a below-floor node keeps beating and is refused work (`fleet-node.types.ts:563-584`; `apps/node/src/core/node-lifecycle.ts:8-25`).                                                                     | The verdict lives in a drawer badge and `doctor`; there is no self-update and no canary (EXISTING-SUBSTRATE §1.11, gap 12; `docs/features/fleet.md` §"Keeping nodes current").                                                                                                                                                   |
 | Use the desktop shell                               | `apps/desktop-node` shares the node core but passes no live-view consent (`apps/desktop-node/src/main/main.ts:138`; zero matches for "attend" under `apps/desktop-node/src`).                                                           | Every computer-page tab shows "not available on this kind of computer yet" for those machines (R-10).                                                                                                                                                                                                                             |
 
 ### 2.3 Why this epic is additive only
 
 The existing computer-session leg, its gateway and both relays keep working unchanged in P1. In P2
-the leg is re-homed onto the link behind a node-side switch with the old path kept as fallback for
-one release. No consent is removed: `--work` and `--attend` mean exactly what they mean today;
+the leg is re-homed onto the link behind a node-side switch with the old path kept as the fallback;
+retiring it is a separate change for the owner to approve, not part of this epic. No consent is
+removed: `--work` and `--attend` mean exactly what they mean today;
 `--manage` is a fourth, independent flag. The heartbeat gains one optional field.
 
 ---
@@ -147,8 +154,9 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
 - **S2 — Enrolled only means no link.** **Given** a node started with no consent flag, **when** it
   heartbeats, **then** no link is opened, the header reads _"Link ○ not open — this computer only
   reports health"_, and every tab that needs the link names the consent it is missing.
-- **S3 — A channel opens, works, closes.** **Given** a connected link and a caller in the `machines`
-  family audience, **when** FL-03's **Refresh now** is pressed, **then** the platform opens a
+- **S3 — A channel opens, works, closes.** **Given** a connected link and a caller in the `view`
+  family audience (`health.now` is a read allowed on any open link — CONTRACTS R-31, §2.1), **when**
+  FL-03's **Refresh now** is pressed, **then** the platform opens a
   `machine` channel (or reuses the one already open), sends the request with a `requestId`,
   receives the reply within 3 seconds at p95, and the card updates; the channel stays open for
   further requests.
@@ -171,8 +179,9 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
   `fleet_relay: { configured: true, mode: 'valkey' }`.
 - **S8 — One replica, no Redis.** **Given** a single API process without `REDIS_URL`, **when** it
   boots, **then** relays run in-process, health reports `fleet_relay: single-replica`, and nothing
-  else changes; **given** the operator declares more than one replica without a bus, **then** boot
-  fails with a message naming the setting.
+  else changes; **given** the deployment sets `FLEET_RELAY_REQUIRE_BUS=true` (every multi-replica
+  deployment does, CONTRACTS R-7) without a bus, **then** boot fails with a message naming the
+  setting.
 - **S9 — Kill switch.** **Given** channels are open on three computers, **when** a platform admin
   throws the kill switch, **then** within 5 seconds every new channel request is refused with
   `kill_switch`, every open channel receives a pause notice (daemon sessions are paused by FL-04,
@@ -283,15 +292,18 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
   either a result or an error carrying a code, a hint and details.
 - **FR-17** A request the node cannot finish within 2 seconds MUST reply at once with an operation id
   and MUST report progress and completion on channel 0.
-- **FR-18** The platform MUST expose each operation by id for polling until 1 hour after completion.
+- **FR-18** The platform MUST expose each operation by id for polling until 1 hour after completion,
+  and MUST let the caller cancel a running one by id, which sends `operation.cancel` to the node
+  (CONTRACTS §3.2–3.3).
 - **FR-19** A verb no node module handles MUST answer `unsupported_on_node` naming the verb.
 
 ### 4.3 P1 — Consent, authorisation, audit, kill switch
 
 - **FR-20** The node MUST accept a `--manage` flag on `start`, independent of `--work` and
   `--attend`, and MUST advertise the `managed` tag only when it is on.
-- **FR-21** Every heartbeat MUST carry the node's three consents; the platform MUST store them on the
-  computer and MUST treat an absent field as `manage: false`.
+- **FR-21** Every heartbeat MUST carry the node's consents `{ work, attend, manage, usageScan }`
+  (CONTRACTS §1.1; `usageScan` false until FL-20 adds `--usage-scan`); the platform MUST store them
+  on the computer and MUST treat an absent field as `manage: false`, `usageScan: false`.
 - **FR-22** A change of consents between two heartbeats MUST write one audit row and MUST close
   every channel whose family lost its consent.
 - **FR-23** Before opening a channel the platform MUST check, in order: kill switch, the family's
@@ -315,8 +327,8 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
   subscribe through Valkey so any replica can serve any viewer.
 - **FR-30** Without `REDIS_URL` the API MUST run in-process relays and MUST report
   `fleet_relay: single-replica` in its readiness output.
-- **FR-31** An operator who declares a multi-replica deployment without a bus MUST get a boot
-  failure naming the setting, never a silently degraded relay.
+- **FR-31** With `FLEET_RELAY_REQUIRE_BUS=true` and no bus configured, the API MUST fail at boot
+  with a message naming the setting, never run a silently degraded relay (CONTRACTS R-7, §9).
 - **FR-32** Viewers MUST attach to a channel through a 60-second single-use token carrying a role of
   `viewer` or `driver`, presented in the first frame and never in a URL.
 - **FR-33** The viewer gateway MUST bridge a browser socket to the node channel, MUST role-check
@@ -328,14 +340,17 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
 
 ### 4.5 P3 — Lifecycle and parity
 
-- **FR-36** A computer below the version floor MUST be shown in the hub with "Upgrade required" and
-  the exact upgrade command, and MUST keep reporting health.
+- **FR-36** A computer below the version floor MUST be shown in the hub with "Upgrade required" (the
+  state word FL-03's state mapping supplies) and the exact upgrade command, MUST raise one
+  `node-upgrade-required` "needs a look" item (`info`, CONTRACTS §4.6, R-23), and MUST keep
+  reporting health.
 - **FR-37** A node started with `--auto-update` MUST upgrade itself within 10 minutes of the platform
   raising the floor above its version or naming a recommended version, MUST restart under its
   service manager, and MUST log before and after versions.
 - **FR-38** A node without `--auto-update` MUST only report; a failed self-update MUST leave the old
   version running and MUST be reported in the hub.
-- **FR-39** The desktop shell MUST offer the three consents in its wizard and tray, MUST pass them
+- **FR-39** The desktop shell MUST offer `work`, `attend` and `manage` in its wizard and tray (the
+  usage-scan consent arrives with FL-20), MUST pass them
   into the shared runtime, and MUST report them in its heartbeat.
 - **FR-40** Until the desktop shell ships consents, the platform MUST show "not available on this
   kind of computer yet" for any family whose consent that kind cannot report.
@@ -346,6 +361,16 @@ one release. No consent is removed: `--work` and `--attend` mean exactly what th
   received over the link since it connected.
 - **FR-42** The link indicator MUST never read "connected" from a stale heartbeat; it MUST reflect
   the platform's own socket state.
+
+### 4.7 P3 — Management lane (CONTRACTS R-34)
+
+- **FR-43** The node MUST run a **management lane**, modelled on the existing attended lane, that
+  leases only the job kinds later epics register for it (`vm-create`, `vm-control` under `--manage`;
+  `runner-install`, `runner-control` under `--work`; `usage-scan` under `--usage-scan` — CONTRACTS
+  R-34, §12) and only while the matching consent is on.
+- **FR-44** Management-lane jobs MUST never count against the node's `--concurrency`, and the work
+  lane MUST never lease them. This epic ships the lane with an empty kind set; FL-16, FL-18 and FL-20
+  each add their kinds.
 
 ---
 
@@ -453,13 +478,28 @@ The link line is a `status` region; every refusal sentence is a key under `fleet
 | **Node link**               | **NEW**     | The one multiplexed outbound connection per node; has a generation, limits, consents and open channels. Not stored. |
 | **Channel**                 | **NEW**     | One stream on a link, with a family, parameters, a lifecycle (open → ready/refused → closed) and a resume rule.    |
 | **Channel family**          | **NEW** (enum) | `session · desktop · logs · machine · files · command · schedule · tunnel · clip` (CONTRACTS §3.3).            |
-| **Consent**                 | Existing + 1 | `work`, `attend` and the new `manage`; reported in every heartbeat, stored on the Node.                          |
+| **Consent**                 | Existing + 2 | `work`, `attend`, the new `manage` and the new `usageScan` (flag added by FL-20); reported in every heartbeat, stored on the Node (CONTRACTS §1.1). |
 | **Node module**             | **NEW** (internal) | A unit inside the node runtime owning tags and channel families; composed at compile time (D8).          |
+| **Management lane**         | **NEW** (internal) | The node's third lease loop for machine jobs (CONTRACTS R-34); outside `--concurrency`.                  |
 | **Link token / attach token** | **NEW** / Existing | Node-side 5-minute single-use token; viewer-side 60-second single-use token with a role.               |
-| **Operation**               | **NEW** (ephemeral) | A long request's id, progress and result, kept 1 hour.                                                  |
+| **Operation**               | **NEW** (ephemeral) | A long request's id, progress and result, kept 1 hour; cancellable.                                      |
 | **Relay bus**               | **NEW**     | The cross-replica fan-out behind every relay; Valkey when configured, in-process otherwise.                        |
 | **Node**                    | Existing    | Gains `consents`; its control policy (FL-01) is what the platform checks per family.                              |
 | **Fleet audit**             | Existing    | Receives consent changes and state-changing channel opens.                                                        |
+
+**Acts this epic adds (rule 7).**
+
+| Act                                   | Consent                     | Family / audience            | Confirmation | Audit (CONTRACTS §7)                      | Errors                                                                 | Agent tool                                  |
+| ------------------------------------- | --------------------------- | ---------------------------- | ------------ | ----------------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------- |
+| Link connect / disconnect (node)      | any of work, attend, manage | — (the node's own credential) | —            | `node.link.connect`, `node.link.disconnect` | close codes only (auth, flag off, rate)                               | —                                           |
+| Open a channel (platform)             | the family's (§3.3)         | the family's (§2.1)          | the verb's   | `node.link.channel-open` for state-changing families only | `kill_switch`, `consent_missing`, `permission_denied`, `unreachable`, `limit_exceeded`, `unsupported_on_node` | —                    |
+| Consent change (node restart)         | —                           | —                            | —            | `node.consent.change`                     | —                                                                      | —                                           |
+| Read an operation                     | —                           | the operation's family       | `plain`      | — (read)                                  | `not_found`                                                            | `fleet_operations_get` · readOnly           |
+| Cancel an operation                   | the operation's family      | the operation's family       | `plain`      | the operation's own verb row              | `not_found`, `unreachable`, `kill_switch`                              | `fleet_operations_cancel` · destructive: false |
+
+Kill switch (R-24): every channel open is refused `kill_switch`, open channels are paused (input
+blocked, processes left running), clearing resumes without a reconnect; drain-all warns owner
+sessions 60 s before ending them.
 
 ---
 
@@ -477,13 +517,25 @@ The link line is a `status` region; every refusal sentence is a key under `fleet
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS change — §7 names no audit action for a channel open or a link connect. FR-25 needs one; proposed `node.link.channel-open` (details: family, target, requestedBy) and `node.link.connect|disconnect` (node actor, informational). Alternative: audit only the verbs each epic names and drop FR-25.]`
-- `[NEEDS CLARIFICATION: CONTRACTS R-7 writes the health key as `fleet.relay`; the readiness output uses snake_case keys (`ai_provider`, `job_runtime`). Proposed `fleet_relay`.]`
-- `[NEEDS CLARIFICATION: How does the API know it runs more than one replica (FR-31)? Proposed operator setting `FLEET_RELAY_REQUIRE_BUS=true` set by the multi-replica deployment manifests; without it a single process is assumed.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — the heartbeat response gains an optional `recommendedNodeVersion` (canary) beside `minNodeVersion`, set from `FLEET_RECOMMENDED_NODE_VERSION`. Confirm the field and the env name.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §4.6 has no "needs a look" kind for a below-floor node; proposed `node-upgrade-required` (info) so S11 appears in the list, else the card chip alone.]`
-- `[NEEDS CLARIFICATION: Single-use link tokens without Redis are enforced per process; with two replicas and no bus (already a configuration error per FR-31) a token could be presented once to each. Accepted as a consequence of the misconfiguration?]`
-- `[NEEDS CLARIFICATION: The existing leg reconnects from 2 s; CONTRACTS §3.1 says 1 s → 30 s. This spec follows CONTRACTS for the link and leaves the legacy leg at 2 s until it is retired.]`
+- **Resolved** by CONTRACTS §7: `node.link.channel-open` (details `family`, `target`,
+  `requestedBy`; state-changing families only) and `node.link.connect|disconnect` (node actor).
+- **Resolved** by CONTRACTS R-7: the readiness key is `fleet_relay` (snake_case like its siblings).
+- **Resolved** by CONTRACTS R-7 / §9: the multi-replica signal is the operator setting
+  `FLEET_RELAY_REQUIRE_BUS=true`; without it a single process is assumed. The relay mode itself is
+  derived from `REDIS_URL` alone — there is no second mode setting.
+- **Resolved** by CONTRACTS §1.1: the heartbeat response gains optional `recommendedNodeVersion`; its
+  value comes from the operator setting `FLEET_RECOMMENDED_NODE_VERSION`, the sibling of the
+  existing `FLEET_MIN_NODE_VERSION` value (a value, not a §9 feature flag).
+- **Resolved** by CONTRACTS §4.6 / R-23: `node-upgrade-required` (`info`) is a "needs a look" kind and
+  this epic registers its producer (FR-36).
+- **Resolved** by CONTRACTS R-7: a multi-replica deployment without the bus is a configuration error
+  (`FLEET_RELAY_REQUIRE_BUS=true` on every such deployment), so per-process single-use enforcement
+  without Valkey is accepted.
+- **Resolved** by CONTRACTS §3.1: its 1 s → 30 s backoff governs the link; the existing computer
+  leg keeps its own 2 s → 30 s ladder unchanged while it remains the fallback.
+- **Resolved** by CONTRACTS §3.2 (rev 3): platform → node `link.pause`, `link.resume` and `link.drain { graceSec }` on channel 0.
+- **Resolved** by CONTRACTS §10.1 (rev 3): the link rates and timings are fixed there (hello 10/min then 60 s refusal, operation id after 2 s, operations kept 1 h, slow viewer dropped after 5 s, flag-off retry every 5 min, link-token 20/min, attach-token 30/min).
+- `[NEEDS CLARIFICATION: Self-update is the owner's call — CONTRACTS §1.1 adds `recommendedNodeVersion` only "so the node can show an upgrade hint", and EXISTING-SUBSTRATE gap 12 assigns self-update to no epic. Default until answered: ship `--auto-update` as a per-machine opt-in, off unless the machine owner passes it, installing only from the package registry the node came from and reporting a failed attempt as an optional `selfUpdateFailedAt` in the heartbeat's newest tier (a heartbeat field CONTRACTS §1.1 does not yet list); without the flag the node only shows the hint.]`
 
 ---
 
@@ -545,6 +597,11 @@ The link line is a `status` region; every refusal sentence is a key under `fleet
       every manage/attend tab reads "not available on this kind of computer yet".
 - [ ] `ACC-FL02-21` (FR-41, FR-42) The header shows bytes over the link and reads "connected" only
       while the platform holds the socket.
+- [ ] `ACC-FL02-22` (FR-18) Cancelling a running operation by id sends `operation.cancel`, the node
+      stops it, and the operation reads cancelled with the shared error envelope.
+- [ ] `ACC-FL02-23` (FR-43, FR-44) A test kind registered on the management lane is leased only with
+      its consent on, never by the work lane, and leasing it does not reduce the work lane's
+      `--concurrency` slots.
 
 ---
 
@@ -556,21 +613,23 @@ The link line is a `status` region; every refusal sentence is a key under `fleet
       a plugin choice.
 - [x] **III — Source-of-truth repos.** Nothing stored but consents and audit rows.
 - [x] **IV — Job runtime.** No background jobs; operations are ephemeral request state, not work.
-- [x] **V — Forward-only migrations.** One additive migration (`consents`).
+- [x] **V — Forward-only migrations.** One additive migration (`consents`, plus the
+      `previewProfileEnabled` column CONTRACTS §13 places in the same slot for FL-10).
 - [x] **VI — Tests.** Contract codec fuzz, node, API gateway, bus, e2e named in the plan.
 - [x] **VII — Secrets.** Tokens never in URLs or logs; node credential never leaves the node; no
       payload logged.
 - [x] **VIII — Plugin counts.** No plugin.
 - [x] **IX — Behaviour-first.** No class, file or endpoint named here.
 - [x] **X — Backwards compatibility.** Optional heartbeat field; existing gateways and relays keep
-      their shapes; legacy leg kept one release.
+      their shapes; the legacy leg stays as the fallback (retiring it is a separate owner decision).
 
 ---
 
 ## 11. References
 
 - Program: [Fleet README](../README.md) D2, D3, D8, D12 · [CONTRACTS](../CONTRACTS.md) §0 R-7,
-  R-10, R-24; §1; §3 (the protocol this epic implements); §8; §9; §10; §13 ·
+  R-10, R-23, R-24, R-26, R-31, R-34; §1; §3 (the protocol this epic implements); §4.6; §7; §8; §9;
+  §10; §12; §13 ·
   [Capability map](../CAPABILITY-MAP.md) row A "Direct peer-to-peer link" (adopt one multiplexed
   outbound link)
 - Plan: [`./plan.md`](./plan.md) · Tasks: [`./tasks.md`](./tasks.md)

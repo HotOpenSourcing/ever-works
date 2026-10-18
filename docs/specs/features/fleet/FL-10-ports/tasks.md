@@ -38,14 +38,14 @@
       `node.port.open`, `node.port.preview.open`, `node.port.preview.close` to
       `packages/contracts/src/fleet/fleet-panic.types.ts` and `FLEET_PORTS_CAPABILITY` to `fleet-jobs.types.ts`.
     - **Test**: `packages/contracts/src/fleet/__tests__/fleet-ports.types.spec.ts`; extend `fleet-panic.spec.ts`.
-- [ ] **T-02**. Add the additive `profile?: 'agent' | 'preview'` param to the `desktop` channel-open
-      params in FL-02's link contract file (`packages/contracts/src/fleet/fleet-link.types.ts` per FL-02;
-      default `agent`).
+- [ ] **T-02**. Make sure FL-02's link contract file (`packages/contracts/src/fleet/fleet-link.types.ts`)
+      carries CONTRACTS §3.3's `profile?: 'agent' | 'preview'` on the `desktop` channel-open params
+      (default `agent`); add it there, additively, if FL-02 has not.
     - **Test**: FL-02's link contract spec gains a case: `profile: 'preview'` accepted, unknown refused.
 
 ## P1.B — Node module
 
-- [ ] **T-03**. Write `apps/node/src/core/modules/ports/discover.ts` (`ss -tlnpH` with `-p`-less
+- [ ] **T-03**. Write `apps/node/src/core/link/modules/ports/discover.ts` (`ss -tlnpH` with `-p`-less
       fallback, `lsof -nP -iTCP -sTCP:LISTEN -F pcnL`, PowerShell encoded `Get-NetTCPConnection` +
       `Get-Process` → JSON) and `classify.ts` (well-known table, Windows + Unix noise tables,
       `localOnly`, Microsoft-HTTPAPI detection). Tables are exported data.
@@ -63,16 +63,16 @@
     - **Test**: `watch-list.spec.ts`, `open-desktop.spec.ts`.
 - [ ] **T-06**. Add `PreviewPageSource` (exported; `navigate(url)` restricted to `127.0.0.1`) to
       `apps/node/src/core/screen/headless-browser-backend.ts` without changing `BrowserPageSource`;
-      write `apps/node/src/core/modules/ports/preview-browser.ts` (profile root
+      write `apps/node/src/core/link/modules/ports/preview-browser.ts` (profile root
       `~/.ever-works/preview-profile` beside `agent-profiles`, lazy with the owner-only ACL from
       `apps/node/src/core/screen/agent-profile.ts`; one `PreviewBrowserSession` per node; capture pump
       + input injector reuse; 15 s leave grace; 60 min cap).
     - **Test**: `apps/node/src/core/screen/headless-browser-backend.spec.ts` (navigate refuses
       `http://example.com`), `modules/ports/preview-browser.spec.ts` (dir is a sibling of
       agent-profiles, never inside; busy; caps).
-- [ ] **T-07**. Write `apps/node/src/core/modules/ports/index.ts` (`createPortsModule`; `ports.list`,
+- [ ] **T-07**. Write `apps/node/src/core/link/modules/ports/index.ts` (`createPortsModule`; `ports.list`,
       `ports.open`; 2 s list cache; `ports` tag under `manage` when a discovery tool exists) and register
-      it in FL-02's module list in `apps/node/src/core/runtime.ts`.
+      it with one entry in FL-02's compile-time module array `apps/node/src/core/link/modules/index.ts`.
     - **Test**: `index.spec.ts` — refusal codes; no tag without a tool; preview open returns the
       channel id the platform opens `desktop` on.
 
@@ -101,7 +101,9 @@
 - [ ] **T-11**. Write `PortsTab.tsx`, `PortRow.tsx`, `OtherPortsFold.tsx`, `SystemPortsFold.tsx`,
       `OpenPortField.tsx`, `OpenMenu.tsx` (disabled reasons for desktop / preview), `PreviewPane.tsx`
       (wraps `apps/web/src/components/computer/ComputerStage.tsx` via FL-07's attach hook; watermark;
-      ends-in line), `ServersBlock.tsx`, `ports-tab.registry.ts` (tab, Overview block, palette) under
+      ends-in line), `ServersBlock.tsx`, `ports-tab.registry.ts` (tab through FL-01's
+      `registerComputerTab` entry shape, Servers through `registerOverviewBlock`, palette in FL-01's
+      `apps/web/src/components/command-palette/registry/sections.ts`) under
       `apps/web/src/components/fleet/ports/`; BFF routes `apps/web/src/app/api/fleet/nodes/[id]/ports/route.ts`
       and `.../ports/[port]/open/route.ts`. Every state in spec §5.5.
     - **Test**: `PortsTab.unit.spec.tsx`, `PreviewPane.unit.spec.tsx`, `ServersBlock.unit.spec.tsx`.
@@ -128,8 +130,10 @@
 
 ## P2.A — Entity and migration
 
-- [ ] **T-15**. Add `packages/agent/src/entities/fleet-port-tunnel.entity.ts` (plan §4.1; plain
-      varchar unions, `PortableDateColumn`, raw uuids, three indexes); register in
+- [ ] **T-15**. Add `packages/agent/src/entities/fleet-port-tunnel.entity.ts` with exactly the
+      CONTRACTS §4.9 columns (plan §4.1: `ownerUserId`, `nodeId`, `port`, `previewHost`, `state`,
+      `openedAt`, `lastRequestAt`, `closedAt`, `closedReason`, `bytesIn`, `bytesOut`, `auditOpenId`,
+      `auditCloseId`; plain varchar unions, `PortableDateColumn`, raw uuids, three indexes); register in
       `packages/agent/src/entities/index.ts` (fleet block `:166-179`) and
       `packages/agent/src/database/_entities-inventory.ts`; add `FleetPortTunnelRepository` at
       `packages/agent/src/fleet/ports/fleet-port-tunnel.repository.ts` with a CAS `close(id, reason)`.
@@ -138,12 +142,13 @@
 - [ ] **T-16**. Author `apps/api/src/migrations/1796100000000-CreateFleetPortTunnels.ts` from
       `apps/api/` (`pnpm typeorm migration:generate -d typeorm.config.ts src/migrations/CreateFleetPortTunnels`),
       shaped like `1795161700000-AddFleetModelUsageLimits.ts` (portable `TableColumn`, per-step
-      guards, `down` drops only what `up` added). FKs `nodeId` (cascade), `userId`.
+      guards, `down` drops only what `up` added; runs on SQLite and Postgres — CONTRACTS §4 storage
+      note). FKs `nodeId` (cascade), `ownerUserId`.
     - **Test**: applies on an empty and a populated DB; a second `migration:generate` yields an empty diff.
 
 ## P2.B — Node tunnel channel
 
-- [ ] **T-17**. Write `apps/node/src/core/modules/ports/tunnel.ts` (`tunnel` channel handler:
+- [ ] **T-17**. Write `apps/node/src/core/link/modules/ports/tunnel.ts` (`tunnel` channel handler:
       `tunnel.request` envelope + `DATA` + `END` → `http.request` to `127.0.0.1:<port>` → `tunnel.response`
       + streamed `DATA` + `END`; `ACK` credits both ways; 60 s per request; byte counters; refuses
       a port not listening with `channel.refused { code: 'not_found' }`); wire `ports.preview` accept in
@@ -155,10 +160,13 @@
 
 - [ ] **T-18**. Write `packages/agent/src/fleet/ports/fleet-port-tunnel.service.ts` (`open`: family
       `ports` → consent → kill switch → per-owner limit 4 → row → link `channel.open tunnel` → audit
-      `node.port.preview.open`; `close(reason)`: CAS → link `CLOSE` → audit `node.port.preview.close`
-      with counts; `authorizeRequest(tunnelId, userId)`; `touch(tunnelId, bytes)`).
+      `node.port.preview.open` → stamp `auditOpenId`; `close(reason)` with `reason` ∈ §4.9's
+      `idle · hard · user · node-offline · kill-switch`: CAS → link `CLOSE` → audit
+      `node.port.preview.close` with the request count and the precise trigger (e.g. `drain`, link
+      lost) → stamp `auditCloseId`; `authorizeRequest(tunnelId, userId)` against `ownerUserId`;
+      `touch(tunnelId, bytes)`).
     - **Test**: `fleet-port-tunnel.service.spec.ts` — limit, owner mismatch, exactly two audit rows per
-      tunnel, every close reason reachable.
+      tunnel, every §4.9 close reason reachable, drain and link loss stored as `node-offline`.
 - [ ] **T-19**. Write `apps/api/src/fleet/ports/preview-host.middleware.ts` (mounted in
       `apps/api/src/main.ts` when `FLEET_PREVIEW_HOST` is set; exact `Host` match; `/p/:tunnelId/*` and
       sticky-cookie root-absolute routing; session cookie auth via the existing auth session store;
@@ -169,11 +177,12 @@
     - **Test**: `preview-host.middleware.spec.ts` (every branch), bridge spec; e2e
       `apps/api/test/fleet-ports.e2e-spec.ts` extended: a body served end to end through the fake peer.
 - [ ] **T-20**. Add tunnel routes to `fleet-ports.controller.ts` (POST/GET/DELETE `/nodes/:id/ports/:port/preview`)
-      behind `apps/api/src/fleet/guards/fleet-port-tunnel-enabled.guard.ts` (404 posture); add the
-      `tunnels` block to FL-20's `GET /api/fleet/usage` response (additive field).
+      behind `apps/api/src/fleet/guards/fleet-port-tunnel-enabled.guard.ts` (404 posture). FL-20's
+      `GET /api/fleet/usage` is not changed by this epic; FL-20 adds a `tunnels` block from
+      `FleetPortTunnelView` when it chooses (spec §8b).
     - **Test**: controller spec (404 with the flag off; `limit_exceeded` envelope).
 - [ ] **T-21**. Write `packages/tasks/src/tasks/trigger/fleet-port-tunnel-sweeper.task.ts` (cron
-      `1/1 * * * *`; idle / hard-cap / node-offline / kill-switch closes through the service's CAS);
+      `1/1 * * * *`; `idle` / `hard` (`openedAt` + 60 min) / `node-offline` / `kill-switch` closes through the service's CAS);
       register where `fleet-job-lease-sweeper.task.ts` is registered (same `TriggerInternalModule`
       caveat); dispatch port `FLEET_PORT_TUNNEL_SWEEPER_DISPATCHER` in `packages/agent/src/fleet/ports/`.
     - **Test**: `packages/tasks/src/__tests__/fleet-port-tunnel-sweeper.task.spec.ts` — each reason;
@@ -195,7 +204,8 @@
 # PHASE 3 — WebSocket passthrough and watch
 
 - [ ] **T-24**. Extend `tunnel.ts` and the bridge with `tunnel.ws-open` (node WS client to loopback;
-      opcode-prefixed `DATA`; `END` closes; counts `wsUpgrades`; an open socket counts as activity for
+      opcode-prefixed `DATA`; `END` closes; counts WebSocket upgrades into the close audit row (no
+      column — CONTRACTS §4.9); an open socket counts as activity for
       the idle clock); preview host upgrade handling.
     - **Test**: `tunnel.spec.ts` ws round trip; middleware upgrade spec; e2e: a dev server's reload
       socket connects through the tunnel.
@@ -213,9 +223,12 @@
       (`:183`) and a row in `docs/features/index.md`.
     - **Test**: `pnpm --filter ever-works-docs build` — no broken links.
 - [ ] **T-27**. Update [`../TRACKER.md`](../TRACKER.md) FL-10 row and the `Status` fields of the three
-      documents; note the CONTRACTS §4 table addition once merged.
+      documents; add the CONTRACTS §10 rows raised in spec §8b in the same PR (the §4.9 table, the
+      `ports` family, R-17's fallback and §3.3's `profile` param already landed in CONTRACTS rev 2).
+    - **Test**: docs build clean; the banned-terms grep over this folder prints nothing.
 - [ ] **T-28**. Run `pnpm format && pnpm lint && pnpm test && pnpm build`; run the banned-terms grep over
       this folder — it must print nothing.
+    - **Test**: the four commands exit 0; the grep prints nothing.
 
 ## Definition of done
 
@@ -224,4 +237,5 @@
 - Tests prove: the node never contacts a non-loopback address for probes, opens or tunnels; platform
   cookies never reach a tunnelled server; exactly two audit rows per tunnel.
 - `pnpm format:check`, `pnpm lint`, `pnpm test`, `pnpm build` green; docs build clean.
-- Constitution gates in `spec.md` §10 confirmed; TRACKER row updated; CONTRACTS §4 table filed.
+- Constitution gates in `spec.md` §10 confirmed; TRACKER row updated; the entity matches CONTRACTS
+  §4.9 column for column; the §10 rows from spec §8b filed.
