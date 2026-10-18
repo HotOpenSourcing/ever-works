@@ -5,6 +5,7 @@ import {
     IsBoolean,
     IsIn,
     IsInt,
+    IsObject,
     IsOptional,
     IsString,
     IsUUID,
@@ -15,6 +16,8 @@ import {
     ValidateIf,
 } from 'class-validator';
 import {
+    FLEET_ACTION_FAMILIES,
+    FLEET_AUDIENCES,
     FLEET_CREDENTIAL_MAX_LENGTH,
     FLEET_CREDENTIAL_MIN_LENGTH,
     FLEET_ENROLLABLE_NODE_KINDS,
@@ -41,14 +44,17 @@ import {
     FLEET_NODE_WORKER_STATES,
 } from '@ever-works/contracts';
 import type {
+    FleetControlPolicyFamiliesInput,
     FleetEnrollableNodeKind,
     FleetExecutionMode,
     FleetExecutionScopeType,
 } from '@ever-works/contracts';
 import {
+    IsFleetConsentsShape,
     MaxConfiguredCapabilityTagLength,
     MaxConfiguredCapabilityTags,
 } from './fleet-capability.validators';
+import { IsFleetControlPolicyFamilies } from './fleet-access.validators';
 
 /**
  * Every bound below comes from the SHARED fleet contract
@@ -92,6 +98,15 @@ export class CreateFleetEnrollmentTokenDto {
     @IsIn(ENROLLABLE_KINDS)
     kind: FleetEnrollableNodeKind;
 }
+
+/**
+ * `GET /api/fleet/nodes?scope=` (Fleet hub). Absent or `own` is the
+ * owner-only list every existing caller reads; `visible` adds computers
+ * shared with the caller through an Organization. Read as one named query
+ * value (not a whitelisted DTO), so the route still ignores any other query
+ * parameter exactly as it did.
+ */
+export const FLEET_NODE_LIST_SCOPES = ['own', 'visible'] as const;
 
 /** Request body for `PATCH /api/fleet/nodes/:id` (partial update). */
 export class UpdateFleetNodeDto {
@@ -168,6 +183,36 @@ export class UpdateFleetNodeDto {
     @Min(1)
     @Max(FLEET_MAX_DAILY_COST_CEILING_CENTS)
     dailyCostCeilingCents?: number | null;
+
+    /**
+     * Fleet hub (FL-01) — the owner's star. Owner only: anyone else who may
+     * see the node is refused with `permission_denied`.
+     */
+    @ApiProperty({
+        required: false,
+        description:
+            'Fleet hub — star (true) or unstar (false) the computer; favourites sort first. Owner only.',
+    })
+    @IsOptional()
+    @IsBoolean()
+    isFavorite?: boolean;
+
+    /**
+     * Fleet hub (FL-01) — a PARTIAL map from action family to audience
+     * (CONTRACTS §2.1). Families named change; the rest keep theirs. Writing
+     * `desktop` also writes the legacy `controlPolicy` (its mirror). Owner
+     * only; audited as `node.policy.change`, one row per family changed.
+     */
+    @ApiProperty({
+        required: false,
+        type: Object,
+        additionalProperties: { type: 'string', enum: [...FLEET_AUDIENCES] },
+        description: `Fleet hub — who may act in each action family on this computer, e.g. { "sessions": "org-admins" }. Families: ${FLEET_ACTION_FAMILIES.join(', ')}. Audiences: ${FLEET_AUDIENCES.join(', ')}. Families not named keep their audience. Owner only.`,
+    })
+    @IsOptional()
+    @IsObject()
+    @IsFleetControlPolicyFamilies()
+    controlPolicyFamilies?: FleetControlPolicyFamiliesInput;
 }
 
 /**
@@ -298,7 +343,7 @@ export class FleetNodeSelfDescriptionDto {
         required: false,
         type: [String],
         description:
-            "Capability tags, e.g. ['terminal', 'workspace', 'docker']. Count and per-tag length are operator-configurable (FLEET_MAX_CAPABILITY_TAGS / FLEET_MAX_CAPABILITY_TAG_LENGTH; defaults 16 / 32).",
+            "Capability tags, e.g. ['terminal', 'workspace', 'docker']. Count and per-tag length are operator-configurable (FLEET_MAX_CAPABILITY_TAGS / FLEET_MAX_CAPABILITY_TAG_LENGTH; defaults 32 / 32).",
     })
     @IsOptional()
     @IsArray()
@@ -560,6 +605,53 @@ export class FleetNodeSelfDescriptionDto {
     @Min(0)
     @Max(FLEET_MAX_REPORTED_LIMIT_VALUE)
     maxMemoryMb?: number | null;
+
+    /**
+     * Computer health (FL-03) — this beat's health snapshot (CONTRACTS §4.5).
+     *
+     * Deliberately only `@IsObject()`, for the reason `workerState` is not an
+     * `@IsIn`: under `whitelist + forbidNonWhitelisted` a value this build
+     * rejects fails the WHOLE beat, and a failed beat is a node swept offline.
+     * A nested object is not whitelisted field by field (no `@ValidateNested`),
+     * so a newer node's extra fact never 400s; `FleetService` runs
+     * `sanitizeFleetNodeHealthSnapshot`, which keeps only known fields within
+     * their bounds and DROPS the rest — a broken reading costs that one figure,
+     * never the machine's liveness. Sent on the heartbeat only, in the node's
+     * newest optional tier, so a platform older than this field costs the node
+     * exactly this field.
+     */
+    @ApiProperty({
+        required: false,
+        type: Object,
+        description:
+            'Health snapshot: cpuPercent, memPercent, memTotalMiB, memUsedMiB, diskPercent, diskFreeMiB, diskTotalMiB, loadAvg1, cpuCores, uptimeSec, gpu (list or null), pendingReboot, failedServices — each optional. Unknown or out-of-range values are dropped, never rejected.',
+    })
+    @IsOptional()
+    @IsObject()
+    health?: Record<string, unknown>;
+
+    /**
+     * Fleet node link (FL-02, CONTRACTS §1.1) — the consents the node was
+     * started with: `{ work, attend, manage, usageScan }`.
+     *
+     * Validated as a small object of BOOLEANS, not as a nested whitelisted
+     * class, on purpose: under `whitelist + forbidNonWhitelisted` a nested
+     * class would 400 the whole beat the day a newer node reports a fifth
+     * consent, and the node would then strip the field and keep its link
+     * closed. Unknown keys are accepted here and dropped by the service,
+     * which takes the four it knows (only a literal `true` grants).
+     */
+    @ApiProperty({
+        required: false,
+        type: Object,
+        additionalProperties: { type: 'boolean' },
+        example: { work: true, attend: false, manage: true, usageScan: false },
+        description:
+            'The consents this node runs with (--work, --attend, --manage, usage scan). Booleans only; at most 16 keys.',
+    })
+    @IsOptional()
+    @IsFleetConsentsShape()
+    consents?: Record<string, boolean>;
 }
 
 /**

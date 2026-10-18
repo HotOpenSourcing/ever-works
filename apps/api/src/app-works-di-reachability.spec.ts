@@ -208,11 +208,9 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         reason: "APW-05's rebuild requester is unwritten (the hosts service is provided in the API since C43, lane aw-deploy-2).",
         source: 'packages/agent/src/app-runtime/app-hosts.service.ts:142 (owned by APW-05)',
     },
-    {
-        key: 'AppEnvModule | AppEnvService | APP_ENV_ACTIVITY',
-        reason: 'Provisional: T26 owns `app-env.activity.ts` and the `ActivityActionType.APP_ENV` member it writes with.',
-        source: 'packages/agent/src/app-env/app-env.service.ts:331-341,373 (APW-07 T26)',
-    },
+    // `AppEnvModule | AppEnvService | APP_ENV_ACTIVITY` left this list on 2026-10-18 (lane
+    // aw-env-smtp): `AppEnvModule` binds it to `AppEnvActivityService` (APW-07 T26), so every env
+    // change through `PUT /api/works/:id/app-env` writes its `app_env` Activity row.
     {
         key: 'AppEnvModule | AppEnvService | APP_ENV_ACTOR_NAMES',
         reason: 'Provisional: the swap is `useExisting: WorkMemberService`, which has no `nameOf` yet.',
@@ -255,11 +253,9 @@ const EXPECTED_UNBOUND: readonly Expected[] = [
         reason: "The agent module's COPY (see the entry above); `WorksConfigService` is provided beside the wired copy.",
         source: 'apps/api/src/app-works/app-works.module.ts:133-144 (APW-01 T15)',
     },
-    {
-        key: 'AppWorksModule[agent] | AppWorkCreateService | APP_PROMPTED_VALUES_PORT',
-        reason: 'Unbound on purpose: binding it means inventing the actor and ordering APW-07 T24/T25 own.',
-        source: 'packages/agent/src/app-runtime/__tests__/app-works-port-dormancy.spec.ts:373-379; app-works/app-prompted-values.port.ts:46-53',
-    },
+    // `AppWorksModule[agent] | AppWorkCreateService | APP_PROMPTED_VALUES_PORT` left this list
+    // on 2026-10-18 (lane aw-live-fix): the agent AppWorksModule binds it to
+    // `AppEnvPromptedValuesAdapter`, so `appEnv` answers given at create are stored.
     {
         key: 'FacadesModule | AppRuntimeFacadeService | WORK_APP_RUNTIME_STATES',
         reason: 'Worker-only facade: in the API every method throws `APP_CLUSTER_IO_IN_API` before any read, so the row is never read here. Its worker binding is T71 status item (b) (see EXPECTED_WORKER_UNBOUND).',

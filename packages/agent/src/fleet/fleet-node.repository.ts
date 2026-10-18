@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, Not, Repository } from 'typeorm';
+import { In, IsNull, LessThan, Not, Repository } from 'typeorm';
 import { FleetAgentNodeAffinity } from '../entities/fleet-agent-node-affinity.entity';
 import {
     FleetNode,
@@ -69,6 +69,9 @@ export interface RotateCredentialPatch {
     rotationRequestedByUserId: string | null;
 }
 
+/** Ids per `IN (...)` read in {@link FleetNodeRepository.findStatusesByIds}. */
+const STATUS_READ_CHUNK = 500;
+
 /**
  * Feature-owned repository (provided by `FleetModule`, not
  * `DatabaseModule` — same split as `MeetingRepository`).
@@ -93,6 +96,28 @@ export class FleetNodeRepository {
         return this.repository.findOne({ where: { id } });
     }
 
+    /**
+     * Fleet node link (FL-02) — the id and status of each of these rows; an
+     * id with no row is simply absent from the answer. Read in chunks so a
+     * large fleet stays under every driver's bound-parameter limit. Empty
+     * input reads nothing.
+     */
+    async findStatusesByIds(
+        ids: readonly string[],
+    ): Promise<Array<Pick<FleetNode, 'id' | 'status'>>> {
+        const out: Array<Pick<FleetNode, 'id' | 'status'>> = [];
+        for (let start = 0; start < ids.length; start += STATUS_READ_CHUNK) {
+            const chunk = ids.slice(start, start + STATUS_READ_CHUNK);
+            out.push(
+                ...(await this.repository.find({
+                    select: { id: true, status: true },
+                    where: { id: In([...chunk]) },
+                })),
+            );
+        }
+        return out;
+    }
+
     /** Credential lookup (sha256 hex) — enroll resolves the row by it. */
     async findByCredentialHash(hash: string): Promise<FleetNode | null> {
         return this.repository.findOne({ where: { enrollmentTokenHash: hash } });
@@ -102,6 +127,21 @@ export class FleetNodeRepository {
     async findByUser(userId: string): Promise<FleetNode[]> {
         return this.repository.find({
             where: { userId },
+            order: { createdAt: 'ASC' },
+        });
+    }
+
+    /**
+     * Fleet hub (FL-01) — every Node bound to one of these Organizations,
+     * whoever owns it, oldest first. The caller (`FleetAccessService`)
+     * filters by role and the `view` audience; this read only narrows by
+     * the binding, so it never decides who sees what. Empty input reads
+     * nothing.
+     */
+    async findByOrganizations(organizationIds: readonly string[]): Promise<FleetNode[]> {
+        if (organizationIds.length === 0) return [];
+        return this.repository.find({
+            where: { organizationId: In([...organizationIds]) },
             order: { createdAt: 'ASC' },
         });
     }

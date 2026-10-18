@@ -557,6 +557,23 @@ export const config = {
             return process.env.FLEET_ENABLED !== 'false';
         },
         /**
+         * Fleet hub (FL-01) — the `FLEET_HUB_ENABLED` switch: the sidebar
+         * entry "Fleet", the `/fleet` hub and its computer pages. The web
+         * tier reads the same variable (`apps/web/src/lib/fleet-flags.ts`)
+         * with the same rule; this getter exists so an API surface that ever
+         * needs to agree with the hub reads ONE definition.
+         *
+         * **Default OFF** (CONTRACTS §9): the hub is new, so off reproduces
+         * today's Settings → Fleet exactly. On ONLY for the literal
+         * `'true'`, and never without `FLEET_ENABLED` — the hub flag alone
+         * cannot resurrect a fleet a deployment switched off (spec U3).
+         */
+        isHubEnabled(): boolean {
+            return (
+                process.env.FLEET_ENABLED !== 'false' && process.env.FLEET_HUB_ENABLED === 'true'
+            );
+        },
+        /**
          * How long a one-time enrollment token stays redeemable.
          * Default 15 minutes (`FLEET_ENROLLMENT_TOKEN_TTL_MS`), floored
          * at 30s so a token can always actually be typed in.
@@ -605,6 +622,18 @@ export const config = {
          */
         isJobPurgeEnabled(): boolean {
             return process.env.FLEET_JOB_PURGE_ENABLED !== 'false';
+        },
+        /**
+         * Computer health (FL-03) — `FLEET_HEALTH_HISTORY_ENABLED` gates the
+         * health HISTORY: the per-beat sample writer, the hourly roll-up and
+         * the history endpoint. Default OFF (CONTRACTS §9): only the exact
+         * string `true` turns it on. Retention is NOT gated: rows written
+         * while it was on still age out after it is switched off. The latest
+         * snapshot on the node row is telemetry and is stored with the flag
+         * off too.
+         */
+        isHealthHistoryEnabled(): boolean {
+            return process.env.FLEET_HEALTH_HISTORY_ENABLED === 'true';
         },
         getCredentialRotationOverlapMs(): number {
             return clampedIntEnv(
@@ -668,6 +697,35 @@ export const config = {
                 normalizeFleetNodeVersionFloor(process.env.FLEET_MIN_NODE_VERSION) ??
                 FLEET_DEFAULT_MIN_NODE_VERSION
             );
+        },
+        /**
+         * Fleet node link (FL-02, CONTRACTS §1.1) — the daemon version this
+         * deployment RECOMMENDS (`FLEET_RECOMMENDED_NODE_VERSION`), carried on
+         * every accepted beat as `recommendedNodeVersion`. A value, not a
+         * feature flag; null (the field is omitted) when unset or not a version.
+         */
+        getRecommendedNodeVersion(): string | null {
+            return normalizeFleetNodeVersionFloor(process.env.FLEET_RECOMMENDED_NODE_VERSION);
+        },
+        /**
+         * Fleet node link (FL-02, CONTRACTS §9) — whether this deployment
+         * accepts node links (`FLEET_NODE_LINK_ENABLED`). Off unless set to
+         * `true`: with it off the link-token route answers 404 and the link
+         * gateway refuses every upgrade, so a node retries every 5 minutes and
+         * everything that works today keeps working. Read per call, so
+         * flipping it needs no restart.
+         */
+        isNodeLinkEnabled(): boolean {
+            return process.env.FLEET_NODE_LINK_ENABLED === 'true';
+        },
+        /**
+         * Fleet node link (FL-02, CONTRACTS R-7, §9) — `FLEET_RELAY_REQUIRE_BUS=true`
+         * makes a missing relay bus (`REDIS_URL`) a boot-time configuration
+         * error. Every multi-replica deployment sets it; without it a single
+         * API process is assumed and relays run in-process.
+         */
+        isRelayBusRequired(): boolean {
+            return process.env.FLEET_RELAY_REQUIRE_BUS === 'true';
         },
         /** Max capability tags one node may advertise. Default 16, hard ceiling 64. */
         getMaxCapabilityTags(): number {

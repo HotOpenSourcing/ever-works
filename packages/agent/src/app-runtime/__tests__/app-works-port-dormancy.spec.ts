@@ -210,6 +210,10 @@ const BOUND: readonly string[] = [
     //                                  dependency output answered
     //                                  `secureStorageUnavailable` on an
     //                                  installation that had a key
+    //   APP_ENV_ACTIVITY               (2026-10-18, lane aw-env-smtp — APW-07 T26)
+    //                                  `AppEnvActivityService`: until then every
+    //                                  env change answered `activityRecorded:
+    //                                  false` and wrote no Activity row (FR-8)
     //   APP_ENV_DEPLOY_READINESS       `AppEnvRuntimeSource.resolve` reported no
     //                                  not-ready dependencies AND dispatched no
     //                                  provisioning at all (GAP-05)
@@ -265,6 +269,7 @@ const BOUND: readonly string[] = [
     // its spec actually said.
     'APP_DEPLOY_HOST_SOURCE',
     'APP_DEPLOY_SPEC_SOURCE',
+    'APP_ENV_ACTIVITY',
     'APP_ENV_DEPLOY_READINESS',
     'APP_ENV_ENSURE_GENERATED',
     'APP_ENV_RESOLVER_FINGERPRINTS',
@@ -289,6 +294,9 @@ const BOUND: readonly string[] = [
     // APW-03 T42 (2026-10-17) — `AppLicenseService` (`useExisting`), bound by
     // `AppLicenseModule` for APW-06's gate and APW-01's ready handler.
     'APP_LICENSE_SERVICE',
+    // APW-01 FR-55 → APW-07 (2026-10-18, lane aw-live-fix) — `AppWorksModule` binds it
+    // to `AppEnvPromptedValuesAdapter`; until then every `appEnv` answer was dropped.
+    'APP_PROMPTED_VALUES_PORT',
     'APP_PROVISIONING_SERVICE',
     'APP_PROVISION_EVENTS_PORT',
     'APP_RUNTIME_ENV_SOURCE',
@@ -415,7 +423,6 @@ const UNBOUND: readonly string[] = [
     'APP_COMMIT_ANCESTRY',
     'APP_DEPENDENCY_CLUSTER_ACCESS',
     'APP_DEPLOY_TARGET_RESOLVER',
-    'APP_ENV_ACTIVITY',
     'APP_ENV_ACTOR_NAMES',
     'APP_ENV_BUILD_FINGERPRINTS',
     'APP_ENV_DEPLOY_FINGERPRINTS',
@@ -427,13 +434,10 @@ const UNBOUND: readonly string[] = [
     'APP_HOSTS_REBUILD_REQUESTER',
     'APP_IMAGE_PULL_CREDENTIAL_SOURCE',
     'APP_IMAGE_REFERENCE_RESOLVER',
-    // Still unbound ON PURPOSE (2026-09-22): its declared owner is APW-07's env
-    // write path, and `AppEnvService.apply` needs an `AppEnvActor` and a spec
-    // that declares the name. `storePrompted(workId, values)` carries neither,
-    // and at create time the Blueprint that would declare the names has not
-    // been applied. Binding it means inventing an actor and an ordering that
-    // APW-07 T24/T25 own, and both are open.
-    'APP_PROMPTED_VALUES_PORT',
+    // `APP_PROMPTED_VALUES_PORT` left this list on 2026-10-18 (lane aw-live-fix): the
+    // live e2e on prod logged every `appEnv` answer as dropped, so `AppWorksModule`
+    // binds it to `AppEnvPromptedValuesAdapter` (the creator is the actor; an empty
+    // spec stands in until one is effective — see BOUND).
     'APP_PUBLISHED_HOSTS',
     'APP_RUNTIME_DELETION_FACADE',
     'APP_RUNTIME_EVENT_SINK',
@@ -570,8 +574,12 @@ describe('App Works port dormancy register (§5.10)', () => {
         // policy, the cluster-op dispatcher, T26's host stores, the host source and APW-07's
         // dependency spec source in the API — measured, not added up by hand.
         // 31/43 → 30/44 on 2026-10-17: `APP_SPEC_DISPLAY_NAMES` is bound by `AppLauncherModule`.
-        expect(UNBOUND).toHaveLength(30);
-        expect(BOUND).toHaveLength(44);
+        // 30/44 → 29/45 on 2026-10-18 (lane aw-live-fix): `APP_PROMPTED_VALUES_PORT` is
+        // bound by `AppWorksModule`.
+        // 29/45 → 28/46 the same day (lane aw-env-smtp): `APP_ENV_ACTIVITY` is bound by
+        // `AppEnvModule` to `AppEnvActivityService` (APW-07 T26).
+        expect(UNBOUND).toHaveLength(28);
+        expect(BOUND).toHaveLength(46);
     });
 
     it('names where the worker binds what this package does not', () => {
