@@ -56,18 +56,20 @@ This directory holds only Works' inputs:
 - `route-params.json` — the values the walk fills the route parameters with: `en` for the locale,
   real values where a page needs one to render (a help article, a plugin category), and
   placeholders elsewhere (a page for an id that does not exist renders its not-found state, which
-  the walk opens like any other page).
+  the walk opens like any other page);
+- `ui-baseline.json` — the links to an Ever host the web app already rendered when the browser leg
+  was adopted (see below).
 
 ## Modes
 
-| Mode             | The API                                                             | Passes when                                                                    | Browser walk                                                |
-| ---------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------- |
-| `default_off`    | nothing about statistics configured (off by default)                | no Ever host looked up, no connection attempt out, `/api/instance-stats/*` 404 | —                                                           |
-| `off`            | `EVER_STATS_ENABLED=false` in the container environment             | the same                                                                       | every page, no Ever host                                    |
-| `off_env_file`   | the same switch written ONLY in the API's `.env` file (`/app/.env`) | the same                                                                       | —                                                           |
-| `loaded_off`     | module loaded (`EVER_STATS_ENABLED=true`), switched off in Settings | no request at all                                                              | every page, no Ever host                                    |
-| `positive_stats` | module on (`EVER_STATS_ENABLED=true`), `EVER_STATS_API_URL` = mock  | reports accepted (`202`), and no call but the statistics report                | every page, no Ever host; Settings → Ever Platform rendered |
-| control          | `positive_stats` with the mock platform left out                    | must **fail** (exit 1): a green run is not a blind one                         | as `positive_stats`                                         |
+| Mode             | The API                                                             | Passes when                                                                                     | Browser walk                                                |
+| ---------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `default_off`    | nothing about statistics configured (off by default)                | no Ever host or unlisted name looked up, no connection attempt out, `/api/instance-stats/*` 404 | —                                                           |
+| `off`            | `EVER_STATS_ENABLED=false` in the container environment             | the same                                                                                        | every page, no Ever host                                    |
+| `off_env_file`   | the same switch written ONLY in the API's `.env` file (`/app/.env`) | the same                                                                                        | —                                                           |
+| `loaded_off`     | module loaded (`EVER_STATS_ENABLED=true`), switched off in Settings | no request at all                                                                               | every page, no Ever host                                    |
+| `positive_stats` | module on (`EVER_STATS_ENABLED=true`), `EVER_STATS_API_URL` = mock  | reports accepted (`202`), and no call but the statistics report                                 | every page, no Ever host; Settings → Ever Platform rendered |
+| control          | `positive_stats` with the mock platform left out                    | must **fail** (exit 1): a green run is not a blind one                                          | as `positive_stats`                                         |
 
 In every mode the send interval is a few seconds, so a module that should be silent but is not
 would try to send inside the watched window (two minutes after the scenario).
@@ -82,6 +84,37 @@ tools/egress-audit/node_modules/.bin/ever-egress-audit ui-routes --framework nex
 
 Run it again after adding or removing a page, and commit the result. A page that signs the person
 out or changes the account belongs in `ui_skip_routes` in the config, with its reason.
+
+One page is skipped today: `/:locale/templates`. Its template previews come from
+`opengraph.githubassets.com` through the web app's image optimizer; inside the sealed network that
+lookup fails, and Next.js logs the error as a multi-line object whose `code: 'ENOTFOUND'` line names
+no host, so the audit cannot attribute it to the allowed host. The page returns to the walk once the
+harness attributes such lines.
+
+## Allowed third-party hosts
+
+No Ever host and no analytics service can ever be allowed: the harness refuses them in the config
+and fails on them whatever it says. The names below are third-party services that features of the
+app (not the statistics module) look up; a lookup of any other name fails the run. None of them
+answers inside the sealed network.
+
+| Host                                                                                                              | Who looks it up      | Why                                                                                               |
+| ----------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
+| `api.github.com`, `raw.githubusercontent.com`                                                                     | the API              | the template catalogue syncs the website templates it discovers on GitHub                         |
+| `opengraph.githubassets.com`                                                                                      | the web app (server) | template previews, fetched by the image optimizer                                                 |
+| `cdn.jsdelivr.net`, `unpkg.com`                                                                                   | the browser          | the animation player loads its WebAssembly from a CDN; plugin icons (dashboard-icons on jsDelivr) |
+| `challenges.cloudflare.com`                                                                                       | the browser          | the Cloudflare Turnstile script of the sign-in and registration pages                             |
+| `framerusercontent.com`, `jina.ai`, `cdn.scrapfly.io`, `composio.dev`, `www.make.com`, `www.sim.ai`, `zapier.com` | the browser          | the logos of plugins on the plugins page, served by their vendors (favicon images)                |
+
+## The DOM baseline
+
+`ui-baseline.json` lists the links to an Ever host the web app rendered when the browser leg was
+adopted (`base_commit`): the documentation link of the dashboard navigation (`docs.ever.works`), the
+Terms and Privacy links of the registration form (`ever.works`), and the statistics section's link to
+the public description of what the module sends (rendered only while the module is loaded). Each
+entry excuses that one link on that one page, and nothing else: never a lookup or a request. The
+file may only shrink: CI fails when an entry is added (`check-baseline-shrink`), and the report lists
+entries no longer seen under `stale_baseline`, so they can be removed.
 
 ## When it runs
 
