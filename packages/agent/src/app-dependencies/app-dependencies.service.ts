@@ -152,6 +152,8 @@ export interface AppDependencyListEntry extends AppDependencyView {
     label: string;
     /** Bare object names from `resourceRefs.objects` — names only, never a value. */
     names: string[];
+    /** Attempts since the last success or reset (FR-43) — lane aw-deps-api, for the card. */
+    attempts: number;
 }
 
 /** The report §4.12's table and APW-06's deletion service both read. */
@@ -757,6 +759,7 @@ export class AppDependenciesService {
                 lastCheckedAt: iso(row.lastCheckedAt),
                 label: resolved?.selection.label ?? row.providerId,
                 names: refNames(row.resourceRefs),
+                attempts: Number(row.attempts ?? 0) || 0,
             });
         }
 
@@ -905,6 +908,114 @@ export class AppDependenciesService {
         return result.dispatched.includes(kind)
             ? { dispatched: true }
             : { dispatched: false, reason: 'dispatcherUnavailable' };
+    }
+
+    /**
+     * The owner pressed **Deploy** — retry every dependency that is `failed` for a
+     * reason that can heal on its own ({@link APP_DEPENDENCY_TRANSIENT_FAILURE_REASONS}).
+     *
+     * Lane aw-deps-api (2026-10-18). FR-43's allowance is three transient attempts,
+     * after which the row reads **Failed** and nothing re-dispatches it: `reconcile`
+     * repairs a lost `pending` dispatch but leaves `failed` alone, so a dependency that
+     * failed `clusterUnreachable` while the worker itself was broken (prod, 2026-10-18:
+     * a worker without a plugin registry) stayed failed — and refused every Deploy —
+     * long after the worker was fixed. An explicit Deploy request is the owner's
+     * consent to try again, exactly like **Retry** on the card; nothing else calls this.
+     *
+     * Deliberately narrow:
+     *
+     * - only `failed` rows, only those two reasons — a definite failure (no storage
+     *   class, sign-in refused, …) needs the owner to change something, and retrying it
+     *   would only burn another attempt;
+     * - a row whose lease a worker holds is left alone (reported in `leaseHeld`), the
+     *   same rule as {@link retry};
+     * - the same row patch as {@link retry} (`pending`, reason and detail cleared,
+     *   attempts `0`) and the same `provision` dispatch — never a deprovision, never a
+     *   data path, never a new row;
+     * - when the dispatch does not reach the queue (no dispatcher, no isolated worker)
+     *   the row is put back exactly as it was and reported in `undispatched`: a card
+     *   reading *Pending* while nothing works on it would hide the real reason.
+     *
+     * Never throws: a store or dispatcher failure is logged and the Deploy request goes
+     * on to answer with its own preconditions.
+     */
+    async retryTransientFailures(workId: string): Promise<AppDependencyTransientRetryResult> {
+        const answer: AppDependencyTransientRetryResult = {
+            retried: [],
+            leaseHeld: [],
+            undispatched: [],
+        };
+        // No writable store or no queue: nothing can be retried, and saying otherwise would be a lie.
+        if (!this.rows || !this.dispatcher) return answer;
+
+        let active: WorkAppDependencyMetadata[];
+        try {
+            active = (await this.dependencies?.findActiveByWork(workId)) ?? [];
+        } catch (error) {
+            this.logger.warn(
+                `Could not read the dependencies of work ${workId} to retry them: ${errorName(error)}`,
+            );
+            return answer;
+        }
+
+        const transient = APP_DEPENDENCY_TRANSIENT_FAILURE_REASONS as readonly string[];
+        for (const row of active) {
+            if (row.status !== 'failed') continue;
+            if (!row.statusReason || !transient.includes(row.statusReason)) continue;
+            if (row.inSpec === false) continue;
+            if (this.leaseHeld(row)) {
+                answer.leaseHeld.push(row.kind);
+                continue;
+            }
+
+            const before = {
+                status: row.status,
+                statusReason: row.statusReason,
+                statusDetail: row.statusDetail ?? null,
+                attempts: row.attempts ?? 0,
+            };
+            try {
+                await this.updateRow(row.id, {
+                    status: 'pending',
+                    statusReason: null,
+                    statusDetail: null,
+                    attempts: 0,
+                });
+            } catch (error) {
+                this.logger.warn(
+                    `Could not reset ${row.kind} of work ${workId} for a retry: ${errorName(error)}`,
+                );
+                continue;
+            }
+
+            let sent = false;
+            try {
+                sent = await this.dispatchPayload({ workId, kind: row.kind, mode: 'provision' });
+            } catch (error) {
+                this.logger.warn(
+                    `Could not dispatch ${row.kind} of work ${workId} for a retry: ${errorName(error)}`,
+                );
+            }
+            if (sent) {
+                answer.retried.push(row.kind);
+                continue;
+            }
+
+            // Nothing reached the queue: the row goes back to what it said, reason included.
+            await this.updateRow(row.id, before).catch((error: unknown) =>
+                this.logger.warn(
+                    `Could not restore ${row.kind} of work ${workId} after an undispatched retry: ${errorName(error)}`,
+                ),
+            );
+            answer.undispatched.push(row.kind);
+        }
+
+        if (answer.retried.length > 0) {
+            this.logger.log(
+                `Deploy requested for work ${workId}: retrying ${answer.retried.join(', ')} after a transient failure.`,
+            );
+        }
+        return answer;
     }
 
     /**
@@ -1787,6 +1898,32 @@ export class AppDependenciesService {
             this.logger.warn(`Activity event ${name} could not be written: ${errorName(error)}`);
         }
     }
+}
+
+/**
+ * The failure reasons a dependency can recover from on its own — the cluster
+ * could not be reached, or the provider did not finish inside the kind's
+ * deadline. Both are what `runAttempt` records for a provider that threw or
+ * was aborted, so a worker that was broken at the time (e.g. built without a
+ * plugin registry) leaves exactly these behind once its allowance is spent.
+ *
+ * Every other reason is a definite answer about the owner's settings or cluster
+ * (no storage class, sign-in refused, a namespace owned elsewhere …) and needs
+ * them to change something first, so it is never reset on their behalf.
+ */
+export const APP_DEPENDENCY_TRANSIENT_FAILURE_REASONS = [
+    'clusterUnreachable',
+    'deadlineExceeded',
+] as const satisfies readonly AppDependencyReason[];
+
+/** What {@link AppDependenciesService.retryTransientFailures} did, per kind. */
+export interface AppDependencyTransientRetryResult {
+    /** Moved from `failed` back to `pending`, attempts cleared, and a fresh attempt queued. */
+    retried: AppDependencyKind[];
+    /** `failed` + transient rows left alone because a worker holds their lease. */
+    leaseHeld: AppDependencyKind[];
+    /** Their dispatch did not reach the queue, so each was put back exactly as it was. */
+    undispatched: AppDependencyKind[];
 }
 
 /* -------------------------------------------------------------------------- *
