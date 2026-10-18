@@ -1,7 +1,7 @@
 import type { FleetLinkChannelOpen, FleetLinkRequest } from '@ever-works/contracts';
 import { asFleetLinkRequest } from '@ever-works/contracts';
 import { ValkeyRelayBus } from '../../relay/relay-bus.valkey';
-import { FakeValkey, flushBus } from '../../relay/__tests__/relay-test-kit';
+import { FakeValkey, flushBus, TEST_RELAY_SECRET } from '../../relay/__tests__/relay-test-kit';
 import { FleetLinkRegistry } from '../fleet-link.registry';
 import { FleetLinkRemote } from '../fleet-link-remote.service';
 import { FleetOperationsService } from '../fleet-operations.service';
@@ -36,7 +36,11 @@ async function until(predicate: () => boolean, timeoutMs = 5_000): Promise<void>
 }
 
 function replica(hub: FakeValkey) {
-    const bus = new ValkeyRelayBus({ url: 'redis://fake', createClient: () => hub.client() });
+    const bus = new ValkeyRelayBus({
+        secret: TEST_RELAY_SECRET,
+        url: 'redis://fake',
+        createClient: () => hub.client(),
+    });
     const registry = new FleetLinkRegistry();
     const remote = new FleetLinkRemote(registry, bus);
     const operations = new FleetOperationsService(registry, undefined, remote);

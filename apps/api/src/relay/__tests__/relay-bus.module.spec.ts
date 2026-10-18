@@ -5,7 +5,7 @@ import { createRelayBus, RELAY_BUS_REQUIRED_MESSAGE } from '../relay-bus.module'
 import { InProcessRelayBus } from '../relay-bus.in-process';
 import { ValkeyRelayBus } from '../relay-bus.valkey';
 import { RelayComputerFanoutBus, RelayTerminalFanoutBus } from '../relay-fanout';
-import { FakeValkey, flushBus } from './relay-test-kit';
+import { FakeValkey, flushBus, TEST_RELAY_SECRET } from './relay-test-kit';
 
 /**
  * Relay bus selection (CONTRACTS R-7, spec FR-29 … FR-31) and the terminal
@@ -59,8 +59,16 @@ describe('createRelayBus', () => {
 
 function twoReplicas() {
     const hub = new FakeValkey();
-    const a = new ValkeyRelayBus({ url: 'redis://fake', createClient: () => hub.client() });
-    const b = new ValkeyRelayBus({ url: 'redis://fake', createClient: () => hub.client() });
+    const a = new ValkeyRelayBus({
+        secret: TEST_RELAY_SECRET,
+        url: 'redis://fake',
+        createClient: () => hub.client(),
+    });
+    const b = new ValkeyRelayBus({
+        secret: TEST_RELAY_SECRET,
+        url: 'redis://fake',
+        createClient: () => hub.client(),
+    });
     closers.push(
         () => a.close(),
         () => b.close(),

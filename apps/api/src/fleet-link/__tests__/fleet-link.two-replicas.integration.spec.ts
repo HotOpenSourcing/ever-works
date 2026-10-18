@@ -15,7 +15,7 @@ import {
 } from '@ever-works/contracts';
 import { ValkeyRelayBus } from '../../relay/relay-bus.valkey';
 import type { RelayBus } from '../../relay/relay-bus';
-import { FakeValkey } from '../../relay/__tests__/relay-test-kit';
+import { FakeValkey, TEST_RELAY_SECRET } from '../../relay/__tests__/relay-test-kit';
 import { TerminalAttachService } from '../../terminal/terminal-attach.service';
 import { FleetLinkAttachService } from '../fleet-link-attach.service';
 import { OwnerOnlyFleetLinkAudience } from '../fleet-link-audience';
@@ -237,8 +237,12 @@ describe('two API replicas, one Valkey (S7)', () => {
         hub = REAL_URL ? null : new FakeValkey();
         const bus = () =>
             hub
-                ? new ValkeyRelayBus({ url: 'redis://fake', createClient: () => hub!.client() })
-                : new ValkeyRelayBus({ url: REAL_URL! });
+                ? new ValkeyRelayBus({
+                      secret: TEST_RELAY_SECRET,
+                      url: 'redis://fake',
+                      createClient: () => hub!.client(),
+                  })
+                : new ValkeyRelayBus({ secret: TEST_RELAY_SECRET, url: REAL_URL! });
         a = await startReplica(bus());
         b = await startReplica(bus());
         await until(

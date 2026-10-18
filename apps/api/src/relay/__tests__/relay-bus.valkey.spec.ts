@@ -4,11 +4,13 @@ import {
     encodeRelayEnvelope,
     isRelayBusTopic,
     newRelayReplicaId,
+    relayBusKey,
+    relayBusNamespace,
     type RelayBus,
 } from '../relay-bus';
 import { InProcessRelayBus } from '../relay-bus.in-process';
 import { ValkeyRelayBus, type RelayRedisClient } from '../relay-bus.valkey';
-import { FakeValkey, flushBus } from './relay-test-kit';
+import { FakeValkey, flushBus, TEST_RELAY_SECRET } from './relay-test-kit';
 
 /**
  * The relay bus over Valkey (FL-02, CONTRACTS R-7, spec FR-29): round trips
@@ -32,8 +34,16 @@ const fakeBackend: Backend = {
     make() {
         const hub = new FakeValkey();
         const create = () => hub.client();
-        const a = new ValkeyRelayBus({ url: 'redis://fake', createClient: create });
-        const b = new ValkeyRelayBus({ url: 'redis://fake', createClient: create });
+        const a = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: create,
+        });
+        const b = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: create,
+        });
         buses.push(a, b);
         return { a, b, cut: () => hub.cutAll(), restore: () => hub.restoreAll() };
     },
@@ -42,8 +52,8 @@ const fakeBackend: Backend = {
 const realBackend: Backend = {
     name: 'Valkey at FLEET_RELAY_TEST_REDIS_URL',
     make() {
-        const a = new ValkeyRelayBus({ url: REAL_URL! });
-        const b = new ValkeyRelayBus({ url: REAL_URL! });
+        const a = new ValkeyRelayBus({ secret: TEST_RELAY_SECRET, url: REAL_URL! });
+        const b = new ValkeyRelayBus({ secret: TEST_RELAY_SECRET, url: REAL_URL! });
         buses.push(a, b);
         return { a, b };
     },
@@ -53,7 +63,7 @@ afterEach(async () => {
     await Promise.all(buses.splice(0).map((bus) => bus.close()));
 });
 
-async function until(predicate: () => boolean, timeoutMs = 5_000): Promise<void> {
+async function until(predicate: () => boolean, timeoutMs = 8_000): Promise<void> {
     const deadline = Date.now() + timeoutMs;
     while (!predicate()) {
         if (Date.now() > deadline) throw new Error('timed out');
@@ -63,20 +73,95 @@ async function until(predicate: () => boolean, timeoutMs = 5_000): Promise<void>
 }
 
 describe('relay bus envelope', () => {
-    it('round-trips from, topic and any body, and refuses what it does not understand', () => {
-        const from = newRelayReplicaId('7d1f0c2a-3b4e-4f5a-8c6d-9e0f1a2b3c4d');
+    const key = relayBusKey(TEST_RELAY_SECRET)!;
+    const from = newRelayReplicaId('7d1f0c2a-3b4e-4f5a-8c6d-9e0f1a2b3c4d');
+
+    it('round-trips a signed message with any body', () => {
         const body = 'a\u001fbody with the separator\nand newlines';
-        expect(decodeRelayEnvelope(encodeRelayEnvelope(from, 'fleet-link.rpc', body))).toEqual({
+        const envelope = { from, to: 'all', topic: 'fleet-link.rpc', seq: 7, body };
+        expect(decodeRelayEnvelope(key, encodeRelayEnvelope(key, envelope))).toEqual(envelope);
+    });
+
+    it('refuses a message signed with another key, a tampered field, or a malformed one', () => {
+        const other = relayBusKey('another-deployments-secret-value')!;
+        const wire = encodeRelayEnvelope(key, {
             from,
-            topic: 'fleet-link.rpc',
-            body,
+            to: 'all',
+            topic: 'relay.terminal',
+            seq: 1,
+            body: 'x',
         });
-        expect(decodeRelayEnvelope('2\u001fx\u001fy\u001fz')).toBeNull();
-        expect(decodeRelayEnvelope(encodeRelayEnvelope('not-a-replica', 'a.b', ''))).toBeNull();
-        expect(decodeRelayEnvelope(encodeRelayEnvelope(from, 'Bad Topic', ''))).toBeNull();
-        expect(decodeRelayEnvelope(42)).toBeNull();
+        expect(decodeRelayEnvelope(other, wire)).toBeNull();
+        expect(
+            decodeRelayEnvelope(key, wire.replace('relay.terminal', 'relay.computer')),
+        ).toBeNull();
+        expect(decodeRelayEnvelope(key, wire.slice(0, -1) + 'y')).toBeNull();
+        expect(decodeRelayEnvelope(key, wire.replace('\u001f1\u001f', '\u001f2\u001f'))).toBeNull();
+        expect(decodeRelayEnvelope(key, '1\u001fx\u001fy\u001fz')).toBeNull();
+        expect(decodeRelayEnvelope(key, 42)).toBeNull();
         expect(isRelayBusTopic('relay.terminal')).toBe(true);
         expect(isRelayBusTopic('__proto__')).toBe(false);
+    });
+
+    it('derives no key from a missing or short secret, and a namespace per key', () => {
+        expect(relayBusKey(null)).toBeNull();
+        expect(relayBusKey('short')).toBeNull();
+        expect(relayBusNamespace(key)).not.toBe(
+            relayBusNamespace(relayBusKey('another-deployments-secret-value')!),
+        );
+    });
+});
+
+describe('ValkeyRelayBus — what it refuses', () => {
+    it('carries nothing without a secret to sign with', async () => {
+        const hub = new FakeValkey();
+        const bus = new ValkeyRelayBus({
+            secret: null,
+            url: 'redis://fake',
+            createClient: () => hub.client(),
+        });
+        buses.push(bus);
+        expect(bus.health().status).toBe('degraded');
+        expect(bus.publish('test.topic', 'x')).toBe(false);
+        await expect(bus.claimOnce('k', 1_000)).rejects.toThrow();
+    });
+
+    it('drops a forged message and a replayed one', async () => {
+        const hub = new FakeValkey();
+        const a = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: () => hub.client(),
+        });
+        const b = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: () => hub.client(),
+        });
+        buses.push(a, b);
+        await until(() => a.peers().includes(b.replicaId) && b.peers().includes(a.replicaId));
+        const seen: string[] = [];
+        b.subscribe('test.topic', (body) => seen.push(body));
+        // Capture what A really sends, then replay it, and forge one with another key.
+        const raw: Array<[string, string]> = [];
+        const spy = hub.client();
+        spy.on('message', (channel: string, message: string) => raw.push([channel, message]));
+        const namespace = relayBusNamespace(relayBusKey(TEST_RELAY_SECRET)!);
+        await spy.subscribe(`ew:relay:${namespace}:all`);
+        a.publish('test.topic', 'genuine');
+        await until(() => seen.length === 1 && raw.some(([, m]) => m.includes('genuine')));
+        const [channel, genuine] = raw.find(([, m]) => m.includes('genuine'))!;
+        await spy.publish(channel, genuine);
+        const forged = encodeRelayEnvelope(relayBusKey('an-attackers-own-secret-value')!, {
+            from: a.replicaId,
+            to: 'all',
+            topic: 'test.topic',
+            seq: 999,
+            body: 'forged',
+        });
+        await spy.publish(channel, forged);
+        await flushBus(10);
+        expect(seen).toEqual(['genuine']);
     });
 });
 
@@ -178,6 +263,7 @@ describe('ValkeyRelayBus — a lost connection', () => {
             .mockImplementation(() => undefined);
         const hub = new FakeValkey();
         const bus = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
             url: 'redis://:hunter2-secret@valkey.internal:6379',
             createClient: () => hub.client(),
         });
@@ -196,6 +282,7 @@ describe('the default ioredis client', () => {
         // Construction with an unreachable URL must not throw synchronously;
         // the bus starts degraded and ioredis keeps retrying in the background.
         const bus = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
             url: 'redis://127.0.0.1:1',
             createClient: (url) =>
                 new Redis(url, {

@@ -1,5 +1,5 @@
 import type { ComputerFanoutBus } from '../computer/computer-relay.registry';
-import type { TerminalFanoutBus } from '../terminal/terminal-relay.registry';
+import type { TerminalFanoutBus, TerminalRelayRegistry } from '../terminal/terminal-relay.registry';
 import type { RelayBus } from './relay-bus';
 
 /**
@@ -40,7 +40,24 @@ function decodePair(body: string): [string, string] | null {
 export const RELAY_TERMINAL_TOPIC = 'relay.terminal';
 export const RELAY_COMPUTER_TOPIC = 'relay.computer';
 
+/** An ended run another replica published, with no viewer here, is released after this long. */
+export const RELAY_TERMINAL_REMOTE_RETENTION_MS = 10 * 60_000;
+
+/** Most remote-created runs tracked at once (oldest forgotten first). */
+const MAX_TRACKED_REMOTE_RUNS = 50_000;
+
+/**
+ * The terminal relay over the bus. Every replica keeps the scrollback of a
+ * run published elsewhere, so a viewer attaching anywhere sees its history —
+ * which means a replica also holds runs it never had a viewer for. The
+ * terminal registry releases memory only on request, so this seam tracks the
+ * runs it created from peers' frames and {@link sweep} releases each one once
+ * it has ended and nobody here watched it for
+ * {@link RELAY_TERMINAL_REMOTE_RETENTION_MS} (`RelayBusLifecycle` runs it).
+ */
 export class RelayTerminalFanoutBus implements TerminalFanoutBus {
+    private readonly remoteRuns = new Map<string, { endedSeenAt: number | null }>();
+
     constructor(private readonly bus: RelayBus) {}
 
     publishRemote(runId: string, wire: string): void {
@@ -50,8 +67,48 @@ export class RelayTerminalFanoutBus implements TerminalFanoutBus {
     onRemote(handler: (runId: string, wire: string) => void): void {
         this.bus.subscribe(RELAY_TERMINAL_TOPIC, (body) => {
             const pair = decodePair(body);
-            if (pair) handler(pair[0], pair[1]);
+            if (!pair) return;
+            if (!this.remoteRuns.has(pair[0])) {
+                this.remoteRuns.set(pair[0], { endedSeenAt: null });
+                if (this.remoteRuns.size > MAX_TRACKED_REMOTE_RUNS) {
+                    const oldest = this.remoteRuns.keys().next().value;
+                    if (oldest !== undefined) this.remoteRuns.delete(oldest);
+                }
+            }
+            handler(pair[0], pair[1]);
         });
+    }
+
+    /** Release ended remote-created runs nobody here is watching. Returns how many were released. */
+    sweep(
+        registry: Pick<TerminalRelayRegistry, 'getStatus' | 'reclaim'>,
+        now = Date.now(),
+    ): number {
+        let released = 0;
+        for (const [runId, tracked] of [...this.remoteRuns]) {
+            const status = registry.getStatus(runId);
+            if (!status.exists) {
+                this.remoteRuns.delete(runId);
+                continue;
+            }
+            if (!status.ended || status.clientCount > 0) {
+                tracked.endedSeenAt = null;
+                continue;
+            }
+            if (tracked.endedSeenAt === null) {
+                tracked.endedSeenAt = now;
+                continue;
+            }
+            if (now - tracked.endedSeenAt < RELAY_TERMINAL_REMOTE_RETENTION_MS) continue;
+            if (registry.reclaim(runId, { force: true })) released += 1;
+            this.remoteRuns.delete(runId);
+        }
+        return released;
+    }
+
+    /** Runs tracked right now (tests). */
+    get trackedRuns(): number {
+        return this.remoteRuns.size;
     }
 }
 

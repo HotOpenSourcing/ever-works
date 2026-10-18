@@ -1,3 +1,5 @@
+import { createHash, createHmac, timingSafeEqual } from 'crypto';
+
 /**
  * Relay bus (FL-02, CONTRACTS R-7, spec FR-29 … FR-31) — how one API replica
  * reaches the others.
@@ -20,8 +22,11 @@
  *    silently degraded relay. There is no other mode setting.
  *
  * Delivery is best-effort and at-most-once: local truth never depends on the
- * bus, and a replica trusts what it reads from it the way it trusts the
- * throttler's storage (plan §11, "replica trust"). Payloads are never logged.
+ * bus. Every message is SIGNED with a key derived from the secret the replicas
+ * already share and carries a per-sender sequence, so a client that can merely
+ * publish to the Valkey server can neither forge a replica's message nor
+ * replay one; the channels are namespaced by that key. Payloads are never
+ * logged.
  */
 
 export const RELAY_BUS = 'RELAY_BUS' as const;
@@ -96,30 +101,96 @@ export function isRelayReplicaId(value: unknown): value is string {
     return typeof value === 'string' && REPLICA_PATTERN.test(value);
 }
 
-/** Separator of the envelope fields; never inside a replica id or a topic. */
-const SEPARATOR = '\u001f';
-const ENVELOPE_VERSION = '1';
+/** Separator of the envelope fields; never inside a replica id, a topic or a number. */
+const SEPARATOR = '';
+const ENVELOPE_VERSION = '2';
 
-/** `1␟<from>␟<topic>␟<body>` — the envelope every bus message travels in. */
-export function encodeRelayEnvelope(from: string, topic: string, body: string): string {
-    return `${ENVELOPE_VERSION}${SEPARATOR}${from}${SEPARATOR}${topic}${SEPARATOR}${body}`;
+/** One message on the bus, as the receiving replica sees it once its signature checked out. */
+export interface RelayEnvelope {
+    from: string;
+    /** `all`, or the one replica it is addressed to. */
+    to: string;
+    topic: string;
+    /** Per sender and per destination, strictly increasing — a replayed message is refused. */
+    seq: number;
+    body: string;
 }
 
-/** The envelope's fields, or null for anything this build does not understand. */
-export function decodeRelayEnvelope(
-    raw: unknown,
-): { from: string; topic: string; body: string } | null {
+/**
+ * The key every replica signs and checks bus messages with: derived from the
+ * attach-token secret the replicas already share (`TERMINAL_ATTACH_SECRET`,
+ * else the Better Auth secret). Null without one — the bus then refuses to
+ * carry anything (fail-closed), because an unsigned bus would let anyone who
+ * can publish to the server command the fleet's links.
+ */
+export function relayBusKey(secret: string | null | undefined): Buffer | null {
+    if (!secret || secret.length < 16) return null;
+    return createHmac('sha256', Buffer.from(secret, 'utf8'))
+        .update('ever-works relay bus v2')
+        .digest();
+}
+
+/** The secret the key is derived from, read the way the attach signer reads it. */
+export function relayBusSecretFromEnv(env: NodeJS.ProcessEnv = process.env): string | null {
+    return env.TERMINAL_ATTACH_SECRET || env.BETTER_AUTH_SECRET || env.AUTH_SECRET || null;
+}
+
+/**
+ * The channel namespace of a key: deployments that do not share the secret
+ * never share channels or claims, even on one Valkey server (a stage and a
+ * production on the same server cannot hear each other).
+ */
+export function relayBusNamespace(key: Buffer): string {
+    return createHash('sha256').update(key).digest('hex').slice(0, 12);
+}
+
+function macOf(key: Buffer, fields: string): string {
+    return createHmac('sha256', key).update(fields).digest('base64url');
+}
+
+/** `2␟from␟to␟topic␟seq␟mac␟body`, the MAC over every other field. */
+export function encodeRelayEnvelope(key: Buffer, envelope: RelayEnvelope): string {
+    const head = [
+        ENVELOPE_VERSION,
+        envelope.from,
+        envelope.to,
+        envelope.topic,
+        String(envelope.seq),
+    ].join(SEPARATOR);
+    const mac = macOf(key, `${head}${SEPARATOR}${envelope.body}`);
+    return `${head}${SEPARATOR}${mac}${SEPARATOR}${envelope.body}`;
+}
+
+/** The envelope's fields when it is well-formed AND signed with `key`; null for anything else. */
+export function decodeRelayEnvelope(key: Buffer, raw: unknown): RelayEnvelope | null {
     if (typeof raw !== 'string') return null;
-    const first = raw.indexOf(SEPARATOR);
-    if (first < 0 || raw.slice(0, first) !== ENVELOPE_VERSION) return null;
-    const second = raw.indexOf(SEPARATOR, first + 1);
-    if (second < 0) return null;
-    const third = raw.indexOf(SEPARATOR, second + 1);
-    if (third < 0) return null;
-    const from = raw.slice(first + 1, second);
-    const topic = raw.slice(second + 1, third);
-    if (!isRelayReplicaId(from) || !isRelayBusTopic(topic)) return null;
-    return { from, topic, body: raw.slice(third + 1) };
+    const cuts: number[] = [];
+    let at = -1;
+    for (let i = 0; i < 6; i += 1) {
+        at = raw.indexOf(SEPARATOR, at + 1);
+        if (at < 0) return null;
+        cuts.push(at);
+    }
+    const field = (index: number) => raw.slice(index === 0 ? 0 : cuts[index - 1] + 1, cuts[index]);
+    if (field(0) !== ENVELOPE_VERSION) return null;
+    const from = field(1);
+    const to = field(2);
+    const topic = field(3);
+    const seqText = field(4);
+    const mac = field(5);
+    const body = raw.slice(cuts[5] + 1);
+    if (
+        !isRelayReplicaId(from) ||
+        !(to === 'all' || isRelayReplicaId(to)) ||
+        !isRelayBusTopic(topic)
+    ) {
+        return null;
+    }
+    if (!/^[0-9]{1,15}$/.test(seqText)) return null;
+    const expected = Buffer.from(macOf(key, `${raw.slice(0, cuts[4])}${SEPARATOR}${body}`));
+    const provided = Buffer.from(mac);
+    if (expected.length !== provided.length || !timingSafeEqual(expected, provided)) return null;
+    return { from, to, topic, seq: Number(seqText), body };
 }
 
 export function newRelayReplicaId(uuid: string): string {

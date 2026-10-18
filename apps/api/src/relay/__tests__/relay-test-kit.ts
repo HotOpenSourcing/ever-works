@@ -1,5 +1,8 @@
 import type { RelayRedisClient } from '../relay-bus.valkey';
 
+/** The shared secret the specs' buses sign with (every replica of a deployment shares one). */
+export const TEST_RELAY_SECRET = 'a-test-relay-secret-of-sufficient-length';
+
 /**
  * A stand-in for one Valkey server shared by several replicas' clients: the
  * pub/sub fan-out (asynchronous and in order, like a socket), `SET … PX … NX`
