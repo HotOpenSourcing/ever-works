@@ -195,7 +195,25 @@ export class IntegrationInboxController {
     ): Promise<unknown> {
         const principal = principalOf(user);
         const organizationId = this.organizationId();
-        const recipient = recipientOf(user, await this.inbox.get(organizationId, id));
+        const current = await this.inbox.get(organizationId, id);
+        const recipient = recipientOf(user, current);
+        // Works-security lane 3a — an approval reply DECIDES the proposal
+        // (`decidedVia: 'user'`, which the merge verifier accepts as the human
+        // merge approval) and an escalation reply resolves it. Both are human
+        // gates: an integration key — even acting as the recipient — is a
+        // machine credential, so it may answer questions (steering a run) but
+        // never approvals or escalations. The person answers in Ever Works.
+        const kind = (current.dto as { kind?: unknown }).kind;
+        if (kind === 'approval' || kind === 'escalation') {
+            throw new IntegrationHttpException(
+                422,
+                'domain_rule',
+                kind === 'approval'
+                    ? 'An approval is a human decision made in Ever Works; an integration key cannot answer it.'
+                    : 'An escalation is a human decision made in Ever Works; an integration key cannot resolve it.',
+                { reason: 'human_session_required', kind },
+            );
+        }
         const work = async (): Promise<{ status: number; body: IntegrationInboxReplyResult }> => {
             const outcome = await this.items.reply(recipient, id, {
                 text: dto.text ?? null,

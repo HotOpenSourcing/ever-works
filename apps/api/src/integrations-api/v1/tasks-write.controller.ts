@@ -255,6 +255,13 @@ export class IntegrationTransitionTaskDto {
     mode!: 'sync';
 }
 
+/**
+ * Works-security lane 3a — the fields of a recurring template or a scheduled
+ * Task an integration may not change: what the dispatched agent reads (title,
+ * description) and which Work's repository it runs in.
+ */
+const AUTONOMOUS_TEMPLATE_FIELDS = ['title', 'description', 'workId'] as const;
+
 /** Contract v1 `requests.schema.json#/$defs/UpdateTask` (no `status`: use /transition). */
 export class IntegrationUpdateTaskDto {
     @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
@@ -571,6 +578,29 @@ export class IntegrationTasksWriteController {
      * externalRef finds this task instead of creating a duplicate. Either way the
      * caller answers the original error, which is what the client has to fix.
      */
+    /** See the call site in {@link update}. */
+    private async refuseAutonomousTemplateRewrite(
+        userId: string,
+        id: string,
+        dto: IntegrationUpdateTaskDto,
+    ): Promise<void> {
+        const fields = AUTONOMOUS_TEMPLATE_FIELDS.filter(
+            (field) => (dto as Record<string, unknown>)[field] !== undefined,
+        );
+        if (fields.length === 0) return;
+        const task = await this.tasks.getOne(userId, id, this.scope.getScope() as never);
+        const scheduled = !!task.scheduledAt && !task.scheduleClaimedAt;
+        if (!task.isRecurring && !scheduled) return;
+        throw new IntegrationHttpException(
+            422,
+            'domain_rule',
+            `An integration cannot change ${fields.join(', ')} on a ${
+                task.isRecurring ? 'recurring' : 'scheduled'
+            } Task: every run it starts dispatches that text to an agent. A person edits it in Ever Works.`,
+            { fields, reason: task.isRecurring ? 'recurring_template' : 'scheduled_task' },
+        );
+    }
+
     private async undoCreate(userId: string, organizationId: string, taskId: string) {
         try {
             await this.tasks.remove(userId, taskId, this.scope.getScope() as never);
@@ -603,6 +633,14 @@ export class IntegrationTasksWriteController {
         if (dto.parentTaskId) {
             await this.resources.get('task', organizationId, dto.parentTaskId, source);
         }
+
+        // Works-security lane 3a — a recurring template (and a Task waiting on
+        // its one-shot schedule) dispatches its title and description to an
+        // agent on its own, at every future fire, with no person in between.
+        // An integration rewriting that text — or moving it to another Work's
+        // repository — would be authoring the next autonomous runs, so it may
+        // not. Everything else (priority, labels, dates, teams) stays open.
+        await this.refuseAutonomousTemplateRewrite(user.userId, id, dto);
 
         const patch: Record<string, unknown> = {};
         if (dto.title !== undefined) patch.title = dto.title;
