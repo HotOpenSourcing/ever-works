@@ -8,8 +8,6 @@ import type { Work } from '../entities/work.entity';
 import { appWorkCloudPushAllowed } from '../tasks-domain/app-work-cloud-push';
 import { resolveTaskRepository } from '../tasks-domain/task-repository';
 import { TasksService } from '../tasks-domain/tasks.service';
-// Leaf token file — no runtime graph (see inbox-producer.port.ts).
-import { INBOX_PRODUCER, type InboxProducer } from '../inbox/inbox-producer.port';
 import {
     APP_WORK_AGENT_RESOLVER,
     AppWorkAgentResolverService,
@@ -83,8 +81,9 @@ export interface AppChangeAccepted {
     /**
      * Prompt-injection hardening — `true` when a member who is NOT the Work owner asked:
      * the Task was filed (assigned, in the backlog) but NOT started, because starting it
-     * runs the OWNER's committing Agent. The owner was told in their Inbox and starts it
-     * from the Task (Run). Absent for an owner's own request, which starts as before.
+     * runs the OWNER's committing Agent. The caller tells the owner (the evolve route files
+     * an Inbox notice); the owner starts it from the Task (Run). Absent for an owner's own
+     * request, which starts as before.
      */
     readonly awaitingOwner?: boolean;
     readonly queuedReason?: string;
@@ -142,10 +141,6 @@ export class AppChangeRequestService {
         @Inject(APP_WORK_AGENT_RESOLVER)
         private readonly resolver?: AppWorkAgentResolver,
         @Optional() private readonly resolverService?: AppWorkAgentResolverService,
-        // Prompt-injection hardening — tells the owner a member's change request is
-        // waiting for them. @Optional() and appended LAST (positional-spec arity rule);
-        // unbound, the Task still waits in the owner's backlog, just without the notice.
-        @Optional() @Inject(INBOX_PRODUCER) private readonly inbox?: InboxProducer,
     ) {}
 
     async request(input: AppChangeRequestInput): Promise<AppChangeRequestResult> {
@@ -265,9 +260,9 @@ export class AppChangeRequestService {
         // request from anyone else — a Work Editor, or an Editor's Agent steered by
         // injected text — is held for the owner: the Task exists, is assigned and sits
         // in the backlog, and the owner is told. Pressing Run on it is the owner's call.
+        // The caller (the evolve route) tells the owner, from `awaitingOwner`.
         const requestedByOwner = !input.actorUserId || input.actorUserId === ownerId;
         if (!requestedByOwner) {
-            await this.noticeOwner(work, task, input.actorUserId);
             return {
                 status: 'accepted',
                 httpStatus: 202,
@@ -329,31 +324,6 @@ export class AppChangeRequestService {
             repository: target,
             warnings,
         };
-    }
-
-    /**
-     * Tell the Work owner a member's change request is waiting for them. Best-effort:
-     * the Task is filed either way and shows on the owner's board.
-     */
-    private async noticeOwner(work: Work, task: Task, actorUserId: string): Promise<void> {
-        if (!this.inbox) return;
-        try {
-            await this.inbox.notice(work.userId, {
-                title: `A change to "${(work.name ?? work.slug ?? 'your App Work').slice(0, 120)}" is waiting for you`,
-                body:
-                    `A member with edit access (user ${actorUserId}) asked for a change. The Task ` +
-                    `${task.slug} was filed and assigned but NOT started, because starting it runs ` +
-                    'your Agent with your credentials. Review the request on the Task and press Run ' +
-                    'if you want it made.',
-                taskId: task.id,
-                workId: work.id,
-                organizationId: work.organizationId ?? null,
-            });
-        } catch (error) {
-            this.logger.warn(
-                `App change: the owner notice for Task ${task.id} failed (${errorText(error)}).`,
-            );
-        }
     }
 
     /** The Work's change Tasks, newest first — what the chat panel lists under the input. */
