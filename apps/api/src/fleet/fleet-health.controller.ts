@@ -13,8 +13,7 @@ import { FleetJobService, FleetNodeHealthService, FleetService } from '@ever-wor
 import {
     isFleetNodeHealthStale,
     resolveComputerState,
-    type ComputerStateResolution,
-    type FleetNodeHealthStored,
+    type FleetNodeHealthView,
     type FleetNodeView,
 } from '@ever-works/contracts';
 import { config } from '@ever-works/agent/config';
@@ -22,18 +21,8 @@ import { CurrentUser } from '../auth/decorators/user.decorator';
 import type { AuthenticatedUser } from '../auth/types/auth.types';
 import { FleetEnabledGuard } from './guards/fleet-enabled.guard';
 
-/** `GET /api/fleet/nodes/:id/health` — the computer's health, as every surface reads it. */
-export interface FleetNodeHealthResponse {
-    nodeId: string;
-    /** The latest snapshot, stamped with the platform's receipt time; null = this node version reports none. */
-    snapshot: FleetNodeHealthStored | null;
-    /** True when the snapshot is older than the offline threshold — shown dimmed, never as current (FR-5, FR-30). */
-    stale: boolean;
-    /** The plain-language state and its one fix (FR-7, FR-8). */
-    state: ComputerStateResolution;
-    /** Whether this deployment keeps health history (`FLEET_HEALTH_HISTORY_ENABLED`). */
-    historyEnabled: boolean;
-}
+/** `GET /api/fleet/nodes/:id/health` — the shared `FleetNodeHealthView` shape. */
+export type FleetNodeHealthResponse = FleetNodeHealthView;
 
 /**
  * Computer health (FL-03) — the read side of a computer's health.

@@ -162,6 +162,19 @@ export interface FleetNodeHealthStored extends FleetNodeHealthSnapshot {
 	sampledAt?: string;
 }
 
+/** `GET /api/fleet/nodes/:id/health` — one computer's health, as every surface reads it. */
+export interface FleetNodeHealthView {
+	nodeId: string;
+	/** The latest snapshot, stamped with the platform's receipt time; null = this node version reports none. */
+	snapshot: FleetNodeHealthStored | null;
+	/** Older than the offline threshold: shown dimmed with its age, never as current (FR-5, FR-30). */
+	stale: boolean;
+	/** The plain-language state and its one fix (FR-7, FR-8). */
+	state: ComputerStateResolution;
+	/** Whether this deployment keeps health history (`FLEET_HEALTH_HISTORY_ENABLED`). */
+	historyEnabled: boolean;
+}
+
 /** History resolutions — one table, one discriminator (CONTRACTS §4.5). */
 export type FleetNodeHealthResolution = 'raw' | 'hourly';
 

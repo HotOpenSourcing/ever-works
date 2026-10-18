@@ -40,9 +40,15 @@ import type {
     FleetExecutionScopeType,
     FleetRotateAllResult,
     FleetRunnerStatusView,
+    // Computer health (FL-03).
+    FleetNodeHealthView,
+    NeedsALookItem,
 } from '@ever-works/contracts';
 
 export type {
+    // Computer health (FL-03).
+    FleetNodeHealthView,
+    NeedsALookItem,
     FleetAgentNodeAffinityView,
     FleetCostCeilingView,
     FleetAuditView,
@@ -420,5 +426,27 @@ export const fleetAPI = {
             method: 'DELETE',
             wrapInData: false,
         });
+    },
+
+    /**
+     * Computer health (FL-03) — one computer's latest snapshot, whether it is
+     * stale, and its plain-language state with its one fix.
+     */
+    health: async (nodeId: string) => {
+        return serverFetch<FleetNodeHealthView>(
+            `${BASE}/nodes/${encodeURIComponent(nodeId)}/health`,
+        );
+    },
+
+    /** Fleet "needs a look" (seam owned by FL-01) — everything on my computers that wants a look. */
+    needsALook: async () => {
+        return serverFetch<NeedsALookItem[]>(`${BASE}/needs-a-look`);
+    },
+
+    /** What wants a look on one computer. */
+    nodeNeedsALook: async (nodeId: string) => {
+        return serverFetch<NeedsALookItem[]>(
+            `${BASE}/nodes/${encodeURIComponent(nodeId)}/needs-a-look`,
+        );
     },
 };
