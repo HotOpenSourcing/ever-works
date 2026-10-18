@@ -268,12 +268,13 @@ describe('TriageTaskFilerService', () => {
                 if (originalBots === undefined) delete process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
                 else process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS = originalBots;
             });
-            const byBot = (author: string, authorType: string | undefined = 'Bot') =>
+            // `null` = the payload carries no `authorType` at all.
+            const byBot = (author: string, authorType: string | null = 'Bot') =>
                 storedEvent({
                     payload: {
                         ...storedEvent().payload,
                         author,
-                        ...(authorType === undefined ? {} : { authorType }),
+                        ...(authorType === null ? {} : { authorType }),
                         authorAssociation: 'NONE',
                     },
                 });
@@ -297,7 +298,7 @@ describe('TriageTaskFilerService', () => {
                 delete process.env.GITHUB_ISSUE_INTAKE_TRUSTED_BOTS;
                 for (const event of [
                     byBot('dependabot[bot]', 'User'),
-                    byBot('dependabot[bot]', undefined),
+                    byBot('dependabot[bot]', null),
                     byBot('some-other[bot]'),
                 ]) {
                     const { filer, tasks } = build();
