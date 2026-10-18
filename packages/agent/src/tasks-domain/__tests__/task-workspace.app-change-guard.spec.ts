@@ -58,6 +58,7 @@ function mocks() {
                 headSha: opts.publishSha ?? HEAD_SHA,
             }),
         ),
+        supportsJudgedPublish: jest.fn(async () => true),
         branchChanges: jest.fn(
             async (
                 _handle: unknown,
@@ -69,6 +70,16 @@ function mocks() {
             }),
         ),
         createPullRequest: jest.fn(async () => ({ number: 7, url: 'https://example.test/pr/7' })),
+        // The provider's own diff the always-protected-path floor reads on the
+        // fleet paths (clean by default).
+        getCompareDiff: jest.fn(
+            async (
+                ..._args: unknown[]
+            ): Promise<{ files: Array<{ path: string; status: string }>; truncated: boolean }> => ({
+                files: [],
+                truncated: false,
+            }),
+        ),
         evaluate: jest.fn(
             async (_input: AppWorkChangeGateInput): Promise<AppWorkChangeGateVerdict> => ({
                 allowed: true,
@@ -158,8 +169,13 @@ function service(m: Mocks, opts: { bound?: boolean; kind?: string } = {}) {
             finalize: m.finalize,
             simulateMerge: m.simulateMerge,
             branchChanges: m.branchChanges,
+            supportsJudgedPublish: m.supportsJudgedPublish,
         } as never, // workspaceFacade
-        { getRepository: m.getRepository, createPullRequest: m.createPullRequest } as never, // gitFacade
+        {
+            getRepository: m.getRepository,
+            createPullRequest: m.createPullRequest,
+            getCompareDiff: m.getCompareDiff,
+        } as never, // gitFacade
         { transition: m.transition } as never, // transitions
         { post: m.post } as never, // taskChat
         undefined as never, // mergePolicy
@@ -592,7 +608,7 @@ describe('judgeAppWorkBranch — runs that never reach finalize', () => {
         expect(m.evaluate).not.toHaveBeenCalled();
     });
 
-    it('returns at once for every other Work kind', async () => {
+    it('never asks the App gate for another Work kind — only the workflow-path floor runs', async () => {
         const m = mocks();
 
         await expect(
@@ -604,6 +620,149 @@ describe('judgeAppWorkBranch — runs that never reach finalize', () => {
             ),
         ).resolves.toBeNull();
         expect(m.evaluate).not.toHaveBeenCalled();
+        expect(m.getCompareDiff).toHaveBeenCalledTimes(1);
+    });
+});
+
+/**
+ * Verifier on #2769 — the fleet paths that never reach `finalizeRemotePush`
+ * (a cancelled run, a question, a remote finalize that threw, a node that
+ * reports nothing pushed) run the always-protected-path floor for EVERY Work
+ * kind: the push already happened on the node, so the job is to stop the pull
+ * request from progressing and tell the owner.
+ */
+describe('judgeAppWorkBranch / judgeMountedPullRequests — the workflow-path floor on every fleet path', () => {
+    const OPEN = { prNumber: 12, prUrl: 'https://example.test/pr/12', branchRef: 'task/real-head' };
+    const workflowDiff = {
+        files: [
+            { path: 'src/x.ts', status: 'modified' },
+            { path: '.github/workflows/x.yml', status: 'added' },
+        ],
+        truncated: false,
+    };
+    const judge = (
+        m: Mocks,
+        t: ReturnType<typeof task>,
+        reported: string | null,
+        kind = 'directory',
+    ) =>
+        service(m, { kind }).judgeAppWorkBranch({
+            task: t as never,
+            userId: 'u-1',
+            agentId: 'a-1',
+            reportedBranch: reported,
+        });
+
+    afterEach(() => {
+        delete process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS;
+    });
+
+    it.each([
+        ['a cancelled run (open PR, nothing reported)', OPEN, null, 'task/real-head'],
+        [
+            'a run that asked a question (open PR, push reported)',
+            OPEN,
+            'task/other-name',
+            'task/real-head',
+        ],
+        [
+            'a run whose remote finalize threw (no PR, push reported)',
+            {},
+            'ever-works/task/add-a-thing',
+            'ever-works/task/add-a-thing',
+        ],
+        ['a run whose node reports nothing pushed (open PR)', OPEN, null, 'task/real-head'],
+    ])(
+        '%s: a non-App Task carrying a workflow file is blocked and told why',
+        async (_label, over, reported, judgedBranch) => {
+            const m = mocks();
+            m.getCompareDiff.mockResolvedValue(workflowDiff);
+
+            const outcome = await judge(m, task(over), reported);
+
+            expect(outcome).toMatchObject({ outcome: 'blocked-by-guard' });
+            expect(blockedWith(m)).toBe(true);
+            expect(bodyOf(m)).toContain('.github/workflows/x.yml');
+            expect(m.evaluate).not.toHaveBeenCalled();
+            // The recorded head when there is an open pull request; the base is the Work's.
+            expect(m.getCompareDiff).toHaveBeenCalledWith(
+                expect.any(String),
+                expect.any(String),
+                'production',
+                judgedBranch,
+                { maxFiles: 300 },
+                expect.objectContaining({ workId: WORK_ID }),
+            );
+            if ('prNumber' in over) {
+                expect(outcome).toMatchObject({ prNumber: 12 });
+                expect(bodyOf(m)).toContain('pull request #12');
+            }
+        },
+    );
+
+    it('an App Work gets the floor too, after its change gate allowed the head', async () => {
+        const m = mocks();
+        m.getCompareDiff.mockResolvedValue(workflowDiff);
+
+        const outcome = await judge(m, task(OPEN), null, 'app');
+
+        expect(m.evaluate).toHaveBeenCalledTimes(1);
+        expect(outcome).toMatchObject({ outcome: 'blocked-by-guard', prNumber: 12 });
+    });
+
+    it('a Work the operator allowed is not checked', async () => {
+        process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS = WORK_ID;
+        const m = mocks();
+        m.getCompareDiff.mockResolvedValue(workflowDiff);
+
+        await expect(judge(m, task(OPEN), null)).resolves.toBeNull();
+        expect(m.getCompareDiff).not.toHaveBeenCalled();
+        expect(blockedWith(m)).toBe(false);
+    });
+
+    it('re-checks every OPEN mount pull request of a non-App Task, with no change gate bound', async () => {
+        const m = mocks();
+        m.getCompareDiff.mockResolvedValue(workflowDiff);
+        const withMount = task({
+            linkedPullRequests: [
+                {
+                    repositoryId: 'acme/templates',
+                    branch: 'task/real-head',
+                    baseRef: 'develop',
+                    headSha: null,
+                    prNumber: 31,
+                    prUrl: 'https://example.test/acme/templates/pull/31',
+                    state: 'pr-open',
+                    error: null,
+                },
+            ],
+        });
+        m.findByIdTask.mockResolvedValue({ ...withMount, status: 'in_progress' } as never);
+
+        const outcomes = await service(m, {
+            kind: 'directory',
+            bound: false,
+        }).judgeMountedPullRequests({
+            task: withMount as never,
+            userId: 'u-1',
+            agentId: 'a-1',
+        });
+
+        expect(outcomes).toEqual([
+            expect.objectContaining({
+                repositoryId: 'acme/templates',
+                outcome: 'blocked-by-guard',
+            }),
+        ]);
+        expect(m.getCompareDiff).toHaveBeenCalledWith(
+            'acme',
+            'templates',
+            'develop',
+            'task/real-head',
+            { maxFiles: 300 },
+            expect.objectContaining({ workId: WORK_ID }),
+        );
+        expect(blockedWith(m)).toBe(true);
     });
 });
 
@@ -935,6 +1094,30 @@ describe('finalizeRun — judged before anything is pushed (cloud pushes enabled
         expect(m.simulateMerge).not.toHaveBeenCalled();
         expect(m.evaluate).not.toHaveBeenCalled();
         expect(m.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    // Review of #2769 (CodeRabbit, outside the diff): a provider that does not
+    // promise to publish exactly the judged commit is refused BEFORE any
+    // finalize — even an allowlisted App Work still needs the judgement.
+    it('refuses a provider that cannot publish a judged commit before anything is committed', async () => {
+        process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS = WORK_ID;
+        try {
+            const m = allow(mocks());
+            m.supportsJudgedPublish.mockResolvedValue(false);
+
+            const outcome = await service(m).finalizeRun(runInput());
+
+            expect(outcome).toEqual({ outcome: 'blocked-by-guard' });
+            expect(m.finalize).not.toHaveBeenCalled();
+            expect(m.branchChanges).not.toHaveBeenCalled();
+            expect(m.checkPaths).not.toHaveBeenCalled();
+            expect(blockedWith(m)).toBe(true);
+            expect(bodyOf(m)).toContain("App Work's changes are judged by its change rules");
+            expect(bodyOf(m)).toContain('Nothing was committed or pushed');
+            expect(m.createPullRequest).not.toHaveBeenCalled();
+        } finally {
+            delete process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS;
+        }
     });
 
     it('publishes EXACTLY the judged commit, then judges the pushed branch and opens the PR', async () => {

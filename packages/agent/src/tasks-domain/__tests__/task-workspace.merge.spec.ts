@@ -77,6 +77,7 @@ describe('TaskWorkspaceService — agent merge path (Wave 3 D4)', () => {
         simulateMerge: jest.Mock;
         provision: jest.Mock;
         branchChanges?: jest.Mock;
+        supportsJudgedPublish?: jest.Mock;
     };
     let gitFacade: {
         getRepository: jest.Mock;
@@ -137,6 +138,7 @@ describe('TaskWorkspaceService — agent merge path (Wave 3 D4)', () => {
             // Prompt-injection hardening: every finalize reads its commit's changes
             // before the push (always-protected-path floor).
             branchChanges: jest.fn().mockResolvedValue({ paths: ['src/x.ts'], contents: {} }),
+            supportsJudgedPublish: jest.fn().mockResolvedValue(true),
         };
         gitFacade = {
             getRepository: jest.fn().mockResolvedValue({
