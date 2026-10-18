@@ -39,6 +39,7 @@ import {
 	FLEET_LINK_FRAME_KINDS,
 	FLEET_WS_PATH_PREFIX,
 	isFleetLinkFamily,
+	type FleetLinkExtensionMessage,
 	type FleetLinkFamily
 } from './fleet-link.types.js';
 
@@ -159,7 +160,7 @@ export function fleetLinkViewerMaySend(family: FleetLinkFamily, type: unknown): 
 }
 
 /** API → browser, channel 0: the node accepted the channel. */
-export interface FleetLinkViewerReady {
+export interface FleetLinkViewerReady extends FleetLinkExtensionMessage {
 	type: 'viewer.ready';
 	family: FleetLinkFamily;
 	target: string;
@@ -168,13 +169,13 @@ export interface FleetLinkViewerReady {
 }
 
 /** API → browser, channel 0: an inbound frame the role may not send; it was not forwarded. */
-export interface FleetLinkViewerRefused {
+export interface FleetLinkViewerRefused extends FleetLinkExtensionMessage {
 	type: 'viewer.refused';
 	error: { code: 'permission_denied' | 'invalid'; hint: string };
 }
 
 /** API → browser, channel 0: the node's link came back, and the channel with it. */
-export interface FleetLinkViewerResumed {
+export interface FleetLinkViewerResumed extends FleetLinkExtensionMessage {
 	type: 'viewer.resumed';
 	linkGeneration: number;
 }

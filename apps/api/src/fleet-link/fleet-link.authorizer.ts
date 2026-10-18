@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { FleetKillSwitchService } from '@ever-works/agent/fleet';
 import {
     effectiveConsents,
@@ -14,6 +14,7 @@ import {
 } from '@ever-works/contracts';
 import { fleetLinkError } from './fleet-link.errors';
 import { FleetLinkRegistry } from './fleet-link.registry';
+import { FleetLinkRemote } from './fleet-link-remote.service';
 import {
     FLEET_LINK_AUDIENCE,
     type FleetLinkAudience,
@@ -35,7 +36,8 @@ import {
  *  1. **Kill switch** — read fail-closed: on, or unreadable, refuses
  *     `kill_switch`.
  *  2. **Consent** — the consent the family (or the `machine` verb) needs,
- *     against what the node's live link presented, else what its last
+ *     against what the node's live link presented (on this API replica or
+ *     the one holding it), else what its last
  *     heartbeat stored (`effectiveConsents`, which never infers `manage`):
  *     `consent_missing` with the command to run on the machine.
  *  3. **Family audience** — the node's control policy for the action family
@@ -91,6 +93,8 @@ export class FleetLinkAuthorizer {
         private readonly killSwitch: FleetKillSwitchService,
         private readonly registry: FleetLinkRegistry,
         @Inject(FLEET_LINK_AUDIENCE) private readonly audience: FleetLinkAudience,
+        // A link another API replica holds presents its consents there (FL-02 P1b).
+        @Optional() private readonly remote?: FleetLinkRemote,
     ) {}
 
     /** Resolve and check the requirement; throws the first refusal. */
@@ -132,6 +136,7 @@ export class FleetLinkAuthorizer {
         // 2. Consent.
         const consents =
             this.registry.liveConsents(node.id) ??
+            this.remote?.liveConsents(node.id) ??
             effectiveConsents({
                 consents: node.storedConsents,
                 capabilities: node.capabilities,

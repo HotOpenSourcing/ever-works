@@ -40,6 +40,23 @@ export class InProcessFleetLinkReplayGuard implements FleetLinkReplayGuard {
 }
 
 /**
+ * The replay guard over the relay bus (FL-02 P1b): with Valkey a token's
+ * `jti` is claimed with `SET … NX PX`, so a token is single-use across every
+ * API replica; with the single-replica bus, in this process. A bus that
+ * cannot answer throws, and the token is refused.
+ */
+export class RelayBusFleetLinkReplayGuard implements FleetLinkReplayGuard {
+    constructor(
+        private readonly bus: { claimOnce(key: string, ttlMs: number): Promise<boolean> },
+        private readonly scope = 'fleet-link',
+    ) {}
+
+    claim(jti: string, ttlMs: number): Promise<boolean> {
+        return this.bus.claimOnce(`${this.scope}:jti:${jti}`, ttlMs);
+    }
+}
+
+/**
  * Bound to the relay bus's guard when Valkey is configured (so a token is
  * single-use across replicas); the in-process guard otherwise — with two
  * replicas and no bus, which `FLEET_RELAY_REQUIRE_BUS` makes a boot error, a

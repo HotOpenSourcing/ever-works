@@ -34,8 +34,11 @@ import {
     type FleetLinkReply,
     type FleetNodeLinkView,
 } from '@ever-works/contracts';
+import type { FleetLinkChannel, FleetLinkChannelEvents } from './fleet-link-channel';
 import { FleetLinkException, fleetLinkError } from './fleet-link.errors';
 import type { FleetLinkRequirement } from './fleet-link.types';
+
+export type { FleetLinkChannel, FleetLinkChannelEvents } from './fleet-link-channel';
 
 /**
  * Fleet node link — the platform's registry of live links and their
@@ -84,14 +87,6 @@ export interface FleetLinkSocketPort {
     /** Send one binary frame; false when it could not be sent (closed, backed up). */
     send(frame: Uint8Array): boolean;
     close(code: number, reason: string): void;
-}
-
-/** What a caller listens to on a channel. */
-export interface FleetLinkChannelEvents {
-    json?(message: Record<string, unknown>): void;
-    binary?(kind: FleetLinkFrameKind, payload: Uint8Array): void;
-    close?(reason: FleetLinkCloseReason, hint?: string): void;
-    resume?(linkGeneration: number): void;
 }
 
 export interface FleetLinkRegistryOptions {
@@ -201,7 +196,7 @@ interface Orphan {
  * A caller's face of one channel: survives a resume (the same handle keeps
  * working on the next generation) and refuses everything once closed.
  */
-export class FleetLinkChannelHandle {
+export class FleetLinkChannelHandle implements FleetLinkChannel {
     constructor(
         private readonly registry: FleetLinkRegistry,
         private readonly entry: () => ChannelEntry,
@@ -277,6 +272,18 @@ export class FleetLinkChannelHandle {
 export type FleetLinkEvent =
     | { type: 'connected'; nodeId: string; linkGeneration: number; continued: boolean }
     | { type: 'dropped'; nodeId: string; reason: string };
+
+/** One link this process holds, as the relay bus directory describes it to the other replicas. */
+export interface FleetLinkLinkSnapshot {
+    nodeId: string;
+    generation: number;
+    /** Epoch ms the link was accepted. */
+    connectedAt: number;
+    consents: FleetConsents;
+    bytesIn: number;
+    bytesOut: number;
+    openChannels: number;
+}
 
 /** What the operations service is handed from channel 0. */
 export type FleetLinkOperationMessage = FleetLinkOperationProgress | FleetLinkOperationDone;
@@ -465,6 +472,22 @@ export class FleetLinkRegistry {
 
     isConnected(nodeId: string): boolean {
         return this.links.has(nodeId);
+    }
+
+    /** The link this process holds for `nodeId`, for the relay bus directory; null when it holds none. */
+    describeLink(nodeId: string): FleetLinkLinkSnapshot | null {
+        const link = this.links.get(nodeId);
+        if (!link) return null;
+        return {
+            nodeId,
+            generation: link.generation,
+            connectedAt: link.connectedAt,
+            consents: { ...link.consents },
+            bytesIn: link.bytesIn,
+            bytesOut: link.bytesOut,
+            openChannels: [...link.channels.values()].filter((entry) => entry.state === 'open')
+                .length,
+        };
     }
 
     /** Ids of every connected node. */
