@@ -20,6 +20,9 @@ services:
             # The audit's person signs in right after registering, with no mailbox to verify from
             # (the e2e workflow sets the same switch).
             REQUIRE_EMAIL_VERIFICATION: 'false'
+            # Plain log lines: the audit reads the host out of a resolver error, and a colour code
+            # after it would hide which host it was.
+            NO_COLOR: '1'
         volumes:
             - ${EVER_WORKS_AUDIT_DOTENV:?set EVER_WORKS_AUDIT_DOTENV to the API .env file of this run}:/app/.env:ro
 
@@ -32,6 +35,11 @@ services:
             # cookie must not be `Secure` (the web app takes that from the scheme of WEB_URL).
             WEB_URL: http://ever-works-web:3000
             NEXT_PUBLIC_WEB_URL: http://ever-works-web:3000
+            # Next.js' standalone server listens on $HOSTNAME. In the audit the web app shares the
+            # network namespace of a holder that sits on two networks, so its host name may resolve
+            # to the address on the other one: listen on every address instead.
+            HOSTNAME: 0.0.0.0
+            NO_COLOR: '1'
 
     ever-works-db:
         ports: !reset []

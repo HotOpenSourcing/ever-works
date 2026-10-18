@@ -135,6 +135,24 @@
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
 		},
 		{
+			"route": "/:locale/ideas/:id",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
+			"route": "/:locale/ideas/:id/agents/new",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
+			"route": "/:locale/ideas/:id/tasks",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
 			"route": "/:locale/ideas/new",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
@@ -154,6 +172,12 @@
 		},
 		{
 			"route": "/:locale/meetings",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
+			"route": "/:locale/meetings/:id",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
@@ -190,6 +214,12 @@
 		},
 		{
 			"route": "/:locale/plugins",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
+			"route": "/:locale/plugins/:pluginId",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
@@ -405,6 +435,12 @@
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
 		},
 		{
+			"route": "/:locale/tasks/:id",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
 			"route": "/:locale/tasks/new",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
@@ -429,6 +465,18 @@
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
 		},
 		{
+			"route": "/:locale/teams/:id",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
+			"route": "/:locale/teams/:id/settings",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
 			"route": "/:locale/teams/new",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
@@ -436,12 +484,6 @@
 		},
 		{
 			"route": "/:locale/teams/org-chart",
-			"attribute": "href",
-			"url": "https://docs.ever.works/",
-			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
-		},
-		{
-			"route": "/:locale/templates",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"

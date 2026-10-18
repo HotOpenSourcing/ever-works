@@ -103,13 +103,13 @@ and fails on them whatever it says. The names below are third-party services tha
 app (not the statistics module) look up; a lookup of any other name fails the run. None of them
 answers inside the sealed network.
 
-| Host                                                                                                              | Who looks it up      | Why                                                                                               |
-| ----------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------- |
-| `api.github.com`, `raw.githubusercontent.com`                                                                     | the API              | the template catalogue syncs the website templates it discovers on GitHub                         |
-| `opengraph.githubassets.com`                                                                                      | the web app (server) | template previews, fetched by the image optimizer                                                 |
-| `cdn.jsdelivr.net`, `unpkg.com`                                                                                   | the browser          | the animation player loads its WebAssembly from a CDN; plugin icons (dashboard-icons on jsDelivr) |
-| `challenges.cloudflare.com`                                                                                       | the browser          | the Cloudflare Turnstile script of the sign-in and registration pages                             |
-| `framerusercontent.com`, `jina.ai`, `cdn.scrapfly.io`, `composio.dev`, `www.make.com`, `www.sim.ai`, `zapier.com` | the browser          | the logos of plugins on the plugins page, served by their vendors (favicon images)                |
+| Host                                                                                                              | Who looks it up      | Why                                                                                                |
+| ----------------------------------------------------------------------------------------------------------------- | -------------------- | -------------------------------------------------------------------------------------------------- |
+| `api.github.com`, `raw.githubusercontent.com`                                                                     | the API              | the template catalogue syncs the website templates it discovers on GitHub                          |
+| `opengraph.githubassets.com`                                                                                      | the web app (server) | template previews, fetched by the image optimizer                                                  |
+| `cdn.jsdelivr.net`, `unpkg.com`                                                                                   | the browser          | the animation player loads its WebAssembly from a CDN; plugin icons (dashboard-icons on jsDelivr)  |
+| `challenges.cloudflare.com`                                                                                       | the browser          | the Cloudflare Turnstile script of the onboarding wizard (its built-in site key is the hosted one) |
+| `framerusercontent.com`, `jina.ai`, `cdn.scrapfly.io`, `composio.dev`, `www.make.com`, `www.sim.ai`, `zapier.com` | the browser          | the logos of plugins on the plugins page, served by their vendors (favicon images)                 |
 
 ## The DOM baseline
 
