@@ -703,6 +703,24 @@ describe('SlackChatBridgeService', () => {
             );
         });
 
+        it("matches a team-qualified entry against the AUTHOR's team (user_team), not the receiving workspace", async () => {
+            process.env[SLACK_BRIDGE_KB_ALLOWLIST_ENV] = 'T1:U7';
+            const { service, openAiCompatService } = createService();
+            // A Slack Connect guest U7 from team T9 posting into workspace T1.
+            await service.bridgeMentionToChat(BINDING, mentionBody({ user_team: 'T9' }) as any);
+            expect(openAiCompatService.handleCompletion).toHaveBeenLastCalledWith(
+                expect.anything(),
+                { userId: 'user-1' },
+                { allowKbMentions: false },
+            );
+            await service.bridgeMentionToChat(BINDING, mentionBody({ user_team: 'T1' }) as any);
+            expect(openAiCompatService.handleCompletion).toHaveBeenLastCalledWith(
+                expect.anything(),
+                { userId: 'user-1' },
+                { allowKbMentions: true },
+            );
+        });
+
         it('passes allowKbMentions: false for anyone else', async () => {
             process.env[SLACK_BRIDGE_KB_ALLOWLIST_ENV] = 'U1';
             const { service, openAiCompatService } = createService();

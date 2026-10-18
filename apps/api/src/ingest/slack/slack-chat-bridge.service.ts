@@ -140,6 +140,11 @@ export interface SlackEventCallbackBody extends SlackWorkspaceCarrier {
         type?: string;
         subtype?: string;
         user?: string;
+        /**
+         * The team the AUTHOR belongs to — differs from `team_id` for a
+         * Slack Connect guest posting in a shared channel.
+         */
+        user_team?: string;
         username?: string;
         bot_id?: string;
         text?: string;
@@ -166,6 +171,8 @@ export interface SlackSlashCommandBody extends SlackWorkspaceCarrier {
     channel_id?: string;
     channel_name?: string;
     user_id?: string;
+    /** The invoking user's own team, when Slack sends it (Slack Connect). */
+    user_team?: string;
     user_name?: string;
     /** Unique per invocation — the dedupe identity for the spine. */
     trigger_id?: string;
@@ -499,7 +506,9 @@ export class SlackChatBridgeService {
         try {
             const replyText = await this.runChatCompletion(binding, prompt, {
                 userId: event.user,
-                teamId: body.team_id,
+                // The author's own team, not the workspace that received the
+                // event: a Slack Connect guest's `T…:U…` entry names THEIR team.
+                teamId: event.user_team ?? body.team_id,
             });
             if (!replyText) {
                 this.logger.warn('Slack mention chat completion returned no content; not replying');
@@ -623,7 +632,7 @@ export class SlackChatBridgeService {
         try {
             const replyText = await this.runChatCompletion(binding, prompt, {
                 userId: command.user_id,
-                teamId: command.team_id,
+                teamId: command.user_team ?? command.team_id,
             });
             if (!replyText) {
                 this.logger.warn('Slack command chat completion returned no content; not replying');
