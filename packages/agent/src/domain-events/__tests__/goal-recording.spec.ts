@@ -279,6 +279,27 @@ describe('goal recording points', () => {
         expect(sample.criterionId).toBe('kr-signups');
     });
 
+    // Review 2026-10-17 F48: a criterion's samples are another series, not the Goal's own.
+    it("the Goal's sample history leaves out the per-criterion samples", async () => {
+        const goal = await external({
+            criteria: [{ id: 'kr-nps', name: 'NPS', weight: 1, target: 50, direction: 'gte' }],
+        });
+        await goals.recordExternalSample(
+            OWNER,
+            goal.id,
+            { value: 120, sampledAt: new Date() },
+            scope,
+        );
+        await goals.recordExternalSample(
+            OWNER,
+            goal.id,
+            { criterionId: 'kr-nps', value: 40, sampledAt: new Date() },
+            scope,
+        );
+        const history = await goals.listSamples(OWNER, goal.id, 100, scope);
+        expect(history.map((sample) => sample.value)).toEqual([120]);
+    });
+
     it('a provider Goal takes no external sample (422)', async () => {
         const goal = await goals.create(
             OWNER,

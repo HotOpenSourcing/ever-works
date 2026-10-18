@@ -40,6 +40,7 @@ import {
     IntegrationIdempotencyService,
     IntegrationResourcesService,
     type KeysetPage,
+    ResourceNotFoundError,
 } from '@ever-works/agent/integrations-api';
 import type { MissionOutcome } from '@ever-works/agent/entities';
 import { MissionsService } from '@ever-works/agent/missions';
@@ -443,6 +444,19 @@ export class IntegrationMissionsController {
         }
         const source = linkSourceOf(principalOf(user));
         const { expected, current } = await this.precondition(user, id, ifMatch, source);
+        // Review 2026-10-17 F49: everything that can refuse the request is checked BEFORE
+        // the first write (each step commits on its own): every Team must be one of the
+        // pinned organization's (404), and the status move must be one this Mission can
+        // make (422). Before, a rejected request had already changed the title.
+        for (const teamId of dto.teamIds ?? []) {
+            await this.resources.get('team', this.organizationId(), teamId, source);
+        }
+        if (dto.status !== undefined) {
+            assertMissionStatusMove(
+                String(current.status),
+                dto.status as 'paused' | 'completed' | 'failed',
+            );
+        }
         await withExpectedVersion('mission', id, expected, async () => {
             if (dto.title !== undefined || dto.description !== undefined) {
                 await this.missions.update(
@@ -494,13 +508,27 @@ export class IntegrationMissionsController {
         const wanted = new Map(dto.goals.map((link) => [link.goalId, link.isPrimary === true]));
         // The links whose Goal the caller sees in this scope (a link to a Goal outside it
         // is neither disclosed nor touched), so no unlink 404s halfway through the set.
-        const existing = (await this.goals.listForMission(user.userId, id, scope)).map((link) => ({
+        // Review 2026-10-17 F51: nor a link to a PRIVATE Goal — the integration never sees
+        // it (the Mission DTO leaves it out), so a full-set PUT must not unlink it.
+        const linked = (await this.goals.listForMission(user.userId, id, scope)).map((link) => ({
             goalId: link.goalId,
             isPrimary: link.isPrimary,
         }));
-        // Every new Goal must be the caller's (404) BEFORE the first write.
+        const existing: typeof linked = [];
+        for (const link of linked) {
+            if (await this.servedGoal(link.goalId, source)) existing.push(link);
+        }
+        const hidden = new Set(
+            linked.filter((link) => !existing.includes(link)).map((link) => link.goalId),
+        );
+        // Every new Goal must be the caller's (404) and one the integration may read: a
+        // private Goal answers 404 as a missing one does (F51). BEFORE the first write.
         for (const goalId of wanted.keys()) {
+            if (hidden.has(goalId)) {
+                throw new ResourceNotFoundError('goal', goalId);
+            }
             if (!existing.some((link) => link.goalId === goalId)) {
+                await this.resources.get('goal', this.organizationId(), goalId, source);
                 await this.goals.getForUser(user.userId, goalId, scope);
             }
         }
@@ -569,17 +597,10 @@ export class IntegrationMissionsController {
         outcome: (typeof OUTCOMES)[number] | null | undefined,
     ): Promise<void> {
         if (from === to) return;
+        assertMissionStatusMove(from, to);
         if (to === 'paused') {
-            if (from !== 'active') {
-                throw domainRule('Only an active Mission can be paused.', { status: from });
-            }
             await this.missions.pause(user.userId, id, this.ownership());
             return;
-        }
-        if (from !== 'active' && from !== 'paused') {
-            throw domainRule(`Only an active or paused Mission can be ${to}.`, {
-                status: from,
-            });
         }
         if (to === 'failed') {
             // Stops the ticks like a fatal tick failure would; a person can resume it.
@@ -622,6 +643,17 @@ export class IntegrationMissionsController {
         return { expected, current: current.dto };
     }
 
+    /** Whether the integration may read this Goal (a private or foreign one: no). */
+    private async servedGoal(goalId: string, source: string): Promise<boolean> {
+        try {
+            await this.resources.get('goal', this.organizationId(), goalId, source);
+            return true;
+        } catch (error) {
+            if (error instanceof ResourceNotFoundError) return false;
+            throw error;
+        }
+    }
+
     private async dto(id: string, source: string): Promise<Record<string, unknown>> {
         return (await this.resources.get('mission', this.organizationId(), id, source)).dto;
     }
@@ -634,6 +666,24 @@ export class IntegrationMissionsController {
         const resource = await this.resources.get('mission', this.organizationId(), id, source);
         if (resource.etag) res.setHeader('ETag', resource.etag);
         return resource.dto;
+    }
+}
+
+/**
+ * The status moves PATCH makes (`422 domain_rule` otherwise): `paused` from `active`;
+ * `completed` / `failed` from `active` or `paused`; the status already reached is a
+ * no-op. Checked before any write (F49) and again by the move itself.
+ */
+function assertMissionStatusMove(from: string, to: 'paused' | 'completed' | 'failed'): void {
+    if (from === to) return;
+    if (to === 'paused') {
+        if (from !== 'active') {
+            throw domainRule('Only an active Mission can be paused.', { status: from });
+        }
+        return;
+    }
+    if (from !== 'active' && from !== 'paused') {
+        throw domainRule(`Only an active or paused Mission can be ${to}.`, { status: from });
     }
 }
 

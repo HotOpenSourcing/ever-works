@@ -24,6 +24,7 @@ import {
 } from '../domain-event-context';
 import { DomainEventPublisher } from '../domain-event-publisher.service';
 import { DomainEventRecorder } from '../domain-event-recorder.service';
+import { buildMissionSnapshot } from '../domain-event-snapshots';
 import {
     catalogDataValidator,
     createDomainEventsDataSource,
@@ -294,6 +295,34 @@ describe('mission recording points', () => {
         });
         expect(recorded[3].data).toMatchObject({ missionIds: [], primaryMissionId: null });
         for (const event of recorded) expectValid(event);
+    });
+
+    // Review 2026-10-17 F51: a private Goal's id never reaches an integration through a Mission.
+    it('the Mission DTO leaves out the Goals that are private', async () => {
+        const mission = await external();
+        const newGoal = (title: string) =>
+            goals.createExternal(
+                OWNER,
+                {
+                    title,
+                    metricSource: { pluginId: 'external', metricId: 'value' },
+                    comparator: 'gte',
+                    targetValue: 10,
+                    unit: 'deals',
+                    window: 'point',
+                },
+                scope,
+            );
+        const shared = await newGoal('Shared');
+        const secret = await newGoal('Secret');
+        await goals.linkToMission(OWNER, mission.id, shared.id, false, scope);
+        await goals.linkToMission(OWNER, mission.id, secret.id, true, scope);
+        await dataSource.getRepository(Goal).update({ id: secret.id }, {
+            visibility: 'private',
+            visibilityExplicit: true,
+        } as never);
+        const snapshot = await buildMissionSnapshot(dataSource.manager, mission.id);
+        expect(snapshot?.dto.goals).toEqual([{ goalId: shared.id, isPrimary: false }]);
     });
 
     it('deleting a linked Goal records mission.goal.unlinked for its Mission', async () => {
