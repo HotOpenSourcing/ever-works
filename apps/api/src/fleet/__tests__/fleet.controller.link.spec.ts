@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import { FleetController } from '../fleet.controller';
 import type { FleetHeartbeatDto } from '../dto/fleet.dto';
 
@@ -147,6 +148,22 @@ describe('FleetController — the node link', () => {
         expect(own.link).toEqual(LINK);
         expect('link' in shared).toBe(false);
         expect(linkState.linkView).toHaveBeenCalledTimes(1);
+    });
+
+    // Fleet hub (FL-01): a non-owner's remove without the typed name is refused
+    // before anything is deleted — so nothing is closed either.
+    it('closes nothing when a non-owner’s remove is refused for want of the typed name', async () => {
+        const lifecycle = { nodeGone: jest.fn() };
+        const { controller, service } = build({ lifecycle });
+        service.resolveMachinesActor.mockResolvedValueOnce({
+            ownerUserId: 'someone-else',
+            role: 'org-admin',
+            nodeName: 'build-01',
+            ctx: { actorUserId: 'owner-1' },
+        });
+        await expect(controller.remove(auth, NODE)).rejects.toBeInstanceOf(ConflictException);
+        expect(service.deleteForUser).not.toHaveBeenCalled();
+        expect(lifecycle.nodeGone).not.toHaveBeenCalled();
     });
 
     it('closes the live link of a node that is deleted, re-keyed by its owner, or unenrolls itself', async () => {

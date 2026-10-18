@@ -21,7 +21,7 @@ import {
     UnauthorizedException,
     UseGuards,
 } from '@nestjs/common';
-import { ApiBody, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type {
     CreateEnrollmentTokenResult,
@@ -750,8 +750,13 @@ export class FleetController {
     @ApiBody({
         required: false,
         description:
-            'Optional. `confirmName` is the typed-name confirmation (CONTRACTS §2.2 `confirm-destructive`): when sent it must be the node’s name, or nothing is deleted (400 `invalid`). Without it the delete works exactly as it always has.',
+            '`confirmName` is the typed-name confirmation (CONTRACTS §2.2 `confirm-destructive`): when sent it must be the node’s name, or nothing is deleted (400 `invalid`). Optional for the node’s OWNER — without it the owner’s delete works exactly as it always has. Required for anyone else the node’s Lifecycle (`machines`) family admits: without it they get 409 `confirmation_required`.',
         schema: { type: 'object', properties: { confirmName: { type: 'string' } } },
+    })
+    @ApiResponse({
+        status: 409,
+        description:
+            '`confirmation_required` — someone other than the owner sent no `confirmName`; `error.details` carries `{ class: "confirm-destructive", summary }`.',
     })
     @HttpCode(HttpStatus.NO_CONTENT)
     @Throttle({ long: { limit: 30, ttl: 60_000 } })

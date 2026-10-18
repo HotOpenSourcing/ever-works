@@ -278,9 +278,11 @@ export async function drainFleetNodeAction(
  * release right now, for the drain confirmation ("2 jobs in flight will be
  * released…"). From the owner's own node list (`load.activeJobCount`); null
  * when it cannot be known — a computer shared with the caller carries no load,
- * and a failed read must never be shown as "no jobs". An owned computer with
- * no load is idle (0). One gap stays: when the list endpoint's own load lookup
- * fails it degrades every row to "no load", which reads as idle here too.
+ * and a read that fails here is never shown as "no jobs". An owned computer
+ * with no load is idle (0). Known gap: when the list endpoint's OWN load
+ * lookup fails it already answers every row with "no load" (its documented
+ * degradation), which this cannot tell from idle — closing it needs the list
+ * to say "load unknown".
  */
 export async function fetchFleetComputerInFlightAction(
     nodeId: string,
