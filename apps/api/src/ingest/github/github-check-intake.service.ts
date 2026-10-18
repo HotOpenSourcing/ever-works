@@ -527,6 +527,7 @@ function isDoorbellComment(
             body: body.comment?.body,
             event: eventName,
             inReplyTo: typeof inReplyTo === 'number' ? inReplyTo : null,
+            author: body.comment?.user?.login ?? null,
         }).kind === 'findings'
     );
 }

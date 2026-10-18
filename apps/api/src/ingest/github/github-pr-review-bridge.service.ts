@@ -1122,6 +1122,7 @@ export class GitHubPrReviewBridgeService {
             body: raw,
             event: eventName,
             inReplyTo: comment.in_reply_to_id ?? null,
+            author: comment.user?.login ?? null,
         });
         if (verdict.kind === 'ignore') {
             this.logger.debug(

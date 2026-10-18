@@ -453,6 +453,15 @@ const AUTOMATIC_ISSUE_COMMENT_OPENERS: readonly RegExp[] = [
 ];
 
 /**
+ * The ONLY login whose issue comment may count through those openers: the
+ * markers are Greptile's, so they prove an automatic review only when
+ * Greptile posted them. Any other trusted bot (Codex, Copilot, CodeRabbit)
+ * can be coaxed by whoever mentions it into starting a reply with
+ * `<!-- greptile_summary -->` (F3 review, 2026-10-18).
+ */
+export const AUTOMATIC_ISSUE_COMMENT_AUTHORS: ReadonlySet<string> = new Set(['greptile-apps[bot]']);
+
+/**
  * CodeRabbit stamps every chat answer — to a review command OR to any
  * question somebody `@coderabbitai`-mentioned it with — with this marker.
  */
@@ -503,9 +512,10 @@ const GREPTILE_FINDING_BADGE = /<img\b[^>]{0,1000}\balt="P[0-3]"/i;
  * to the agent on the owner's PC. So, whatever the text:
  *
  *  * an `issue_comment` is a finding only when it is one of the bots'
- *    AUTOMATIC review shapes (it OPENS with Greptile's summary or TREX
- *    marker — see {@link AUTOMATIC_ISSUE_COMMENT_OPENERS}) and is not a
- *    CodeRabbit chat reply. Everything else is `chat-reply`;
+ *    AUTOMATIC review shapes — it OPENS with Greptile's summary or TREX
+ *    marker ({@link AUTOMATIC_ISSUE_COMMENT_OPENERS}) AND Greptile posted it
+ *    ({@link AUTOMATIC_ISSUE_COMMENT_AUTHORS}) — and is not a CodeRabbit chat
+ *    reply. Everything else is `chat-reply`;
  *  * a `pull_request_review_comment` is a finding only when it OPENS a
  *    review thread (`in_reply_to_id` absent). Every reply is
  *    `thread-reply`, severity marker or not.
@@ -532,6 +542,12 @@ export function classifyReviewBotComment(input: {
      * and for every `issue_comment`.
      */
     inReplyTo?: number | null;
+    /**
+     * The comment author's login. An `issue_comment` counts through an
+     * automatic-review opener only when it is one of
+     * {@link AUTOMATIC_ISSUE_COMMENT_AUTHORS}; a missing login never does.
+     */
+    author?: string | null;
 }): ReviewBotCommentVerdict {
     const ignore = (reason: ReviewBotCommentIgnoreReason): ReviewBotCommentVerdict => ({
         kind: 'ignore',
@@ -608,6 +624,7 @@ export function classifyReviewBotComment(input: {
     if (
         input.event === 'issue_comment' &&
         (CODERABBIT_CHAT_REPLY.test(raw) ||
+            !AUTOMATIC_ISSUE_COMMENT_AUTHORS.has(normalizeReviewerLogin(input.author)) ||
             !AUTOMATIC_ISSUE_COMMENT_OPENERS.some((opener) => opener.test(raw)))
     ) {
         return ignore('chat-reply');
