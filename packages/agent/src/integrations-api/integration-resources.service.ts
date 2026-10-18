@@ -29,7 +29,16 @@ import type { ExternalLinkEntityType } from '../entities/external-record-link.en
 import { ExternalRecordLinksService, type ExternalLinkDto } from './external-record-links.service';
 import { etagFor } from './if-match';
 import { ResourceNotFoundError } from './integration-api.errors';
-import { type KeysetPage, type KeysetQuery, readKeysetPage } from './keyset-cursor';
+import {
+    encodeKeysetCursor,
+    type KeysetPage,
+    type KeysetQuery,
+    keysetLimit,
+    readKeysetPage,
+} from './keyset-cursor';
+
+/** A cursor before every row: the roster page after a first page the synthesized owner filled. */
+const KEYSET_START_CURSOR = encodeKeysetCursor({ updatedAt: '0001-01-01 00:00:00.000', id: '0' });
 
 /**
  * The versioned resources the integration API reads (contract v1 B.6): the P1
@@ -221,33 +230,54 @@ export class IntegrationResourcesService {
         organizationId: string,
         query: KeysetQuery,
     ): Promise<KeysetPage<Record<string, unknown>>> {
-        const qb = this.dataSource
-            .getRepository(OrganizationMember)
-            .createQueryBuilder('row')
-            .where('row.organizationId = :organizationId', { organizationId });
-        const page = await readKeysetPage(qb, 'row', query);
-        const data: Record<string, unknown>[] = [];
-        if (!query.cursor) {
-            const owner = await this.ownerWithoutRosterRow(organizationId);
-            if (owner && !(query.updatedSince && owner.createdAt < query.updatedSince)) {
-                const member = await buildMemberSnapshot(this.dataSource.manager, {
-                    organizationId,
-                    userId: owner.userId,
-                    role: 'owner',
-                    joinedAt: owner.createdAt,
-                    updatedAt: owner.createdAt,
-                } as Pick<
-                    OrganizationMember,
-                    'organizationId' | 'userId' | 'role' | 'joinedAt' | 'updatedAt'
-                >);
-                if (member) data.push(member as unknown as Record<string, unknown>);
-            }
+        const roster = () =>
+            this.dataSource
+                .getRepository(OrganizationMember)
+                .createQueryBuilder('row')
+                .where('row.organizationId = :organizationId', { organizationId });
+        const owner = query.cursor ? null : await this.syntheticOwner(organizationId, query);
+        const limit = keysetLimit(query.limit);
+        if (owner && limit === 1) {
+            // The owner fills the page; the roster starts on the next one.
+            const peek = await readKeysetPage(roster(), 'row', { ...query, limit: 1 });
+            return {
+                data: [owner],
+                nextCursor: peek.data.length ? KEYSET_START_CURSOR : null,
+                hasMore: peek.data.length > 0,
+            };
         }
+        // The owner counts toward the page limit (review on #2723): one roster row fewer.
+        const page = await readKeysetPage(
+            roster(),
+            'row',
+            owner ? { ...query, limit: limit - 1 } : query,
+        );
+        const data: Record<string, unknown>[] = owner ? [owner] : [];
         for (const row of page.data) {
             const member = await buildMemberSnapshot(this.dataSource.manager, row);
             if (member) data.push(member as unknown as Record<string, unknown>);
         }
         return { data, nextCursor: page.nextCursor, hasMore: page.hasMore };
+    }
+
+    /** The synthesized owner member of the first page (see `members`), or `null`. */
+    private async syntheticOwner(
+        organizationId: string,
+        query: KeysetQuery,
+    ): Promise<Record<string, unknown> | null> {
+        const owner = await this.ownerWithoutRosterRow(organizationId);
+        if (!owner || (query.updatedSince && owner.createdAt < query.updatedSince)) return null;
+        const member = await buildMemberSnapshot(this.dataSource.manager, {
+            organizationId,
+            userId: owner.userId,
+            role: 'owner',
+            joinedAt: owner.createdAt,
+            updatedAt: owner.createdAt,
+        } as Pick<
+            OrganizationMember,
+            'organizationId' | 'userId' | 'role' | 'joinedAt' | 'updatedAt'
+        >);
+        return (member as unknown as Record<string, unknown>) ?? null;
     }
 
     /**

@@ -411,12 +411,22 @@ describe('IntegrationResourcesService', () => {
                 joinedAt: new Date(),
             } as unknown as OrganizationMember);
         }
-        const page1 = await resources.members(ORG_A, { limit: 1 });
-        expect(page1.data.map((m) => m.userId)).toEqual([ownerId, expect.any(String)]);
-        expect(page1.nextCursor).toBeTruthy();
-        const page2 = await resources.members(ORG_A, { limit: 1, cursor: page1.nextCursor });
-        expect(page2.data.map((m) => m.userId)).not.toContain(ownerId);
-        expect(page2.data).toHaveLength(1);
+        // The owner counts toward the page limit (review on #2723): every page holds at most `limit` members,
+        // and walking the cursor lists everybody exactly once.
+        for (const limit of [1, 2]) {
+            const seen: unknown[] = [];
+            let cursor: string | null | undefined;
+            for (let n = 0; n < 5; n++) {
+                const page = await resources.members(ORG_A, { limit, cursor });
+                expect(page.data.length).toBeLessThanOrEqual(limit);
+                seen.push(...page.data.map((m) => m.userId));
+                if (!page.hasMore) break;
+                expect(page.nextCursor).toBeTruthy();
+                cursor = page.nextCursor;
+            }
+            expect(seen[0]).toBe(ownerId);
+            expect([...seen].sort()).toEqual([ownerId, ...others].sort());
+        }
         await dataSource.query(
             `DELETE FROM "organization_members" WHERE "userId" IN (?, ?)`,
             others,
