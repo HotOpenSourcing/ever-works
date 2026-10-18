@@ -1,15 +1,10 @@
 import 'server-only';
-import {
-    convertToModelMessages,
-    streamText,
-    stepCountIs,
-    type UIMessage,
-    type StreamTextOnFinishCallback,
-} from 'ai';
+import { streamText, stepCountIs, type UIMessage, type StreamTextOnFinishCallback } from 'ai';
 import { createBackendProvider } from './provider';
 import { buildChatTools, type ChatTools } from './tools';
 import { selectActiveToolNames } from './tools/tool-selection';
-import { createUserConfirmationCheck } from './tools/generated/confirmation';
+import { createUserConfirmationCheckFromMessages } from './tools/generated/confirmation';
+import { toModelHistory } from './model-history';
 import { API_URL } from '@/lib/constants';
 import { sanitizeText } from '@/lib/utils';
 
@@ -150,10 +145,11 @@ export async function runAgent({
 
     const model = provider.chatModel(modelOverride || MODEL_AUTO);
     // Security: a gated tool's `confirmed: true` only counts when THIS turn's
-    // user message confirms it — tool output read earlier in the same turn
-    // cannot supply the confirmation.
+    // user message confirms the exact card (tool + arguments) the assistant
+    // showed right before it — tool output read in the same turn cannot
+    // supply the confirmation, and each card is single-use.
     const allTools = buildChatTools(model, {
-        userConfirmed: createUserConfirmationCheck(latestUserText(messages)),
+        userConfirmed: createUserConfirmationCheckFromMessages(messages),
     });
 
     // Per-turn tool gating: the full set is large (hand-written + ~280
@@ -172,30 +168,16 @@ export async function runAgent({
     return streamText({
         model,
         system: SYSTEM_PROMPT.replace('{context}', context),
-        messages: await convertToModelMessages(
+        // Security: replayed tool results from earlier turns go through each
+        // tool's `toModelOutput` too (the untrusted fence), not raw.
+        messages: await toModelHistory(
             messages.filter((message) => !isProviderErrorMessage(message)),
+            allTools,
         ),
         tools,
         stopWhen: stepCountIs(MAX_TOOL_STEPS),
         onFinish,
     });
-}
-
-/**
- * Text of the LATEST user message only — the turn that started this call.
- * Used for the confirmation gate, where earlier turns must not count (a
- * "yes" three messages ago confirmed something else).
- */
-function latestUserText(messages: UIMessage[]): string {
-    for (let i = messages.length - 1; i >= 0; i--) {
-        const message = messages[i];
-        if (message.role !== 'user') continue;
-        return message.parts
-            .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
-            .map((part) => part.text)
-            .join(' ');
-    }
-    return '';
 }
 
 /** How many trailing user turns feed the tool-gating keyword match. */

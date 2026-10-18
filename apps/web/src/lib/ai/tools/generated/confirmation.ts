@@ -1,51 +1,159 @@
-/**
- * Security (prompt-injection hardening) — WHO confirmed a gated tool call.
- *
- * The factory's confirmation handshake used to trust the model alone: a gated
- * tool ran as soon as the model passed `confirmed: true`. The system prompt
- * says "only after the user agrees", but the same turn can contain tool output
- * the user never wrote (an email, an ingested event, a KB document, another
- * person's task-chat message) — and text in that output can tell the model to
- * pass `confirmed: true` straight away.
- *
- * So the flag is now honoured only when the CURRENT user turn — the human's
- * own message that started this streamText call, which no tool output can
- * change — actually confirms:
- *
- *   - the Confirm button on the card sends
- *     "Yes, I confirm — proceed with <tool_name> …" → confirms exactly that tool;
- *   - a short typed affirmative ("yes", "go ahead", "confirm") → confirms
- *     whatever the assistant just asked about.
- *
- * Anything else re-shows the confirmation card, so a refused call costs the
- * user one click, never a dead end.
- */
-
-/** Max length of a typed message still read as a bare "yes". */
-const MAX_AFFIRMATIVE_LENGTH = 120;
-
-const AFFIRMATIVE_RE =
-    /^(?:yes|yep|yeah|yup|y|sure|ok|okay|confirm(?:ed)?|i confirm|go ahead|go for it|do it|proceed|approved?|please do|absolutely|affirmative)\b/i;
-
-/** The Confirm button's message names the exact tool (see `ConfirmCard`). */
-const CARD_CONFIRM_RE = /\bproceed with ([a-z][a-z0-9_]{0,79})\b/i;
-
-export type UserConfirmationCheck = (toolName: string) => boolean;
+import { getToolName, isToolUIPart, type UIMessage } from 'ai';
 
 /**
- * Build the per-turn check from the latest user message's text. `null` /
- * empty text (no user turn) confirms nothing.
+ * Security (prompt-injection hardening) — WHO confirmed a gated tool call,
+ * and WHAT exactly they confirmed.
+ *
+ * The confirmation handshake used to trust the model alone: a gated tool ran
+ * as soon as the model passed `confirmed: true`. The same turn can contain
+ * tool output the user never wrote (an email, an ingested event, a KB
+ * document, another person's task-chat message), and text in that output can
+ * tell the model to pass `confirmed: true` straight away.
+ *
+ * A model-supplied `confirmed: true` is therefore honoured only when ALL hold:
+ *
+ *  1. the assistant message right before the user's latest message showed a
+ *     confirmation card (`__confirmationRequired`) for THIS tool;
+ *  2. the call's arguments are the card's arguments (the card is what the
+ *     user saw — confirming `update_agent` on `a1` does not allow `a2`);
+ *  3. the user's latest message — which no tool output can change — is
+ *     either the card's Confirm-button message naming that tool, or a bare
+ *     affirmative and nothing else ("yes", "ok", "go ahead");
+ *  4. the card has not been used yet in this turn (single use).
+ *
+ * Anything else re-shows the card, so a refused call costs the user one
+ * click, never a dead end.
  */
-export function createUserConfirmationCheck(latestUserText: string | null | undefined): UserConfirmationCheck {
-    const text = (latestUserText ?? '').trim();
-    if (!text) return () => false;
+
+/** One confirmation card the user was shown. */
+export interface PendingConfirmation {
+    toolName: string;
+    target?: string;
+    args: Record<string, unknown>;
+}
+
+export type UserConfirmationCheck = (toolName: string, args: Record<string, unknown>) => boolean;
+
+/** The WHOLE message must be one of these (optionally followed by `.`/`!`). */
+const AFFIRMATIVE_RE = /^\s*(?:yes|y|ok|okay|sure|confirm(?:ed)?|go ahead|do it)\s*[.!]*\s*$/i;
+
+/** Exactly what `ConfirmCard`'s Confirm button sends. */
+const CARD_CONFIRM_RE =
+    /^\s*Yes, I confirm — proceed with ([A-Za-z][A-Za-z0-9_]{0,79})(?: for ([^\n]{1,200}))? \(confirmed: true\)\.\s*$/;
+
+/** Mirrors `sanitizeConfirmRef` in `ChatToolResult` so card targets compare equal. */
+function sanitizeRef(raw: string | undefined): string {
+    if (!raw) return '';
+    return raw
+        .replace(/\(\s*confirmed\s*:[^)]*\)/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** Canonical JSON (sorted keys, `confirmed` dropped at the top level). */
+function canonical(value: unknown, top = true): string {
+    if (Array.isArray(value)) return `[${value.map((item) => canonical(item, false)).join(',')}]`;
+    if (isRecord(value)) {
+        const keys = Object.keys(value)
+            .filter((key) => !(top && key === 'confirmed') && value[key] !== undefined)
+            .sort();
+        return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(value[key], false)}`).join(',')}}`;
+    }
+    return JSON.stringify(value ?? null);
+}
+
+function textOf(message: UIMessage): string {
+    return message.parts
+        .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+        .map((part) => part.text)
+        .join(' ');
+}
+
+/** Text of the latest user message (the turn that started this call). */
+export function latestUserText(messages: UIMessage[]): string {
+    for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].role === 'user') return textOf(messages[i]);
+    }
+    return '';
+}
+
+/**
+ * The confirmation cards the assistant showed in its message right before
+ * the user's latest message — the only cards the latest message can answer.
+ */
+export function pendingConfirmationsFrom(messages: UIMessage[]): PendingConfirmation[] {
+    let i = messages.length - 1;
+    while (i >= 0 && messages[i].role !== 'user') i--;
+    for (i -= 1; i >= 0; i--) {
+        const message = messages[i];
+        if (message.role === 'user') return [];
+        if (message.role !== 'assistant') continue;
+        const pending: PendingConfirmation[] = [];
+        for (const part of message.parts) {
+            if (!isToolUIPart(part) || part.state !== 'output-available') continue;
+            const output = part.output;
+            if (!isRecord(output) || output.__confirmationRequired !== true) continue;
+            const toolName =
+                typeof output.toolName === 'string' ? output.toolName : getToolName(part);
+            if (!toolName) continue;
+            pending.push({
+                toolName,
+                target: typeof output.target === 'string' ? output.target : undefined,
+                args: isRecord(output.args) ? output.args : {},
+            });
+        }
+        return pending;
+    }
+    return [];
+}
+
+/**
+ * Build the per-turn check. Returns a function the tools call with the
+ * name and arguments of a `confirmed: true` call; `true` consumes the
+ * matching card.
+ */
+export function createUserConfirmationCheck(input: {
+    latestUserText: string | null | undefined;
+    pending: PendingConfirmation[];
+}): UserConfirmationCheck {
+    const text = (input.latestUserText ?? '').trim();
+    const pending = input.pending ?? [];
+    if (!text || pending.length === 0) return () => false;
 
     const card = CARD_CONFIRM_RE.exec(text);
-    if (card && /^yes,?\s+i confirm/i.test(text)) {
-        const confirmedTool = card[1].toLowerCase();
-        return (toolName) => toolName.toLowerCase() === confirmedTool;
-    }
+    const affirmative = !card && AFFIRMATIVE_RE.test(text);
+    if (!card && !affirmative) return () => false;
+    const cardTool = card ? card[1] : null;
+    const cardTarget = card?.[2] ? sanitizeRef(card[2]) : null;
 
-    const affirmative = text.length <= MAX_AFFIRMATIVE_LENGTH && AFFIRMATIVE_RE.test(text);
-    return () => affirmative;
+    const used = new Set<number>();
+    return (toolName, args) => {
+        if (cardTool && cardTool !== toolName) return false;
+        const wanted = canonical(args ?? {});
+        const index = pending.findIndex(
+            (entry, i) =>
+                !used.has(i) &&
+                entry.toolName === toolName &&
+                (cardTarget === null || sanitizeRef(entry.target) === cardTarget) &&
+                canonical(entry.args) === wanted,
+        );
+        if (index < 0) return false;
+        used.add(index);
+        return true;
+    };
+}
+
+/** Convenience: the check for a whole UI history (latest user turn + the cards before it). */
+export function createUserConfirmationCheckFromMessages(
+    messages: UIMessage[],
+): UserConfirmationCheck {
+    return createUserConfirmationCheck({
+        latestUserText: latestUserText(messages),
+        pending: pendingConfirmationsFrom(messages),
+    });
 }

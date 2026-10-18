@@ -31,10 +31,13 @@ export function touchesAgentPrivileges(args: Record<string, unknown>): boolean {
 }
 
 /**
- * Same shape the platform's task-chat parser keys on (`@slug`), but not an
- * e-mail address (`a@b.co`) — the `@` must start a word.
+ * The platform's own task-chat mention grammar (`MENTION_RE` in
+ * `packages/agent/src/tasks-domain/task-chat.service.ts`): `@slug` anywhere,
+ * no word-start requirement — so `x@builder-bot` and an e-mail address
+ * count too. Over-asking costs one click; under-asking wakes an agent.
+ * Case-insensitive here so an upper-case mention cannot slip past.
  */
-const MENTION_RE = /(^|[^\w.@])@[a-z0-9][a-z0-9-]{0,79}\b/i;
+const MENTION_RE = /@([a-z0-9-]{1,80})\b/i;
 
 function containsMention(value: unknown, depth = 0): boolean {
     if (depth > 4 || value === null || value === undefined) return false;

@@ -100,6 +100,8 @@ interface ConfirmationOutput {
     args?: Record<string, unknown>;
     /** `privileged` = reversible, but changes what agents can do / know / are told. */
     confirmationKind?: 'destructive' | 'privileged';
+    /** Plain-text preview of the content a privileged write would store. */
+    preview?: string;
 }
 
 // Security: tool outputs are LLM-authored and can be poisoned via prompt
@@ -300,6 +302,7 @@ export function ChatToolResult({
                 action={confirmation.action ?? ''}
                 target={confirmation.target}
                 kind={confirmation.confirmationKind}
+                preview={confirmation.preview}
             />
         );
     }
@@ -373,11 +376,13 @@ function ConfirmCard({
     action,
     target,
     kind,
+    preview,
 }: {
     confirmToolName: string;
     action: string;
     target?: string;
     kind?: 'destructive' | 'privileged';
+    preview?: string;
 }) {
     const { sendMessage } = useChatContext();
     const [resolved, setResolved] = useState<null | 'confirmed' | 'cancelled'>(null);
@@ -420,6 +425,14 @@ function ConfirmCard({
                     ? 'This changes what your agents can do, know or are told.'
                     : 'This can’t be undone.'}
             </p>
+            {preview ? (
+                // Rendered as text (React escapes it) — the content the
+                // assistant wants to store, so the user confirms the words,
+                // not just the action name.
+                <pre className="mb-3 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded border border-border bg-surface-secondary p-2 text-[11px] text-text dark:border-white/15 dark:bg-white/5 dark:text-text-dark">
+                    {preview}
+                </pre>
+            ) : null}
             <div className="flex gap-2">
                 <button
                     onClick={() => {

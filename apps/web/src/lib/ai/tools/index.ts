@@ -12,7 +12,7 @@ import {
     importWorkTool,
     analyzeImportSource,
     updateWorkTool,
-    deleteWorkTool,
+    createDeleteWorkTool,
     syncWork,
 } from './work.tools';
 import { checkGitConnection, listGitProviders } from './git.tools';
@@ -115,7 +115,8 @@ export function buildChatTools(model: LanguageModel, options: GeneratedToolsOpti
 
         // Update / Delete
         updateWork: updateWorkTool,
-        deleteWork: deleteWorkTool,
+        // Same user-turn confirmation check as the generated tools.
+        deleteWork: createDeleteWorkTool(options.userConfirmed),
         syncWork,
 
         // Providers

@@ -25,6 +25,34 @@ export interface ConfirmationRequired {
     confirmationKind?: 'destructive' | 'privileged';
     /** Set when `confirmed: true` was passed but the user's turn did not confirm. */
     confirmationNote?: string;
+    /**
+     * For privileged writes: a short, plain-text preview of what will be
+     * written (the fact, the skill definition, the agent-file body …), so
+     * the user confirms the content, not just the action name.
+     */
+    preview?: string;
+}
+
+/** Fields whose value IS the content of a privileged write, in preview priority order. */
+const PREVIEW_FIELDS = ['body', 'content', 'definition', 'instructionsMd', 'text', 'description'];
+const MAX_PREVIEW_CHARS = 400;
+
+function previewOf(args: Record<string, unknown>): string | undefined {
+    const body = args[BODY_FIELD];
+    if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+    const record = body as Record<string, unknown>;
+    const field = PREVIEW_FIELDS.find((key) => typeof record[key] === 'string' && record[key]);
+    let text: string;
+    if (field) {
+        text = record[field] as string;
+    } else {
+        try {
+            text = JSON.stringify(record);
+        } catch {
+            return undefined;
+        }
+    }
+    return text.length > MAX_PREVIEW_CHARS ? `${text.slice(0, MAX_PREVIEW_CHARS)}…` : text;
 }
 
 /** Options for {@link buildGeneratedTools}. */
@@ -244,7 +272,8 @@ export function buildGeneratedTools(
                 if (needsConfirmation(spec, args)) {
                     const claimed = args[CONFIRM_FIELD] === true;
                     const backed =
-                        claimed && (!options.userConfirmed || options.userConfirmed(spec.toolName));
+                        claimed &&
+                        (!options.userConfirmed || options.userConfirmed(spec.toolName, args));
                     if (!backed) {
                         const confirmation: ConfirmationRequired = {
                             __confirmationRequired: true,
@@ -254,10 +283,14 @@ export function buildGeneratedTools(
                             args,
                             confirmationKind: spec.confirmationKind ?? 'destructive',
                         };
+                        if (spec.confirmationKind === 'privileged') {
+                            const preview = previewOf(args);
+                            if (preview) confirmation.preview = preview;
+                        }
                         if (claimed) {
                             confirmation.confirmationNote =
-                                'Not run: the user has not confirmed this action in their own message. ' +
-                                'Ask them, and wait for their answer.';
+                                'Not run: the user has not confirmed this exact action (same tool, same ' +
+                                'arguments) in their own latest message. Show them the card and wait.';
                         }
                         return confirmation;
                     }
