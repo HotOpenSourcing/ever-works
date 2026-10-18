@@ -752,8 +752,34 @@ export class CodexPlugin
 			let items = await readGeneratedItems(workspacePath, logger);
 			const requestedTargetItems = Number(request.config?.target_items ?? DEFAULT_TARGET_ITEMS);
 			if (items.length === 0 && (requestedTargetItems > 0 || existing.items.length === 0)) {
-				const shouldRetryWithBypass =
+				// Security (prompt-injection): this used to retry with
+				// `--dangerously-bypass-approvals-and-sandbox` whenever Codex's
+				// own stdout/stderr *sounded like* a sandbox write block — and
+				// it did so precisely when the operator had NOT enabled
+				// `unsafeBypassSandbox`. That stdout is model-produced text, so
+				// an injected page or README could make the model print the
+				// trigger phrases and escalate the run to full host access.
+				// Bypass is now only ever the operator's explicit choice: with
+				// the setting ON the first run already bypassed (nothing to
+				// retry); with it OFF the escalation is declined and logged.
+				const sandboxBlockReported =
 					settings.unsafeBypassSandbox !== true && this.detectSandboxWriteBlock(executionResult);
+				const shouldRetryWithBypass = sandboxBlockReported && this.isBypassRetryAllowed(settings);
+
+				if (sandboxBlockReported && !shouldRetryWithBypass) {
+					logger.warn(
+						'Codex output reported a sandboxed file-write block; NOT retrying with sandbox bypass ' +
+							'(unsafeBypassSandbox is off). Enable it explicitly only on hosts where Codex sandboxing is incompatible.'
+					);
+					this.emitCodexLog({
+						onLogEntry,
+						stepId: 'generate-items',
+						event: 'message',
+						level: 'warn',
+						message:
+							'Codex reported a sandboxed file-write block; sandbox-bypass retry declined (unsafeBypassSandbox is off)'
+					});
+				}
 
 				if (shouldRetryWithBypass) {
 					this.emitCodexLog({
@@ -1144,6 +1170,17 @@ export class CodexPlugin
 			.join('\n');
 
 		return contextParts;
+	}
+
+	/**
+	 * Whether a sandbox-bypass RETRY may follow a reported write block.
+	 * Only the operator's explicit `unsafeBypassSandbox` opt-in allows
+	 * bypass at all — and with it on, the first run already bypassed, so in
+	 * practice this never authorizes an escalation on its own. Kept as a
+	 * single seam so the policy is stated (and tested) in one place.
+	 */
+	private isBypassRetryAllowed(settings: Record<string, unknown>): boolean {
+		return settings.unsafeBypassSandbox === true;
 	}
 
 	private detectSandboxWriteBlock(result: ExecuteResult): boolean {
