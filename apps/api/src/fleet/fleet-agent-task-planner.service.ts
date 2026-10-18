@@ -195,23 +195,53 @@ function defuseStructure(line: string): string {
  * `m2` and break emoji and ZWNJ sequences in text an agent may copy into a
  * file (round-2 review of #2761, which applies to this planner too).
  */
+/**
+ * Every LOGICAL line break a model may honour \u2014 not only `\n` (CodeRabbit on
+ * #2770: `OWNER ANSWER\u2028---` split on `\n` alone stayed one line and
+ * dodged the setext check). Captured so the original separators survive.
+ */
+const LOGICAL_LINE_BREAK = /(\r\n|[\n\r\v\f\u0085\u2028\u2029])/;
+
 function neutralizeUntrustedText(value: string): string {
-    const lines = neutralizeControlTokens(value).split('\n');
-    const shadows = lines.map((line) => normalizeUntrusted(line).replace(/\r$/, ''));
-    return lines
-        .map((line, index) => {
-            const shadow = shadows[index];
-            if (
-                index > 0 &&
-                SETEXT_UNDERLINE_LINE.test(shadow) &&
-                RESERVED_NAME_ONLY_LINE.test(shadows[index - 1])
-            ) {
-                return shadow.replace(SETEXT_UNDERLINE_LINE, '$1\u200b$2');
-            }
-            const defused = defuseStructure(shadow);
-            return defused === shadow ? line : defused;
-        })
-        .join('\n');
+    // [line, sep, line, sep, \u2026, line] \u2014 separators at odd indices, kept verbatim.
+    const parts = neutralizeControlTokens(value).split(LOGICAL_LINE_BREAK);
+    const lines = parts.filter((_part, index) => index % 2 === 0);
+    const shadows = lines.map((line) => normalizeUntrusted(line));
+    const rewritten = lines.map((line, index) => {
+        const shadow = shadows[index];
+        if (
+            index > 0 &&
+            SETEXT_UNDERLINE_LINE.test(shadow) &&
+            RESERVED_NAME_ONLY_LINE.test(shadows[index - 1])
+        ) {
+            return shadow.replace(SETEXT_UNDERLINE_LINE, '$1\u200b$2');
+        }
+        const defused = defuseStructure(shadow);
+        return defused === shadow ? line : defused;
+    });
+    return parts.map((part, index) => (index % 2 === 0 ? rewritten[index / 2] : part)).join('');
+}
+
+/**
+ * Neutralise, then keep the result inside `maxBytes` WITHOUT cutting the
+ * neutralised text (a cut there could expose structure at the new edge):
+ * shrink the INPUT until its neutralised form fits. Defusing can grow a line
+ * (a zero-width space, an NFKC fold such as U+FDFA \u2192 18 characters), so a
+ * message cut to the budget first could still overflow it and be dropped by
+ * `fitOwnerMessages` (CodeRabbit on #2770). The input shrinks on every pass,
+ * so the loop ends.
+ */
+function neutralizeWithinBytes(value: string, maxBytes: number): string {
+    let current = truncateToBytes(value, maxBytes);
+    for (;;) {
+        const neutralized = neutralizeUntrustedText(current);
+        const size = byteLength(neutralized);
+        if (size <= maxBytes) return neutralized;
+        const currentBytes = byteLength(current);
+        if (currentBytes === 0) return '';
+        const nextBytes = Math.min(currentBytes - 1, Math.floor((currentBytes * maxBytes) / size));
+        current = truncateToBytes(current, Math.max(0, nextBytes));
+    }
 }
 
 /**
@@ -1498,10 +1528,10 @@ function ownerMessagesOf(run: AgentRun | null): string[] {
     const messages = pending
         .filter((entry): entry is string => typeof entry === 'string' && entry.trim() !== '')
         .map((entry) =>
-            // Cut FIRST, then neutralise: a cut made after defusing could
-            // remove the character that kept a reserved heading or fence word
-            // from matching (`# OWNER ANSWERX` → `# OWNER ANSWER`).
-            neutralizeUntrustedText(truncateToBytes(entry.trim(), OWNER_MESSAGE_MAX_BYTES)),
+            // Neutralised within the per-message budget: never cut AFTER defusing
+            // (a cut could expose `# OWNER ANSWER` from `# OWNER ANSWERX`), and
+            // never let defusing push a message over the budget.
+            neutralizeWithinBytes(entry.trim(), OWNER_MESSAGE_MAX_BYTES),
         );
     return fitOwnerMessages(messages);
 }
