@@ -142,7 +142,11 @@ describe('goal recording points', () => {
         const goal = await external({ teamIds: [team.id] });
         expect(goal).toMatchObject({ status: GoalStatus.DRAFT, organizationId: ORG_A });
         const [created, ...rest] = await events();
-        expect(rest).toHaveLength(0);
+        // Review 2026-10-17 F34: the Team's own side follows the record's event.
+        expect(rest.map((event) => [event.type, event.aggregateId])).toEqual([
+            ['team.resource.added', team.id],
+        ]);
+        expectValid(rest[0]);
         expect(created).toMatchObject({
             type: 'goal.created',
             aggregateType: 'goal',
