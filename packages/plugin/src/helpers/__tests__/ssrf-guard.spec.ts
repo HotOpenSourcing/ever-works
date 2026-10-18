@@ -25,6 +25,25 @@ describe('isSafeWebhookUrl', () => {
 		expect(isSafeWebhookUrl('http://metadata.goog/')).toBe(false);
 	});
 
+	it('rejects the fully-qualified (trailing-dot) spelling of a metadata hostname', () => {
+		expect(isSafeWebhookUrl('http://metadata.google.internal./')).toBe(false);
+		expect(isSafeWebhookUrl('http://METADATA.goog../')).toBe(false);
+		expect(isSafeWebhookUrl('http://instance-data./latest')).toBe(false);
+		expect(isSafeWebhookUrl('https://hooks.example.com./incoming')).toBe(true);
+	});
+
+	it('rejects the benchmarking and documentation IPv4 ranges', () => {
+		for (const ip of ['198.18.0.1', '198.19.255.254', '192.0.2.10', '198.51.100.7', '203.0.113.9']) {
+			expect(isSafeWebhookUrl(`https://${ip}/x`)).toBe(false);
+			expect(isPrivateIPv4(ip)).toBe(true);
+		}
+		for (const ip of ['198.17.255.255', '198.20.0.1', '192.0.3.1', '198.51.101.1', '203.0.114.1']) {
+			expect(isPrivateIPv4(ip)).toBe(false);
+		}
+		// The same ranges embedded in an IPv6 literal.
+		expect(isSafeWebhookUrl('https://[::ffff:198.18.0.1]/x')).toBe(false);
+	});
+
 	it('rejects literal private IPv4', () => {
 		expect(isSafeWebhookUrl('https://127.0.0.1/x')).toBe(false);
 		expect(isSafeWebhookUrl('https://169.254.169.254/latest/meta-data')).toBe(false);

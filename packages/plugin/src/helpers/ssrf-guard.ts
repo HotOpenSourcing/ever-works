@@ -35,6 +35,9 @@ export function isSafeWebhookUrl(rawUrl: string): boolean {
 	if (host.startsWith('[') && host.endsWith(']')) {
 		host = host.slice(1, -1);
 	}
+	// A fully-qualified spelling (`metadata.google.internal.`) names the same
+	// host — the trailing dot must not walk past the alias list.
+	host = host.replace(/\.+$/, '');
 
 	if (CLOUD_METADATA_HOSTNAMES.has(host)) {
 		return false;
@@ -68,8 +71,10 @@ const CLOUD_METADATA_HOSTNAMES = new Set([
  * True for any IPv4 address that must never be reachable from server-side
  * webhook / SSRF-sensitive code: RFC1918 private ranges, loopback (127/8),
  * link-local (169.254/16 — includes AWS / GCP / Azure IMDS 169.254.169.254),
- * CGNAT (100.64/10), multicast/reserved (>=224), 0.0.0.0/8, and the
- * IETF-protocol-assignment range 192.0.0/24.
+ * CGNAT (100.64/10), multicast/reserved (>=224), 0.0.0.0/8, the
+ * IETF-protocol-assignment range 192.0.0/24, the benchmarking range
+ * 198.18/15 (RFC 2544), and the documentation ranges 192.0.2/24,
+ * 198.51.100/24 and 203.0.113/24 (RFC 5737) — none is a public destination.
  *
  * Exported so {@link safeFetchWithDnsPin} can reuse the same predicate
  * against DNS-resolved addresses without duplicating the rules.
@@ -85,6 +90,10 @@ export function isPrivateIPv4(ip: string): boolean {
 	if (a === 172 && b >= 16 && b <= 31) return true;
 	if (a === 192 && b === 168) return true;
 	if (a === 192 && b === 0 && parts[2] === 0) return true;
+	if (a === 198 && (b === 18 || b === 19)) return true;
+	if (a === 192 && b === 0 && parts[2] === 2) return true;
+	if (a === 198 && b === 51 && parts[2] === 100) return true;
+	if (a === 203 && b === 0 && parts[2] === 113) return true;
 	if (a === 100 && b >= 64 && b <= 127) return true;
 	if (a >= 224) return true;
 	return false;

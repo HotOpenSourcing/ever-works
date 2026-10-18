@@ -50,13 +50,22 @@ function comparable(path: string): string {
     return out.toLowerCase();
 }
 
-/** Whether one repository path is under an always-protected prefix. */
+/**
+ * Whether one repository path is under an always-protected prefix — or IS one
+ * of the directories on the way to it. A change to the bare `.github`,
+ * `.github/workflows` or `.github/actions` entry itself (turning it into a
+ * symlink or a submodule) would swap every file under it at once.
+ */
 export function isAlwaysProtectedRepoPath(path: string | null | undefined): boolean {
     if (typeof path !== 'string' || !path.trim()) return false;
     const candidate = comparable(path);
-    return ALWAYS_PROTECTED_REPO_PREFIXES.some(
-        (prefix) => candidate.startsWith(prefix) || candidate === prefix.slice(0, -1),
-    );
+    const bare = candidate.replace(/\/+$/, '');
+    return ALWAYS_PROTECTED_REPO_PREFIXES.some((prefix) => {
+        if (candidate.startsWith(prefix)) return true;
+        // Every ancestor directory of the prefix: `.github`, `.github/workflows`.
+        const parts = prefix.replace(/\/+$/, '').split('/');
+        return parts.some((_, index) => bare === parts.slice(0, index + 1).join('/'));
+    });
 }
 
 /** The distinct always-protected paths among `paths`, in first-seen order. */
