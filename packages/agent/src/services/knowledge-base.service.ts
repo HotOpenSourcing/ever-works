@@ -2448,7 +2448,12 @@ export class KnowledgeBaseService {
         // user drops on the Memory page into every Work repository in the
         // organization. Overlay membership is a property of the CLASS, so
         // that is what decides.
-        if (isInheritable) {
+        //
+        // Works-security lane 3a — and only an ACCEPTED document is copied
+        // into every Work repository: a `proposed` one (machine-written,
+        // review-gated) is materialized when a person accepts it
+        // (`acceptOrgDocument` runs the same fanout).
+        if (isInheritable && doc.reviewState !== KbReviewState.PROPOSED) {
             await this.enqueueOrgOverlayFanout(
                 organizationId,
                 doc.id,
@@ -2506,7 +2511,14 @@ export class KnowledgeBaseService {
         const isInheritable = (
             KB_ORG_INHERITABLE_CLASSES as ReadonlyArray<KbDocumentClass>
         ).includes(updated.kbDocumentClass);
-        if (isInheritable && updated.status !== KbDocumentStatus.ARCHIVED) {
+        // Works-security lane 3a — an edit that left the document `proposed`
+        // (review-gated) is not copied into the Work repositories; the last
+        // accepted copy stays until a person accepts the new one.
+        if (
+            isInheritable &&
+            updated.status !== KbDocumentStatus.ARCHIVED &&
+            updated.reviewState !== KbReviewState.PROPOSED
+        ) {
             await this.enqueueOrgOverlayFanout(
                 organizationId,
                 updated.id,
