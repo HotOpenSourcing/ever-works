@@ -17,7 +17,7 @@ import {
 	type GpuInfo
 } from './gpu-probe';
 import type { ResourceProbe } from './resource-limits';
-import { cacheProbe, type DiskProbeIo, type DiskVolumeReading } from './telemetry-probe';
+import type { DiskProbeIo, DiskVolumeReading } from './telemetry-probe';
 import { nearestExistingPath } from './workspaces/disk-headroom';
 
 /**
@@ -109,6 +109,14 @@ export const LINUX_REBOOT_REQUIRED_PATH = '/var/run/reboot-required';
 export const LINUX_DEBIAN_RELEASE_PATH = '/etc/debian_version';
 
 /**
+ * What `needs-restarting -r` prints when it exits 1 because a reboot IS
+ * needed ("Reboot is required to fully utilize these updates." / "… to
+ * ensure that your system benefits from these updates."). Exit 1 without it
+ * is a failure, not an answer.
+ */
+export const NEEDS_RESTARTING_REBOOT_PATTERN = /reboot is required/i;
+
+/**
  * The Windows facts in one PowerShell start (they are slow to start, so one
  * spawn answers all three): whether a reboot is pending (the two registry
  * keys servicing and Windows Update set), how many automatic services are
@@ -172,6 +180,54 @@ export function parseWindowsHealth(stdout: string): WindowsFacts {
 /** Count `systemctl list-units --state=failed --no-legend --plain` rows. */
 export function countSystemdFailedUnits(stdout: string): number {
 	return (stdout ?? '').split(/\r?\n/).filter((line) => line.trim().length > 0).length;
+}
+
+/**
+ * A slow fact's cache that never makes a beat wait for a REFRESH (rule 4).
+ *
+ * The first read waits for the probe (bounded by the caller's per-fact
+ * deadline; a probe still running then lands on a later beat). Once a value
+ * is in hand, an expired read serves it at once and starts one refresh in the
+ * background; the refresh's answer — `null` ("could not ask") included —
+ * replaces it when it lands. So a slow tool (`needs-restarting` on RHEL, a
+ * cold PowerShell + CIM start, `system_profiler`) costs the beat nothing at
+ * expiry, and the fact never blinks to "—" every TTL. One refresh at a time;
+ * a probe that throws answers `null`.
+ *
+ * Unlike `cacheProbe` (model identity), which makes the reader wait at every
+ * expiry, because there a stale answer would be the wrong account.
+ */
+export function refreshInBackground<T>(
+	probe: () => Promise<T | null>,
+	ttlMs: number,
+	now: () => number = Date.now
+): () => Promise<T | null> {
+	let value: T | null = null;
+	let answered = false;
+	let expiresAt = Number.NEGATIVE_INFINITY;
+	let inFlight: Promise<T | null> | null = null;
+	const refresh = (): Promise<T | null> => {
+		if (!inFlight) {
+			inFlight = Promise.resolve()
+				.then(probe)
+				.catch(() => null)
+				.then((fresh) => {
+					value = fresh;
+					answered = true;
+					expiresAt = now() + ttlMs;
+					return fresh;
+				})
+				.finally(() => {
+					inFlight = null;
+				});
+		}
+		return inFlight;
+	};
+	return async () => {
+		if (now() < expiresAt) return value;
+		const pending = refresh();
+		return answered ? value : pending;
+	};
 }
 
 /**
@@ -280,7 +336,7 @@ export function createHealthProbe(
 
 	// ── Slow facts, cached and refreshed off the beat (rule 4) ──
 
-	const windowsFacts = cacheProbe<WindowsFacts>(
+	const windowsFacts = refreshInBackground<WindowsFacts>(
 		async () => {
 			const result = await run(
 				'powershell',
@@ -293,23 +349,26 @@ export function createHealthProbe(
 		now
 	);
 
-	const linuxPendingReboot = cacheProbe<boolean>(
+	const linuxPendingReboot = refreshInBackground<boolean>(
 		async () => {
 			if (await io.pathExists(LINUX_REBOOT_REQUIRED_PATH)) return true;
 			// On the Debian family the marker IS the authority: no marker, no reboot.
 			if (await io.pathExists(LINUX_DEBIAN_RELEASE_PATH)) return false;
-			// The RHEL family: `needs-restarting -r` exits 1 when a reboot is needed.
+			// The RHEL family: `needs-restarting -r` exits 1 when a reboot is needed
+			// and SAYS so. Exit 1 alone is not enough: a runner reports a tool that
+			// is not installed (Alpine, Arch, openSUSE, minimal images) as exit 1
+			// too, and "not installed" is "could not ask", never "reboot needed".
 			const result = await run('needs-restarting', ['-r'], slowDeadline);
-			if (!result || result.timedOut) return null;
+			if (!result || result.timedOut || result.spawnError) return null;
 			if (result.code === 0) return false;
-			if (result.code === 1) return true;
+			if (result.code === 1 && NEEDS_RESTARTING_REBOOT_PATTERN.test(result.stdout)) return true;
 			return null;
 		},
 		slowTtl,
 		now
 	);
 
-	const linuxFailedServices = cacheProbe<number>(
+	const linuxFailedServices = refreshInBackground<number>(
 		async () => {
 			const result = await run(
 				'systemctl',
@@ -323,7 +382,7 @@ export function createHealthProbe(
 		now
 	);
 
-	const gpuIdentity = cacheProbe<{ gpu: GpuInfo | null; answered: boolean }>(
+	const gpuIdentity = refreshInBackground<{ gpu: GpuInfo | null; answered: boolean }>(
 		() => detectGpuWithEvidence(io.runner, io.platform),
 		GPU_IDENTITY_TTL_MS,
 		now

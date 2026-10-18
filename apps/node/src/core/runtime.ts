@@ -564,11 +564,16 @@ export function createNodeRuntime(config: NodeConfig, io: NodeIo, options: Creat
 	// platform does not know. One probe per process: its slow-fact caches
 	// live in the closure. Every consent gets it — health is what enrolment
 	// alone already grants (CONTRACTS §1.1).
+	// Once the platform has proven it predates `health` the beat strips it
+	// for the life of the process, so the probe — and the tools it spawns —
+	// stops running too (`loopRef` is set once the loop below exists).
+	let loopRef: HeartbeatLoop | null = null;
 	if (io.health) {
-		telemetry.health = createHealthProbe(io.health, {
+		const probeHealth = createHealthProbe(io.health, {
 			workspacePath: io.workspacePath ?? workspaceRoot,
 			...(io.now ? { now: io.now } : {})
 		});
+		telemetry.health = () => (loopRef?.isDropping('health') ? null : probeHealth());
 	}
 	// Agent computers: `--attend` is process-scoped consent, so it rides the
 	// environment the capability probe reads rather than the stored config —
@@ -628,7 +633,9 @@ export function createNodeRuntime(config: NodeConfig, io: NodeIo, options: Creat
 		}
 	};
 
-	const runtime: NodeRuntime = { client, loop: new HeartbeatLoop(loopOptions), lifecycle, cliCompat };
+	const loop = new HeartbeatLoop(loopOptions);
+	loopRef = loop;
+	const runtime: NodeRuntime = { client, loop, lifecycle, cliCompat };
 
 	// ONE job client per process, shared by the work lane and the live-view
 	// lane, so both talk to the same pinned control plane with the same credential.

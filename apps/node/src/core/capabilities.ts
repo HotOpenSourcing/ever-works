@@ -63,6 +63,14 @@ export interface CommandRunner {
 		 * tell leaves it unset.
 		 */
 		timedOut?: boolean;
+		/**
+		 * The spawn error code (`ENOENT`, `EACCES`, …) when the command could
+		 * not be started at all. The runner still resolves — with `code: 1`,
+		 * which a tool that uses exit 1 as an ANSWER (`needs-restarting -r`:
+		 * "reboot needed") must not mistake for one. Optional: a runner that
+		 * cannot tell leaves it unset.
+		 */
+		spawnError?: string;
 	}>;
 }
 

@@ -47,6 +47,10 @@ export function createCommandRunner(): CommandRunner {
 							code: typeof code === 'number' ? code : 1,
 							stdout: String(stdout),
 							stderr: String(stderr),
+							// A string code is a spawn failure (`ENOENT`: not installed),
+							// not an exit status; `code` above still reads 1 for callers
+							// that only ask "did it succeed".
+							...(typeof code === 'string' ? { spawnError: code } : {}),
 							// `execFile` sets `killed` when it terminated the child at
 							// `timeout`; what the child printed until then is partial.
 							timedOut: Boolean(error && (error as { killed?: boolean }).killed)

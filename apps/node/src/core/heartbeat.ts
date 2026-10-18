@@ -215,6 +215,18 @@ export class HeartbeatLoop {
 		this.options.logger?.protect(options.secret);
 	}
 
+	/**
+	 * True once this platform has proven it predates `field` — the beat has
+	 * latched a tier that drops it — so whatever produces that field is
+	 * wasted work until this node restarts (the health probe's tool spawns,
+	 * for one).
+	 */
+	isDropping(field: keyof NodeSelfDescription): boolean {
+		return OPTIONAL_DESCRIPTION_FIELD_TIERS.slice(0, this.strippedTiers).some((tier) =>
+			(tier as readonly string[]).includes(field)
+		);
+	}
+
 	getState(): HeartbeatState {
 		return { ...this.state };
 	}

@@ -9,6 +9,7 @@ import {
 	LINUX_DEBIAN_RELEASE_PATH,
 	LINUX_REBOOT_REQUIRED_PATH,
 	parseWindowsHealth,
+	refreshInBackground,
 	WINDOWS_HEALTH_SCRIPT,
 	withDeadline,
 	type HealthProbeIo
@@ -27,7 +28,7 @@ import type { DiskVolumeReading } from './telemetry-probe';
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
 
-type Answer = { code: number | null; stdout?: string; stderr?: string; timedOut?: boolean };
+type Answer = { code: number | null; stdout?: string; stderr?: string; timedOut?: boolean; spawnError?: string };
 type Handler = (args: string[], options?: CommandRunOptions) => Answer | Promise<Answer>;
 
 interface Call {
@@ -36,7 +37,12 @@ interface Call {
 	options?: CommandRunOptions;
 }
 
-/** Runner that answers the commands it is given and "not found"s the rest. */
+/**
+ * Runner that answers the commands it is given and "not found"s the rest
+ * EXACTLY as the real `execFile` runner does (`node-io.ts`): it resolves,
+ * with exit code 1 and `spawnError: 'ENOENT'` — it never throws. A fake
+ * that threw here is how "tool missing" once read as "reboot needed".
+ */
 function runnerFor(handlers: Record<string, Handler>): CommandRunner & { calls: Call[] } {
 	const calls: Call[] = [];
 	return {
@@ -44,7 +50,7 @@ function runnerFor(handlers: Record<string, Handler>): CommandRunner & { calls: 
 		run: async (command, args, options) => {
 			calls.push({ command, args, options });
 			const handler = handlers[command];
-			if (!handler) throw Object.assign(new Error(`spawn ${command} ENOENT`), { code: 'ENOENT' });
+			if (!handler) return { code: 1, stdout: '', stderr: '', spawnError: 'ENOENT' };
 			const answer = await handler(args, options);
 			return { stdout: '', stderr: '', ...answer };
 		}
@@ -132,14 +138,59 @@ describe('createHealthProbe — Linux', () => {
 		expect(runner.calls.some((call) => call.command === 'needs-restarting')).toBe(false);
 	});
 
+	const REBOOT_REQUIRED = [
+		'Core libraries or services have been updated since boot-up:',
+		'  * kernel',
+		'',
+		'Reboot is required to fully utilize these updates.',
+		''
+	].join('\n');
+	const NO_REBOOT = [
+		'No core libraries or services have been updated since boot-up.',
+		'Reboot should not be necessary.',
+		''
+	].join('\n');
+
 	it.each([
-		[1, true],
-		[0, false],
-		[2, undefined]
-	])('elsewhere `needs-restarting -r` exiting %s reads as pendingReboot %s', async (code, expected) => {
-		const runner = runnerFor({ 'needs-restarting': () => ({ code }), systemctl: () => ({ code: 0 }) });
+		[1, REBOOT_REQUIRED, true],
+		[0, NO_REBOOT, false],
+		[2, '', undefined],
+		// Exit 1 WITHOUT the sentence is a failure of the tool, not its answer.
+		[1, '', undefined]
+	])('elsewhere `needs-restarting -r` exiting %s (%j) reads as pendingReboot %s', async (code, stdout, expected) => {
+		const runner = runnerFor({ 'needs-restarting': () => ({ code, stdout }), systemctl: () => ({ code: 0 }) });
 		const snapshot = await createHealthProbe(io({ platform: 'linux', runner }), { workspacePath: WORKSPACE })();
 		expect(snapshot?.pendingReboot).toBe(expected);
+	});
+
+	it('a needs-restarting that is not installed is "could not ask" — never "reboot needed" (Alpine, Arch, minimal images)', async () => {
+		// What the real runner resolves for ENOENT: exit 1 and the spawn error.
+		const runner = runnerFor({ systemctl: () => ({ code: 0 }) });
+		const snapshot = await createHealthProbe(io({ platform: 'linux', runner }), { workspacePath: WORKSPACE })();
+		expect(runner.calls.some((call) => call.command === 'needs-restarting')).toBe(true);
+		expect(snapshot).not.toHaveProperty('pendingReboot');
+		// Even with the sentence on stdout, a spawn error is not an answer.
+		const odd = runnerFor({
+			'needs-restarting': () => ({ code: 1, stdout: REBOOT_REQUIRED, spawnError: 'EACCES' }),
+			systemctl: () => ({ code: 0 })
+		});
+		expect(
+			await createHealthProbe(io({ platform: 'linux', runner: odd }), { workspacePath: WORKSPACE })()
+		).not.toHaveProperty('pendingReboot');
+	});
+
+	it('a runner that throws (another runner shape) is "could not ask" too, and the beat still answers', async () => {
+		const throwing: CommandRunner = {
+			run: async (command) => {
+				throw Object.assign(new Error(`spawn ${command} ENOENT`), { code: 'ENOENT' });
+			}
+		};
+		const snapshot = await createHealthProbe(io({ platform: 'linux', runner: throwing }), {
+			workspacePath: WORKSPACE
+		})();
+		expect(snapshot).not.toHaveProperty('pendingReboot');
+		expect(snapshot).not.toHaveProperty('failedServices');
+		expect(snapshot?.cpuPercent).toBe(31.3);
 	});
 
 	it('leaves pending reboot and failed services ABSENT when neither tool exists — never false, never 0', async () => {
@@ -308,7 +359,7 @@ describe('createHealthProbe — never fails the beat (FR-6)', () => {
 		expect(spawns).toBe(1);
 	});
 
-	it('re-asks a slow fact once its cache expires', async () => {
+	it('re-asks a slow fact once its cache expires — serving the last answer while it does', async () => {
 		let now = 0;
 		let failed = 1;
 		const runner = runnerFor({ systemctl: () => ({ code: 0, stdout: 'x\n'.repeat(failed) }) });
@@ -322,7 +373,41 @@ describe('createHealthProbe — never fails the beat (FR-6)', () => {
 		now = 30_000;
 		expect((await probe())?.failedServices).toBe(1);
 		now = 61_000;
+		// Expired: this beat gets the answer in hand, and the refresh starts.
+		expect((await probe())?.failedServices).toBe(1);
+		// The refresh has landed by the next beat.
 		expect((await probe())?.failedServices).toBe(3);
+	});
+
+	it('a slow refresh at expiry never blinks the fact to "—" (stale-while-revalidate)', async () => {
+		vi.useFakeTimers();
+		let now = 0;
+		let calls = 0;
+		const runner = runnerFor({
+			systemctl: () => {
+				calls += 1;
+				// The first answer is quick; the refresh takes 10 s — longer than a beat's 2 s.
+				const delay = calls === 1 ? 0 : 10_000;
+				const stdout = calls === 1 ? 'a\n' : 'a\nb\n';
+				return new Promise<Answer>((resolve) => setTimeout(() => resolve({ code: 0, stdout }), delay));
+			}
+		});
+		const probe = createHealthProbe(io({ platform: 'linux', runner }), {
+			workspacePath: WORKSPACE,
+			now: () => now,
+			slowFactTtlMs: 60_000
+		});
+		const first = probe();
+		await vi.advanceTimersByTimeAsync(0);
+		expect((await first)?.failedServices).toBe(1);
+		now = 61_000;
+		const atExpiry = probe();
+		await vi.advanceTimersByTimeAsync(0);
+		// Answered at once, with the last value — not after the 2 s budget, not absent.
+		expect((await atExpiry)?.failedServices).toBe(1);
+		await vi.advanceTimersByTimeAsync(10_000);
+		expect((await probe())?.failedServices).toBe(2);
+		expect(calls).toBe(2);
 	});
 
 	it('a sampler that throws costs CPU and memory only', async () => {
@@ -431,5 +516,59 @@ describe('parsers', () => {
 				throw new Error('sync');
 			}, 100)
 		).toBeUndefined();
+	});
+});
+
+describe('refreshInBackground', () => {
+	it('waits for the first answer, then serves the cached one until it expires', async () => {
+		let now = 0;
+		const probe = vi.fn(async () => 'v1');
+		const cached = refreshInBackground(probe, 1_000, () => now);
+		expect(await cached()).toBe('v1');
+		now = 999;
+		expect(await cached()).toBe('v1');
+		expect(probe).toHaveBeenCalledTimes(1);
+	});
+
+	it('at expiry answers the old value at once and refreshes once in the background', async () => {
+		let now = 0;
+		let release: (value: string) => void = () => undefined;
+		const probe = vi
+			.fn<() => Promise<string | null>>()
+			.mockResolvedValueOnce('v1')
+			.mockImplementationOnce(
+				() =>
+					new Promise<string>((resolve) => {
+						release = resolve;
+					})
+			);
+		const cached = refreshInBackground(probe, 1_000, () => now);
+		expect(await cached()).toBe('v1');
+		now = 1_001;
+		expect(await cached()).toBe('v1');
+		expect(await cached()).toBe('v1');
+		// Two expired reads, ONE refresh.
+		expect(probe).toHaveBeenCalledTimes(2);
+		release('v2');
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(await cached()).toBe('v2');
+	});
+
+	it('a refresh that answers null ("could not ask") replaces the value — the fact is absent, not stale', async () => {
+		let now = 0;
+		const probe = vi.fn<() => Promise<string | null>>().mockResolvedValueOnce('v1').mockResolvedValueOnce(null);
+		const cached = refreshInBackground(probe, 1_000, () => now);
+		expect(await cached()).toBe('v1');
+		now = 1_001;
+		await cached();
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(await cached()).toBeNull();
+	});
+
+	it('a probe that throws answers null and never rejects', async () => {
+		const cached = refreshInBackground<string>(async () => {
+			throw new Error('boom');
+		}, 1_000);
+		await expect(cached()).resolves.toBeNull();
 	});
 });

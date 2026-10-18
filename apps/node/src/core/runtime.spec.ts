@@ -1165,6 +1165,52 @@ describe('computer health wiring (FL-03)', () => {
 		expect(bodies[0].body).not.toHaveProperty('health');
 	});
 
+	it('stops running the probe — and spawning its tools — once the platform rejects health', async () => {
+		const bodies: Array<{ url: string; body: Record<string, unknown> }> = [];
+		let samples = 0;
+		const counting: HealthProbeIo = {
+			...healthIo,
+			resourceProbe: {
+				sample: () => {
+					samples += 1;
+					return { cpuPercent: 12, usedMemoryMb: 4096, totalMemoryMb: 8192 };
+				}
+			}
+		};
+		// An API older than `health`: a beat carrying it is a 400.
+		const olderPlatform: FetchLike = async (url, init) => {
+			const body = JSON.parse(init.body || '{}') as Record<string, unknown>;
+			bodies.push({ url, body });
+			if (url.endsWith('/api/fleet/heartbeat') && 'health' in body) {
+				return { ok: false, status: 400, text: async () => '{"message":"property health should not exist"}' };
+			}
+			return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true, node: nodeFromApi }) };
+		};
+		const runtime = createNodeRuntime(
+			{
+				apiUrl: 'https://api.ever.works',
+				nodeId: NODE_ID,
+				secret: SECRET,
+				kind: 'node',
+				capabilities: ['os:linux'],
+				heartbeatIntervalMs: 30_000,
+				enrolledAt: '2026-10-18T09:00:00.000Z'
+			},
+			{ ...io(olderPlatform).io, health: counting },
+			{ env: {} }
+		);
+		await runtime.loop.start();
+		const afterFirstBeat = samples;
+		expect(afterFirstBeat).toBeGreaterThan(0);
+		expect(runtime.loop.isDropping('health')).toBe(true);
+		await runtime.loop.tick();
+		runtime.loop.stop();
+		// The second beat went out without health, and nothing was probed for it.
+		const beats = bodies.filter((entry) => entry.url.endsWith('/api/fleet/heartbeat'));
+		expect(beats[beats.length - 1].body).not.toHaveProperty('health');
+		expect(samples).toBe(afterFirstBeat);
+	});
+
 	it('a node without a health probe beats exactly as before', async () => {
 		const bodies: Array<{ url: string; body: Record<string, unknown> }> = [];
 		const runtime = createNodeRuntime(

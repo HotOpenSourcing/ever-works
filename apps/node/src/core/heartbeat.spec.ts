@@ -509,6 +509,33 @@ describe('HeartbeatLoop', () => {
 			expect(scripted.requests[2]).toHaveProperty('cliVersions');
 		});
 
+		it('says which fields it has latched off, so their producers can stop (FL-03)', async () => {
+			const scheduler = fakeScheduler();
+			const scripted = scriptedClient([rejected(), ok]);
+			const loop = new HeartbeatLoop({
+				client: scripted.client,
+				nodeId: NODE_ID,
+				secret: SECRET,
+				describe: async () => ({
+					platform: 'linux/x64',
+					capabilities: [],
+					health: { cpuPercent: 31.2 },
+					cliVersions: ['claude-code 2.1.3']
+				}),
+				intervalMs: INTERVAL,
+				scheduler: scheduler.scheduler
+			});
+			// Before any beat nothing is dropped.
+			expect(loop.isDropping('health')).toBe(false);
+			await loop.start();
+			expect(loop.isDropping('health')).toBe(true);
+			// Only the newest tier went: the older ones are still sent.
+			expect(loop.isDropping('cliVersions')).toBe(false);
+			expect(loop.isDropping('workerState')).toBe(false);
+			// Never dropped at all: not an optional field.
+			expect(loop.isDropping('platform')).toBe(false);
+		});
+
 		it('a beat WITH health against a platform that also predates the pinned CLI versions strips both tiers', async () => {
 			const scheduler = fakeScheduler();
 			const scripted = scriptedClient([rejected(), rejected(), ok]);
