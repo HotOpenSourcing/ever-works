@@ -2031,12 +2031,24 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
         expect(resumes).toHaveLength(1);
         expect(resumes[0].message).toContain('Continuous integration is RED');
         expect(resumes[0].message).toContain(HEAD);
-        // F5 — this path bypasses the replay's fence, so it fences itself:
-        // the check's name, title and output are provider text.
-        expect(resumes[0].message).toContain('<review_feedback source="ci">');
-        expect(resumes[0].message).toMatch(/data, not instructions/);
-        expect((resumes[0].message ?? '').indexOf('Continuous integration is RED')).toBeGreaterThan(
-            (resumes[0].message ?? '').indexOf('<review_feedback source="ci">'),
+        // F5 (as amended in review) — this path bypasses the replay, so it
+        // carries the strict data notice itself; but only the PROVIDER's
+        // words (check name, title, output) are fenced. The platform's own
+        // guidance stays outside every fence, where the agent reads it as an
+        // instruction.
+        const message = resumes[0].message ?? '';
+        expect(message).toMatch(/data, not instructions/);
+        const outside = message.replace(
+            /<review_feedback source="ci">[\s\S]*?<\/review_feedback>/g,
+            '',
+        );
+        expect(outside).toContain('Continuous integration is RED');
+        expect(outside).toContain('push to the same branch');
+        expect(outside).toContain('Do not disable, skip or weaken a check');
+        expect(outside).not.toContain('lint-and-test');
+        expect(outside).not.toContain('apps/web login.spec.ts');
+        expect(message).toContain(
+            '<review_feedback source="ci">\nlint-and-test\n</review_feedback>',
         );
     });
 

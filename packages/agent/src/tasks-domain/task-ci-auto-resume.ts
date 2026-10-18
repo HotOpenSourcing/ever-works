@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { fenceReviewFeedback, neutralizeFenceText } from './review-feedback-fence';
 
 /**
  * CI feedback and the autonomous fix loop (self-build slice AC, EW-806) —
@@ -407,9 +408,24 @@ export const CI_FAILURE_FEEDBACK_MAX_CHARS = 4000;
  * observed for this commit, not necessarily the only one, and the run
  * that reads this has a git provider it can ask.
  *
- * Every interpolated value is provider-reported and therefore untrusted;
- * `RunSteeringService` neutralizes chat-template markers when it splices
- * the stored row into a prompt, and the caller caps the length.
+ * ## Platform words vs provider words (security finding F5, 2026-10-18)
+ *
+ * The check NAME, output TITLE and output SUMMARY are whatever the CI
+ * provider reported — text a workflow (or any GitHub App) chose — so each
+ * sits in its own `<review_feedback source="ci">` fence with `<` neutralized
+ * ({@link fenceReviewFeedback}). Everything else is the PLATFORM speaking
+ * and stays outside the fence, where the agent reads it as instructions:
+ * the repository / commit / PR coordinates, the conclusion (one of
+ * {@link FAILING_CHECK_CONCLUSIONS} for any row this is written for), the
+ * provider's https run link, and the "fix the cause, push to the same
+ * branch, do not weaken a check" guidance. `RunSteeringService` recognises
+ * a row composed here ({@link isComposedCiFeedback}) and replays it as-is
+ * under the strict data notice.
+ *
+ * The length cap is spent on the OUTPUT, never on the fences or the
+ * guidance: the summary is cut to whatever room the rest leaves, so a long
+ * CI dump can neither push the closing tag off the end nor squeeze out the
+ * instruction not to disable a check.
  */
 export function composeCiFailureFeedback(input: {
     repoFullName: string;
@@ -421,21 +437,50 @@ export function composeCiFailureFeedback(input: {
     outputTitle?: string | null;
     outputSummary?: string | null;
 }): string {
-    const lines: string[] = [
-        `Continuous integration is RED for ${input.repoFullName} at commit ${input.headSha}.`,
+    const oneLine = (value: string, max: number) => {
+        const flat = value.replace(/\s+/g, ' ').trim();
+        return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+    };
+    const head: string[] = [
+        `Continuous integration is RED for ${oneLine(input.repoFullName, 200)} at commit ${oneLine(input.headSha, 64)}.`,
         '',
-        `Failing check: ${input.checkName} (${input.conclusion}).`,
+        `Failing check (${neutralizeFenceText(oneLine(input.conclusion, 40))}) — its name as the CI provider reported it:`,
+        fenceReviewFeedback(oneLine(input.checkName, CI_FEEDBACK_NAME_MAX_CHARS), 'ci'),
     ];
-    if (input.prNumber) lines.push(`Pull request: #${input.prNumber}.`);
-    if (input.url) lines.push(`Details: ${input.url}`);
-    if (input.outputTitle) lines.push('', `Reported title: ${input.outputTitle}`);
-    if (input.outputSummary) lines.push('', 'Reported output:', input.outputSummary);
-    lines.push(
+    if (input.prNumber) head.push(`Pull request: #${input.prNumber}.`);
+    if (input.url) head.push(`Details: ${oneLine(input.url, 500)}`);
+    if (input.outputTitle) {
+        head.push(
+            '',
+            'Reported title:',
+            fenceReviewFeedback(oneLine(input.outputTitle, CI_FEEDBACK_TITLE_MAX_CHARS), 'ci'),
+        );
+    }
+    const tail = [
         '',
         'Other checks on this commit may also be failing — this is the first red result reported for it, not a full list. Read the pull request checks, fix the cause, and push to the same branch. Do not disable, skip or weaken a check to make it pass.',
-    );
-    return lines.join('\n').slice(0, CI_FAILURE_FEEDBACK_MAX_CHARS);
+    ];
+    if (input.outputSummary) {
+        const outputLabel = ['', 'Reported output:'];
+        const fixed = [...head, ...outputLabel, fenceReviewFeedback('', 'ci'), ...tail].join(
+            '\n',
+        ).length;
+        const room = CI_FAILURE_FEEDBACK_MAX_CHARS - fixed;
+        // Neutralizing can lengthen the text (`<` → `&lt;`), so the cut is made
+        // on the ESCAPED form — which holds no `<`, so fencing it again is a
+        // no-op and a cut can never leave half a tag behind.
+        let escaped = neutralizeFenceText(input.outputSummary.trim());
+        if (escaped.length > room) escaped = room > 1 ? `${escaped.slice(0, room - 1)}…` : '';
+        if (escaped.length > 0) head.push(...outputLabel, fenceReviewFeedback(escaped, 'ci'));
+    }
+    return [...head, ...tail].join('\n');
 }
+
+/** Longest check name quoted into the CI feedback (one line). */
+export const CI_FEEDBACK_NAME_MAX_CHARS = 200;
+
+/** Longest output title quoted into the CI feedback (one line). */
+export const CI_FEEDBACK_TITLE_MAX_CHARS = 300;
 
 /**
  * Title + body of the ONE Inbox notice filed when the loop gives up.

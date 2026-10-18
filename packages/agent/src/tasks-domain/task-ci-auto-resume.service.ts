@@ -36,25 +36,32 @@ import { resolveTaskDispatchAgentIds } from './task-dispatch-agents';
 import {
     REVIEW_FEEDBACK_DATA_NOTICE,
     fenceReviewFeedback,
+    isComposedCiFeedback,
     safeReviewerLabel,
 } from './review-feedback-fence';
 
 /**
  * The CI failure handed to `resume` as its MESSAGE — used only when the
  * durable rejection row will not be replayed (the replay window is full, or
- * the row could not be written). The replayed row is fenced by
- * `composeRejectionFeedbackMessage`; this path bypasses it, so it fences
- * itself the same way (F5): a check's name, title and output are provider
- * text, and arrive here framed as something to act on.
+ * the row could not be written). It bypasses the replay, so it carries the
+ * replay's strict data notice itself (F5). The text is
+ * `composeCiFailureFeedback`'s, whose provider fields (check name, output
+ * title and summary) are already fenced; the platform's own guidance around
+ * them stays outside the fence, as instructions.
+ *
+ * Should the text ever arrive NOT composed that way, it is fenced whole —
+ * fail closed.
  */
 export function fencedCiFallbackMessage(feedback: { text: string; reviewerLabel: string }): string {
     return [
-        'Continuous integration is red for this task. Fix the failure described below, then finish.',
-        '',
         REVIEW_FEEDBACK_DATA_NOTICE,
         '',
-        `Failing check: ${safeReviewerLabel(feedback.reviewerLabel, 'CI')}`,
-        fenceReviewFeedback(feedback.text, 'ci'),
+        isComposedCiFeedback(feedback.text)
+            ? feedback.text
+            : [
+                  `Failing check: ${safeReviewerLabel(feedback.reviewerLabel, 'CI')}`,
+                  fenceReviewFeedback(feedback.text, 'ci'),
+              ].join('\n'),
     ].join('\n');
 }
 
