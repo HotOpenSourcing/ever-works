@@ -30,7 +30,7 @@ function item(over: Partial<NeedsALookItem> = {}): NeedsALookItem {
 }
 
 describe('kinds and severities', () => {
-	it('is the closed set of CONTRACTS §4.6 (revision 3: twelve kinds)', () => {
+	it('is the closed set of CONTRACTS §4.6 (revision 4: thirteen kinds)', () => {
 		expect(NEEDS_A_LOOK_KINDS).toEqual([
 			'disk-low',
 			'node-throttled',
@@ -40,6 +40,7 @@ describe('kinds and severities', () => {
 			'job-unassignable',
 			'session-needs-you',
 			'session-unconfirmed',
+			'service-failed',
 			'schedule-failed',
 			'cloud-idle',
 			'helper-untrusted',

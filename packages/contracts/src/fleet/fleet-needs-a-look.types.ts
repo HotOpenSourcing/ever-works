@@ -23,6 +23,7 @@ export const NEEDS_A_LOOK_KINDS = [
 	'job-unassignable',
 	'session-needs-you',
 	'session-unconfirmed',
+	'service-failed',
 	'schedule-failed',
 	'cloud-idle',
 	'helper-untrusted',
