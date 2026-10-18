@@ -409,7 +409,10 @@ Works `id` (`PUT /links/inbox_item/...` stays `400 validation_failed`).
   reply, so it does exactly what the recipient answering in Ever Works does: a question steers the live run or resumes
   the parked one. An approval decides its proposal and an escalation resolves, exactly as the recipient answering in Ever Works — the
   reply is the recipient's own decision relayed by the integration (works-security lane 3a keeps it open for that reason;
-  `X-Act-As-User` must still name the recipient). It answers
+  `X-Act-As-User` must still name the recipient). **A merge approval** (a `merge_pull_request` proposal) is relayed only
+  by a key holding the opt-in `merges:decide` scope; without it the reply answers `403 scope_missing`
+  (`details.missing: ['merges:decide']`) and the approval stays pending. A relayed decision is recorded on the proposal
+  (`payload.decisionRelay: {via: 'integration', integrationKeyId, integrationKind, recordedAt}`). It answers
   [`{item, routed, restart, runId?}`](./contract/schemas/resources/inbox-reply-result.schema.json). An item already
   answered or archived answers `409 conflict`; a lost race answers `200` with `routed: "already-decided"` and the
   winning answer. `Idempotency-Key` is optional (a reply creates nothing); with one, a retry replays the first answer.
