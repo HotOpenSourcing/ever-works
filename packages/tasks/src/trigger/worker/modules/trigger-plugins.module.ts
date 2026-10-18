@@ -34,24 +34,55 @@ import { TriggerPluginHydratorService } from '../services/trigger-plugin-hydrato
 @Global()
 @Module({})
 export class TriggerPluginsModule {
-    static forRoot(options: PluginsModuleOptions = {}): DynamicModule {
-        const nodeEnv = process.env.NODE_ENV || 'development';
+    /**
+     * The one option-less `forRoot()` module, handed to every importer.
+     *
+     * Nest 11 keys a dynamic module **by reference** (`ByReferenceModuleOpaqueKeyFactory`, the
+     * default `moduleIdGeneratorAlgorithm`), so two `forRoot()` calls that return two objects are
+     * two module instances — two `PluginRegistryService`s in one context. A worker context that
+     * imports two modules which each import `forRoot()` (`app-dependency-provision`:
+     * `TriggerWorkerModule` + `TriggerAppRuntimeModule`) then bootstrapped one registry and read
+     * the other: the runtime facade found the `apps-tier` plugin and prepared the namespace, and
+     * `AppDependencyFacadeService.resolve('k8s-apps-tier', …)` answered `null` from the empty
+     * twin — `providerNotSupported` on prod (worker 20261018.5, runs
+     * `run_cmvdsnwul27sl2x2viw5z0cu0` / `run_cmvdsnx6o1jos2z1rfg425oup`).
+     *
+     * Returning the same object makes every option-less import ONE module, so a context has one
+     * registry however many of its modules import this one. A call WITH options (the
+     * run-plugin-operation module's) is its own module, as before.
+     */
+    private static defaultModule: DynamicModule | null = null;
+
+    static forRoot(options?: PluginsModuleOptions): DynamicModule {
+        if (options === undefined || Object.keys(options).length === 0) {
+            TriggerPluginsModule.defaultModule ??= TriggerPluginsModule.build({});
+            return TriggerPluginsModule.defaultModule;
+        }
+        return TriggerPluginsModule.build(options);
+    }
+
+    private static build(options: PluginsModuleOptions): DynamicModule {
         return {
             module: TriggerPluginsModule,
             imports: [EventEmitterModule.forRoot(), TriggerInternalModule],
             providers: [
                 {
                     provide: PLUGINS_MODULE_OPTIONS,
-                    useValue: {
-                        platformVersion: DEFAULT_PLATFORM_VERSION,
-                        pluginPaths: nodeEnv === 'development' ? ['../plugins'] : ['./plugins'], // ['./plugins'] Copied by prepare:plugins script before deployment
-                        autoLoadBuiltIn: true,
-                        autoEnableOnLoad: false,
-                        environment: nodeEnv,
-                        encryptSecrets: false,
-                        maxConcurrentLoads: 5,
-                        loadTimeout: 30000,
-                        ...options,
+                    // A factory, so the environment is read when a context is built rather than
+                    // when the (now shared) module object was first created.
+                    useFactory: (): PluginsModuleOptions => {
+                        const nodeEnv = process.env.NODE_ENV || 'development';
+                        return {
+                            platformVersion: DEFAULT_PLATFORM_VERSION,
+                            pluginPaths: nodeEnv === 'development' ? ['../plugins'] : ['./plugins'], // ['./plugins'] Copied by prepare:plugins script before deployment
+                            autoLoadBuiltIn: true,
+                            autoEnableOnLoad: false,
+                            environment: nodeEnv,
+                            encryptSecrets: false,
+                            maxConcurrentLoads: 5,
+                            loadTimeout: 30000,
+                            ...options,
+                        };
                     },
                 },
                 {
