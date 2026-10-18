@@ -194,7 +194,7 @@ test.describe('needs a look — the FL-03 producers (FR-12 … FR-17)', () => {
         );
     });
 
-    test('a quarantined node is critical with the exact machine command — never a button', async ({
+    test('a quarantined node is critical with the exact machine command — never a button that pretends to clear it', async ({
         request,
     }) => {
         const owner = await registerUserViaAPI(request);
@@ -208,10 +208,18 @@ test.describe('needs a look — the FL-03 producers (FR-12 … FR-17)', () => {
                 headers: authedHeaders(owner.access_token),
             })
         ).json()) as Array<Record<string, unknown>>;
-        expect(items.find((entry) => entry.kind === 'node-quarantined')).toMatchObject({
+        const quarantined = items.find((entry) => entry.kind === 'node-quarantined');
+        // Quarantine is cleared only at the machine's keyboard: the command is
+        // in the sentence, and the action opens the computer page (where it
+        // has a copy button) — it never runs anything.
+        expect(quarantined).toMatchObject({
             severity: 'critical',
-            action: { command: 'ever-works-node clear-quarantine --confirm-process-tree-stopped' },
+            action: { route: `/fleet/computers/${nodeId}?tab=overview` },
         });
+        expect(quarantined?.detail).toContain(
+            'ever-works-node clear-quarantine --confirm-process-tree-stopped',
+        );
+        expect(quarantined?.action).not.toHaveProperty('command');
     });
 
     test('a stranger reads neither the snapshot nor the items', async ({ request }) => {
