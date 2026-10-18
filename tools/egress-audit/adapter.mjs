@@ -58,6 +58,49 @@ const pathOf = (url) => {
 	}
 };
 
+/** The records of a list answer: an array, or the array under `items`, `plugins` or `data`. */
+const listOf = (data) => {
+	if (Array.isArray(data)) return data;
+	for (const key of ['items', 'plugins', 'data']) if (Array.isArray(data?.[key])) return data[key];
+	return [];
+};
+
+/** The id of a created record, wherever the answer puts it. */
+const idOf = (data) =>
+	[
+		data?.id,
+		data?.data?.id,
+		data?.item?.id,
+		data?.goal?.id,
+		data?.idea?.id,
+		data?.task?.id,
+		data?.meeting?.id,
+		data?.team?.id
+	].find((value) => typeof value === 'string' && value);
+
+/** The id of the first record of a list answer. */
+const firstId = (data) => listOf(data).find((record) => typeof record?.id === 'string' && record.id)?.id;
+
+/** Which fixture fills the id of which route (the rest keep the placeholders of route-params.json). */
+const FIXTURE_ROUTES = {
+	organizationId: [],
+	teamId: [
+		['/:locale/teams/:id', 'id'],
+		['/:locale/teams/:id/settings', 'id']
+	],
+	goalId: [['/:locale/goals/:id', 'id']],
+	ideaId: [
+		['/:locale/ideas/:id', 'id'],
+		['/:locale/ideas/:id/agents/new', 'id'],
+		['/:locale/ideas/:id/tasks', 'id']
+	],
+	taskId: [['/:locale/tasks/:id', 'id']],
+	meetingId: [['/:locale/meetings/:id', 'id']],
+	pluginId: [['/:locale/plugins/:pluginId', 'pluginId']],
+	workflowId: [['/:locale/catalog/workflows/:id', 'id']],
+	playbookSlug: [['/:locale/catalog/playbooks/:slug', 'slug']]
+};
+
 async function json(response) {
 	const text = await response.text();
 	try {
@@ -104,19 +147,76 @@ export default {
 
 	/**
 	 * What a person does before using the app: close the onboarding wizard (so the walk sees the
-	 * pages, not the wizard). Answers what the walk needs that only a run knows: ids and slugs,
-	 * never a token.
+	 * pages, not the wizard), then create one of each plain record a detail page shows, so those
+	 * pages render their content instead of their not-found state. Each record is best effort: one
+	 * the API refuses keeps its pages on the placeholder of route-params.json, and the log says
+	 * which. Works, agents and missions stay placeholders: creating one starts background work
+	 * (generation, runs) that needs AI providers and GitHub. Answers ids and slugs, never a token.
 	 */
 	async createFixtures({ baseUrl, fetch, headers, log }) {
 		const dismissed = await fetch(`${baseUrl}/api/onboarding/dismiss`, { method: 'POST', headers });
 		if (!dismissed.ok) throw new Error(`dismissing the onboarding wizard answered ${dismissed.status}`);
+
+		const call = async (method, path, body) => {
+			const response = await fetch(`${baseUrl}/api${path}`, {
+				method,
+				headers: { ...headers, accept: 'application/json', 'content-type': 'application/json' },
+				body: body === undefined ? undefined : JSON.stringify(body)
+			});
+			const data = await json(response);
+			if (!response.ok) throw new Error(`${method} /api${path} answered ${response.status}`);
+			return data;
+		};
 		const fixtures = {};
-		const playbooks = await fetch(`${baseUrl}/api/catalog/playbooks`, { headers });
-		const items = playbooks.ok ? ((await json(playbooks))?.items ?? []) : [];
-		const slug = items.find((p) => typeof p?.slug === 'string')?.slug;
-		if (slug) fixtures.playbookSlug = slug;
+		const made = [];
+		const missing = [];
+		const attempt = async (key, make) => {
+			try {
+				const value = await make();
+				if (typeof value === 'string' && value) {
+					fixtures[key] = value;
+					made.push(key);
+					return;
+				}
+				missing.push(`${key} (no id in the answer)`);
+			} catch (error) {
+				missing.push(`${key} (${String(error?.message ?? error).split('\n')[0]})`);
+			}
+		};
+
+		await attempt('organizationId', async () =>
+			idOf(await call('POST', '/organizations', { name: 'Egress audit' }))
+		);
+		if (fixtures.organizationId)
+			await attempt('teamId', async () =>
+				idOf(
+					await call('POST', `/organizations/${fixtures.organizationId}/teams`, { name: 'Egress audit team' })
+				)
+			);
+		await attempt('goalId', async () => idOf(await call('POST', '/me/goals', { title: 'Egress audit goal' })));
+		await attempt('ideaId', async () =>
+			idOf(
+				await call('POST', '/me/work-proposals', {
+					title: 'Egress audit idea',
+					description: 'An idea recorded by the egress audit.'
+				})
+			)
+		);
+		await attempt('taskId', async () => idOf(await call('POST', '/tasks', { title: 'Egress audit task' })));
+		await attempt('meetingId', async () =>
+			idOf(
+				await call('POST', '/meetings', { title: 'Egress audit meeting', startedAt: new Date().toISOString() })
+			)
+		);
+		await attempt('pluginId', async () => firstId(await call('GET', '/plugins')));
+		await attempt('workflowId', async () => firstId(await call('GET', '/workflows')));
+		await attempt('playbookSlug', async () => {
+			const data = await call('GET', '/catalog/playbooks');
+			return listOf(data).find((p) => typeof p?.slug === 'string')?.slug;
+		});
+
 		log(
-			`adapter: onboarding dismissed; ${slug ? 'a catalog playbook found' : 'no catalog playbook (placeholder slug)'}`
+			`adapter: onboarding dismissed; fixtures: ${made.join(', ') || 'none'}${missing.length ? `; placeholders for: ${missing.join('; ')}` : ''}`
 		);
 		return fixtures;
 	},
@@ -218,6 +318,12 @@ export default {
 	/** The values only a run knows (route-params.json holds the placeholders). */
 	async routeParams(ctx) {
 		const fixtures = ctx.fixtures ?? {};
-		return fixtures.playbookSlug ? { '/:locale/catalog/playbooks/:slug': { slug: fixtures.playbookSlug } } : {};
+		const params = {};
+		for (const [key, routes] of Object.entries(FIXTURE_ROUTES)) {
+			const value = fixtures[key];
+			if (typeof value !== 'string' || !value) continue;
+			for (const [route, name] of routes) params[route] = { ...params[route], [name]: value };
+		}
+		return params;
 	}
 };

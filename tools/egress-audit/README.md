@@ -43,8 +43,11 @@ This directory holds only Works' inputs:
   statistics routes probed in the off modes, the browser leg's inputs (web address, idle pages, the
   positive control) and the Works modes `default_off` and `off_env_file`;
 - `adapter.mjs` — what an operator and a person do: register the platform admin (the
-  installation's first person), close the onboarding wizard, for `loaded_off` switch statistics off
-  in Settings; in the off modes, call all six statistics routes with their own method (the
+  installation's first person), close the onboarding wizard, create one plain record of each kind a
+  detail page shows (an organization, a team, a goal, an idea, a task, a meeting; the ids of a
+  plugin, a workflow and a playbook of the catalogue), each best effort, and hand their ids to the
+  walk; for `loaded_off` switch statistics off in Settings; in the off modes, call all six
+  statistics routes with their own method (the
   harness's probe sends GET only) and require 404 from each; sign in through the web app's sign-in
   page and prove the session holds (in `positive_stats`, Settings → Ever Platform must render); per
   mode, `CI=true` so the module honours the modes' short send interval (otherwise raised to one
@@ -55,8 +58,10 @@ This directory holds only Works' inputs:
 - `ui-routes.json` — every page of the web app, generated from the Next.js app router (see below);
 - `route-params.json` — the values the walk fills the route parameters with: `en` for the locale,
   real values where a page needs one to render (a help article, a plugin category), and
-  placeholders elsewhere (a page for an id that does not exist renders its not-found state, which
-  the walk opens like any other page);
+  placeholders for the ids the adapter does not create (a page for an id that does not exist renders
+  its not-found state, which the walk opens like any other page). Works, agents and missions stay
+  placeholders: creating one starts background work (generation, runs) that needs AI providers and
+  GitHub;
 - `ui-baseline.json` — the links to an Ever host the web app already rendered when the browser leg
   was adopted (see below).
 
