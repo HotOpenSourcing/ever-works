@@ -400,9 +400,7 @@ function isDeniedGateRoute(segments: readonly string[]): boolean {
 const FLEET_RUN_TOKEN_ROUTE_SHAPES: readonly { method: string; shape: readonly string[] }[] =
 	FLEET_RUN_TOKEN_ROUTES.map((route) => ({
 		method: route.method.toUpperCase(),
-		shape: splitSegments(route.pathPattern).map((part) =>
-			/^\{[^}]+\}$/.test(part) ? '*' : part.toLowerCase()
-		)
+		shape: splitSegments(route.pathPattern).map((part) => (/^\{[^}]+\}$/.test(part) ? '*' : part.toLowerCase()))
 	}));
 
 /**
@@ -443,9 +441,7 @@ export function isFleetRunTokenRouteAllowed(method: unknown, path: unknown): boo
 	}
 	if (isDeniedGateRoute(segments)) return false;
 
-	return FLEET_RUN_TOKEN_ROUTE_SHAPES.some(
-		(route) => route.method === verb && matchesShape(route.shape, segments)
-	);
+	return FLEET_RUN_TOKEN_ROUTE_SHAPES.some((route) => route.method === verb && matchesShape(route.shape, segments));
 }
 
 /**
