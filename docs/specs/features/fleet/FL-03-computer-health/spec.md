@@ -99,11 +99,11 @@ instead of waiting for its next beat.
 
 | To answer…                               | Today                                                                                                                                                                                                                                | What breaks                                                                                                                                                                                                                                                                                 |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "How busy is it?"                        | The heartbeat carries `diskFreeBytes`, the node's own disk floor, workspace counts and the enforced limits (`packages/contracts/src/fleet/fleet-node.types.ts:212-323`). The node's own housekeeping report states it in so many words: it sends no CPU or memory reading at all (`apps/node/src/core/housekeeping-report.ts:30-34`). | The node *samples* CPU and memory for its admission gate (`apps/node/src/core/resource-limits.ts:13-28`; `apps/node/src/node-io.ts:310-335`) and never reports them. Uptime, load, pending reboot and failed services are measured nowhere (grep over `apps/` and `packages/`: no match). |
+| "How busy is it?"                        | The heartbeat carries `diskFreeBytes`, the node's own disk floor, workspace counts and the enforced limits (`packages/contracts/src/fleet/fleet-node.types.ts:212-323`). The node's own housekeeping report states it in so many words: it sends no CPU or memory reading at all (`apps/node/src/core/housekeeping-report.ts:30-34`). | The node *samples* CPU and memory for its admission gate (`apps/node/src/core/resource-limits.ts:13-28`; `apps/node/src/node-io.ts:310-335`) and never reports them. Uptime, load, pending reboot and failed services are measured nowhere, and no history of any field is kept (EXISTING-SUBSTRATE §1.10, §2.13, gap 9). |
 | "Is it getting worse?"                   | Nothing. The row holds the latest `diskFreeBytes` and nothing else over time (`packages/agent/src/entities/fleet-node.entity.ts:264`).                                                                                               | No history table, no roll-up, no chart; the capability map calls this out (row A "Health").                                                                                                                                                                                                 |
 | "What is wrong with it?"                 | A worker state badge and a free-text reason in the drawer (`apps/web/src/components/settings/FleetNodeDrawer.tsx:317-345`); model throttles listed with a **Clear** button (`:347-392`); "Upgrade required" (`:493-505`).             | The states are words for operators (`quarantined`, `throttled`), not sentences for owners, and they live three clicks deep. The week-old usage-limit work (`apps/api/src/migrations/1795161700000-AddFleetModelUsageLimits.ts`, audit `node.model-throttle-clear` in `fleet-panic.types.ts:84`) has a route (`fleet.controller.ts:451`) but no place in a list of things that need a look. |
 | "Which GPU does it have?"                | A `gpu` and `gpu:<vendor>` tag from a probe that returns vendor and model only (`apps/node/src/core/gpu-probe.ts:19-26`).                                                                                                              | No utilisation, no memory.                                                                                                                                                                                                                                                                  |
-| "Wake it."                               | Nothing (no `macAddress`, no wake code anywhere under `apps/` or `packages/`).                                                                                                                                                       | An outbound-only node that is asleep is unreachable until someone walks to it.                                                                                                                                                                                                              |
+| "Wake it."                               | Nothing (no `macAddress` column — EXISTING-SUBSTRATE §2.2; no wake code — §1.14, §2.13 "No wake-on-LAN").                                                                                                                             | An outbound-only node that is asleep is unreachable until someone walks to it.                                                                                                                                                                                                              |
 | "Check it now."                          | Wait for the next beat (60 s by default, `fleet-client.ts:17`); the offline sweep runs on list (`packages/agent/src/fleet/fleet.service.ts:958-984`).                                                                                | The only live path is the computer-session leg, built for pictures (FL-02 generalises it).                                                                                                                                                                                                  |
 
 ### 2.3 Why this epic is additive only
@@ -147,7 +147,8 @@ never pushed down (the same rule the housekeeping report states).
   **then** the platform sends the wake through `build-01`, the state reads _"Waking… listening for
   win-lab"_, and at 20 s / 60 s either _"win-lab is back"_ or _"win-lab has not answered yet — it may
   be powered off or on another network"_; one audit row names both computers.
-- **S8 — Refresh now.** **Given** `build-01` has a connected link with `--manage`, **when** the
+- **S8 — Refresh now.** **Given** `build-01` has a connected link (any of `--work`, `--attend`,
+  `--manage` opens one; a refresh needs no consent beyond the link — CONTRACTS R-31), **when** the
   owner presses **Refresh now**, **then** a fresh snapshot replaces the cards within 3 seconds and
   "checked just now" appears; the next scheduled beat is unaffected.
 - **S9 — An Agent reads health.** **Given** an Agent with a read-only health tool, **when** it asks
@@ -161,12 +162,15 @@ never pushed down (the same rule the housekeeping report states).
 
 - **U1 — Offline.** Cards show the last snapshot dimmed with "last checked 2 h ago — values are
   stale"; Refresh now is disabled with _"build-01 is offline"_; Wake is offered when possible.
-- **U2 — No link (consent missing).** Refresh now reads _"Refresh needs --manage on build-01 ·
-  next automatic check in 42 s"_ with the command; the countdown is real.
+- **U2 — No link (no consent beyond enrolment).** Refresh now reads _"Refresh needs a link — start
+  build-01 with --work, --attend or --manage · next automatic check in 42 s"_ with the command; the
+  countdown is real; a direct call returns `consent_missing` with that hint.
 - **U3 — Link drop mid-refresh.** The request answers `unreachable`; the cards keep the last
   snapshot; the button offers **Try again**.
-- **U4 — Permission denied.** A member outside the `machines` family sees Wake and Refresh now
-  disabled with the audience named; a direct call returns `permission_denied` with the hint.
+- **U4 — Permission denied.** A member outside the `machines` family sees Wake disabled with the
+  audience named; Refresh now follows the `view` family (CONTRACTS §2.1), so anyone who can see the
+  computer can refresh it; a direct wake call returns `permission_denied` with the hint _"ask the
+  owner of build-01 to allow org admins: lifecycle"_.
 - **U5 — Kill switch.** Refresh now and Wake are refused with `kill_switch`; the heartbeat keeps
   arriving and the cards keep updating — the switch stops actions, not observation.
 - **U6 — Nothing to wake with.** No online sibling on the same network, or no known hardware
@@ -245,8 +249,9 @@ never pushed down (the same rule the housekeeping report states).
 
 - **FR-18** With `FLEET_HEALTH_HISTORY_ENABLED` on, the platform MUST store one sample per
   accepted heartbeat carrying a snapshot, at most one per computer per 55 seconds.
-- **FR-19** Raw samples MUST be kept 7 days; an hourly roll-up (mean, max) MUST be kept 90 days;
-  a scheduled sweep MUST delete beyond those windows, never a read.
+- **FR-19** Raw samples MUST be kept 7 days; an hourly roll-up (the mean of each CONTRACTS §4.5
+  column, `resolution: hourly` in the same table) MUST be kept 90 days; a scheduled sweep MUST delete
+  beyond those windows, never a read. (Hourly peaks wait on the §8b CONTRACTS question.)
 - **FR-20** The history endpoint MUST answer 1 h and 24 h from raw samples and 7 d and 90 d from
   roll-ups, each in at most 500 points, with gaps preserved.
 - **FR-21** The chart MUST render CPU, memory and disk lines with offline gaps, and the card
@@ -264,9 +269,10 @@ never pushed down (the same rule the housekeeping report states).
   limited to 3 attempts per computer per 5 minutes.
 - **FR-26** After a wake the platform MUST report at 20 s and 60 s whether the target has
   heartbeated.
-- **FR-27** Refresh now MUST request a fresh snapshot over the link, MUST require the `machines`
-  family and the node's `manage` consent, MUST answer within 3 seconds or `unreachable`, and MUST
-  replace the stored snapshot on success.
+- **FR-27** Refresh now MUST request a fresh snapshot over the link with `health.now`, MUST require
+  only the `view` family and an open link — no consent beyond the link itself (CONTRACTS R-31,
+  §2.1) — MUST answer within 3 seconds or `unreachable`, MUST answer `consent_missing` for a node that
+  gave no consent able to open a link, and MUST replace the stored snapshot on success.
 - **FR-28** Refresh now MUST NOT change the heartbeat cadence and MUST be limited to 10 per
   computer per minute.
 
@@ -346,9 +352,9 @@ reported a hardware address yet"_ · _"Already tried 3 times; give it a minute"_
 ### 5.6 Refresh now
 
 Enabled: spinner on the button ≤ 3 s → cards update → _"checked just now"_. Disabled variants:
-_"build-01 is offline"_ · _"Refresh needs --manage on build-01 · next automatic check in 42 s"_
-`[copy]` · _"Live actions are paused while all computers are stopped"_ · _"Only the owner of
-build-01 can do this"_.
+_"build-01 is offline"_ · _"Refresh needs a link — start build-01 with --work, --attend or
+--manage · next automatic check in 42 s"_ `[copy]` · _"Live actions are paused while all computers
+are stopped"_. (Refresh follows the `view` family, so a viewer who sees the card can refresh it.)
 
 ### 5.7 History chart
 
@@ -392,6 +398,19 @@ every state word is text; every disabled action carries its reason in a tooltip 
 | **Node**                | Existing        | Gains the latest snapshot, a hardware address, a network identity and the last wake attempt time.      |
 | **Model throttle / worker state** | Existing | The week-old facts this epic turns into sentences.                                               |
 
+**Acts this epic adds (rule 7).**
+
+| Act               | Consent                         | Family / audience default | Confirmation | Audit (CONTRACTS §7)                    | Errors                                                                                   | Agent tool (FL-19 catalogue)          |
+| ----------------- | ------------------------------- | ------------------------- | ------------ | --------------------------------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
+| Read health / history | — (heartbeat data)          | `view` / org-members      | `plain`      | — (read)                                | `not_found`, `invalid` (range)                                                           | `fleet_nodes_health` · readOnly       |
+| Refresh now       | any open link (R-31)            | `view` / org-members      | `plain`      | — (read)                                | `unreachable`, `consent_missing` (no link possible), `kill_switch`, `limit_exceeded`     | `fleet_nodes_health` with `fresh: true` · readOnly |
+| Wake              | `manage` on the sibling          | `machines` / owner (target) | `plain`    | `node.wake { target, via }`             | `unsupported_on_node`, `unreachable`, `kill_switch`, `limit_exceeded`, `permission_denied` | `fleet_nodes_wake` · destructive: false |
+| Clear limit now   | — (platform state)              | `machines` / owner        | `plain`      | `node.model-throttle-clear` (existing)  | `permission_denied`, `not_found`                                                         | — (FL-19)                             |
+| "Needs a look" list | —                             | `view` / org-members      | `plain`      | — (read)                                | —                                                                                        | `fleet_nodes_needs_a_look`, `fleet_status` · readOnly |
+
+Kill switch (R-24): Refresh now and Wake are link requests and are refused `kill_switch`; the
+heartbeat and every read keep working — the switch stops actions, not observation.
+
 ---
 
 ## 8. Out of scope
@@ -406,11 +425,17 @@ every state word is text; every disabled action carries its reason in a tooltip 
 
 ## 8b. Open questions
 
-- `[NEEDS CLARIFICATION: CONTRACTS §4.5 names one table with raw columns and says "hourly roll-ups 90 days"; this plan adds a resolution column (`raw` | `hour`) to the same table rather than a second table. Confirm.]`
-- `[NEEDS CLARIFICATION: CONTRACTS change — §4.1 lists macAddress and lastWakeAttemptAt; matching siblings "on the same network" needs an opaque network identity (`lanId`, a salted hash of the subnet) reported by the node. Confirm the extra column in slot 1796030100000.]`
-- `[NEEDS CLARIFICATION: CONTRACTS §3.3 puts health.now on the machine family (manage). A refresh is read-only; should it be allowed on any open link so a --work-only computer can be refreshed? This spec follows CONTRACTS and shows the countdown instead.]`
-- `[NEEDS CLARIFICATION: The state word "Limited" (model usage limit) is new UI copy beside "Throttled" (resource ceiling); README §1 says a new noun needs a flag. It is a state label, not an entity — confirm the word or fold both into "Throttled" with two sentences.]`
-- `[NEEDS CLARIFICATION: Should disk-low use the node's own floor (recommended: it is the number at which the machine actually stops) when the floor was switched off (`minFreeDiskBytes = null`)? Proposed: percentage rule only.]`
+- **Resolved** by CONTRACTS §4.5: one table, `fleet_node_health_samples`, with a `resolution`
+  column `raw · hourly`; raw rows 7 days, hourly rows 90 days.
+- **Resolved** by CONTRACTS §4.1 / §13: `macAddress`, `lanId` (the opaque network identity) and
+  `lastWakeAttemptAt` — together with the `health` snapshot column — are slot
+  `1796030100000-AddFleetNodeWakeFields`.
+- **Resolved** by CONTRACTS R-31 / §2.1: `health.now` is allowed on any open link with no consent
+  beyond the link itself and is a `view`-family read, so a `--work`-only computer can be refreshed
+  (FR-27).
+- `[NEEDS CLARIFICATION: The state word "Limited" (model usage limit) is new UI copy beside "Throttled" (resource ceiling); README §1 says a new word needs the owner's nod. It is a state label, not an entity. Default until answered: ship "Limited" for a model usage-limit throttle and "Throttled" for a resource ceiling, both mapping to the one `node-throttled` "needs a look" kind (CONTRACTS §4.6).]`
+- `[NEEDS CLARIFICATION: Which disk-low rule applies when the owner switched the node's floor off (`minFreeDiskBytes = null`)? Default until answered: percentage rule only — `warn` below 10% free, no `critical`.]`
+- **Resolved** by CONTRACTS §4.5 (rev 3): hourly rows carry `cpuMax`, `memMax`, `diskMax`; the `health` snapshot adds `cpuCores`, `memUsedMiB`, `diskTotalMiB` and a GPU list; §1.1 lists the heartbeat fields (`health`, `macAddress`, `lanId`); rates in §10.1.
 
 ---
 
@@ -436,7 +461,7 @@ every state word is text; every disabled action carries its reason in a tooltip 
 - [ ] `ACC-FL03-06` (FR-18, FR-22) With the flag on, one sample per beat (≥ 55 s apart) is written;
       with it off, none, and the chart says so.
 - [ ] `ACC-FL03-07` (FR-19) The sweep deletes raw > 7 d and hourly > 90 d and is idempotent;
-      roll-ups carry mean and max.
+      hourly rows (`resolution: hourly`) carry the mean of each column.
 - [ ] `ACC-FL03-08` (FR-20, FR-21) 1 h/24 h come from raw, 7 d/90 d from roll-ups, ≤ 500 points, gaps
       preserved; the chart and sparkline render them.
 
@@ -448,8 +473,10 @@ every state word is text; every disabled action carries its reason in a tooltip 
 - [ ] `ACC-FL03-10` (FR-25, FR-26) Wake goes through the sibling, writes one audit row with both
       computers, refuses the 4th attempt in 5 min, and reports at 20 s and 60 s.
 - [ ] `ACC-FL03-11` (FR-27, FR-28) Refresh now returns a fresh snapshot within 3 s over a connected
-      link, `unreachable` without one, `consent_missing` without `--manage`, `kill_switch` under the
-      switch; the 11th in a minute is `limit_exceeded`; the cadence is unchanged.
+      link opened by any consent (a `--work`-only node included) for any viewer in the `view`
+      audience, `unreachable` when the link is down, `consent_missing` for an enrol-only node,
+      `kill_switch` under the switch; the 11th in a minute is `limit_exceeded`; the cadence is
+      unchanged.
 - [ ] `ACC-FL03-12` (FR-29) The Overview tab carries the storage footprint sentence; no token is spent.
 
 ---
@@ -460,8 +487,8 @@ every state word is text; every disabled action carries its reason in a tooltip 
 - [x] **II — Capability-driven.** No provider resolution.
 - [x] **III — Source-of-truth repos.** Health is telemetry, not content.
 - [x] **IV — Job runtime.** The roll-up and retention sweep run on the configured job runtime.
-- [x] **V — Forward-only migrations.** Two additive migrations (samples + snapshot column; wake
-      fields).
+- [x] **V — Forward-only migrations.** Two additive migrations from the CONTRACTS §13 slots (the
+      samples table; the wake fields plus the `health` snapshot column).
 - [x] **VI — Tests.** Node probes, contracts, agent, API, web and e2e named in the plan.
 - [x] **VII — Secrets.** No secret; addresses hashed or masked; nothing logged from a probe.
 - [x] **VIII — Plugin counts.** No plugin.
@@ -472,8 +499,9 @@ every state word is text; every disabled action carries its reason in a tooltip 
 
 ## 11. References
 
-- Program: [Fleet README](../README.md) D2, D8 · [CONTRACTS](../CONTRACTS.md) §1.2 (`wake`), §3.3
-  (`health.now`, `wake.send`), §4.1, §4.5, §4.6, §7 (`node.wake`), §8, §9, §10, §11.2, §13 ·
+- Program: [Fleet README](../README.md) D2, D8 · [CONTRACTS](../CONTRACTS.md) R-23, R-24, R-31;
+  §1.2 (`wake`), §2.1 (`health.now` → `view`), §3.3 (`health.now`, `wake.send`), §4.1, §4.5, §4.6,
+  §7 (`node.wake`), §8, §9, §10, §11.2, §13 ·
   [Capability map](../CAPABILITY-MAP.md) rows A "Health", "Machine states", "Needs a look", "Wake on
   LAN", "Machine checks on an interval"
 - Plan: [`./plan.md`](./plan.md) · Tasks: [`./tasks.md`](./tasks.md)

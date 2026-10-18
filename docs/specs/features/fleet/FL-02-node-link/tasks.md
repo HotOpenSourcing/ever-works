@@ -18,7 +18,8 @@
 - The existing computer-session leg (`apps/node/src/core/screen/node-leg.ts`) and both gateways must
   stay green after every task — their specs are the regression floor for this epic.
 - Migration authored from `apps/api/`; re-stamp the slot if `develop` moved (README rule 10).
-- Nothing is removed: the legacy leg stays as a fallback through P2 and one release after.
+- Nothing is removed: the legacy leg stays as the fallback; retiring it is a separate change the
+  owner approves, not a task here.
 - Commit style: `feat(fleet-link): …`, `feat(node): …`, `test(fleet-link): …`.
 
 ---
@@ -62,7 +63,8 @@
       `status` / `doctor` print consents.
       **Test**: extend `apps/node/src/core/capabilities.spec.ts` (`managed` only with the flag) and
       `apps/node/src/cli/program.spec.ts` (flag parsed, independent of `--work`/`--attend`).
-- [ ] **T-07**. Heartbeat `consents`: `describe()` in `runtime.ts` adds `{ work, attend, manage }`;
+- [ ] **T-07**. Heartbeat `consents`: `describe()` in `runtime.ts` adds `{ work, attend, manage,
+      usageScan: false }` (CONTRACTS §1.1; FL-20 wires `usageScan`);
       `OPTIONAL_DESCRIPTION_FIELD_TIERS` in `apps/node/src/core/heartbeat.ts:72-90` gains `consents` in
       the newest tier; `apps/node/src/core/types.ts` `NodeSelfDescription.consents?`.
       **Test**: extend `apps/node/src/core/heartbeat.spec.ts` — sent on every beat; dropped first on a
@@ -84,7 +86,9 @@
 ## P1.C — API: token, gateway, registry, authoriser, operations
 
 - [ ] **T-10**. Migration `apps/api/src/migrations/1796020000000-AddFleetNodeConsents.ts` (guarded
-      `ADD COLUMN consents text NULL`); entity column in `packages/agent/src/entities/fleet-node.entity.ts`;
+      `ADD COLUMN consents text NULL` and `ADD COLUMN previewProfileEnabled boolean NOT NULL DEFAULT
+      false` — CONTRACTS §13 puts both in this slot; FL-10 owns the behaviour); entity columns in
+      `packages/agent/src/entities/fleet-node.entity.ts`;
       `FleetService.heartbeat` (`packages/agent/src/fleet/fleet.service.ts:534-630`) stores `consents`,
       emits `node.consent.change` through `FleetAuditService`, and calls a `ConsentChangeListener` port.
       DTO field in `apps/api/src/fleet/dto/fleet.dto.ts`.
@@ -112,9 +116,11 @@
       state-changing); `fleet-link.service.spec.ts` (`unreachable` when no link; `limit_exceeded` on
       the 65th; `unsupported_on_node` passthrough).
 - [ ] **T-14**. Operations: `fleet-operations.service.ts` (in-memory + Valkey TTL 1 h) and
-      `GET /api/fleet/operations/:id` in `fleet-link.controller.ts`; ch 0 `operation.progress/done`
-      handling in the registry.
-      **Test**: `fleet-operations.service.spec.ts` — progress, done, expiry, foreign caller 404.
+      `GET /api/fleet/operations/:id` + `DELETE /api/fleet/operations/:id` (sends `operation.cancel`,
+      CONTRACTS §3.3 / §11.2) in `fleet-link.controller.ts`; ch 0 `operation.progress/done` handling
+      in the registry.
+      **Test**: `fleet-operations.service.spec.ts` — progress, done, cancel → `cancelled`, expiry,
+      foreign caller 404.
 - [ ] **T-15**. Kill switch and panic: `fleet-link.registry.ts` subscribes to
       `FleetKillSwitchService` changes (poll each ping tick, as the computer relay does) → `link.pause`
       / `link.resume` broadcast; `apps/api/src/fleet/fleet-panic.service.ts` drain-all → `link.drain
@@ -126,7 +132,8 @@
 ## P1.D — Web and i18n
 
 - [ ] **T-16**. Link line in `apps/web/src/components/fleet/computer/ComputerHeader.tsx` from
-      `node.link`; `apps/web/src/components/fleet/link/ConsentsCard.tsx` registered as an Overview slot;
+      `node.link`; `apps/web/src/components/fleet/link/ConsentsCard.tsx` registered with
+      `registerOverviewBlock` (FL-01);
       `link.shared.ts` (state word, missing-consent command, bytes). Registry placeholder resolution
       reads `effectiveConsents`.
       **Test**: `link.shared.unit.spec.ts`, `ConsentsCard.unit.spec.tsx` (command for each missing
@@ -142,17 +149,22 @@
 
 - [ ] **T-19**. `apps/api/src/relay/relay-bus.ts` (`RelayBus` interface = the existing
       `TerminalFanoutBus` plus subscribe), `relay-bus.valkey.ts` (ioredis pub/sub, delivery answer),
-      `relay-bus.in-process.ts`, `relay-bus.module.ts` selecting by `FLEET_RELAY_MODE` /
-      `getRedisUrl()`; bind to `TERMINAL_FANOUT_BUS` (`terminal-relay.registry.ts:130`) and the computer
-      relay's bus token (`computer.module.ts:62-70`); boot check for `FLEET_RELAY_REQUIRE_BUS`.
+      `relay-bus.in-process.ts`, `relay-bus.module.ts` selecting Valkey exactly when `getRedisUrl()`
+      answers (CONTRACTS R-7 — no mode setting); bind to `TERMINAL_FANOUT_BUS`
+      (`terminal-relay.registry.ts:130`) and the computer relay's bus token (`computer.module.ts:62-70`);
+      boot check for `FLEET_RELAY_REQUIRE_BUS`.
       **Test**: `relay-bus.valkey.spec.ts` against a test Valkey (round-trip, delivery answer, degraded
-      on loss); `relay-bus.module.spec.ts` (mode selection; boot failure message names the setting).
+      on loss); `relay-bus.module.spec.ts` (selection by `REDIS_URL`; boot failure message names
+      `FLEET_RELAY_REQUIRE_BUS`).
 - [ ] **T-20**. Health: `fleet_relay` indicator in `apps/api/src/health/service-detection.ts` /
-      `health.controller.ts:85-100` (`configured`, `mode`, `status`).
-      **Test**: extend `apps/api/src/health/health.controller.spec.ts` — three modes.
-- [ ] **T-21**. Viewer side: `fleet-link-attach.service.ts` (channel claim `fleet-link`, role
-      `viewer|driver`, 60 s, single use) over `TerminalAttachService`; `POST /api/fleet/nodes/:id/channels/:family/attach-token`
-      (authoriser applied); `fleet-link-viewer-gateway.service.ts` on `/ws/fleet/:family/:id`;
+      `health.controller.ts:85-100` (`configured`, `mode: 'valkey'|'single-replica'`, `status`) on the
+      existing `GET /api/health/ready`.
+      **Test**: extend `apps/api/src/health/health.controller.spec.ts` — both modes and the degraded
+      status.
+- [ ] **T-21**. Viewer side: `fleet-link-attach.service.ts` (`mint(nodeId, family, target, role,
+      caller)`; channel claim `fleet-link`, role `viewer|driver`, 60 s, single use) over
+      `TerminalAttachService`, authoriser applied — no HTTP route of its own: each epic calls it from
+      its CONTRACTS §11.2 attach-token path; `fleet-link-viewer-gateway.service.ts` on `/ws/fleet/:family/:id`;
       `fleet-link-relay.ts` bridging viewer sockets ↔ node channels through the bus.
       **Test**: `fleet-link-relay.spec.ts` (viewer input → error frame, never forwarded; driver
       forwarded; cross-replica via bus mock); `fleet-link-viewer-gateway.spec.ts` (token single use,
@@ -166,13 +178,17 @@
       one Valkey, node harness on A, viewer on B; frames both ways; bus loss degrades health.
       **Test**: itself.
 
-## P3 — Lifecycle and parity
+## P3 — Lifecycle, management lane and parity
 
 - [ ] **T-24**. Upgrade-required surfaces: `apps/web/src/components/fleet/link/UpgradeRequiredSection.tsx`
-      on the Settings tab; card/header chip from `node.upgradeRequired`; `recommendedNodeVersion` from
-      `FLEET_RECOMMENDED_NODE_VERSION` in `packages/agent/src/config/` and
-      `FleetService.heartbeat` result (`fleet.service.ts:620-630`).
-      **Test**: `UpgradeRequiredSection.unit.spec.tsx`; extend `config.spec.ts` and the heartbeat spec.
+      on the Settings tab; card/header word from FL-03's state mapping (`node.upgradeRequired`);
+      `recommendedNodeVersion` (CONTRACTS §1.1) from `FLEET_RECOMMENDED_NODE_VERSION` in
+      `packages/agent/src/config/` and `FleetService.heartbeat` result (`fleet.service.ts:620-630`);
+      producer `packages/agent/src/fleet/needs-a-look/producers/node-upgrade-required.producer.ts`
+      registered under FL-01's `NEEDS_A_LOOK_PRODUCERS`.
+      **Test**: `UpgradeRequiredSection.unit.spec.tsx`; extend `config.spec.ts` and the heartbeat spec;
+      `packages/agent/src/fleet/__tests__/node-upgrade-required.producer.spec.ts` (one `info` item per
+      below-floor node, stable id, none at or above the floor).
 - [ ] **T-25**. Node self-update: `apps/node/src/core/link/self-update.ts` (compare, installer
       detection reusing `doctor`'s install-path logic, run, exit 75, failure log + heartbeat
       `selfUpdateFailedAt`); `--auto-update` on `start` in `program.ts`; `node-lifecycle.ts` record gains
@@ -184,13 +200,20 @@
       config persisted beside the enrolment.
       **Test**: `apps/desktop-node/src/main/start-order.spec.ts` extend (consents passed through);
       renderer unit spec for the step.
-- [ ] **T-27**. Docs: `docs/features/fleet-node-link.md` (consents, what the link is, what it never
+- [ ] **T-27**. Management lane (CONTRACTS R-34): `FLEET_MANAGEMENT_LANE_KINDS` (empty) and
+      `FLEET_MANAGEMENT_LANE_CONSENT` in `packages/contracts/src/fleet/fleet-jobs.types.ts`;
+      `createManagementLane` beside `createAttendedLane` in `apps/node/src/core/runtime.ts`
+      (`:1026-1070`), started only when a registered kind's consent is on, concurrency 1 outside
+      `--concurrency`; the work lane's kind filter (`runtime.ts:657-661`) excludes the lane's kinds.
+      **Test**: `apps/node/src/core/runtime.management-lane.spec.ts` — with a test kind: leased only
+      with its consent, never by the work lane, work-lane slots unchanged; empty set → no lane started.
+- [ ] **T-28**. Docs: `docs/features/fleet-node-link.md` (consents, what the link is, what it never
       does, operator relay settings, self-update); add to `apps/docs/sidebarsPlatform.ts` beside
       `'features/fleet'` (`:183`); extend `docs/features/fleet.md` §"Keeping nodes current" and
       §"Connect a machine"; `docs/specs/security/fleet-session-trust-model.md` gains a link section;
       update `docs/specs/features/fleet/TRACKER.md` row FL-02.
       **Test**: `pnpm --filter ever-works-docs build` — no broken-link warning.
-- [ ] **T-28**. `pnpm format && pnpm lint && pnpm test && pnpm build` green; AW-11 and fleet e2e green
+- [ ] **T-29**. `pnpm format && pnpm lint && pnpm test && pnpm build` green; AW-11 and fleet e2e green
       with `FLEET_NODE_LINK_ENABLED` on and off and on both legs.
 
 ## Definition of done
