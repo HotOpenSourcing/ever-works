@@ -364,6 +364,7 @@ const HEALTH_EXPORTS = [
 	'FLEET_HEALTH_DISK_WARN_FREE_FRACTION',
 	'FLEET_HEALTH_BYTES_PER_MIB',
 	'FLEET_HEALTH_MAX_GPU_MODEL_LENGTH',
+	'FLEET_HEALTH_MAX_GPUS',
 	'FLEET_HEALTH_MAX_MIB',
 	'FLEET_HEALTH_MAX_LOAD_AVG',
 	'FLEET_HEALTH_MAX_CORES',
@@ -542,12 +543,12 @@ describe('fleet barrel', () => {
 		// symbols of `fleet-model-usage-limit.types.ts` and the seven of
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
-		// → 260 with computer health (FL-03): the twenty-four symbols of
+		// → 261 with computer health (FL-03): the twenty-five symbols of
 		// `fleet-node-health.types.ts` and the three of
 		// `fleet-needs-a-look.types.ts` (seam owned by FL-01) — two NEW
 		// modules, so the witness table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		expect(Object.keys(fleet)).toHaveLength(260);
+		expect(Object.keys(fleet)).toHaveLength(261);
 	});
 
 	it.each([

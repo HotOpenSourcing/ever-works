@@ -5,6 +5,7 @@ import {
 	diskLowSeverity,
 	FLEET_HEALTH_DISK_CRITICAL_MARGIN_BYTES,
 	FLEET_HEALTH_MAX_GPU_MODEL_LENGTH,
+	FLEET_HEALTH_MAX_GPUS,
 	FLEET_NODE_CLEAR_QUARANTINE_COMMAND,
 	fleetNodeDiskLowInput,
 	isFleetNodeHealthStale,
@@ -35,9 +36,9 @@ describe('sanitizeFleetNodeHealthSnapshot', () => {
 				diskFreeMiB: 120832,
 				diskTotalMiB: 201390,
 				loadAvg1: 1.9349,
-				cores: 4,
+				cpuCores: 4,
 				uptimeSec: 273600.9,
-				gpu: { vendor: 'nvidia', model: 'RTX 4070', utilPercent: 12, memUsedMiB: 2048, memTotalMiB: 8192 },
+				gpu: [{ vendor: 'nvidia', name: 'RTX 4070', utilPercent: 12, memUsedMiB: 2048, memTotalMiB: 8192 }],
 				pendingReboot: false,
 				failedServices: 1
 			})
@@ -50,9 +51,9 @@ describe('sanitizeFleetNodeHealthSnapshot', () => {
 			diskFreeMiB: 120832,
 			diskTotalMiB: 201390,
 			loadAvg1: 1.93,
-			cores: 4,
+			cpuCores: 4,
 			uptimeSec: 273600,
-			gpu: { vendor: 'nvidia', model: 'RTX 4070', utilPercent: 12, memUsedMiB: 2048, memTotalMiB: 8192 },
+			gpu: [{ vendor: 'nvidia', name: 'RTX 4070', utilPercent: 12, memUsedMiB: 2048, memTotalMiB: 8192 }],
 			pendingReboot: false,
 			failedServices: 1
 		});
@@ -64,7 +65,7 @@ describe('sanitizeFleetNodeHealthSnapshot', () => {
 			memPercent: -1,
 			loadAvg1: Number.NaN,
 			uptimeSec: Number.POSITIVE_INFINITY,
-			cores: 0,
+			cpuCores: 0,
 			failedServices: '3',
 			diskPercent: 12
 		});
@@ -77,18 +78,36 @@ describe('sanitizeFleetNodeHealthSnapshot', () => {
 	});
 
 	it('keeps gpu: null (asked, no GPU) apart from an absent gpu (not known)', () => {
-		expect(sanitizeFleetNodeHealthSnapshot({ gpu: null, cores: 2 })).toEqual({ gpu: null, cores: 2 });
-		expect(sanitizeFleetNodeHealthSnapshot({ cores: 2 })).toEqual({ cores: 2 });
-		expect(sanitizeFleetNodeHealthSnapshot({ gpu: 'nvidia', cores: 2 })).toEqual({ cores: 2 });
+		expect(sanitizeFleetNodeHealthSnapshot({ gpu: null, cpuCores: 2 })).toEqual({ gpu: null, cpuCores: 2 });
+		expect(sanitizeFleetNodeHealthSnapshot({ gpu: [], cpuCores: 2 })).toEqual({ gpu: null, cpuCores: 2 });
+		expect(sanitizeFleetNodeHealthSnapshot({ cpuCores: 2 })).toEqual({ cpuCores: 2 });
+		// The pre-revision-3 single object, and junk, are "not known" — never "no GPU".
+		expect(sanitizeFleetNodeHealthSnapshot({ gpu: { vendor: 'nvidia', name: 'RTX' }, cpuCores: 2 })).toEqual({
+			cpuCores: 2
+		});
+		expect(sanitizeFleetNodeHealthSnapshot({ gpu: ['junk'], cpuCores: 2 })).toEqual({ cpuCores: 2 });
 	});
 
-	it('bounds the GPU model, strips control characters and files an unknown vendor as other', () => {
-		const gpu = sanitizeFleetNodeHealthSnapshot({
-			gpu: { vendor: 'acme', model: `A\u0007B\n${'x'.repeat(200)}`, memUsedMiB: 9, memTotalMiB: 8 }
+	it('keeps every sane GPU of a list, first adapter first, bounded in count', () => {
+		const gpus = sanitizeFleetNodeHealthSnapshot({
+			gpu: [{ vendor: 'nvidia', name: 'A' }, 'junk', { vendor: 'intel', name: 'B' }]
 		})?.gpu;
+		expect(gpus).toEqual([
+			{ vendor: 'nvidia', name: 'A' },
+			{ vendor: 'intel', name: 'B' }
+		]);
+		const many = Array.from({ length: FLEET_HEALTH_MAX_GPUS + 4 }, (_, i) => ({ vendor: 'nvidia', name: `G${i}` }));
+		expect(sanitizeFleetNodeHealthSnapshot({ gpu: many })?.gpu).toHaveLength(FLEET_HEALTH_MAX_GPUS);
+	});
+
+	it('bounds the GPU name, strips control characters and files an unknown vendor as other', () => {
+		const [gpu] =
+			sanitizeFleetNodeHealthSnapshot({
+				gpu: [{ vendor: 'acme', name: `A\u0007B\n${'x'.repeat(200)}`, memUsedMiB: 9, memTotalMiB: 8 }]
+			})?.gpu ?? [];
 		expect(gpu?.vendor).toBe('other');
-		expect(gpu?.model?.startsWith('A B x')).toBe(true);
-		expect(gpu?.model).toHaveLength(FLEET_HEALTH_MAX_GPU_MODEL_LENGTH);
+		expect(gpu?.name?.startsWith('A B x')).toBe(true);
+		expect(gpu?.name).toHaveLength(FLEET_HEALTH_MAX_GPU_MODEL_LENGTH);
 		expect(gpu).not.toHaveProperty('memUsedMiB');
 		expect(gpu).not.toHaveProperty('memTotalMiB');
 	});

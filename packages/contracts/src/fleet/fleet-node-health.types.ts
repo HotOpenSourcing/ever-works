@@ -23,7 +23,10 @@
  * a clamped 100% CPU would be a number the machine never reported.
  *
  * `gpu` is the one field with three states: absent (not known), `null`
- * (the machine was asked and has no GPU), or an object.
+ * (the machine was asked and has no GPU), or a list of the GPUs it has.
+ *
+ * Shape: CONTRACTS §4.5 (revision 3) — one sample's columns plus
+ * `cpuCores`, `memUsedMiB`, `diskTotalMiB` and the GPU list.
  */
 
 import { FLEET_NODE_UPGRADE_COMMAND, type FleetNodeStatus, type FleetNodeWorkerState } from './fleet-node.types.js';
@@ -52,8 +55,11 @@ export const FLEET_HEALTH_DISK_CRITICAL_MARGIN_BYTES = 1024 ** 3;
 /** `disk-low` is a warning below this fraction of the volume free (FR-12). */
 export const FLEET_HEALTH_DISK_WARN_FREE_FRACTION = 0.1;
 
-/** The GPU model string is bounded and sanitised like `workerStateReason`. */
+/** The GPU name string is bounded and sanitised like `workerStateReason`. */
 export const FLEET_HEALTH_MAX_GPU_MODEL_LENGTH = 64;
+
+/** At most this many GPUs are reported per machine. */
+export const FLEET_HEALTH_MAX_GPUS = 16;
 
 /** Upper bound for any MiB figure: 1 EiB. Anything above is certainly nonsense. */
 export const FLEET_HEALTH_MAX_MIB = 2 ** 40;
@@ -84,11 +90,11 @@ export type FleetNodeGpuVendor = 'nvidia' | 'amd' | 'intel' | 'apple' | 'other';
 
 export const FLEET_NODE_GPU_VENDORS: readonly FleetNodeGpuVendor[] = ['nvidia', 'amd', 'intel', 'apple', 'other'];
 
-/** The first GPU's facts. Utilisation and memory only where the vendor tool exposes them. */
+/** One GPU's facts. Utilisation and memory only where the vendor tool exposes them. */
 export interface FleetNodeGpuHealth {
 	vendor: FleetNodeGpuVendor;
 	/** Adapter name as the vendor tool reported it, bounded; null when unknown. */
-	model: string | null;
+	name: string | null;
 	utilPercent?: number;
 	memUsedMiB?: number;
 	memTotalMiB?: number;
@@ -114,11 +120,11 @@ export interface FleetNodeHealthSnapshot {
 	/** One-minute load average. Absent on Windows, where it is not meaningful. */
 	loadAvg1?: number;
 	/** Logical cores, so a load figure has its scale. */
-	cores?: number;
+	cpuCores?: number;
 	/** How long the machine has been up — a duration, never a boot instant (U12). */
 	uptimeSec?: number;
-	/** Absent = not known; `null` = asked, no GPU; object = the first GPU. */
-	gpu?: FleetNodeGpuHealth | null;
+	/** Absent = not known; `null` = asked, no GPU; a list = the GPUs, first adapter first. */
+	gpu?: FleetNodeGpuHealth[] | null;
 	/** The operating system is waiting for a restart. Absent where it is not exposed. */
 	pendingReboot?: boolean;
 	/** Services the service manager reports as failed. Absent where not cheaply knowable. */
@@ -182,16 +188,15 @@ function boundedText(value: unknown, max: number): string | null {
 	return cleaned ? cleaned.slice(0, max) : null;
 }
 
-function sanitizeGpu(raw: unknown): FleetNodeGpuHealth | null | undefined {
-	if (raw === null) return null;
-	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+function sanitizeOneGpu(raw: unknown): FleetNodeGpuHealth | null {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
 	const source = raw as Record<string, unknown>;
 	const vendor = FLEET_NODE_GPU_VENDORS.includes(source.vendor as FleetNodeGpuVendor)
 		? (source.vendor as FleetNodeGpuVendor)
 		: 'other';
 	const gpu: FleetNodeGpuHealth = {
 		vendor,
-		model: boundedText(source.model, FLEET_HEALTH_MAX_GPU_MODEL_LENGTH)
+		name: boundedText(source.name, FLEET_HEALTH_MAX_GPU_MODEL_LENGTH)
 	};
 	const util = percent(source.utilPercent);
 	if (util !== null) gpu.utilPercent = util;
@@ -203,6 +208,19 @@ function sanitizeGpu(raw: unknown): FleetNodeGpuHealth | null | undefined {
 	if (used !== null) gpu.memUsedMiB = used;
 	if (total !== null) gpu.memTotalMiB = total;
 	return gpu;
+}
+
+/** `null` stays "no GPU"; a list keeps its sane entries (bounded); anything else is "not known". */
+function sanitizeGpu(raw: unknown): FleetNodeGpuHealth[] | null | undefined {
+	if (raw === null) return null;
+	if (!Array.isArray(raw)) return undefined;
+	const gpus = raw
+		.slice(0, FLEET_HEALTH_MAX_GPUS)
+		.map(sanitizeOneGpu)
+		.filter((gpu): gpu is FleetNodeGpuHealth => gpu !== null);
+	// An empty list is "asked, none" — the same fact as null, said one way.
+	if (gpus.length === 0) return raw.length === 0 ? null : undefined;
+	return gpus;
 }
 
 /**
@@ -241,8 +259,8 @@ export function sanitizeFleetNodeHealthSnapshot(raw: unknown): FleetNodeHealthSn
 
 	const load = finiteIn(source.loadAvg1, 0, FLEET_HEALTH_MAX_LOAD_AVG);
 	if (load !== null) out.loadAvg1 = round(load, 2);
-	const cores = wholeIn(source.cores, 1, FLEET_HEALTH_MAX_CORES);
-	if (cores !== null) out.cores = cores;
+	const cores = wholeIn(source.cpuCores, 1, FLEET_HEALTH_MAX_CORES);
+	if (cores !== null) out.cpuCores = cores;
 	const uptime = wholeIn(source.uptimeSec, 0, FLEET_HEALTH_MAX_UPTIME_SEC);
 	if (uptime !== null) out.uptimeSec = uptime;
 

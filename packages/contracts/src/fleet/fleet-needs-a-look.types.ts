@@ -14,7 +14,7 @@
  * (job-unassignable). FL-01 renders.
  */
 
-/** Every kind a producer may emit (CONTRACTS §4.6). Closed: a new kind is a contract change. */
+/** Every kind a producer may emit (CONTRACTS §4.6, revision 3). Closed: a new kind is a contract change. */
 export type NeedsALookKind =
 	| 'disk-low'
 	| 'node-throttled'
@@ -23,6 +23,7 @@ export type NeedsALookKind =
 	| 'runner-stopped'
 	| 'job-unassignable'
 	| 'session-needs-you'
+	| 'session-unconfirmed'
 	| 'schedule-failed'
 	| 'cloud-idle'
 	| 'helper-untrusted'
@@ -36,6 +37,7 @@ export const NEEDS_A_LOOK_KINDS: readonly NeedsALookKind[] = [
 	'runner-stopped',
 	'job-unassignable',
 	'session-needs-you',
+	'session-unconfirmed',
 	'schedule-failed',
 	'cloud-idle',
 	'helper-untrusted',
