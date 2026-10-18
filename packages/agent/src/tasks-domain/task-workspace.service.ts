@@ -42,7 +42,7 @@ import type { AgentRepoAttachment } from '../entities/agent-repo-attachment.enti
 import type { RepoConnectionProvider } from '../entities/repo-connection.entity';
 import { WorkspaceFacadeService } from '../facades/workspace.facade';
 import { GitFacadeService, MergePolicyRefusedError } from '../facades/git.facade';
-import { TaskTransitionService } from './task-transition.service';
+import { TASK_STATUS_TRANSITIONS, TaskTransitionService } from './task-transition.service';
 import { TaskChatService } from './task-chat.service';
 import { MergePolicyService } from '../policy/merge-policy.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
@@ -2322,10 +2322,17 @@ export class TaskWorkspaceService {
             providerId: work.gitProvider,
             workId: work.id,
         };
-        const baseRef =
+        // The PLANNED base: the caller's (a promotion / revert) or the Work's
+        // isolation base. `null` when neither names one — then the facade
+        // judges the pull request's LIVE base alone (works-security lane 3a);
+        // guessing 'main' here made every merge of a Work whose repository
+        // defaults to another branch fail `target-branch-mismatch`.
+        const plannedTargetBranch =
             (input.baseRef && input.baseRef.trim()) ||
             (work.taskIsolationBaseBranch && work.taskIsolationBaseBranch.trim()) ||
-            'main';
+            null;
+        // Display text only (Task chat, activity), never a policy input.
+        const baseRef = plannedTargetBranch ?? 'main';
 
         return this.attemptAgentMerge({
             task,
@@ -2337,6 +2344,7 @@ export class TaskWorkspaceService {
             gitOptions,
             prNumber: task.prNumber,
             baseRef,
+            plannedTargetBranch,
             gateStatus: input.gateStatus ?? null,
             headSha: input.headSha ?? task.prHeadSha ?? null,
             requireHumanApproval: input.requireHumanApproval === true,
@@ -2388,7 +2396,14 @@ export class TaskWorkspaceService {
         repo: string;
         gitOptions: { userId: string; providerId: string; workId: string };
         prNumber: number;
+        /** Display text for messages and activity (falls back to 'main'). */
         baseRef: string;
+        /**
+         * The branch the platform PLANNED to merge into, or `null` when nothing
+         * names one. The policy input: the facade refuses a live base that
+         * disagrees with it, and judges the live base alone when it is null.
+         */
+        plannedTargetBranch?: string | null;
         gateStatus: GateStatus | null;
         /** Head commit the refusal record is keyed by. Never an input to the decision. */
         headSha?: string | null;
@@ -2457,7 +2472,7 @@ export class TaskWorkspaceService {
                     // head commit. An asker that could assert its own
                     // approval would not be a gate.
                     taskId: task.id,
-                    targetBranch: baseRef,
+                    targetBranch: args.plannedTargetBranch ?? null,
                     // Release promotion lane (slice AI): a caller-side
                     // RAISE only. The facade ORs it with the resolved
                     // policy, so this can never clear an approval
@@ -2745,7 +2760,24 @@ export class TaskWorkspaceService {
                 // worker only reaches finalize on a passing/off/warn gate);
                 // it exists so a red gate can never be smuggled into the
                 // review column through this path either.
-                await this.transitions.transition(fresh, to, { actorType: 'agent' });
+                if (
+                    (fresh.status === TaskStatus.BACKLOG || fresh.status === TaskStatus.TODO) &&
+                    !TASK_STATUS_TRANSITIONS[fresh.status]?.includes(to) &&
+                    typeof this.transitions.transitionSync === 'function'
+                ) {
+                    // Live e2e 2026-10-18 (T-40): a Task started through `runTask` (the
+                    // board's Run, an App change request, a provisioning Task) is never
+                    // moved out of `backlog`/`todo` by the dispatch, so its finalize
+                    // could not reach `in_review` (or `blocked`) — the direct move is
+                    // illegal and was only logged. Walk the shortest legal path instead
+                    // (`backlog → todo → in_progress → in_review`), every hop with its
+                    // own gates and WITHOUT a second agent dispatch. Only from the two
+                    // not-started columns: a Task a person already closed is not
+                    // re-opened by a late finalize.
+                    await this.transitions.transitionSync(fresh, to, { actorType: 'agent' });
+                } else {
+                    await this.transitions.transition(fresh, to, { actorType: 'agent' });
+                }
             }
         } catch (error) {
             this.logger.warn(

@@ -1,6 +1,7 @@
 import { randomBytes } from 'crypto';
 import {
     BadRequestException,
+    ForbiddenException,
     Inject,
     Injectable,
     Logger,
@@ -10,6 +11,11 @@ import {
 import type { IPlugin } from '@ever-works/plugin';
 import {
     activeFleetNodeModelThrottles,
+    diffControlPolicyFamilies,
+    effectiveControlPolicy,
+    FLEET_ACTION_FAMILIES,
+    isFleetAudience,
+    normalizeControlPolicyFamilies,
     FLEET_DEFAULT_ENROLLMENT_TOKEN_TTL_MS,
     FLEET_DEFAULT_MAX_CAPABILITY_TAG_LENGTH,
     FLEET_DEFAULT_MAX_CAPABILITY_TAGS,
@@ -32,15 +38,25 @@ import {
     FLEET_MAX_WORKER_STATE_REASON_LENGTH,
     FLEET_MAX_WORKSPACE_COUNT,
     FLEET_MIN_NODE_NAME_LENGTH,
+    diskLowSeverity,
+    fleetNodeDiskLowInput,
+    hasFleetNodeHealthReading,
+    fleetConsentsDiffer,
     isFleetNodeVersionBelowFloor,
+    normalizeFleetConsents,
     normalizeFleetNodeWorkerState,
+    sanitizeFleetNodeHealthSnapshot,
 } from '@ever-works/contracts';
 import type {
     FleetAuditAction,
+    FleetNodeHealthStored,
+    FleetConsents,
+    FleetControlPolicyFamiliesInput,
     FleetNodeLimitCeiling,
     FleetNodeView,
     FleetNodeLoadView,
     FleetNodeWorkerState,
+    FleetViewerRole,
 } from '@ever-works/contracts';
 import { config } from '../config';
 import { INBOX_PRODUCER, type InboxProducer } from '../inbox/inbox-producer.port';
@@ -56,6 +72,8 @@ import { pluginLoadFailure } from '../plugins/services/plugin-operation.util';
 import { redactSecrets } from '../utils/secret-scan';
 import { FleetNodeRepository } from './fleet-node.repository';
 import { FleetAuditService } from './fleet-audit.service';
+import { FleetNodeHealthService } from './fleet-node-health.service';
+import { FleetAccessService, fleetOwnerOnlyBody } from './fleet-access.service';
 import { normalizeDailyCeilingCents } from './fleet-cost-ceiling.shared';
 import {
     CREDENTIAL_MAX_LENGTH,
@@ -215,6 +233,22 @@ export interface EnrollInput {
     maxConcurrentJobs?: number;
     maxCpuPercent?: number | null;
     maxMemoryMb?: number | null;
+    /**
+     * Computer health (FL-03) — the beat's health snapshot. UNTRUSTED: the
+     * DTO admits any object so a value this build rejects can never fail the
+     * beat; {@link sanitizeFleetNodeHealthSnapshot} keeps only known fields
+     * within their bounds. Same additive contract as {@link cliVersion}: an
+     * absent or unusable snapshot leaves the stored one alone.
+     */
+    health?: unknown;
+    /**
+     * Fleet node link (FL-02, CONTRACTS §1.1) — the four consents the node
+     * was started with. An untrusted value off the wire: normalized here
+     * (only a literal `true` grants), and absent leaves the stored set alone
+     * like every other telemetry field — a daemon older than the field never
+     * blanks it.
+     */
+    consents?: unknown;
 }
 
 /** The enroll patch, widened with the telemetry columns a fresh row is stamped with. */
@@ -241,6 +275,14 @@ export interface FleetHeartbeatResult {
      * all-null when none is set, so lifting one reaches the machine too.
      */
     limitCeiling: FleetNodeLimitCeiling;
+    /**
+     * Fleet node link (FL-02) — the consents THIS beat reported (normalized),
+     * or null when it carried none. What the link registry compares against
+     * the open channels: a consent withdrawn closes its families' channels.
+     */
+    consents: FleetConsents | null;
+    /** Fleet node link (FL-02, CONTRACTS §1.1) — `FLEET_RECOMMENDED_NODE_VERSION`, or null when unset. */
+    recommendedNodeVersion: string | null;
 }
 
 export interface EnrollResult {
@@ -277,6 +319,35 @@ export interface FleetNodeAuditContext {
     details?: Record<string, unknown>;
     /** True when the caller records the richer row itself. */
     suppress?: boolean;
+}
+
+/**
+ * Fleet hub (FL-01, FR-22) — who a `machines`-family act (rename, pause /
+ * resume, disable / enable, drain / return, remove) runs as; see
+ * {@link FleetService.resolveMachinesActor}.
+ */
+export interface FleetMachinesActor {
+    /** The Node's owner: the registry row the act changes is theirs. */
+    ownerUserId: string;
+    /** The caller's role on the Node (never `stranger`: a stranger got a 404). */
+    role: FleetViewerRole;
+    /** The Node's name, for a refusal that names it. */
+    nodeName: string;
+    /**
+     * The audit context to hand the act. Empty for the owner (their rows stay
+     * exactly what they were); for anyone else it names the caller as the
+     * actor, with the family and role they acted through.
+     */
+    ctx: FleetNodeAuditContext;
+}
+
+/** Fleet hub (FL-01) — the optional typed-name confirmation of a remove (CONTRACTS §2.2). */
+export interface FleetRemoveConfirmation {
+    /**
+     * The computer's name as the person typed it. Checked only when sent: a
+     * remove without it works exactly as it always has (existing callers).
+     */
+    confirmName?: unknown;
 }
 
 /**
@@ -343,6 +414,14 @@ export class FleetService {
         // anywhere but last, or made required, would break them — and an
         // audit trail is not worth making the registry unbootable for.
         @Optional() private readonly audit?: FleetAuditService,
+        // Fleet hub (FL-01) — role derivation for the hub's widened reads and
+        // the owner-only acts. APPENDED and @Optional() for the same reason as
+        // `audit`: unbound, every read stays owner-scoped exactly as before.
+        @Optional() private readonly access?: FleetAccessService,
+        // Computer health (FL-03) — the history writer. APPENDED and
+        // @Optional() for the same positional-construction reason: without
+        // it the snapshot is still stored on the row; only history is off.
+        @Optional() private readonly healthHistory?: FleetNodeHealthService,
     ) {}
 
     /** Issue a one-time enrollment token for a new node (owner-scoped). */
@@ -480,9 +559,22 @@ export class FleetService {
             lastReclaimAt: sanitizeReportedInstant(input.lastReclaimAt, now),
             lastReclaimFreedBytes: sanitizeByteCount(input.lastReclaimFreedBytes),
         } as ConsumeEnrollmentPatchWithTelemetry;
+        // Computer health (FL-03). A node never sends a snapshot at enrol
+        // (enrolment has no strip-and-retry fallback), but the DTO is shared
+        // with the heartbeat, so one that arrives is stored the same way. The
+        // first sample of the history is the first BEAT's, not this.
+        const enrolledHealth = buildStoredHealth(input.health, now, null, {
+            diskFreeBytes: patch.diskFreeBytes ?? null,
+            minFreeDiskBytes: patch.minFreeDiskBytes ?? null,
+        });
+        if (enrolledHealth) patch.health = enrolledHealth;
         // Remote node limits (slice AS) — the same keyed set as a beat; a
         // fresh row starts from whatever the machine said (usually nothing).
         applyReportedLimits(input, patch);
+        // Fleet node link (FL-02): an enrolling node's consents, when it sent any
+        // (the first heartbeat reports them in any case).
+        const enrollConsents = normalizeFleetConsents(input.consents);
+        if (enrollConsents) patch.consents = enrollConsents;
         // CAS: single-use by construction — a raced duplicate enroll
         // matches zero rows and gets the same null as a bad token.
         const consumed = await this.repository.consumeEnrollment(node.id, tokenHash, patch);
@@ -596,6 +688,38 @@ export class FleetService {
         this.applyHousekeeping(refresh, patch);
         // Remote node limits (slice AS): what the worker reports enforcing.
         applyReportedLimits(refresh, patch);
+        // Computer health (FL-03): the snapshot, stamped with THIS beat's
+        // receipt time (never the machine's clock, U12), replacing the stored
+        // one whole — a fact a probe missed this beat reads "—", not last
+        // minute's value. Absent or unusable leaves the stored one alone, as
+        // every telemetry field above does. Built after the housekeeping so
+        // the disk-low marker judges this beat's floor.
+        const receivedAt = patch.lastHeartbeatAt as Date;
+        const sampleThisBeat = this.healthHistory?.shouldSample(node.health, receivedAt) === true;
+        const beatDisk = {
+            diskFreeBytes:
+                patch.diskFreeBytes !== undefined ? patch.diskFreeBytes : node.diskFreeBytes,
+            minFreeDiskBytes:
+                'minFreeDiskBytes' in patch ? patch.minFreeDiskBytes : node.minFreeDiskBytes,
+        };
+        const health = buildStoredHealth(
+            refresh.health,
+            receivedAt,
+            node.health ?? null,
+            beatDisk,
+            sampleThisBeat,
+        );
+        if (health) {
+            patch.health = health;
+        } else {
+            // A daemon older than the snapshot still reports free disk and its
+            // floor: keep the platform's disk-low marker for it, so its
+            // `disk-low` item has one stable `since` too (FR-17).
+            const marker = buildDiskLowMarker(receivedAt, node.health ?? null, beatDisk);
+            if (marker !== undefined) patch.health = marker;
+        }
+        // Fleet node link (FL-02): the consents, stored only when they changed.
+        const consentChange = applyReportedConsents(node, refresh, patch);
         // Re-arm the offline notice markers on EVERY accepted beat, not
         // only on beats that happened to report a worker state. The beat
         // itself is the proof the machine is reachable, and the daemons
@@ -608,12 +732,38 @@ export class FleetService {
         // SECOND outage would never have been announced.
         this.rearmOfflineNotices(node, patch);
         await this.repository.update(node.id, patch);
+        // Computer health (FL-03) — the history sample, AFTER the write so a
+        // sample never exists for a beat the database refused, and
+        // fire-and-forget so it can never slow or fail this beat (U11).
+        if (health && sampleThisBeat) {
+            try {
+                this.healthHistory?.record(node.id, receivedAt, health);
+            } catch {
+                // `record` swallows its own failures; this is the belt for a
+                // history bug — the beat is the node's liveness, never history's.
+            }
+        }
         // Best-effort and AFTER the write, so a notice never claims a
         // transition the database refused. The dedup markers ride in the
         // same patch, which is what makes each notice fire once: if the
         // Inbox call then fails we log it rather than re-arming, exactly
         // as the daily-ceiling notice does.
         await this.announceWorkerTransition(node, patch, workerState);
+        // Fleet node link (FL-02, CONTRACTS §7): a consent set that CHANGED
+        // between two beats (a restart with different flags) is one row,
+        // with both sets. The first report of a daemon is not a change, and
+        // an unchanged beat writes nothing — one row per node per minute is
+        // the firehose the header above refuses.
+        if (consentChange?.before) {
+            await this.tryAuditNode({
+                action: 'node.consent.change',
+                actorUserId: null,
+                ownerUserId: node.userId,
+                nodeId: node.id,
+                before: { ...consentChange.before },
+                after: { ...consentChange.after },
+            });
+        }
         const view = this.toView({ ...node, ...patch });
         return {
             node: view,
@@ -627,6 +777,8 @@ export class FleetService {
             // Remote node limits (slice AS) — read off the ROW: a beat never
             // writes the ceiling, only the owner does.
             limitCeiling: toLimitCeiling(node),
+            consents: normalizeFleetConsents(refresh.consents),
+            recommendedNodeVersion: config.fleet.getRecommendedNodeVersion(),
         };
     }
 
@@ -994,6 +1146,172 @@ export class FleetService {
      */
     async getForUser(userId: string, nodeId: string): Promise<FleetNodeView> {
         return this.toView(await this.getOwnedNode(userId, nodeId));
+    }
+
+    /**
+     * Fleet hub (FL-01) — every Node the caller may SEE (`GET
+     * /api/fleet/nodes?scope=visible`): their own (exactly {@link listForUser},
+     * offline sweep and cluster merge included) followed by the Nodes other
+     * people own that are bound to an Organization where the caller derives a
+     * role admitted by the Node's `view` audience. Every row carries
+     * `viewerRole`.
+     *
+     * The owner-only {@link listForUser} is unchanged and is still what the
+     * runner pill, the panic controls, Settings → Fleet and the lease path
+     * read: a shared Node is never counted as the caller's runner.
+     */
+    async listVisibleForUser(
+        userId: string,
+        options: { includeClusters?: boolean } = {},
+    ): Promise<FleetNodeView[]> {
+        // `includeClusters: false` (the needs-a-look read) skips the live
+        // cluster merge, which talks to the user's Kubernetes API and whose rows
+        // no producer reads — the same reason the pill reads `listEnrolledForUser`.
+        const ownRows =
+            options.includeClusters === false
+                ? await this.listEnrolledForUser(userId)
+                : await this.listForUser(userId);
+        const own = ownRows.map((view) => ({
+            ...view,
+            viewerRole: 'owner' as const,
+        }));
+        if (!this.access) return own;
+        const shared = await this.access.listSharedWith(userId);
+        if (shared.length === 0) return own;
+        const cutoff = new Date(Date.now() - config.fleet.getNodeOfflineAfterMs());
+        return [
+            ...own,
+            ...shared.map(({ node, role }) => toSharedView(this.toView(node), node, role, cutoff)),
+        ];
+    }
+
+    /**
+     * Fleet hub (FL-01) — one Node the caller may see, with their role on it.
+     * A Node outside the caller's `view` audience answers the same 404 as an
+     * unknown id (FR-30). Without the access service this is exactly
+     * {@link getForUser} (owner-only).
+     */
+    async getVisibleForUser(
+        userId: string,
+        nodeId: string,
+    ): Promise<{ view: FleetNodeView; role: FleetViewerRole }> {
+        if (!this.access) {
+            return {
+                view: { ...(await this.getForUser(userId, nodeId)), viewerRole: 'owner' },
+                role: 'owner',
+            };
+        }
+        const { node, role } = await this.access.resolveVisible(nodeId, userId);
+        if (role === 'owner') return { view: { ...this.toView(node), viewerRole: 'owner' }, role };
+        const cutoff = new Date(Date.now() - config.fleet.getNodeOfflineAfterMs());
+        return { view: toSharedView(this.toView(node), node, role, cutoff), role };
+    }
+
+    /**
+     * Fleet hub (FL-01) — star or unstar a Node. The owner's mark alone
+     * (spec §7: owner only, `plain`, not audited — a personal preference,
+     * not a machine act): someone who may see the Node but does not own it
+     * gets `permission_denied`; anyone else the 404 of an unknown id.
+     * Last write wins (spec U12).
+     */
+    async setFavoriteForUser(
+        userId: string,
+        nodeId: string,
+        isFavorite: boolean,
+    ): Promise<FleetNodeView> {
+        if (typeof isFavorite !== 'boolean') {
+            throw new BadRequestException('isFavorite must be true or false');
+        }
+        const node = await this.getOwnedNodeForOwnerAct(userId, nodeId, 'view');
+        if (Boolean(node.isFavorite) !== isFavorite) {
+            await this.repository.update(node.id, { isFavorite });
+        }
+        return this.toView({ ...node, isFavorite } as FleetNode);
+    }
+
+    /**
+     * Fleet hub (FL-01) — change who may act in one or more action families
+     * (CONTRACTS §2.1). Owner only. `families` is a PARTIAL map: families it
+     * names change, the rest keep what they had.
+     *
+     * The legacy `controlPolicy` column is the `desktop` family's mirror:
+     * whenever this write names `desktop`, the column is written in the same
+     * UPDATE, so AW-11's take-over (which reads the column) and the map can
+     * never disagree. One `node.policy.change` audit row per family whose
+     * audience actually changed, details `{ family, from, to }` plus the
+     * CONTRACTS §2.3 fields; a write that changes nothing writes nothing.
+     */
+    async setControlPolicyFamiliesForUser(
+        userId: string,
+        nodeId: string,
+        families: unknown,
+        ctx: FleetNodeAuditContext = {},
+    ): Promise<FleetNodeView> {
+        const input = parseControlPolicyFamiliesInput(families);
+        const node = await this.getOwnedNodeForOwnerAct(userId, nodeId, 'view');
+        const stored = normalizeControlPolicyFamilies(node.controlPolicyFamilies) ?? {};
+        const merged: FleetControlPolicyFamiliesInput = { ...stored, ...input };
+        const before = effectiveControlPolicy(node);
+        const patch: Partial<FleetNode> = { controlPolicyFamilies: merged };
+        if (input.desktop) patch.controlPolicy = input.desktop;
+        const after = effectiveControlPolicy({ ...node, ...patch });
+        const changes = diffControlPolicyFamilies(before, after);
+        if (changes.length === 0) return this.toView(node);
+
+        await this.repository.update(node.id, patch);
+        const actor = ctx.actorUserId === undefined ? userId : ctx.actorUserId;
+        for (const change of changes) {
+            await this.auditLifecycle('node.policy.change', userId, node, ctx, {
+                before: { audience: change.from },
+                after: { audience: change.to },
+                extra: {
+                    family: change.family,
+                    from: change.from,
+                    to: change.to,
+                    target: change.family,
+                    requestedBy: actor ? `user:${actor}` : 'system:fleet',
+                    confirmationClass: 'plain',
+                    outcome: 'success',
+                },
+            });
+        }
+        return this.toView({ ...node, ...patch } as FleetNode);
+    }
+
+    /**
+     * Fleet hub (FL-01, FR-22, ACC-FL01-16) — who a `machines`-family act
+     * (rename, pause / resume, disable / enable, drain / return, remove) runs
+     * as, answered server-side before the act.
+     *
+     * The owner acts as themselves, exactly as before. Someone else whose role
+     * the Node's `machines` audience admits acts on the OWNER's registry row
+     * (`ownerUserId`), with themselves recorded as the actor. Outside `view`:
+     * the 404 of an unknown id; inside `view` but outside `machines`:
+     * `permission_denied` naming the Lifecycle family. Without the access
+     * service this is the owner-only lookup the acts always made.
+     */
+    async resolveMachinesActor(callerId: string, nodeId: string): Promise<FleetMachinesActor> {
+        if (!this.access) {
+            const node = await this.getOwnedNode(callerId, nodeId);
+            return { ownerUserId: callerId, role: 'owner', nodeName: node.name, ctx: {} };
+        }
+        const { node, role } = await this.access.resolveForFamily(nodeId, callerId, 'machines');
+        if (role === 'owner') {
+            return { ownerUserId: node.userId, role, nodeName: node.name, ctx: {} };
+        }
+        return {
+            ownerUserId: node.userId,
+            role,
+            nodeName: node.name,
+            ctx: {
+                actorUserId: callerId,
+                details: {
+                    family: 'machines',
+                    viewerRole: role,
+                    requestedBy: `user:${callerId}`,
+                },
+            },
+        };
     }
 
     /**
@@ -1475,13 +1793,29 @@ export class FleetService {
         return true;
     }
 
-    /** Delete a node registration (owner-scoped, no existence leak). */
+    /**
+     * Delete a node registration (owner-scoped, no existence leak).
+     *
+     * Fleet hub (FL-01, CONTRACTS §2.2): `confirmation.confirmName` is the
+     * `confirm-destructive` field — when sent, it must be the computer's name
+     * or nothing is deleted (400 `invalid`). It is checked only AFTER the Node
+     * resolved, so a wrong name never tells anyone a Node exists. Without it
+     * the delete works exactly as it always has.
+     */
     async deleteForUser(
         userId: string,
         nodeId: string,
         ctx: FleetNodeAuditContext = {},
+        confirmation: FleetRemoveConfirmation = {},
     ): Promise<void> {
         const node = await this.getOwnedNode(userId, nodeId);
+        if (confirmation.confirmName !== undefined) {
+            assertConfirmName(node, confirmation.confirmName);
+            ctx = {
+                ...ctx,
+                details: { ...(ctx.details ?? {}), confirmationClass: 'confirm-destructive' },
+            };
+        }
         await this.repository.delete(node.id);
         await this.auditLifecycle('node.delete', userId, node, ctx, {
             before: { status: node.status, name: node.name, kind: node.kind },
@@ -1591,6 +1925,25 @@ export class FleetService {
             );
             return false;
         }
+    }
+
+    /**
+     * The Node, when the caller OWNS it; an owner-only act refused otherwise.
+     * Someone who may see the Node (`gate` family) is told "only the owner"
+     * (`permission_denied`); anyone else gets the 404 of an unknown id. Without
+     * the access service this is exactly {@link getOwnedNode}.
+     */
+    private async getOwnedNodeForOwnerAct(
+        userId: string,
+        nodeId: string,
+        gate: 'view',
+    ): Promise<FleetNode> {
+        if (!this.access) return this.getOwnedNode(userId, nodeId);
+        const { node, role } = await this.access.resolveForFamily(nodeId, userId, gate);
+        if (role !== 'owner') {
+            throw new ForbiddenException(fleetOwnerOnlyBody(node));
+        }
+        return node;
     }
 
     private async getOwnedNode(userId: string, nodeId: string): Promise<FleetNode> {
@@ -1758,8 +2111,280 @@ export class FleetService {
             recordWatchSessions: Boolean(node.recordWatchSessions),
             recordingRetentionDays: toOptionalNumber(node.recordingRetentionDays) ?? 14,
             controlHolder: toControlHolder(node),
+            // Computer health (FL-03): the latest snapshot off the row — one
+            // read per computer, never a join to the history.
+            health: toStoredHealthView(node.health),
+            // Fleet hub (FL-01): the owner's star and the policy in force,
+            // every family filled in (the legacy column read through as
+            // `desktop` when the map has no entry for it).
+            isFavorite: Boolean(node.isFavorite),
+            controlPolicyFamilies: effectiveControlPolicy(node),
+            // Fleet node link (FL-02). Null = never reported — read it through
+            // `effectiveConsents`, never as "nothing allowed".
+            consents: normalizeFleetConsents(node.consents),
+            previewProfileEnabled: Boolean(node.previewProfileEnabled),
         };
     }
+}
+
+/**
+ * Computer health (FL-03) — the snapshot a beat carried, as the row stores
+ * it: sanitised (only known fields, each within bounds — nothing the node did
+ * not send, FR-4), stamped with the platform's receipt time, carrying the two
+ * platform markers forward:
+ *
+ *   - `diskLowSince` — kept from the previous snapshot while the disk stays
+ *     low, set to this beat when it turns low, dropped when it recovers, so
+ *     the `disk-low` item keeps one `since` for its whole duration (FR-17);
+ *   - `sampledAt` — this beat when it is written to the history, else the
+ *     previous marker, so the 55 s floor holds across replicas (FR-18).
+ *
+ * Null when the beat carried nothing usable: the caller leaves the stored
+ * snapshot alone.
+ */
+export function buildStoredHealth(
+    raw: unknown,
+    receivedAt: Date,
+    previous: FleetNodeHealthStored | null,
+    disk: {
+        diskFreeBytes: string | number | null | undefined;
+        minFreeDiskBytes: string | number | null | undefined;
+    },
+    sampled = false,
+): FleetNodeHealthStored | null {
+    const snapshot = sanitizeFleetNodeHealthSnapshot(raw);
+    if (!snapshot) return null;
+    const at = receivedAt.toISOString();
+    const stored: FleetNodeHealthStored = { ...snapshot, at };
+    const low = diskLowSeverity(
+        fleetNodeDiskLowInput({
+            diskFreeBytes: toOptionalNumber(disk.diskFreeBytes),
+            minFreeDiskBytes: toOptionalNumber(disk.minFreeDiskBytes),
+            health: snapshot,
+        }),
+    );
+    if (low) stored.diskLowSince = previous?.diskLowSince ?? at;
+    if (sampled) {
+        stored.sampledAt = at;
+    } else if (previous?.sampledAt) {
+        stored.sampledAt = previous.sampledAt;
+    }
+    return stored;
+}
+
+/**
+ * Computer health (FL-03) — the disk-low marker for a beat that carried no
+ * usable snapshot, judged by the floor rule alone (the percentage rule needs
+ * the snapshot's volume size):
+ *
+ *   - a row holding a real reading is left alone (`undefined`): its snapshot
+ *     already carries the marker, and a beat that missed it changes nothing,
+ *     as every telemetry field does;
+ *   - disk low → `{ at, diskLowSince }`, `diskLowSince` carried from the
+ *     previous marker, so the `disk-low` item keeps its first instant;
+ *   - disk fine → `null` when a marker was stored (clear it), else
+ *     `undefined` (nothing to write).
+ *
+ * The value is a marker, not a reading: {@link hasFleetNodeHealthReading} is
+ * false for it, so no surface shows it as metrics, and nothing is sampled.
+ */
+export function buildDiskLowMarker(
+    receivedAt: Date,
+    previous: FleetNodeHealthStored | null,
+    disk: {
+        diskFreeBytes: string | number | null | undefined;
+        minFreeDiskBytes: string | number | null | undefined;
+    },
+): FleetNodeHealthStored | null | undefined {
+    if (hasFleetNodeHealthReading(previous)) return undefined;
+    const low = diskLowSeverity(
+        fleetNodeDiskLowInput({
+            diskFreeBytes: toOptionalNumber(disk.diskFreeBytes),
+            minFreeDiskBytes: toOptionalNumber(disk.minFreeDiskBytes),
+            health: null,
+        }),
+    );
+    if (!low) return previous ? null : undefined;
+    const at = receivedAt.toISOString();
+    return { at, diskLowSince: previous?.diskLowSince ?? at };
+}
+
+/** The stored snapshot as the view serves it, or null when the row holds none (or junk). */
+function toStoredHealthView(value: unknown): FleetNodeHealthStored | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const stored = value as FleetNodeHealthStored;
+    return typeof stored.at === 'string' && stored.at.length > 0 ? stored : null;
+}
+
+/**
+ * Fleet node link (FL-02) — fold a beat's consents into the patch.
+ *
+ * Absent (or not an object) leaves the stored set alone, the additive
+ * contract every telemetry field follows. A set is written only when it
+ * differs from the stored one, and the change is returned so the caller can
+ * audit it: `before` is null on a daemon's first report, which is not a
+ * change.
+ */
+function applyReportedConsents(
+    node: FleetNode,
+    refresh: EnrollInput,
+    patch: Partial<FleetNode>,
+): { before: FleetConsents | null; after: FleetConsents } | null {
+    const after = normalizeFleetConsents(refresh.consents);
+    if (after === null) return null;
+    const before = normalizeFleetConsents(node.consents);
+    if (!fleetConsentsDiffer(before, after)) return null;
+    patch.consents = after;
+    return { before, after };
+}
+
+/**
+ * Fleet hub (FL-01) — the view of a Node someone else owns, as an
+ * Organization member sees it (`view` grants listing only).
+ *
+ * An ALLOW-LIST, not a deny-list: only what the hub needs to list a computer
+ * and say its state in words is copied from the owner-shaped view; every
+ * other field is absent, or null where the wire type requires it. So a field
+ * added to `FleetNodeView` later is NOT shared until someone decides it
+ * should be. Withheld in particular: who holds control, the cost and limit
+ * ceilings, the recording settings, pending rotation, the housekeeping
+ * counters, the account the machine's CLI is signed in as, and the
+ * free-text reasons a node reports (quarantine reason, throttle reason).
+ *
+ * `viewerRole` is stamped and `isFavorite` is false (the star is the
+ * owner's). The status is judged at READ time: the offline sweep only runs on
+ * the owner's own reads, so a row still marked `online` whose last heartbeat
+ * is older than the offline window is SHOWN as `offline` (nothing is written
+ * — the owner's next read sweeps it for real).
+ *
+ * Takes the owner-shaped `view` (`toView`) so there is ONE entity → wire
+ * mapping; this only narrows it.
+ */
+function toSharedView(
+    view: FleetNodeView,
+    node: FleetNode,
+    role: FleetViewerRole,
+    offlineCutoff: Date,
+): FleetNodeView {
+    const lastBeat = node.lastHeartbeatAt ? new Date(node.lastHeartbeatAt).getTime() : NaN;
+    const stale =
+        view.status === 'online' &&
+        (!Number.isFinite(lastBeat) || lastBeat < offlineCutoff.getTime());
+    return {
+        id: view.id,
+        name: view.name,
+        kind: view.kind,
+        status: stale ? 'offline' : view.status,
+        platform: view.platform,
+        version: view.version,
+        capabilities: view.capabilities,
+        lastHeartbeatAt: view.lastHeartbeatAt,
+        createdAt: view.createdAt,
+        persisted: view.persisted,
+        cliVersion: view.cliVersion ?? null,
+        upgradeRequired: view.upgradeRequired,
+        diskFreeBytes: view.diskFreeBytes ?? null,
+        workerState: view.workerState ?? null,
+        workerStateChangedAt: view.workerStateChangedAt ?? null,
+        // The CLI and window that are out of quota say "throttled" in words;
+        // the node's own sentence about it stays the owner's.
+        modelThrottles: (view.modelThrottles ?? []).map((throttle) => ({
+            ...throttle,
+            reason: '',
+        })),
+        controlPolicy: view.controlPolicy,
+        controlPolicyFamilies: view.controlPolicyFamilies,
+        viewerRole: role,
+        isFavorite: false,
+        hostNodeId: view.hostNodeId ?? null,
+        virtualKind: view.virtualKind ?? null,
+        // Computer health (FL-03) — DECIDED shared: reading health is the `view`
+        // family (FL-03 spec §7, "Read health / history: view / org-members").
+        // The stored snapshot carries numbers, booleans, a failed-service COUNT
+        // and bounded GPU model names — no free text the node wrote, no path,
+        // no unit name. The disk floor and the resource ceilings stay withheld,
+        // so a shared reader's "disk low" is the percentage rule only.
+        health: view.health ?? null,
+    };
+}
+
+/** The fields a shared view carries (`toSharedView`) — pinned by the spec so a new one is a decision. */
+export const FLEET_SHARED_VIEW_FIELDS: readonly (keyof FleetNodeView)[] = [
+    'id',
+    'name',
+    'kind',
+    'status',
+    'platform',
+    'version',
+    'capabilities',
+    'lastHeartbeatAt',
+    'createdAt',
+    'persisted',
+    'cliVersion',
+    'upgradeRequired',
+    'diskFreeBytes',
+    'workerState',
+    'workerStateChangedAt',
+    'modelThrottles',
+    'controlPolicy',
+    'controlPolicyFamilies',
+    'viewerRole',
+    'isFavorite',
+    'hostNodeId',
+    'virtualKind',
+    'health',
+];
+
+/**
+ * Validate a family-map write: an object whose keys are families and whose
+ * values are audiences. Anything else is the caller's mistake (`invalid`),
+ * not something to drop silently — the owner asked for a change and must be
+ * told it was not made.
+ */
+function parseControlPolicyFamiliesInput(value: unknown): FleetControlPolicyFamiliesInput {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw invalidPolicy('controlPolicyFamilies must be a map of family → audience');
+    }
+    const out: FleetControlPolicyFamiliesInput = {};
+    for (const [family, audience] of Object.entries(value as Record<string, unknown>)) {
+        if (!(FLEET_ACTION_FAMILIES as readonly string[]).includes(family)) {
+            throw invalidPolicy(`Unknown action family: ${family}`);
+        }
+        if (!isFleetAudience(audience)) {
+            throw invalidPolicy(
+                `Audience for ${family} must be one of: owner, org-admins, org-members`,
+            );
+        }
+        out[family as keyof FleetControlPolicyFamiliesInput] = audience;
+    }
+    if (Object.keys(out).length === 0) {
+        throw invalidPolicy('controlPolicyFamilies must name at least one family');
+    }
+    return out;
+}
+
+/** A 400 in CONTRACTS §8's envelope (`invalid`, the hint naming the field), with `message` for existing clients. */
+function invalidPolicy(hint: string): BadRequestException {
+    return new BadRequestException({
+        statusCode: 400,
+        message: hint,
+        error: { code: 'invalid', hint, details: { field: 'controlPolicyFamilies' } },
+    });
+}
+
+/**
+ * Fleet hub (FL-01) — the `confirm-destructive` check of a remove: the typed
+ * name must be the computer's name (surrounding whitespace aside; case
+ * counts). A 400 in CONTRACTS §8's envelope otherwise.
+ */
+function assertConfirmName(node: Pick<FleetNode, 'name'>, confirmName: unknown): void {
+    if (typeof confirmName === 'string' && confirmName.trim() === node.name) return;
+    const hint = `Type ${node.name} exactly to remove it from Fleet.`;
+    throw new BadRequestException({
+        statusCode: 400,
+        message: hint,
+        error: { code: 'invalid', hint, details: { field: 'confirmName' } },
+    });
 }
 
 /**

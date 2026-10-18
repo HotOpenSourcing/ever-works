@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { ROUTES } from '@/lib/constants';
 import { getAuthFromCookie } from '@/lib/auth';
 import { ApiResponseError } from '@/lib/api/server-api';
-import type { FleetNodeLimitCeiling } from '@ever-works/contracts';
+import type { FleetControlPolicyFamiliesInput, FleetNodeLimitCeiling } from '@ever-works/contracts';
 import {
     fleetAPI,
     type CancelFleetInFlightPayload,
@@ -22,6 +22,7 @@ import {
     type FleetNodeDrainResult,
     type FleetExecutionPreferenceView,
     type FleetExecutionScopeType,
+    type FleetNeedsALookResult,
     type FleetNodeView,
     type FleetRunnerStatusView,
     type SetFleetExecutionPreferencePayload,
@@ -41,6 +42,13 @@ import {
  */
 
 const SETTINGS_PAGE_PATTERN = '/[locale]/(dashboard)/settings/fleet';
+
+/**
+ * Fleet hub (FL-01) — every `/fleet/*` page, revalidated as a LAYOUT so the
+ * Overview, the Computers tab and each computer page re-read together after a
+ * registry act (a star, a rename, a policy change).
+ */
+const HUB_LAYOUT_PATTERN = '/[locale]/(dashboard)/fleet';
 
 /**
  * The Agent's Capabilities tab, where the preferred-node picker lives.
@@ -96,6 +104,8 @@ export async function updateFleetNodeAction(
     try {
         const data = await fleetAPI.updateNode(nodeId, payload);
         revalidatePath(SETTINGS_PAGE_PATTERN, 'page');
+        // Fleet hub (FL-01): the ⋯ menu renames / pauses from the hub.
+        revalidatePath(HUB_LAYOUT_PATTERN, 'layout');
         return { success: true, data, error: null };
     } catch (error) {
         return {
@@ -150,10 +160,15 @@ export async function clearFleetNodeModelThrottleAction(
 
 export async function deleteFleetNodeAction(
     nodeId: string,
+    /** Fleet hub (FL-01): the typed name the ⋯ menu's Remove sends (CONTRACTS §2.2). */
+    confirmName?: string,
 ): Promise<FleetActionResult<{ deleted: true }>> {
     await ensureAuth();
     try {
-        await fleetAPI.deleteNode(nodeId);
+        await fleetAPI.deleteNode(nodeId, confirmName === undefined ? undefined : { confirmName });
+        // Settings only: revalidating the hub here would re-render the computer
+        // page that just lost its computer (a 404) before the ⋯ menu navigates
+        // away; the Computers tab it lands on is read fresh.
         revalidatePath(SETTINGS_PAGE_PATTERN, 'page');
         return { success: true, data: { deleted: true }, error: null };
     } catch (error) {
@@ -247,6 +262,7 @@ export async function drainFleetNodeAction(
     try {
         const data = await fleetAPI.drainNode(nodeId, drain);
         revalidatePath(SETTINGS_PAGE_PATTERN, 'page');
+        revalidatePath(HUB_LAYOUT_PATTERN, 'layout');
         return { success: true, data, error: null };
     } catch (error) {
         return {
@@ -254,6 +270,37 @@ export async function drainFleetNodeAction(
             data: null,
             error: errorMessage(error, 'Failed to drain the node'),
         };
+    }
+}
+
+/**
+ * Fleet hub (FL-01, FR-23) — how many jobs a drain of this computer would
+ * release right now, for the drain confirmation ("2 jobs in flight will be
+ * released…"). From the owner's own node list (`load.activeJobCount`); null
+ * when it cannot be known — a computer shared with the caller carries no load,
+ * and a read that fails here is never shown as "no jobs". An owned computer
+ * with no load is idle (0). Known gap: when the list endpoint's OWN load
+ * lookup fails it already answers every row with "no load" (its documented
+ * degradation), which this cannot tell from idle — closing it needs the list
+ * to say "load unknown".
+ */
+export async function fetchFleetComputerInFlightAction(
+    nodeId: string,
+): Promise<FleetActionResult<number | null>> {
+    await ensureAuth();
+    try {
+        const nodes = await fleetAPI.listNodes();
+        const own = nodes.find((node) => node.id === nodeId && node.persisted);
+        // Not in the owner's own list (a computer shared with the caller): unknown.
+        if (!own) return { success: true, data: null, error: null };
+        // In the list without a load is idle (`FleetNodeView.load`: null/absent = idle).
+        return {
+            success: true,
+            data: typeof own.load?.activeJobCount === 'number' ? own.load.activeJobCount : 0,
+            error: null,
+        };
+    } catch {
+        return { success: true, data: null, error: null };
     }
 }
 
@@ -512,6 +559,101 @@ export async function clearFleetExecutionPreferenceAction(
             success: false,
             data: null,
             error: errorMessage(error, 'Failed to clear the execution preference'),
+        };
+    }
+}
+
+/**
+ * Fleet hub (FL-01) — what needs a look across every computer the caller
+ * may see, for the Overview's "Try again" (spec U11). A failure is returned,
+ * never thrown, so the cards below keep rendering.
+ */
+export async function fetchFleetNeedsALookAction(): Promise<
+    FleetActionResult<FleetNeedsALookResult>
+> {
+    await ensureAuth();
+    try {
+        const data = await fleetAPI.needsALook();
+        return { success: true, data, error: null };
+    } catch (error) {
+        return {
+            success: false,
+            data: null,
+            error: errorMessage(error, 'Could not load what needs a look'),
+        };
+    }
+}
+
+/** Fleet hub (FL-01) — what needs a look on ONE computer, for its page's Try again. */
+export async function fetchFleetNodeNeedsALookAction(
+    nodeId: string,
+): Promise<FleetActionResult<FleetNeedsALookResult>> {
+    await ensureAuth();
+    try {
+        const data = await fleetAPI.nodeNeedsALook(nodeId);
+        return { success: true, data, error: null };
+    } catch (error) {
+        return {
+            success: false,
+            data: null,
+            error: errorMessage(error, 'Could not load what needs a look'),
+        };
+    }
+}
+
+/** Fleet hub (FL-01) — every computer the caller may see (own + shared), for a client refresh. */
+export async function listVisibleFleetNodesAction(): Promise<FleetActionResult<FleetNodeView[]>> {
+    await ensureAuth();
+    try {
+        const data = await fleetAPI.listVisibleNodes();
+        return { success: true, data, error: null };
+    } catch (error) {
+        return {
+            success: false,
+            data: null,
+            error: errorMessage(error, 'Failed to load the computers'),
+        };
+    }
+}
+
+/** Fleet hub (FL-01) — star or unstar a computer (owner only; no confirmation, no audit row). */
+export async function setFleetNodeFavoriteAction(
+    nodeId: string,
+    isFavorite: boolean,
+): Promise<FleetActionResult<FleetNodeView>> {
+    await ensureAuth();
+    try {
+        const data = await fleetAPI.setFavorite(nodeId, isFavorite);
+        revalidatePath(HUB_LAYOUT_PATTERN, 'layout');
+        revalidatePath(SETTINGS_PAGE_PATTERN, 'page');
+        return { success: true, data, error: null };
+    } catch (error) {
+        return {
+            success: false,
+            data: null,
+            error: errorMessage(error, 'Failed to update the favourite'),
+        };
+    }
+}
+
+/**
+ * Fleet hub (FL-01) — change who may act in some action families on one
+ * computer (owner only; audited `node.policy.change` by the API).
+ */
+export async function setFleetNodePolicyFamiliesAction(
+    nodeId: string,
+    families: FleetControlPolicyFamiliesInput,
+): Promise<FleetActionResult<FleetNodeView>> {
+    await ensureAuth();
+    try {
+        const data = await fleetAPI.setPolicyFamilies(nodeId, families);
+        revalidatePath(HUB_LAYOUT_PATTERN, 'layout');
+        return { success: true, data, error: null };
+    } catch (error) {
+        return {
+            success: false,
+            data: null,
+            error: errorMessage(error, 'Failed to change who can do what'),
         };
     }
 }
