@@ -6,7 +6,7 @@ import {
     TENANT,
 } from '../../../domain-events/__tests__/domain-events.test-helpers';
 import { ExternalRecordLink } from '../../../entities/external-record-link.entity';
-import { Task, TaskStatus } from '../../../entities/task.entity';
+import { Task, TaskPriority, TaskStatus } from '../../../entities/task.entity';
 import { TaskRepository } from '../task.repository';
 
 describe('TaskRepository ownership scope', () => {
@@ -167,6 +167,19 @@ describe('TaskRepository.findFanoutCandidates — integration Tasks (SQLite)', (
 
         const ids = (await tasks.findFanoutCandidates(50)).map((task) => task.id);
         expect(ids).toEqual([human.id]);
+    });
+
+    // CodeRabbit on #2769: Tasks waiting for their owner are excluded IN the
+    // query, so they never use up the scan limit ahead of eligible ones.
+    it('never lets awaiting-owner Tasks use up the scan limit', async () => {
+        await dataSource.getRepository(Task).clear();
+        // Older and higher priority than the eligible Task: first in the order.
+        await makeTask({ priority: TaskPriority.P0, labels: ['inbound-email', 'awaiting-owner'] });
+        await makeTask({ priority: TaskPriority.P0, labels: ['awaiting-owner'] });
+        const eligible = await makeTask({ labels: ['inbound-email'] });
+
+        const ids = (await tasks.findFanoutCandidates(1)).map((task) => task.id);
+        expect(ids).toEqual([eligible.id]);
     });
 });
 
