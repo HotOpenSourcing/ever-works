@@ -210,7 +210,7 @@ PUT-set routes take an object (`{members:[…]}`, `{resources:[…]}`, `{assigne
 be `backlog` (default) or `todo`. A `PATCH /tasks/:id` that changes `title`, `description` or `workId` on a **recurring
 template** answers `422 domain_rule` (`details.reason: recurring_template`, works-security lane 3a): every fire dispatches
 that text to an agent with no person in between, so a person edits it in Ever Works. Acceptance checks (shell commands a fleet node runs) are never
-writable by an integration key (`POST /api/tasks` answers `422 domain_rule` for `acceptanceChecks`).
+writable by an integration key: `POST /tasks` here, and the app route `POST /api/tasks` an integration key with `tasks:write` can also reach, both answer `422 domain_rule` for `acceptanceChecks`.
 
 ### 6.1 Creating with an external reference
 
