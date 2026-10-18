@@ -55,7 +55,12 @@ const EVERY_ACTION: readonly FleetAuditAction[] = [
 	'computer.control-refused',
 	'computer.teach-start',
 	'computer.teach-finish',
-	'computer.profile-reset'
+	'computer.profile-reset',
+	// Fleet node link (FL-02, CONTRACTS §7).
+	'node.consent.change',
+	'node.link.connect',
+	'node.link.disconnect',
+	'node.link.channel-open'
 ];
 
 /** The `varchar(64)` the column actually is (`fleet-audit.entity.ts`). */
@@ -93,8 +98,11 @@ describe('FLEET_AUDIT_ACTIONS', () => {
 	it('uses lowercase kebab/dot names only', () => {
 		// One shape, so an operator filtering the log does not have to guess
 		// between `node.rotateSelf`, `node_rotate_self` and `node.rotate-self`.
+		// Up to three dotted segments after the subject: CONTRACTS §7 (Fleet
+		// program) names actions such as `node.consent.change` and
+		// `node.link.channel-open`; every segment is still lowercase kebab.
 		for (const action of FLEET_AUDIT_ACTIONS) {
-			expect(action).toMatch(/^[a-z]+(?:-[a-z]+)*(?:\.[a-z]+(?:-[a-z]+)*)?$/);
+			expect(action).toMatch(/^[a-z]+(?:-[a-z]+)*(?:\.[a-z]+(?:-[a-z]+)*){0,3}$/);
 		}
 	});
 

@@ -1,0 +1,51 @@
+/**
+ * Fleet — long operations on a node (FL-02, CONTRACTS §3.3, spec FR-17/18).
+ *
+ * A request the node cannot finish within {@link FLEET_LINK_INLINE_REPLY_MS}
+ * replies at once with an `operationId`, then reports `operation.progress`
+ * and `operation.done` on the link's channel 0. The platform keeps each
+ * operation readable at `GET /api/fleet/operations/:id` until
+ * {@link FLEET_OPERATION_RETENTION_MS} after it completes, and
+ * `DELETE /api/fleet/operations/:id` asks the node to cancel it. An
+ * operation is request state, not work: nothing about it survives the
+ * process that tracked it unless the relay bus carries it.
+ */
+
+import type { FleetLinkError, FleetLinkFamily, FleetLinkOperationProgressValue } from './fleet-link.types.js';
+
+export const FLEET_OPERATION_STATES = ['running', 'done', 'failed', 'cancelled'] as const;
+
+export type FleetOperationState = (typeof FLEET_OPERATION_STATES)[number];
+
+/** States an operation never leaves. */
+export const FLEET_OPERATION_TERMINAL_STATES: readonly FleetOperationState[] = ['done', 'failed', 'cancelled'];
+
+export function isFleetOperationTerminal(state: FleetOperationState): boolean {
+	return (FLEET_OPERATION_TERMINAL_STATES as readonly string[]).includes(state);
+}
+
+/** `GET /api/fleet/operations/:id`. */
+export interface FleetOperationView {
+	id: string;
+	nodeId: string;
+	family: FleetLinkFamily;
+	/** The request that started it (`docker.image.pull`, …). */
+	verb: string;
+	state: FleetOperationState;
+	progress: FleetLinkOperationProgressValue | null;
+	/** Present once `done`. */
+	result?: unknown;
+	/** Present once `failed` (or `cancelled`, with code `operation_failed` and the node's hint). */
+	error?: FleetLinkError;
+	startedAt: string;
+	endedAt: string | null;
+	/** True once someone asked to cancel it and the node has not confirmed yet. */
+	cancelRequested: boolean;
+}
+
+/** `DELETE /api/fleet/operations/:id`. */
+export interface FleetOperationCancelResult {
+	operation: FleetOperationView;
+	/** False when the operation had already ended; nothing was sent to the node. */
+	sent: boolean;
+}

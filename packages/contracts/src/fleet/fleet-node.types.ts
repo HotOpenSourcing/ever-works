@@ -36,6 +36,8 @@ import type { FleetNodeModelThrottleView } from './fleet-model-usage-limit.types
 
 import type { ComputerControlPolicy } from '../computer/computer-session.types.js';
 
+import type { FleetConsents, FleetNodeLinkView } from './fleet-link.types.js';
+
 /**
  * App shape of a fleet node.
  *
@@ -323,6 +325,19 @@ export interface FleetNodeSelfDescription {
 	maxConcurrentJobs?: number;
 	maxCpuPercent?: number | null;
 	maxMemoryMb?: number | null;
+	/**
+	 * Fleet node link (FL-02, CONTRACTS §1.1) — what this machine's owner
+	 * switched on when starting the node: `--work`, `--attend`, `--manage`,
+	 * `--usage-scan`. Reported on every beat so the platform can say, per
+	 * computer tab, which consent is missing.
+	 *
+	 * Optional and additive, in the NEWEST strip tier of the node's
+	 * heartbeat: a platform older than the field 400s the beat, the node
+	 * retries without it, keeps beating and does not open a link. A daemon
+	 * older than the field never sends it; the platform then infers what it
+	 * can and never infers `manage` (see `effectiveConsents`).
+	 */
+	consents?: FleetConsents;
 }
 
 /** Wire view of one fleet node — never carries credentials or hashes. */
@@ -478,6 +493,23 @@ export interface FleetNodeView {
 	 * nobody does. At most one person at a time, across every live view.
 	 */
 	controlHolder?: FleetNodeControlHolderView | null;
+	/**
+	 * Fleet node link (FL-02) — the consents the node last reported, or null
+	 * when it never reported any (a daemon older than the field). Read it
+	 * through `effectiveConsents`, which applies the inference for older
+	 * daemons; a raw null is "not reported", never "nothing allowed".
+	 */
+	consents?: FleetConsents | null;
+	/**
+	 * Fleet node link (FL-02, CONTRACTS R-3) — whether "Open" on a listening
+	 * port may use this node's owner-level preview browser profile.
+	 */
+	previewProfileEnabled?: boolean;
+	/**
+	 * Fleet node link (FL-02) — the link as the platform's own socket sees
+	 * it right now. Absent on a build without the link and on cluster rows.
+	 */
+	link?: FleetNodeLinkView;
 }
 
 /** The current holder of a node's control lock. */
@@ -594,6 +626,16 @@ export interface FleetHeartbeatResponse {
 	 * against the limits that daemon does not report.
 	 */
 	limitCeiling?: FleetNodeLimitCeiling;
+	/**
+	 * Fleet node link (FL-02, CONTRACTS §1.1) — the daemon version this
+	 * deployment RECOMMENDS (`FLEET_RECOMMENDED_NODE_VERSION`), when the
+	 * operator named one: a node below it shows an upgrade hint before the
+	 * floor ({@link FleetHeartbeatResponse.minNodeVersion}) ever bites, and a
+	 * node started with `--auto-update` upgrades itself to it.
+	 *
+	 * Optional and additive: omitted when unset, ignored by older daemons.
+	 */
+	recommendedNodeVersion?: string;
 }
 
 // ─── Node lifecycle: the daemon version floor (self-build slice AR) ─────────
