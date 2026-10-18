@@ -81,13 +81,22 @@ describe('protectedTaskBranchReason (prompt-injection hardening)', () => {
         },
     );
 
+    it("refuses a branch the Work's effective merge policy protects", () => {
+        expect(protectedTaskBranchReason('release/frozen', 'main', ['release/frozen'])).toMatch(
+            /protected branch/,
+        );
+        expect(protectedTaskBranchReason('feature/x', 'main', ['release/frozen'])).toBeNull();
+    });
+
     it("refuses the Work's own base branch", () => {
         expect(protectedTaskBranchReason('trunk', 'trunk')).toMatch(/base branch/);
         expect(protectedTaskBranchReason('refs/heads/Trunk', 'trunk')).toMatch(/base branch/);
     });
 
     it('allows a generated or named working branch, and nothing at all', () => {
-        expect(protectedTaskBranchReason(taskBranchName({ id: 'abc-1', slug: 'T-1' }), 'main')).toBeNull();
+        expect(
+            protectedTaskBranchReason(taskBranchName({ id: 'abc-1', slug: 'T-1' }), 'main'),
+        ).toBeNull();
         expect(protectedTaskBranchReason('feature/ship-x', 'main')).toBeNull();
         expect(protectedTaskBranchReason('develop-notes', 'main')).toBeNull();
         expect(protectedTaskBranchReason(null)).toBeNull();

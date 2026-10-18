@@ -307,7 +307,11 @@ export class TaskWorkspaceService {
         const branch = task.branchRef || taskBranchName({ id: task.id, slug: task.slug });
         // Prompt-injection hardening: a Task branch is never a protected branch
         // (nor the Work's base) — the agent's pushes land on it.
-        const protectedReason = protectedTaskBranchReason(branch, baseRef);
+        const protectedReason = protectedTaskBranchReason(
+            branch,
+            baseRef,
+            await this.policyProtectedBranches(work, input.agentId),
+        );
         if (protectedReason) {
             throw new Error(
                 `Task ${task.id} cannot run on its branch: ${protectedReason}. Agents work on a ` +
@@ -429,7 +433,11 @@ export class TaskWorkspaceService {
             repository.defaultBranch;
         const branch = task.branchRef || taskBranchName({ id: task.id, slug: task.slug });
         // Prompt-injection hardening — same rule as the cloud path above.
-        const protectedReason = protectedTaskBranchReason(branch, baseRef);
+        const protectedReason = protectedTaskBranchReason(
+            branch,
+            baseRef,
+            await this.policyProtectedBranches(work, input.agentId),
+        );
         if (protectedReason) {
             throw new Error(
                 `Task ${task.id} cannot run on its branch: ${protectedReason}. Agents work on a ` +
@@ -3201,6 +3209,31 @@ export class TaskWorkspaceService {
      * identified, a provider that cannot report the changes, or a gate that
      * rejects each become a refusal — never a push of something unjudged.
      */
+    /**
+     * The branches the Work's EFFECTIVE merge policy protects (tenant →
+     * organization → Work → Agent), for the protected-Task-branch check. Best
+     * effort: no policy service, or a policy that cannot be read, adds nothing
+     * — the platform's own protected branches still apply.
+     */
+    private async policyProtectedBranches(
+        work: Work,
+        agentId: string | null | undefined,
+    ): Promise<string[]> {
+        if (!this.mergePolicy) return [];
+        try {
+            const resolved = await this.mergePolicy.resolve({
+                agentId: agentId ?? null,
+                workId: work.id,
+                organizationId: work.organizationId ?? null,
+                tenantId: work.tenantId ?? null,
+            });
+            const branches = resolved?.policy?.protectedBranches;
+            return Array.isArray(branches) ? branches : [];
+        } catch {
+            return [];
+        }
+    }
+
     /**
      * Prompt-injection hardening — the always-protected-path floor, BEFORE a
      * push (every Work kind): what the local commit `headSha` changes is read

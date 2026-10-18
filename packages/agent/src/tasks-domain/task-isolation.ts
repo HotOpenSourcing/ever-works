@@ -71,6 +71,8 @@ export function taskBranchName(task: { id: string; slug?: string | null }): stri
 export function protectedTaskBranchReason(
     branch: string | null | undefined,
     baseRef?: string | null,
+    /** Branches the Work's EFFECTIVE merge policy protects on top of the platform's. */
+    policyProtectedBranches: readonly string[] = [],
 ): string | null {
     if (typeof branch !== 'string' || !branch.trim()) return null;
     const normalize = (ref: string): string =>
@@ -80,7 +82,9 @@ export function protectedTaskBranchReason(
             .toLowerCase();
     const candidate = normalize(branch);
     const protectedBranches = new Set(
-        PLATFORM_DEFAULT_MERGE_POLICY.protectedBranches.map((name) => normalize(name)),
+        [...PLATFORM_DEFAULT_MERGE_POLICY.protectedBranches, ...policyProtectedBranches]
+            .filter((name): name is string => typeof name === 'string' && name.trim().length > 0)
+            .map((name) => normalize(name)),
     );
     if (protectedBranches.has(candidate)) {
         return `'${branch.trim()}' is a protected branch`;
