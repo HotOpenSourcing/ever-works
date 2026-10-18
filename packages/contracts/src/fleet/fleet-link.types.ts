@@ -37,6 +37,8 @@
  * the source of a node's online/offline status.
  */
 
+import { FLEET_ACTION_FAMILIES, isFleetActionFamily, type FleetActionFamily } from './fleet-access.types.js';
+
 // ─── Limits (CONTRACTS §10) ─────────────────────────────────────────────────
 
 /** Protocol version a node presents in `link.hello`. */
@@ -459,31 +461,18 @@ export function fleetConsentMissingHint(requirement: FleetLinkConsentRequirement
 }
 
 /**
- * The action families of a node's control policy (CONTRACTS §2.1), named
- * here for the link's authorisation step. The audience lookup itself —
- * which callers a family's audience admits — is the Fleet hub's role
- * derivation (FL-01); this list is only what the link asks it about.
+ * The action families of a node's control policy (CONTRACTS §2.1), as the
+ * link's authorisation step names them. They ARE the Fleet hub's families
+ * (`fleet-access.types.ts`, FL-01) — the same list object, the same type —
+ * so a family added there is a family the link knows; these names only say
+ * which side of the program is asking.
  */
-export const FLEET_LINK_ACTION_FAMILIES = [
-	'view',
-	'sessions',
-	'desktop',
-	'logs',
-	'services',
-	'docker',
-	'processes',
-	'ports',
-	'files',
-	'commands',
-	'schedules',
-	'checkouts',
-	'machines'
-] as const;
+export const FLEET_LINK_ACTION_FAMILIES: typeof FLEET_ACTION_FAMILIES = FLEET_ACTION_FAMILIES;
 
-export type FleetLinkActionFamily = (typeof FLEET_LINK_ACTION_FAMILIES)[number];
+export type FleetLinkActionFamily = FleetActionFamily;
 
 export function isFleetLinkActionFamily(value: unknown): value is FleetLinkActionFamily {
-	return typeof value === 'string' && (FLEET_LINK_ACTION_FAMILIES as readonly string[]).includes(value);
+	return isFleetActionFamily(value);
 }
 
 /** The action family a channel family answers to by default. */

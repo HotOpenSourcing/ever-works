@@ -353,6 +353,44 @@ const COMMIT_MESSAGE_EXPORTS = [
 	'retypeFleetCommitMessage'
 ] as const;
 
+// Fleet hub (FL-01) — `fleet-access.types.ts` (the per-family control
+// policy and the role truth table) and `fleet-needs-a-look.types.ts` (the
+// one item shape every producer emits), pinned in `fleet-access.spec.ts`
+// and `fleet-needs-a-look.spec.ts`.
+const ACCESS_EXPORTS = [
+	'FLEET_ACTION_FAMILIES',
+	'isFleetActionFamily',
+	'FLEET_AUDIENCES',
+	'isFleetAudience',
+	'FLEET_VIEWER_ROLES',
+	'FLEET_CONTROL_POLICY_DEFAULTS',
+	'FLEET_ACTION_FAMILY_HINT_LABELS',
+	'normalizeControlPolicyFamilies',
+	'effectiveControlPolicy',
+	'audienceIncludes',
+	'fleetFamilyAllows',
+	'diffControlPolicyFamilies',
+	'narrowestAudienceFor',
+	'fleetPermissionDeniedHint'
+] as const;
+
+const NEEDS_A_LOOK_EXPORTS = [
+	'NEEDS_A_LOOK_KINDS',
+	'isNeedsALookKind',
+	'NEEDS_A_LOOK_SEVERITIES',
+	'isNeedsALookSeverity',
+	'NEEDS_A_LOOK_MAX_ITEMS',
+	'NEEDS_A_LOOK_MAX_TITLE_LENGTH',
+	'NEEDS_A_LOOK_MAX_DETAIL_LENGTH',
+	'NEEDS_A_LOOK_MAX_LABEL_LENGTH',
+	'NEEDS_A_LOOK_MAX_ROUTE_LENGTH',
+	'NEEDS_A_LOOK_MAX_COMMAND_LENGTH',
+	'NEEDS_A_LOOK_PARTIAL_HEADER',
+	'isNeedsALookRoute',
+	'normalizeNeedsALookItem',
+	'sortNeedsALook'
+] as const;
+
 // Fleet node link (FL-02) — `fleet-link.types.ts` and `fleet-link.codec.ts`,
 // pinned in `fleet-link.types.spec.ts`, `fleet-link.codec.spec.ts` and the wire
 // fixture spec `fleet-link.fixture.spec.ts`.
@@ -468,6 +506,8 @@ const ALL_EXPORTS = [
 	...PUSH_CREDENTIAL_EXPORTS,
 	...USAGE_LIMIT_EXPORTS,
 	...COMMIT_MESSAGE_EXPORTS,
+	...ACCESS_EXPORTS,
+	...NEEDS_A_LOOK_EXPORTS,
 	...LINK_EXPORTS,
 	...OPERATION_EXPORTS
 ];
@@ -539,6 +579,20 @@ const FUNCTION_EXPORTS = [
 	'composeFleetTaskCommitMessage',
 	'classifyFleetChangedPaths',
 	'retypeFleetCommitMessage',
+	'isFleetActionFamily',
+	'isFleetAudience',
+	'normalizeControlPolicyFamilies',
+	'effectiveControlPolicy',
+	'audienceIncludes',
+	'fleetFamilyAllows',
+	'diffControlPolicyFamilies',
+	'narrowestAudienceFor',
+	'fleetPermissionDeniedHint',
+	'isNeedsALookKind',
+	'isNeedsALookSeverity',
+	'isNeedsALookRoute',
+	'normalizeNeedsALookItem',
+	'sortNeedsALook',
 	'fleetLinkVerbConsent',
 	'fleetLinkChannelOpenConsent',
 	'isFleetLinkFrameKind',
@@ -592,7 +646,7 @@ describe('fleet barrel', () => {
 		expect(typeof bag[name]).toBe('function');
 	});
 
-	it('exposes exactly these 325 runtime symbols', () => {
+	it('exposes exactly these 353 runtime symbols', () => {
 		// Regression guard in BOTH directions: an `export *` line deleted from
 		// index.ts fails here, and a NEW runtime export added without a spec
 		// also fails here — which forces the author back to cover it.
@@ -646,13 +700,16 @@ describe('fleet barrel', () => {
 		// symbols of `fleet-model-usage-limit.types.ts` and the seven of
 		// `fleet-commit-message.types.ts` — two NEW modules, so the witness
 		// table below gains two rows.
+		// → 261 with the Fleet hub (FL-01): the fourteen symbols of
+		// `fleet-access.types.ts` and the fourteen of `fleet-needs-a-look.types.ts`
+		// — two NEW modules, so the witness table below gains two rows.
 		expect(Object.keys(fleet).sort()).toEqual([...ALL_EXPORTS].sort());
-		// → 325 with the node link (FL-02): the sixty-seven symbols of
+		// → 353 with the node link (FL-02): the sixty-seven symbols of
 		// `fleet-link.types.ts`, the twenty-one of `fleet-link.codec.ts`, the
 		// three of `fleet-operations.types.ts` — three NEW modules, so the
 		// witness table below gains three rows — and the legacy tag cap in
 		// `fleet-node.types.ts`.
-		expect(Object.keys(fleet)).toHaveLength(325);
+		expect(Object.keys(fleet)).toHaveLength(353);
 	});
 
 	it.each([
@@ -667,10 +724,12 @@ describe('fleet barrel', () => {
 		['fleet-run-credential.types.js', 'FLEET_RUN_TOKEN_PREFIX'],
 		['fleet-push-credential.types.js', 'FLEET_PUSH_CAPABILITY'],
 		['fleet-model-usage-limit.types.js', 'FLEET_JOB_FAILURE_KIND_MODEL_USAGE_LIMIT'],
+		['fleet-commit-message.types.js', 'FLEET_COMMIT_TYPES'],
+		['fleet-access.types.js', 'FLEET_ACTION_FAMILIES'],
+		['fleet-needs-a-look.types.js', 'NEEDS_A_LOOK_KINDS'],
 		['fleet-link.types.js', 'FLEET_LINK_FAMILIES'],
 		['fleet-link.codec.js', 'encodeFleetLinkFrame'],
-		['fleet-operations.types.js', 'FLEET_OPERATION_STATES'],
-		['fleet-commit-message.types.js', 'FLEET_COMMIT_TYPES']
+		['fleet-operations.types.js', 'FLEET_OPERATION_STATES']
 	])('keeps the %s module represented via %s', (_module, sentinel) => {
 		// One distinctive symbol per source module, so a whole missing
 		// `export * from` line is named in the failure rather than showing up

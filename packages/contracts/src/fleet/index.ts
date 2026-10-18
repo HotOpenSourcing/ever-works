@@ -1,3 +1,4 @@
+export * from './fleet-access.types.js';
 export * from './fleet-agent-credentials.types.js';
 export * from './fleet-commit-message.types.js';
 export * from './fleet-execution-preference.types.js';
@@ -5,6 +6,7 @@ export * from './fleet-jobs.types.js';
 export * from './fleet-link.codec.js';
 export * from './fleet-link.types.js';
 export * from './fleet-model-usage-limit.types.js';
+export * from './fleet-needs-a-look.types.js';
 export * from './fleet-node.types.js';
 export * from './fleet-operations.types.js';
 export * from './fleet-panic.types.js';

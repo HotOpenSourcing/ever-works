@@ -56,6 +56,7 @@ const EVERY_ACTION: readonly FleetAuditAction[] = [
 	'computer.teach-start',
 	'computer.teach-finish',
 	'computer.profile-reset',
+	'node.policy.change',
 	// Fleet node link (FL-02, CONTRACTS §7).
 	'node.consent.change',
 	'node.link.connect',
@@ -98,12 +99,17 @@ describe('FLEET_AUDIT_ACTIONS', () => {
 	it('uses lowercase kebab/dot names only', () => {
 		// One shape, so an operator filtering the log does not have to guess
 		// between `node.rotateSelf`, `node_rotate_self` and `node.rotate-self`.
-		// Up to three dotted segments after the subject: CONTRACTS §7 (Fleet
-		// program) names actions such as `node.consent.change` and
-		// `node.link.channel-open`; every segment is still lowercase kebab.
+		// The Fleet program's names have a third segment (`node.policy.change`,
+		// CONTRACTS §7), so any number of dot segments is allowed — each still
+		// lowercase kebab, never camelCase or snake_case.
 		for (const action of FLEET_AUDIT_ACTIONS) {
-			expect(action).toMatch(/^[a-z]+(?:-[a-z]+)*(?:\.[a-z]+(?:-[a-z]+)*){0,3}$/);
+			expect(action).toMatch(/^[a-z]+(?:-[a-z]+)*(?:\.[a-z]+(?:-[a-z]+)*)*$/);
+			expect(action).not.toMatch(/[A-Z_]/);
 		}
+	});
+
+	it('names the Fleet hub policy change exactly as CONTRACTS §7 does', () => {
+		expect(FLEET_AUDIT_ACTIONS).toContain('node.policy.change');
 	});
 
 	it('records no direction-paired verbs', () => {

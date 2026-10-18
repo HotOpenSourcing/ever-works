@@ -50,6 +50,11 @@ function build(
             { ...nodeView, id: 'cluster-node', persisted: false },
         ]),
         getForUser: jest.fn(async () => nodeView),
+        listVisibleForUser: jest.fn(async () => [
+            { ...nodeView, viewerRole: 'owner' },
+            { ...nodeView, id: 'shared-node', viewerRole: 'org-member' },
+        ]),
+        getVisibleForUser: jest.fn(async () => ({ view: nodeView, role: 'owner' })),
     };
     const jobs = {
         loadByNodeForUser: jest.fn(async () => ({})),
@@ -64,8 +69,9 @@ function build(
         {} as never,
         {} as never,
         { findByIds: jest.fn(async () => []) } as never,
-        undefined,
-        undefined,
+        undefined, // audit
+        undefined, // pending computer sessions
+        undefined, // needs-a-look (FL-01)
         options.observer as never,
         options.linkState as never,
     );
@@ -117,6 +123,15 @@ describe('FleetController — the node link', () => {
         expect(cluster.link).toBeUndefined();
         expect(linkState.linkView).toHaveBeenCalledWith({ id: NODE, kind: 'node' });
         expect((await controller.detail(auth, NODE)).node.link).toEqual(LINK);
+    });
+
+    it('never adds the link to a row someone else sees through an Organization', async () => {
+        const linkState = { linkView: jest.fn(() => LINK) };
+        const { controller } = build({ linkState });
+        const [own, shared] = await controller.list(auth, 'visible');
+        expect(own.link).toEqual(LINK);
+        expect('link' in shared).toBe(false);
+        expect(linkState.linkView).toHaveBeenCalledTimes(1);
     });
 
     it('keeps every response shape exactly as before without the link module', async () => {

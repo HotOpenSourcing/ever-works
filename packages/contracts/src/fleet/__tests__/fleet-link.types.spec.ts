@@ -29,8 +29,10 @@ import {
 	isFleetLinkEligible,
 	isFleetLinkStateChangingFamily,
 	isFleetLinkVerb,
-	normalizeFleetConsents
+	normalizeFleetConsents,
+	isFleetLinkActionFamily
 } from '../fleet-link.types.js';
+import { FLEET_ACTION_FAMILIES } from '../fleet-access.types.js';
 
 describe('fleet link constants match CONTRACTS §10', () => {
 	it('fixes the frame, channel, ping, silence, backoff and token numbers', () => {
@@ -66,6 +68,15 @@ describe('channel families', () => {
 		expect([...FLEET_LINK_FAMILIES].sort()).toEqual(
 			['clip', 'command', 'desktop', 'files', 'logs', 'machine', 'schedule', 'session', 'tunnel'].sort()
 		);
+	});
+
+	it("names the Fleet hub's action families, not a copy of them", () => {
+		// One list for the hub's policy and the link's authorisation: a family
+		// FL-01 adds is one the link can be asked about the same day.
+		expect(FLEET_LINK_ACTION_FAMILIES).toBe(FLEET_ACTION_FAMILIES);
+		for (const family of FLEET_ACTION_FAMILIES) expect(isFleetLinkActionFamily(family)).toBe(true);
+		expect(isFleetLinkActionFamily('constructor')).toBe(false);
+		expect(isFleetLinkActionFamily('lifecycle')).toBe(false);
 	});
 
 	it('gives every family a consent requirement and an action family', () => {

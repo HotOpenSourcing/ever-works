@@ -123,7 +123,13 @@ export type FleetAuditAction =
 	/** A node's link closed, with its reason (actor: the node; informational). */
 	| 'node.link.disconnect'
 	/** A channel in a state-changing family was opened on a node's link (family, target, requestedBy). */
-	| 'node.link.channel-open';
+	| 'node.link.channel-open'
+	/**
+	 * Fleet hub (FL-01) — the owner changed one action family's audience on a
+	 * node's control policy (CONTRACTS §2.1, §7). One row per family changed;
+	 * details carry `family`, `from`, `to` — never a member's name.
+	 */
+	| 'node.policy.change';
 
 export const FLEET_AUDIT_ACTIONS: readonly FleetAuditAction[] = [
 	'kill-switch.stop',
@@ -161,7 +167,8 @@ export const FLEET_AUDIT_ACTIONS: readonly FleetAuditAction[] = [
 	'node.consent.change',
 	'node.link.connect',
 	'node.link.disconnect',
-	'node.link.channel-open'
+	'node.link.channel-open',
+	'node.policy.change'
 ];
 
 /**
