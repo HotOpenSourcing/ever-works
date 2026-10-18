@@ -83,7 +83,10 @@ import {
     inboundEmailTaskTitle,
 } from './inbound-email-task-chat';
 import { UploadsModule } from '../uploads/uploads.module';
-import { assertNoAlwaysProtectedPaths } from './agent-git-protected-paths';
+import {
+    assertNoAlwaysProtectedPaths,
+    workflowChangesAllowedForWork,
+} from './agent-git-protected-paths';
 import { UploadsService } from '../uploads/uploads.service';
 
 // Phase 16.6 / 16.7 — commitToRepo / openPullRequest tools.
@@ -1361,6 +1364,7 @@ async function assertRealWriteTarget(
                             'commitToRepo',
                             writes.map((w) => w.path),
                             'Nothing was written, committed or pushed.',
+                            workId,
                         );
                         const namedTarget = requestedBranch || base;
                         if (namedTarget) {
@@ -1610,6 +1614,8 @@ async function assertRealWriteTarget(
                             prHead: string,
                             options: { providerId: string; userId: string; workId: string },
                         ): Promise<void> => {
+                            // The operator lifted the floor for this Work.
+                            if (workflowChangesAllowedForWork(options.workId)) return;
                             if (typeof git.getCompareDiff !== 'function') {
                                 agentGitToolsLogger.warn(
                                     `openPullRequest: no compare capability for ${prTarget.owner}/${prTarget.repo}; ` +

@@ -817,8 +817,78 @@ describe('finalizeRun — cloud App Work pushes are off by default (FR-12 / T12)
         expect(blockedWith(m)).toBe(false);
     });
 
-    it('leaves every other Work kind exactly as it was: one finalize, pushed', async () => {
+    it('checks every other Work kind for protected paths before its push, then publishes exactly that commit', async () => {
         const m = mocks();
+
+        const outcome = await service(m, { kind: 'directory' }).finalizeRun(runInput());
+
+        expect(outcome.outcome).toBe('pr-opened');
+        expect(finalizeOpts(m)).toEqual([
+            { commitMessage: 'feat(task): add-a-thing agent run output', push: false },
+            {
+                commitMessage: 'feat(task): add-a-thing agent run output',
+                push: true,
+                publishSha: HEAD_SHA,
+            },
+        ]);
+        expect(m.branchChanges).toHaveBeenCalledTimes(1);
+    });
+
+    it('checks an App Work with no gate bound the same way', async () => {
+        const m = mocks();
+
+        const outcome = await service(m, { bound: false }).finalizeRun(runInput());
+
+        expect(outcome.outcome).toBe('pr-opened');
+        expect(finalizeOpts(m)).toEqual([
+            { commitMessage: 'feat(task): add-a-thing agent run output', push: false },
+            {
+                commitMessage: 'feat(task): add-a-thing agent run output',
+                push: true,
+                publishSha: HEAD_SHA,
+            },
+        ]);
+    });
+});
+
+describe('finalizeRun — the always-protected-path floor, every Work kind (review of #2769)', () => {
+    afterEach(() => {
+        delete process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS;
+    });
+
+    it.each(['.github/workflows/deploy.yml', '.github/actions/setup/action.yml'])(
+        'refuses to push a non-App run that changes %s — nothing reaches the remote',
+        async (path) => {
+            const m = mocks();
+            m.branchChanges.mockResolvedValue({ paths: ['src/x.ts', path], contents: {} });
+
+            const outcome = await service(m, { kind: 'directory' }).finalizeRun(runInput());
+
+            expect(outcome.outcome).toBe('blocked-by-guard');
+            expect(finalizeOpts(m)).toEqual([
+                { commitMessage: 'feat(task): add-a-thing agent run output', push: false },
+            ]);
+            expect(m.createPullRequest).not.toHaveBeenCalled();
+            const body = m.post.mock.calls.at(-1)![1].body;
+            expect(body).toContain('workflow or action files');
+            expect(body).toContain(path);
+        },
+    );
+
+    it('refuses (fail closed) when what the run changed cannot be read', async () => {
+        const m = mocks();
+        m.branchChanges.mockRejectedValue(new Error('provider cannot report'));
+
+        const outcome = await service(m, { kind: 'directory' }).finalizeRun(runInput());
+
+        expect(outcome.outcome).toBe('blocked-by-guard');
+        expect(m.createPullRequest).not.toHaveBeenCalled();
+    });
+
+    it('a Work the operator listed in AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS pushes in one step as before', async () => {
+        process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS = `other-work, ${WORK_ID}`;
+        const m = mocks();
+        m.branchChanges.mockResolvedValue({ paths: ['.github/workflows/ci.yml'], contents: {} });
 
         const outcome = await service(m, { kind: 'directory' }).finalizeRun(runInput());
 
@@ -827,17 +897,6 @@ describe('finalizeRun — cloud App Work pushes are off by default (FR-12 / T12)
             { commitMessage: 'feat(task): add-a-thing agent run output', push: true },
         ]);
         expect(m.branchChanges).not.toHaveBeenCalled();
-    });
-
-    it('leaves an App Work with no gate bound exactly as it was: one finalize, pushed', async () => {
-        const m = mocks();
-
-        const outcome = await service(m, { bound: false }).finalizeRun(runInput());
-
-        expect(outcome.outcome).toBe('pr-opened');
-        expect(finalizeOpts(m)).toEqual([
-            { commitMessage: 'feat(task): add-a-thing agent run output', push: true },
-        ]);
     });
 });
 
@@ -1086,7 +1145,7 @@ describe('finalizeRun — judged before anything is pushed (cloud pushes enabled
         expect(m.branchChanges).not.toHaveBeenCalled();
     });
 
-    it('leaves every other Work kind, and an unbound gate, with one pushing finalize', async () => {
+    it('checks every other Work kind, and an unbound gate, only against the protected-path floor', async () => {
         for (const opts of [{ kind: 'directory' }, { bound: false }]) {
             const m = mocks();
 
@@ -1094,10 +1153,15 @@ describe('finalizeRun — judged before anything is pushed (cloud pushes enabled
 
             expect(outcome.outcome).toBe('pr-opened');
             expect(finalizeOpts(m)).toEqual([
-                { commitMessage: 'feat(task): add-a-thing agent run output', push: true },
+                { commitMessage: 'feat(task): add-a-thing agent run output', push: false },
+                {
+                    commitMessage: 'feat(task): add-a-thing agent run output',
+                    push: true,
+                    publishSha: HEAD_SHA,
+                },
             ]);
             expect(m.checkPaths).not.toHaveBeenCalled();
-            expect(m.branchChanges).not.toHaveBeenCalled();
+            expect(m.branchChanges).toHaveBeenCalledTimes(1);
         }
     });
 });

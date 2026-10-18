@@ -254,6 +254,7 @@ describe('TaskWorkspaceService', () => {
             provision: jest.Mock;
             finalize: jest.Mock;
             simulateMerge: jest.Mock;
+            branchChanges?: jest.Mock;
         };
 
         const buildFull = () =>
@@ -298,6 +299,9 @@ describe('TaskWorkspaceService', () => {
                     .fn()
                     .mockResolvedValue({ pushed: true, headSha: 'cafe42', empty: false }),
                 simulateMerge: jest.fn().mockResolvedValue({ clean: true, conflictPaths: [] }),
+                // Prompt-injection hardening: every finalize reads its commit's changes
+                // before the push (always-protected-path floor).
+                branchChanges: jest.fn().mockResolvedValue({ paths: ['src/x.ts'], contents: {} }),
             };
         });
 

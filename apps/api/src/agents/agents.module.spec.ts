@@ -2246,6 +2246,26 @@ describe('api-side AgentsModule — AGENT_GIT_FACADE Work repository resolution 
             expectNoGitWork(git);
         });
 
+        it('lets a Work the operator listed in AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS write a workflow file', async () => {
+            process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS = WORK_ID;
+            try {
+                const { facade, git } = build();
+                await facade
+                    .commitToRepo(
+                        commitInput({
+                            branch: 'feature/x',
+                            files: [{ path: '.github/workflows/ci.yml', body: 'on: push
+' }],
+                        }),
+                    )
+                    .catch(() => undefined);
+                // Past the floor: the adapter went on to open the working copy.
+                expect(git.cloneOrPull).toHaveBeenCalled();
+            } finally {
+                delete process.env.AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS;
+            }
+        });
+
         it("refuses the Work's own default branch when the policy protects it", async () => {
             const git = makeGit();
             git.getRepository.mockResolvedValue({ defaultBranch: 'develop' });

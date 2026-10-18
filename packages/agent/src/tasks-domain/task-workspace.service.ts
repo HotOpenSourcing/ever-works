@@ -47,8 +47,14 @@ import { TaskChatService } from './task-chat.service';
 import { MergePolicyService } from '../policy/merge-policy.service';
 import { ActivityLogService } from '../activity-log/activity-log.service';
 import { ActivityActionType, ActivityStatus } from '../entities/activity-log.types';
-import { resolveTaskIsolation, protectedTaskBranchReason,
-    taskBranchName } from './task-isolation';
+// Prompt-injection hardening — the always-protected repository paths
+// (`.github/workflows/**`, `.github/actions/**`) and their operator opt-in.
+import {
+    alwaysProtectedRepoPaths,
+    protectedRepoPathsRefusal,
+    workflowChangesAllowedForWork,
+} from '../policy/agent-protected-repo-paths';
+import { resolveTaskIsolation, protectedTaskBranchReason, taskBranchName } from './task-isolation';
 import {
     mapAttachmentEdgesToRepos,
     resolveAttachedReposForAgent,
@@ -1713,10 +1719,19 @@ export class TaskWorkspaceService {
         // RUN on push — on the remote before the gate had spoken. Checked
         // without any await, so no other kind pays for it.
         const judgeFirst = isAppWorkKind(work.kind) && !!this.appChangeGate;
+        // Prompt-injection hardening — EVERY kind is checked before it is
+        // pushed for the always-protected paths (`.github/workflows/**`,
+        // `.github/actions/**`): commit locally, read what that commit changes,
+        // refuse the push if it touches them, and publish exactly the checked
+        // commit otherwise. Only a Work the operator listed in
+        // `AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS` skips it (and, when it is not
+        // an App Work, pushes in one step exactly as before).
+        const floorFirst = !workflowChangesAllowedForWork(work.id);
+        const checkFirst = judgeFirst || floorFirst;
 
         const finalize = await this.workspaceFacade.finalize(
             handle,
-            { commitMessage, push: !judgeFirst },
+            { commitMessage, push: !checkFirst },
             facadeOptions,
         );
         // Run telemetry — stamp the changed-file count as soon as the
@@ -1729,24 +1744,37 @@ export class TaskWorkspaceService {
             return { outcome: 'no-changes' };
         }
 
-        if (judgeFirst) {
-            // Owner decision: no cloud App Work push at all until APW-08 FR-12's
-            // isolated-run admission (T12) lands, unless an operator opts in.
-            // The shared gate the agent git tools ask too (`app-work-cloud-push.ts`);
-            // `judgeFirst` already established that this is an App Work.
-            const judged = appWorkCloudPushAllowed(work.kind)
-                ? await this.judgeBeforePush({
-                      input,
-                      work,
-                      owner,
-                      repo,
-                      gitOptions,
-                      baseRef,
-                      handle,
-                      headSha: finalize.headSha,
-                      facadeOptions,
-                  })
-                : { refused: await this.refuseCloudAppPush(input) };
+        if (checkFirst) {
+            let judged: { refused: TaskWorkspaceFinalizeOutcome } | { judgedSha: string };
+            if (judgeFirst && !appWorkCloudPushAllowed(work.kind)) {
+                // Owner decision: no cloud App Work push at all until APW-08
+                // FR-12's isolated-run admission (T12) lands, unless an operator
+                // opts in. The shared gate the agent git tools ask too
+                // (`app-work-cloud-push.ts`).
+                judged = { refused: await this.refuseCloudAppPush(input) };
+            } else {
+                judged = floorFirst
+                    ? await this.floorBeforePush({
+                          input,
+                          handle,
+                          headSha: finalize.headSha,
+                          facadeOptions,
+                      })
+                    : { judgedSha: (finalize.headSha ?? '').trim() };
+                if (!('refused' in judged) && judgeFirst) {
+                    judged = await this.judgeBeforePush({
+                        input,
+                        work,
+                        owner,
+                        repo,
+                        gitOptions,
+                        baseRef,
+                        handle,
+                        headSha: finalize.headSha,
+                        facadeOptions,
+                    });
+                }
+            }
             if ('refused' in judged) return judged.refused;
 
             // Exactly the judged commit — the very sha `judgeBeforePush` read,
@@ -2055,6 +2083,21 @@ export class TaskWorkspaceService {
         const { task, work, userId, owner, repo, gitOptions, baseRef, branch } = args;
         if (!this.gitFacade) {
             throw new Error(`Task ${task.id} pull-request finalize requires the git facade.`);
+        }
+        // Prompt-injection hardening — a branch that changes a GitHub workflow
+        // or composite action gets no pull request from the platform (opening
+        // one RUNS the repository's `pull_request` workflows from the head).
+        // This covers the fleet path too, where the node pushed the branch
+        // itself and nothing was checked before it reached the remote.
+        const floorRefusal = await this.protectedPathsRefusalForBranch(args);
+        if (floorRefusal) {
+            return this.refuseChange(
+                { task, userId, agentId: args.agentId },
+                task,
+                floorRefusal,
+                openPullRequestOf(task),
+                { reachedRemote: true },
+            );
         }
         if (!args.agentCanOpenPullRequests) {
             this.logger.log(
@@ -3158,6 +3201,142 @@ export class TaskWorkspaceService {
      * identified, a provider that cannot report the changes, or a gate that
      * rejects each become a refusal — never a push of something unjudged.
      */
+    /**
+     * Prompt-injection hardening — the always-protected-path floor, BEFORE a
+     * push (every Work kind): what the local commit `headSha` changes is read
+     * from the workspace, and a commit that touches `.github/workflows/**` or
+     * `.github/actions/**` is refused — nothing reaches the remote, the Task is
+     * blocked and says why. A commit that cannot be identified or read is
+     * refused too (fail closed). `{ judgedSha }` when it may be published.
+     */
+    private async floorBeforePush(input: {
+        input: { task: Task; userId: string; agentId: string };
+        handle: {
+            path: string;
+            baseSha: string;
+            reused: boolean;
+            branch: string;
+            bindingKey: string;
+        };
+        headSha: string | null;
+        facadeOptions: { userId: string; workId: string };
+    }): Promise<{ refused: TaskWorkspaceFinalizeOutcome } | { judgedSha: string }> {
+        const task = input.input.task;
+        const existingPullRequest = openPullRequestOf(task);
+        const refuse = async (message: string, paths: readonly string[] = []) => ({
+            refused: await this.refuseChange(
+                input.input,
+                task,
+                [
+                    `${message} ${nothingPushedConsequence(existingPullRequest)}`,
+                    ...(paths.length
+                        ? ['', 'Paths:', ...paths.map((path) => `- \`${path}\``)]
+                        : []),
+                ].join('\n'),
+                existingPullRequest,
+                { reachedRemote: false },
+            ),
+        });
+        const headSha = typeof input.headSha === 'string' ? input.headSha.trim() : '';
+        if (!headSha || !this.workspaceFacade) {
+            return refuse(
+                "The run's commit could not be identified, so it was not checked for GitHub workflow " +
+                    'or action files before the push.',
+            );
+        }
+        let paths: string[];
+        try {
+            const changes = await this.workspaceFacade.branchChanges(
+                input.handle,
+                { headSha },
+                input.facadeOptions,
+            );
+            if (!changes || !Array.isArray(changes.paths)) {
+                throw new Error('the workspace provider answered no list of paths');
+            }
+            paths = changes.paths;
+        } catch (error) {
+            this.logger.warn(
+                `Task ${task.id}: the run's changes could not be read before the push: ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+            return refuse(
+                'What this run changed could not be read before it was pushed, so it was not checked ' +
+                    'for GitHub workflow or action files.',
+            );
+        }
+        const hits = alwaysProtectedRepoPaths(paths);
+        if (hits.length > 0) {
+            return refuse(`This run was not pushed: ${protectedRepoPathsRefusal(hits)}`, hits);
+        }
+        return { judgedSha: headSha };
+    }
+
+    /**
+     * The always-protected-path floor for a branch that is ALREADY on the
+     * remote (a fleet node pushed it, or a cloud run's push): the provider's
+     * own diff of `branch` against `baseRef`. `null` when the pull request may
+     * be opened; the refusal text otherwise. A diff that cannot be read whole
+     * is refused (the protected file could be in the part that was dropped); a
+     * provider with no compare capability is let through with a warning — the
+     * cloud path already checked before its push.
+     */
+    private async protectedPathsRefusalForBranch(args: {
+        task: Task;
+        work: Work;
+        owner: string;
+        repo: string;
+        gitOptions: { userId: string; providerId: string; workId: string };
+        baseRef: string;
+        branch: string;
+    }): Promise<string | null> {
+        if (workflowChangesAllowedForWork(args.work.id) || !this.gitFacade) return null;
+        if (typeof this.gitFacade.getCompareDiff !== 'function') return null;
+        let diff: {
+            files: ReadonlyArray<{ path: string; previousPath?: string }>;
+            truncated: boolean;
+        };
+        try {
+            diff = await this.gitFacade.getCompareDiff(
+                args.owner,
+                args.repo,
+                args.baseRef,
+                args.branch,
+                { maxFiles: 300 },
+                args.gitOptions,
+            );
+        } catch (error) {
+            if ((error as Error)?.name === 'GitOperationNotSupportedError') {
+                this.logger.warn(
+                    `Task ${args.task.id}: ${args.owner}/${args.repo} cannot be compared; the workflow-path ` +
+                        'check before the pull request was skipped.',
+                );
+                return null;
+            }
+            return (
+                `The changes on \`${args.branch}\` could not be read, so they were not checked for GitHub ` +
+                'workflow or action files. No pull request was opened.'
+            );
+        }
+        if (diff.truncated) {
+            return (
+                `The diff of \`${args.branch}\` is too large to check for GitHub workflow or action files. ` +
+                'No pull request was opened.'
+            );
+        }
+        const hits = alwaysProtectedRepoPaths(
+            diff.files.flatMap((file) => [file.path, file.previousPath]),
+        );
+        if (hits.length === 0) return null;
+        return [
+            `No pull request was opened for \`${args.branch}\`: ${protectedRepoPathsRefusal(hits)}`,
+            '',
+            'Paths:',
+            ...hits.map((path) => `- \`${path}\``),
+        ].join('\n');
+    }
+
     private async judgeBeforePush(input: {
         input: { task: Task; userId: string; agentId: string };
         work: Work;

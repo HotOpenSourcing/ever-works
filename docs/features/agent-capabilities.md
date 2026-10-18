@@ -149,6 +149,16 @@ The Capabilities tab shows all eight flags read-only, with an **Edit in Settings
 
 Turning a flag off removes the tool from the run entirely — it is never assembled, so the model does not see it. That is a stronger statement than a deny in the matrix, which withholds an assembled tool and reports the refusal.
 
+:::caution Agents never change GitHub workflow or action files
+Whatever the Work kind, an Agent's changes may not touch `.github/workflows/**` or `.github/actions/**` — files that run a repository's checks and deploys with its secrets. `commitToRepo` refuses to write them, `openPullRequest` refuses a branch whose diff touches them, a cloud run's commit is checked **before** it is pushed (and is not pushed if it touches them), and no pull request is opened for a fleet-pushed branch that does. An operator can lift this for specific Works only, with a comma-separated list of Work ids:
+
+```bash
+AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS=11111111-1111-4111-8111-111111111111,22222222-2222-4222-8222-222222222222
+```
+
+An App Work's own change gate still applies its rules to a listed Work.
+:::
+
 ## Skills
 
 The **Skills** section binds [Skills](./skills-catalog.md) directly to this Agent. The **Attach a skill…** picker offers every Skill you already have installed; catalog entries you have not installed yet appear with an **install & attach** hint and are installed in one step when picked.
