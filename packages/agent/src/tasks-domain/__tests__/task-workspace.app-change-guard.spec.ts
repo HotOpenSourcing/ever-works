@@ -365,13 +365,22 @@ describe('every push is judged, including one onto an open pull request', () => 
         expect(blockedWith(m)).toBe(true);
     });
 
-    it('does no extra I/O for a non-App Task that already has a pull request', async () => {
+    // CodeRabbit on #2769: the App change gate stays App-only, but the
+    // always-protected-path floor now runs on this path for EVERY kind — it
+    // reads the base branch to diff against, and nothing more.
+    it('runs only the workflow-path floor (not the App gate) for a non-App Task with a pull request', async () => {
         const m = mocks();
 
-        await service(m, { kind: 'directory' }).finalizeRemotePush(withPr());
+        const outcome = await service(m, { kind: 'directory' }).finalizeRemotePush(withPr());
 
         expect(m.evaluate).not.toHaveBeenCalled();
-        expect(m.getRepository).not.toHaveBeenCalled();
+        expect(m.getRepository).toHaveBeenCalledTimes(1);
+        expect(m.createPullRequest).not.toHaveBeenCalled();
+        expect(outcome).toEqual({
+            outcome: 'pr-opened',
+            prNumber: 12,
+            prUrl: 'https://example.test/pr/12',
+        });
     });
 });
 
