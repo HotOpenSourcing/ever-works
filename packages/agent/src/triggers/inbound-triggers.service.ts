@@ -142,8 +142,8 @@ export function outsiderAutoStartBlockReason(event: TriggerTemplateEvent | null)
     // only that alphabet so a forged payload cannot write prose here.
     const shown = association.replace(/[^A-Z_]/g, '').slice(0, 40);
     return (
-        `Not started automatically: the GitHub author is ${shown || 'not a member'} of the repository, ` +
-        'not an OWNER, MEMBER or COLLABORATOR. Review the request, then start the Task by hand.'
+        `Not started automatically: the GitHub author's association with the repository is ${shown || 'unknown'}, ` +
+        'not OWNER, MEMBER or COLLABORATOR. Review the request, then start the Task by hand.'
     );
 }
 
