@@ -539,13 +539,11 @@ describe('WebhooksService', () => {
                 [
                     User,
                     {
-                        findOne: jest
-                            .fn()
-                            .mockResolvedValue({
-                                id: ACCOUNT,
-                                tenantId: TENANT_ID,
-                                isActive: true,
-                            }),
+                        findOne: jest.fn().mockResolvedValue({
+                            id: ACCOUNT,
+                            tenantId: TENANT_ID,
+                            isActive: true,
+                        }),
                     },
                 ],
             ]);
