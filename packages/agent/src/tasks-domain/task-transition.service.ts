@@ -1,6 +1,7 @@
 import {
     BadRequestException,
     ConflictException,
+    ForbiddenException,
     Inject,
     Injectable,
     Logger,
@@ -61,6 +62,7 @@ import {
 import { resolveTaskDispatchAgentIds } from './task-dispatch-agents';
 import { normalizeCommitSha, type SubAgentScope } from '@ever-works/contracts';
 import { randomUUID } from 'node:crypto';
+import { AWAITING_OWNER_LABEL, isAwaitingOwner, withoutAwaitingOwner } from './awaiting-owner';
 
 /**
  * The planning lease one attempt holds (CodeRabbit CR-2). `unavailable`:
@@ -271,6 +273,14 @@ export class TaskTransitionService {
      */
     async transition(task: Task, to: TaskStatus, opts: TransitionOptions = {}): Promise<Task> {
         opts = withoutAgentForce(opts, this.logger, task.id);
+        // Prompt-injection hardening — a Task filed from an untrusted email
+        // waits for its owner: no agent moves it (see `awaiting-owner.ts`).
+        const awaitingOwner = isAwaitingOwner(task);
+        if (awaitingOwner && opts.actorType === 'agent') {
+            throw new ForbiddenException(
+                `Task ${task.id} is waiting for its owner (label '${AWAITING_OWNER_LABEL}'): an agent cannot move it. The owner starts it.`,
+            );
+        }
         const from = task.status;
         if (!ALLOWED[from]?.includes(to)) {
             throw new BadRequestException(`Cannot transition Task from ${from} to ${to}.`);
@@ -347,6 +357,10 @@ export class TaskTransitionService {
         }
 
         const patch: Partial<Task> = { status: to };
+        // A PERSON starting it (into todo / in_progress) clears the binding label.
+        if (awaitingOwner && (to === TaskStatus.TODO || to === TaskStatus.IN_PROGRESS)) {
+            patch.labels = withoutAwaitingOwner(task.labels);
+        }
         if (to === TaskStatus.IN_PROGRESS && !task.startedAt) {
             patch.startedAt = new Date();
         }

@@ -90,6 +90,22 @@ describe('TaskRepository.findFanoutCandidates', () => {
         expect(clauses).toContain('task.latestRunId IS NULL');
     });
 
+    it("never returns a Task waiting for its owner (the binding 'awaiting-owner' label)", async () => {
+        const qb = makeQb();
+        qb.getMany.mockResolvedValue([
+            { id: 't-1', labels: ['inbound-email'] },
+            { id: 't-2', labels: ['inbound-email', 'awaiting-owner'] },
+            { id: 't-3', labels: null },
+        ]);
+        const tasks = new TaskRepository({ createQueryBuilder: jest.fn(() => qb) } as never);
+
+        const rows = await tasks.findFanoutCandidates(50);
+
+        // Prompt-injection hardening (review of #2769): a Task filed from an
+        // untrusted email is started by a person, never by the fan-out.
+        expect(rows.map((row) => row.id)).toEqual(['t-1', 't-3']);
+    });
+
     it('keeps the scan deterministic and bounded', async () => {
         const qb = makeQb();
         const tasks = new TaskRepository({ createQueryBuilder: jest.fn(() => qb) } as never);

@@ -145,8 +145,9 @@ export interface AgentInboundEmailDispatcher {
 export const AGENT_INBOUND_EMAIL_DISPATCHER = 'AGENT_INBOUND_EMAIL_DISPATCHER' as const;
 
 /**
- * Optional adapter that creates a Task from an inbound email and
- * enqueues `agent-task-execute`. Bound by the platform layer (which has
+ * Optional adapter that creates a Task from an inbound email and assigns the
+ * receiving agent (assignment alone starts no run — runs start on
+ * `→ in_progress` or Run). Bound by the platform layer (which has
  * the tasks-domain + Trigger.dev wrappers). When unbound, task-spawn
  * mode persists the message but does not create a Task — the dispatcher
  * returns `handled: true` with no `taskId` and logs the gap.

@@ -99,6 +99,7 @@ import { UploadsService } from '../uploads/uploads.service';
 // it post-merge when their git provider setup is stable. Leaving it
 // unbound keeps the model from seeing tools that would fail mysteriously.
 import {
+    AWAITING_OWNER_LABEL,
     TasksDomainModule,
     TaskChatService,
     TasksService,
@@ -637,10 +638,11 @@ async function assertRealWriteTarget(
         // Notifications v2 (EW-670) — INBOUND_EMAIL_TASK_SPAWNER binding.
         // The inbound-email dispatcher's `task-spawn` mode delegates here:
         // create a Task from the inbound email (scoped to the address
-        // owner, created-by the receiving agent) and assign that agent so
-        // the task-tracking flow dispatches `agent-task-execute`. When this
-        // token is unbound the dispatcher persists the message but spawns
-        // no Task (graceful no-op).
+        // owner, created-by the receiving agent) and assign that agent.
+        // Creating and assigning does NOT start a run: runs start on
+        // `→ in_progress` (or Run). An untrusted sender's Task also carries
+        // the binding `awaiting-owner` label. When this token is unbound the
+        // dispatcher persists the message but spawns no Task (graceful no-op).
         //
         // EW-P4-3 — a reply that threads (In-Reply-To / References) onto an
         // email already linked to a Task is posted on THAT Task's chat
@@ -750,15 +752,17 @@ async function assertRealWriteTarget(
                                 `${body}${inboundEmailAttachmentList(attachments)}${inboundEmailReplyHint(emailMessageId)}${trusted ? '' : inboundEmailAwaitingOwnerNote()}`.trim(),
                             labels: trusted
                                 ? ['inbound-email']
-                                : ['inbound-email', 'awaiting-owner'],
+                                : ['inbound-email', AWAITING_OWNER_LABEL],
                             createdByType: 'agent' as const,
                             createdById: agentId,
                         };
                         const task = scope
                             ? await tasks.create(userId, data, scope)
                             : await tasks.create(userId, data);
-                        // Assign the receiving agent so the task-tracking flow
-                        // fans out agent-task-execute for it.
+                        // Assign the receiving agent. This alone starts no run
+                        // (runs start on `→ in_progress` or Run); for an
+                        // untrusted sender the `awaiting-owner` label keeps
+                        // agents and the fan-out off it until a person starts it.
                         await tasks.addAssignee(userId, task.id, 'agent', agentId);
                         if (!trusted) {
                             await noticeUntrusted(userId, {

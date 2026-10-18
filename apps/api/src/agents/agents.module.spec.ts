@@ -74,6 +74,7 @@ jest.mock('@ever-works/agent/notifications', () => ({
     INBOUND_EMAIL_ATTACHMENT_STORE: 'INBOUND_EMAIL_ATTACHMENT_STORE',
 }));
 jest.mock('@ever-works/agent/tasks-domain', () => ({
+    AWAITING_OWNER_LABEL: 'awaiting-owner',
     TasksDomainModule: class TasksDomainModule {},
     TaskChatService: class TaskChatService {},
     TasksService: class TasksService {},

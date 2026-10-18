@@ -890,7 +890,16 @@ export class TaskRepository {
             .addOrderBy('task.createdAt', 'ASC')
             .addOrderBy('task.id', 'ASC')
             .take(limit)
-            .getMany();
+            .getMany()
+            .then((rows) =>
+                // Prompt-injection hardening — a Task filed from an untrusted
+                // email waits for its owner; the fan-out never starts it.
+                // Filtered here rather than in SQL: `labels` is a JSON column
+                // whose query syntax differs per driver.
+                rows.filter(
+                    (row) => !(Array.isArray(row.labels) && row.labels.includes('awaiting-owner')),
+                ),
+            );
     }
 
     /**

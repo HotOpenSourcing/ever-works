@@ -133,6 +133,40 @@ describe('TaskTransitionService', () => {
             );
         });
 
+        describe("the binding 'awaiting-owner' label (untrusted email)", () => {
+            it('refuses ANY agent-driven move of a Task carrying it', async () => {
+                const task = makeTask({
+                    status: TaskStatus.BACKLOG,
+                    labels: ['inbound-email', 'awaiting-owner'],
+                });
+                await expect(
+                    svc.transition(task, TaskStatus.IN_PROGRESS, { actorType: 'agent' }),
+                ).rejects.toThrow(/waiting for its owner/);
+                expect(tasks.casUpdateStatus).not.toHaveBeenCalled();
+            });
+
+            it('a person starting it (todo / in_progress) clears the label in the same write', async () => {
+                const task = makeTask({
+                    status: TaskStatus.BACKLOG,
+                    labels: ['inbound-email', 'awaiting-owner'],
+                });
+                tasks.findById.mockResolvedValueOnce({ ...task, status: TaskStatus.TODO });
+                await svc.transition(task, TaskStatus.TODO);
+                const patch = tasks.casUpdateStatus.mock.calls[0][2];
+                expect(patch.labels).toEqual(['inbound-email']);
+            });
+
+            it('a person moving it elsewhere (cancelled) keeps the label', async () => {
+                const task = makeTask({
+                    status: TaskStatus.BACKLOG,
+                    labels: ['awaiting-owner'],
+                });
+                tasks.findById.mockResolvedValueOnce({ ...task, status: TaskStatus.CANCELLED });
+                await svc.transition(task, TaskStatus.CANCELLED);
+                expect(tasks.casUpdateStatus.mock.calls[0][2].labels).toBeUndefined();
+            });
+        });
+
         it('force=true from an AGENT-driven move does NOT skip the approver gate', async () => {
             const task = makeTask({ status: TaskStatus.IN_REVIEW, requireAllApprovers: true });
             approvers.allApproved.mockResolvedValueOnce(false);

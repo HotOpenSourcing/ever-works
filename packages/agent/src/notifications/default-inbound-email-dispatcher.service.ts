@@ -223,8 +223,9 @@ function whyNotDeliverable(
  * (`payload.recipient`) → its inbound agent assignment, persists the
  * inbound `email_messages` row, and branches on the assignment's
  * `dispatchMode`:
- *  - `task-spawn` (default): delegate Task creation + agent-task-execute
- *    enqueue to the optional {@link INBOUND_EMAIL_TASK_SPAWNER} adapter.
+ *  - `task-spawn` (default): delegate Task creation (and assignment to the
+ *    receiving agent — which by itself starts no run) to the optional
+ *    {@link INBOUND_EMAIL_TASK_SPAWNER} adapter.
  *  - `conversation`: find/create the per-agent `email_conversations`
  *    thread, link the message, and bump `lastMessageAt` (the agent's
  *    chat-reply path consumes the thread).
