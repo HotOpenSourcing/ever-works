@@ -6,7 +6,7 @@
 
 **Epic ID:** `FL-02-node-link`
 **Spec:** [`./spec.md`](./spec.md) · **Plan:** [`./plan.md`](./plan.md)
-**Status:** `In progress` — P1 (T-01 … T-15) in PR 1
+**Status:** `In progress` — P1 (T-01 … T-15) merged (#2737); relay bus and viewers (T-19 … T-21, T-23) in PR 2
 **Last updated:** 2026-10-18
 
 ---
@@ -147,7 +147,7 @@
 
 ## P2 — Relay bus and viewer bridge
 
-- [ ] **T-19**. `apps/api/src/relay/relay-bus.ts` (`RelayBus` interface = the existing
+- [x] **T-19**. `apps/api/src/relay/relay-bus.ts` (`RelayBus` interface = the existing
       `TerminalFanoutBus` plus subscribe), `relay-bus.valkey.ts` (ioredis pub/sub, delivery answer),
       `relay-bus.in-process.ts`, `relay-bus.module.ts` selecting Valkey exactly when `getRedisUrl()`
       answers (CONTRACTS R-7 — no mode setting); bind to `TERMINAL_FANOUT_BUS`
@@ -156,12 +156,12 @@
       **Test**: `relay-bus.valkey.spec.ts` against a test Valkey (round-trip, delivery answer, degraded
       on loss); `relay-bus.module.spec.ts` (selection by `REDIS_URL`; boot failure message names
       `FLEET_RELAY_REQUIRE_BUS`).
-- [ ] **T-20**. Health: `fleet_relay` indicator in `apps/api/src/health/service-detection.ts` /
+- [x] **T-20**. Health: `fleet_relay` indicator in `apps/api/src/health/service-detection.ts` /
       `health.controller.ts:85-100` (`configured`, `mode: 'valkey'|'single-replica'`, `status`) on the
       existing `GET /api/health/ready`.
       **Test**: extend `apps/api/src/health/health.controller.spec.ts` — both modes and the degraded
       status.
-- [ ] **T-21**. Viewer side: `fleet-link-attach.service.ts` (`mint(nodeId, family, target, role,
+- [x] **T-21**. Viewer side: `fleet-link-attach.service.ts` (`mint(nodeId, family, target, role,
       caller)`; channel claim `fleet-link`, role `viewer|driver`, 60 s, single use) over
       `TerminalAttachService`, authoriser applied — no HTTP route of its own: each epic calls it from
       its CONTRACTS §11.2 attach-token path; `fleet-link-viewer-gateway.service.ts` on `/ws/fleet/:family/:id`;
@@ -174,7 +174,7 @@
       `openNodeLeg` (unchanged); `EVER_WORKS_NODE_LINK_LEGACY_LEG=1` forces the old path. API side:
       `computer-relay.registry.ts` accepts frames from the bridge as the `worker` role.
       **Test**: `computer-session.spec.ts` extend (both paths); AW-11 e2e run twice in CI (env matrix).
-- [ ] **T-23**. Integration `apps/api/test/fleet-link.two-replicas.e2e-spec.ts` — two API processes,
+- [x] **T-23**. Integration `apps/api/test/fleet-link.two-replicas.e2e-spec.ts` — two API processes,
       one Valkey, node harness on A, viewer on B; frames both ways; bus loss degrades health.
       **Test**: itself.
 
