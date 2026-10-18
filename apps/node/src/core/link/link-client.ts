@@ -1,17 +1,20 @@
 import {
 	decodeFleetLinkControl,
 	decodeFleetLinkFrame,
+	encodeFleetLinkControl,
 	FLEET_LINK_AUTH_TIMEOUT_MS,
 	FLEET_LINK_CLOSE_CODES,
 	FLEET_LINK_DEFAULT_LIMITS,
 	FLEET_LINK_HELLO_BLOCK_MS,
 	FLEET_LINK_MAX_FRAME_BYTES,
+	FLEET_LINK_MAX_JSON_BYTES,
 	FLEET_LINK_REFUSED_RETRY_MS,
 	FLEET_LINK_RESUME_WINDOW_MS,
 	FLEET_LINK_VERSION,
 	FLEET_LINK_WS_PATH,
 	isFleetLinkControlMessage,
 	isFleetLinkEligible,
+	makeFleetLinkError,
 	peekFleetLinkFrameChannel,
 	type FleetConsents,
 	type FleetLinkControlMessage,
@@ -214,9 +217,22 @@ class NodeLinkClient implements NodeLink {
 			},
 			done: (operationId, outcome) => {
 				if (!this.operations.delete(operationId)) return;
-				const done: FleetLinkOperationDone = { type: 'operation.done', operationId };
+				let done: FleetLinkOperationDone = { type: 'operation.done', operationId };
 				if (outcome.error) done.error = outcome.error;
 				else done.result = outcome.result ?? null;
+				if (encodeFleetLinkControl(done) === null) {
+					// Over the control-message cap: no link would ever carry it, so
+					// keeping it would retry it forever while the platform shows
+					// "running". The operation ends, failed, saying why.
+					done = {
+						type: 'operation.done',
+						operationId,
+						error: makeFleetLinkError(
+							'operation_failed',
+							`the result was too large to send back (over ${Math.round(FLEET_LINK_MAX_JSON_BYTES / (1024 * 1024))} MiB)`
+						)
+					};
+				}
 				if (this.state.phase !== 'connected' || !this.mux.sendControl(done)) this.keepResult(done);
 			}
 		};
@@ -446,7 +462,11 @@ class NodeLinkClient implements NodeLink {
 				this.control.startDrain(message, this.now());
 				return;
 			case 'channel.open':
-				void this.mux.open(message);
+				this.mux.open(message).catch((error: unknown) => {
+					this.options.logger?.warn(
+						`Node link: opening channel ${message.channel} failed: ${describe(error)}`
+					);
+				});
 				return;
 			case 'channel.close':
 				this.mux.closeRemote(message.channel, message.reason);
@@ -468,6 +488,16 @@ class NodeLinkClient implements NodeLink {
 		this.forgetToken();
 		this.limits = message.limits;
 		this.previousGeneration = message.linkGeneration;
+		// A pause belongs to the link that carried it. The platform sends
+		// `link.pause` right after `link.ready` while its kill switch is on,
+		// so a pause from an earlier link — whose `link.resume` this computer
+		// was not connected to hear — must not outlive it.
+		if (this.control.paused) {
+			this.control.resume();
+			this.options.logger?.info(
+				'Node link reconnected: the earlier pause is lifted unless the platform repeats it.'
+			);
+		}
 		this.resumeChannels = [];
 		this.backoff.reset();
 		this.refusalLogged = false;

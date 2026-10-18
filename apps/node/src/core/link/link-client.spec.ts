@@ -280,6 +280,29 @@ describe('createNodeLink — channels, pause, operations', () => {
 		expect(h.sockets.sockets).toHaveLength(1);
 	});
 
+	it('lifts a pause from an earlier link when a new link is ready — the resume it was not there to hear', async () => {
+		// The kill switch went on (this link paused), the link dropped, the
+		// switch was cleared while it was away: the platform only resumes the
+		// links it holds, and re-sends link.pause after ready while it is still on.
+		const h = setup();
+		const socket = await connect(h, 1);
+		socket.receiveControl({ type: 'link.pause', reason: 'kill_switch' });
+		expect(h.link.control.paused).toBe(true);
+		socket.drop(1006);
+		h.clock.advance(1_000);
+		await flush();
+		const next = h.sockets.last();
+		next.open();
+		next.receiveControl(readyMessage(2));
+		expect(h.link.control.paused).toBe(false);
+		next.receiveControl({ type: 'channel.open', channel: 1, family: 'machine', params: {}, requestId: 'o1' });
+		await flush();
+		expect(next.controls().at(-1)).toMatchObject({ type: 'channel.ready', channel: 1 });
+		// A pause the platform repeats after ready still holds.
+		next.receiveControl({ type: 'link.pause', reason: 'kill_switch' });
+		expect(h.link.control.paused).toBe(true);
+	});
+
 	it('records a drain for the session module (FR-27)', async () => {
 		const h = setup();
 		const socket = await connect(h);
@@ -394,6 +417,46 @@ describe('createNodeLink — channels, pause, operations', () => {
 		expect(next.controls().filter((m) => m.type === 'operation.done')).toEqual([
 			{ type: 'operation.done', operationId, result: { ok: true } }
 		]);
+	});
+
+	it('fails an operation whose result is too large for any link, instead of keeping it forever', async () => {
+		let finish!: (value: unknown) => void;
+		const h = setup({}, [
+			{
+				id: 'docker',
+				machineVerbs: {
+					'docker.image.list': {
+						stateChanging: false,
+						run: () => new Promise((resolve) => (finish = resolve))
+					}
+				}
+			}
+		]);
+		const socket = await connect(h);
+		socket.receiveControl({ type: 'channel.open', channel: 3, family: 'machine', params: {}, requestId: 'o3' });
+		await flush();
+		socket.receiveJson(3, { requestId: 'q1', type: 'docker.image.list' });
+		await flush();
+		h.clock.advance(2_000);
+		const operationId = socket.jsonOn(3)[0].operationId as string;
+		finish({ blob: 'x'.repeat(2 * 1024 * 1024) });
+		await flush();
+		const done = socket.controls().filter((m) => m.type === 'operation.done');
+		expect(done).toEqual([
+			{
+				type: 'operation.done',
+				operationId,
+				error: { code: 'operation_failed', hint: 'the result was too large to send back (over 1 MiB)' }
+			}
+		]);
+		// Nothing is held for the next link.
+		socket.drop(1006);
+		h.clock.advance(1_000);
+		await flush();
+		const next = h.sockets.last();
+		next.open();
+		next.receiveControl(readyMessage(2));
+		expect(next.controls().filter((m) => m.type === 'operation.done')).toEqual([]);
 	});
 
 	it('cancels an operation the platform cancels', async () => {

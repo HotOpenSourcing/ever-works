@@ -15,6 +15,7 @@ import {
 	type FleetConsents,
 	type FleetLinkChannelOpen,
 	type FleetLinkCloseReason,
+	type FleetLinkConsentRequirement,
 	type FleetLinkError,
 	type FleetLinkExtensionMessage,
 	type FleetLinkFamily,
@@ -145,7 +146,18 @@ export class ChannelMux {
 			);
 			return;
 		}
-		const requirement = this.options.modules.familyConsent(family, params);
+		// A module-supplied function over platform-controlled params: whatever
+		// it throws is a refusal of this open, never a daemon crash.
+		let requirement: FleetLinkConsentRequirement;
+		try {
+			requirement = this.options.modules.familyConsent(family, params);
+		} catch (thrown) {
+			this.options.logger?.warn(
+				`Link channel ${channel} (${family}) consent check failed: ${thrown instanceof Error ? thrown.message : String(thrown)}`
+			);
+			refuse(makeFleetLinkError('internal', `${this.options.nodeName} could not check this channel's consent`));
+			return;
+		}
 		if (!fleetConsentSatisfies(this.options.consents, requirement)) {
 			refuse(
 				makeFleetLinkError('consent_missing', fleetConsentMissingHint(requirement, this.options.nodeName), {

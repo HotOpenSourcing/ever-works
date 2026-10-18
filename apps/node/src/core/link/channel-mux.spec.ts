@@ -83,6 +83,35 @@ describe('ChannelMux', () => {
 		expect(h.handlers.get(1)!.onJson).toHaveBeenCalledWith({ type: 'logs.follow' });
 	});
 
+	it('refuses an open whose module consent check throws, and keeps running (a module bug is not a daemon crash)', async () => {
+		const h = harness({
+			modules: [
+				{
+					id: 'fragile',
+					families: [
+						{
+							family: 'logs',
+							consent: () => {
+								throw new Error('params.path is not a string');
+							},
+							open: () => ({ ok: true, handler: {} })
+						}
+					]
+				}
+			]
+		});
+		await expect(h.open(1, 'logs', { path: 42 })).resolves.toBeUndefined();
+		expect(h.controls()).toEqual([
+			{
+				type: 'channel.refused',
+				channel: 1,
+				requestId: 'r1',
+				error: { code: 'internal', hint: "build-01 could not check this channel's consent" }
+			}
+		]);
+		expect(h.mux.size).toBe(0);
+	});
+
 	it('names a resumable channel’s key in channel.ready', async () => {
 		const h = harness();
 		await h.open(4, 'session');
