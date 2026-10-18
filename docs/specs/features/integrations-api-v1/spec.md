@@ -474,9 +474,12 @@ organization overlay into Works, locks, revisions and the activity trail therefo
   letter (`400`). A Work document's path follows the Work rule, which also requires a class folder first.
 - **An archived document** changes `status` only through `/unarchive`: a `PATCH` with `status` answers `422`. Other
   edits are allowed.
-- **Review gate** (works-security lane 3a, 2026-10-18): a document an integration creates lands `reviewState: proposed`
-  and is kept out of agent context until it is accepted — by a person in Ever Works, or by the integration relaying its own
-  review queue's decision through `POST /kb/documents/:id/accept`.
+- **Review gate** (works-security lane 3a, 2026-10-18): a document the key writes **as itself** (no `X-Act-As-User`)
+  lands `reviewState: proposed`, and a key-only `PATCH` of its `title`, `body`, `description` or `class` puts it back to
+  `proposed`; it is kept out of agent context until it is accepted — by a person in Ever Works, or by the integration
+  relaying its own review queue's decision through `POST /kb/documents/:id/accept`. A person's write relayed with
+  `X-Act-As-User` stays `accepted` (create) and leaves the review state alone (edit), as their own edit in Ever Works
+  would.
 
 Document routes:
 
