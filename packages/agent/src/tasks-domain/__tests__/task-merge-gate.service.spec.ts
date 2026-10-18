@@ -351,6 +351,38 @@ describe('TaskMergeGateService', () => {
         expect(liveMain.taskWorkspace.attemptMergeForOpenPullRequest).not.toHaveBeenCalled();
     });
 
+    it('shows the LIVE base in the approval request, not the Work default', async () => {
+        const { service, mergeApprovals } = build({ base: 'develop' });
+        await service.onPullRequestStatusRefreshed(task(), status({ baseRef: 'main' }));
+        expect(mergeApprovals.requestMergeApproval).toHaveBeenCalledWith(
+            expect.objectContaining({ targetBranch: 'main' }),
+        );
+    });
+
+    it('lets a human-set tenant / organization waiver merge develop on green CI, never main', async () => {
+        const waived = (base: string) => {
+            const built = build({
+                policy: { ...NEEDS_APPROVAL, requireHumanApproval: false, protectedBranches: [] },
+                base,
+            });
+            built.mergePolicy.resolve.mockResolvedValue({
+                policy: { ...NEEDS_APPROVAL, requireHumanApproval: false, protectedBranches: [] },
+                source: 'organization',
+                chain: [],
+                humanScopeWaivesApproval: true,
+            });
+            return built;
+        };
+        const develop = waived('develop');
+        await expect(
+            develop.service.onPullRequestStatusRefreshed(task(), status()),
+        ).resolves.toMatchObject({ action: 'merge-attempted' });
+        const main = waived('main');
+        await expect(
+            main.service.onPullRequestStatusRefreshed(task(), status()),
+        ).resolves.toMatchObject({ action: 'approval-requested' });
+    });
+
     it('merges a floor base once a human approved it, and tells the facade to re-verify', async () => {
         const { service, taskWorkspace } = build({
             policy: { ...NEEDS_APPROVAL, requireHumanApproval: false, protectedBranches: [] },

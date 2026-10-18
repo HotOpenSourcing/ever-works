@@ -302,6 +302,31 @@ describe('evaluateAgentMerge — the single decision point', () => {
         expect(decision.allowed).toBe(true);
     });
 
+    it('lets a human-set tenant / organization waiver lift develop and stage, never main or master', () => {
+        for (const target of ['develop', 'stage']) {
+            expect(
+                evaluateAgentMerge({
+                    ...okCtx,
+                    policy: unattended,
+                    humanApproved: false,
+                    humanScopeWaivesApproval: true,
+                    targetBranch: target,
+                }).allowed,
+            ).toBe(true);
+        }
+        for (const target of ['main', 'master']) {
+            const decision = evaluateAgentMerge({
+                ...okCtx,
+                policy: unattended,
+                humanApproved: false,
+                humanScopeWaivesApproval: true,
+                targetBranch: target,
+            });
+            expect(decision.allowed).toBe(false);
+            expect(decision.code).toBe('human-approval-required');
+        }
+    });
+
     it('leaves every other branch to the resolved policy (no approval needed)', () => {
         const decision = evaluateAgentMerge({
             ...okCtx,
@@ -389,5 +414,49 @@ describe('evaluateAgentMerge — the single decision point', () => {
                 mergeMethod: 'rebase',
             }).code,
         ).toBe('protected-branch');
+    });
+});
+
+describe('resolveMergePolicyChain — the human-scope floor waiver (works-security lane 3a)', () => {
+    const off = { requireHumanApproval: false };
+    const on = { requireHumanApproval: true };
+
+    it('is set when a tenant or organization policy turned approval off and nothing re-enabled it', () => {
+        expect(
+            resolveMergePolicyChain([{ scope: 'tenant', id: 't', policy: off }])
+                .humanScopeWaivesApproval,
+        ).toBe(true);
+        expect(
+            resolveMergePolicyChain([{ scope: 'organization', id: 'o', policy: off }])
+                .humanScopeWaivesApproval,
+        ).toBe(true);
+    });
+
+    it('is never set by a Work- or Agent-level loosening (the scopes a machine could write)', () => {
+        for (const scope of ['work', 'agent'] as const) {
+            const resolved = resolveMergePolicyChain([{ scope, id: 'x', policy: off }]);
+            expect(resolved.policy.requireHumanApproval).toBe(false);
+            expect(resolved.humanScopeWaivesApproval).toBe(false);
+        }
+    });
+
+    it('follows the most specific human scope that declares it, and needs the effective policy to agree', () => {
+        // Organization re-enables what the tenant turned off.
+        expect(
+            resolveMergePolicyChain([
+                { scope: 'tenant', id: 't', policy: off },
+                { scope: 'organization', id: 'o', policy: on },
+                { scope: 'work', id: 'w', policy: off },
+            ]).humanScopeWaivesApproval,
+        ).toBe(false);
+        // A Work re-enables approval: the effective policy wants one anyway.
+        expect(
+            resolveMergePolicyChain([
+                { scope: 'organization', id: 'o', policy: off },
+                { scope: 'work', id: 'w', policy: on },
+            ]).humanScopeWaivesApproval,
+        ).toBe(false);
+        // Silent chain: the platform default requires approval.
+        expect(resolveMergePolicyChain([]).humanScopeWaivesApproval).toBe(false);
     });
 });

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	MERGE_METHODS,
+	MERGE_POLICY_ALWAYS_APPROVED_BRANCHES,
 	MERGE_POLICY_FIELDS,
 	MERGE_POLICY_PROTECTED_BRANCH_FLOOR,
 	MERGE_POLICY_SCOPE_PRECEDENCE,
 	PLATFORM_DEFAULT_MERGE_POLICY,
-	mergeTargetNeedsFloorApproval
+	mergeTargetNeedsFloorApproval,
+	sameMergeBranch
 } from '../merge-policy.types.js';
 
 describe('MERGE_METHODS', () => {
@@ -192,9 +194,10 @@ describe('MERGE_POLICY_FIELDS', () => {
 });
 
 describe('MERGE_POLICY_PROTECTED_BRANCH_FLOOR (works-security lane 3a)', () => {
-	it('is the four long-lived branches, frozen', () => {
+	it('is the four long-lived branches, frozen; main and master can never be waived', () => {
 		expect([...MERGE_POLICY_PROTECTED_BRANCH_FLOOR]).toEqual(['main', 'master', 'develop', 'stage']);
 		expect(Object.isFrozen(MERGE_POLICY_PROTECTED_BRANCH_FLOOR)).toBe(true);
+		expect([...MERGE_POLICY_ALWAYS_APPROVED_BRANCHES]).toEqual(['main', 'master']);
 	});
 
 	it('is covered by the platform default protected list', () => {
@@ -210,15 +213,30 @@ describe('MERGE_POLICY_PROTECTED_BRANCH_FLOOR (works-security lane 3a)', () => {
 		expect(mergeTargetNeedsFloorApproval('Master')).toBe(true);
 	});
 
-	it('treats an unknown or blank base as the worst case', () => {
+	it('treats an unknown or blank base as the worst case, waiver or not', () => {
 		expect(mergeTargetNeedsFloorApproval(null)).toBe(true);
-		expect(mergeTargetNeedsFloorApproval(undefined)).toBe(true);
+		expect(mergeTargetNeedsFloorApproval(undefined, { humanScopeWaivesApproval: true })).toBe(true);
 		expect(mergeTargetNeedsFloorApproval('   ')).toBe(true);
+	});
+
+	it('lets a human-scope waiver lift develop / stage, never main / master', () => {
+		const waived = { humanScopeWaivesApproval: true };
+		expect(mergeTargetNeedsFloorApproval('develop', waived)).toBe(false);
+		expect(mergeTargetNeedsFloorApproval('refs/heads/Stage', waived)).toBe(false);
+		expect(mergeTargetNeedsFloorApproval('main', waived)).toBe(true);
+		expect(mergeTargetNeedsFloorApproval('master', waived)).toBe(true);
 	});
 
 	it('leaves every other branch to the resolved policy', () => {
 		expect(mergeTargetNeedsFloorApproval('feature/x')).toBe(false);
 		expect(mergeTargetNeedsFloorApproval('main-backup')).toBe(false);
 		expect(mergeTargetNeedsFloorApproval('release/1.2')).toBe(false);
+	});
+
+	it('compares branch refs the same way', () => {
+		expect(sameMergeBranch('refs/heads/Main', 'main')).toBe(true);
+		expect(sameMergeBranch('develop', 'main')).toBe(false);
+		expect(sameMergeBranch(null, 'main')).toBe(false);
+		expect(sameMergeBranch(' ', ' ')).toBe(false);
 	});
 });

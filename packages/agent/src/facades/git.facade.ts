@@ -76,7 +76,11 @@ import { WorkRepository } from '../database/repositories/work.repository';
 import { GitHubAppInstallationRepository } from '../database/repositories/github-app-installation.repository';
 import { MERGE_POLICY_ENFORCER, type MergePolicyEnforcer } from '../policy/merge-policy.enforcer';
 import { MERGE_APPROVAL_VERIFIER, type MergeApprovalVerifier } from '../policy/merge-approval.port';
-import { mergeTargetNeedsFloorApproval, normalizeCommitSha } from '@ever-works/contracts';
+import {
+    mergeTargetNeedsFloorApproval,
+    normalizeCommitSha,
+    sameMergeBranch,
+} from '@ever-works/contracts';
 import type { AuthAccount } from '../entities/auth-account.entity';
 import { FacadeError } from './base.facade';
 import { config } from '@src/config';
@@ -1163,9 +1167,13 @@ export class GitFacadeService implements IGitFacade {
         // older binding) is read as "yes" — fail closed.
         let requiresApproval = true;
         let policySource: MergePolicySource | undefined;
+        // Works-security lane 3a — whether a human-set tenant / organization
+        // policy lifted the protected-branch floor for develop / stage.
+        let humanScopeWaivesApproval = false;
         if (typeof this.mergePolicy.resolve === 'function') {
             try {
                 const resolved = await this.mergePolicy.resolve(scope);
+                humanScopeWaivesApproval = resolved.humanScopeWaivesApproval === true;
                 // OR, never assignment: `agentActor.requireHumanApproval`
                 // can only RAISE the bar (release promotion lane, slice
                 // AI). A caller that could clear it would be able to
@@ -1270,11 +1278,37 @@ export class GitFacadeService implements IGitFacade {
         // default branch unattended. Raise-only, exactly like
         // `agentActor.requireHumanApproval`; the matrix below applies the same
         // rule a second time.
-        if (!requiresApproval) {
-            const base = agentActor.targetBranch ?? live.baseRef ?? null;
-            if (mergeTargetNeedsFloorApproval(base)) {
-                requiresApproval = true;
-            }
+        //
+        // The LIVE base is authoritative: the caller's `targetBranch` is what
+        // the platform planned (the Work's isolation base), and a pull request
+        // can be retargeted after it was opened. A live base that disagrees
+        // with the plan is refused outright — the merge would land somewhere
+        // nobody planned, and nobody approved.
+        const liveBase = live.baseRef && live.baseRef.trim() ? live.baseRef : null;
+        if (
+            liveBase &&
+            agentActor.targetBranch &&
+            !sameMergeBranch(liveBase, agentActor.targetBranch)
+        ) {
+            throw new MergePolicyRefusedError(
+                {
+                    allowed: false,
+                    code: 'target-branch-mismatch',
+                    reason:
+                        `Pull request #${prNumber} now targets '${liveBase}', not the planned ` +
+                        `'${agentActor.targetBranch}'. It was retargeted after it was opened, so this ` +
+                        'merge is refused; a person decides where it lands.',
+                    source: policySource,
+                },
+                options.providerId,
+            );
+        }
+        const floorBase = liveBase ?? agentActor.targetBranch ?? null;
+        if (
+            !requiresApproval &&
+            mergeTargetNeedsFloorApproval(floorBase, { humanScopeWaivesApproval })
+        ) {
+            requiresApproval = true;
         }
 
         // (3) The approval gate, which IS skipped when the effective policy
@@ -1366,7 +1400,9 @@ export class GitFacadeService implements IGitFacade {
         // Resolve the base branch when the caller did not supply it — the
         // protected-branch rule is worthless without it, and the decision
         // point refuses on an unknown target rather than guessing.
-        let targetBranch = agentActor.targetBranch ?? null;
+        // The live base first (works-security lane 3a): it is the branch the
+        // provider would actually merge into.
+        let targetBranch = liveBase ?? agentActor.targetBranch ?? null;
         if (!targetBranch) {
             try {
                 const pr = await this.getPullRequest(owner, repo, prNumber, options);

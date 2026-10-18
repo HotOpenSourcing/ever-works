@@ -275,6 +275,7 @@ export class TaskMergeGateService {
                 revertBase ??
                 status.baseRef ??
                 ((work.taskIsolationBaseBranch && work.taskIsolationBaseBranch.trim()) || null),
+            { humanScopeWaivesApproval: resolved.humanScopeWaivesApproval === true },
         );
         const needsApproval =
             resolved.policy.requireHumanApproval ||
@@ -334,9 +335,12 @@ export class TaskMergeGateService {
             // read it in the Inbox ("Merge PR #7 into <branch> in <repo>").
             // A promotion carries its own base; only an ordinary Task pull
             // request targets the Work's isolation base.
+            // The LIVE base first (works-security lane 3a): a pull request
+            // retargeted after it was opened must be shown as what it is.
             targetBranch:
                 promotion?.baseBranch ??
                 revertBase ??
+                ((status.baseRef && status.baseRef.trim()) || null) ??
                 ((work.taskIsolationBaseBranch && work.taskIsolationBaseBranch.trim()) || null),
             repository: taskRepositoryFullName(work),
             ciState: status.ciState,

@@ -113,7 +113,21 @@ export function resolveMergePolicyChain(layers: MergePolicyLayer[]): ResolvedMer
         if (entry.fields.length > 0) source = entry.scope;
     }
 
-    return { policy, source, chain };
+    // Works-security lane 3a — the protected-branch floor waiver for `develop`
+    // / `stage`: only a TENANT or ORGANIZATION policy (scopes only a person
+    // can write) may lift it, by explicitly declaring `requireHumanApproval:
+    // false` — and only while the effective policy agrees. A Work- or
+    // Agent-level `false` never lifts it.
+    let humanScopeApproval: boolean | undefined;
+    for (const layer of ordered) {
+        if (layer.scope !== 'tenant' && layer.scope !== 'organization') continue;
+        const declared = sanitizeMergePolicyOverride(layer.policy).requireHumanApproval;
+        if (declared !== undefined) humanScopeApproval = declared;
+    }
+    const humanScopeWaivesApproval =
+        humanScopeApproval === false && policy.requireHumanApproval === false;
+
+    return { policy, source, chain, humanScopeWaivesApproval };
 }
 
 /** Context the single decision point evaluates against. */
@@ -133,6 +147,12 @@ export interface MergeDecisionContext {
      * policy that cannot be evaluated is never satisfied.
      */
     targetBranch?: string | null;
+    /**
+     * Works-security lane 3a — {@link ResolvedMergePolicy.humanScopeWaivesApproval}
+     * of the resolution `policy` came from: lifts the protected-branch floor
+     * for `develop` / `stage` (never `main` / `master`). Absent = not waived.
+     */
+    humanScopeWaivesApproval?: boolean;
     /**
      * Requested merge strategy. `undefined` means "provider default", which
      * every supported provider treats as a merge commit — so it is
@@ -195,12 +215,18 @@ export function evaluateAgentMerge(ctx: MergeDecisionContext): MergeDecision {
     }
 
     // The protected-branch FLOOR (works-security lane 3a). A scope that
-    // removed `main` / `master` / `develop` / `stage` from its protected list
-    // (or protects nothing) still cannot have an agent land on one of them
-    // unattended: the merge needs a recorded human approval whatever
-    // `requireHumanApproval` resolved to. An unknown base is judged as the
-    // worst case. Listed as protected, the branch was already refused above.
-    if (!ctx.humanApproved && mergeTargetNeedsFloorApproval(ctx.targetBranch)) {
+    // removed a floor branch from its protected list (or protects nothing)
+    // still cannot have an agent land on it unattended: `main` / `master`
+    // always need a recorded human approval, `develop` / `stage` too unless a
+    // human-set tenant or organization policy turned approval off. An unknown
+    // base is judged as the worst case. Listed as protected, the branch was
+    // already refused above.
+    if (
+        !ctx.humanApproved &&
+        mergeTargetNeedsFloorApproval(ctx.targetBranch, {
+            humanScopeWaivesApproval: ctx.humanScopeWaivesApproval === true,
+        })
+    ) {
         const target = ctx.targetBranch?.trim();
         return deny(
             target ? 'human-approval-required' : 'target-branch-unknown',
