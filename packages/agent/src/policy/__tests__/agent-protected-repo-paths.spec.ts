@@ -25,10 +25,13 @@ describe('always-protected repository paths', () => {
 
     // CodeQL on #2769: no polynomial regex on the (model-supplied) path.
     it('stays linear on a path made of thousands of slashes', () => {
+        // The slow case for a `/\/+$/` regex: a long run of `/` that is NOT at
+        // the end (every start position scans the run, then fails on `x`) —
+        // about 0.8 s with that regex, well under a millisecond with the loop.
         const started = Date.now();
-        expect(isAlwaysProtectedRepoPath(`${'/'.repeat(50_000)}x`)).toBe(false);
+        expect(isAlwaysProtectedRepoPath(`a${'/'.repeat(50_000)}x`)).toBe(false);
+        expect(Date.now() - started).toBeLessThan(200);
         expect(isAlwaysProtectedRepoPath(`.github${'/'.repeat(50_000)}`)).toBe(true);
-        expect(Date.now() - started).toBeLessThan(1_000);
     });
 
     it('leaves the rest of the repository, and look-alikes, alone', () => {
