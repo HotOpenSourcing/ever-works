@@ -32,7 +32,10 @@ import {
  * Only a PERSON's approval acts: a guardrail decision carries no
  * `decidedById` and is ignored, a rejection does nothing (the proposal row is
  * the record). Best-effort by contract, like every listener of this event: a
- * failure is logged, never thrown back into the request that decided.
+ * failure is logged, never thrown back into the request that decided — but an
+ * APPROVED proposal that cannot be applied, for ANY reason (the service is not
+ * wired, the payload is malformed, the state moved on), always files an Inbox
+ * notice for the owner: an approval never fails silently.
  */
 export { AGENT_ESCALATION_RESOLUTION_PROPOSAL_KIND, AGENT_FILE_EDIT_PROPOSAL_KIND };
 
@@ -102,9 +105,11 @@ export class AgentProposalExecutionListener {
         event: AgentActionProposalDecidedEvent,
         payload: Record<string, unknown>,
     ): Promise<void> {
-        if (!this.escalations) return;
+        if (!this.escalations) {
+            throw new Error('escalations are not available on this deployment.');
+        }
         const escalationId = typeof payload.escalationId === 'string' ? payload.escalationId : '';
-        if (!escalationId) return;
+        if (!escalationId) throw new Error('the proposal names no escalation.');
         const note = typeof payload.note === 'string' ? payload.note : null;
         const resolved = await this.escalations.resolve(escalationId, event.userId, note, {
             resolvedBy: 'agent',
@@ -119,10 +124,19 @@ export class AgentProposalExecutionListener {
         event: AgentActionProposalDecidedEvent,
         payload: Record<string, unknown>,
     ): Promise<void> {
-        if (!this.files) return;
+        if (!this.files) throw new Error('agent files are not available on this deployment.');
         const name = payload.fileName;
-        if (typeof name !== 'string' || !AGENT_FILE_NAMES.includes(name as AgentFileName)) return;
-        if (typeof payload.body !== 'string') return;
+        if (typeof name !== 'string' || !AGENT_FILE_NAMES.includes(name as AgentFileName)) {
+            throw new Error(`the proposal names no agent file (${AGENT_FILE_NAMES.join(', ')}).`);
+        }
+        if (typeof payload.body !== 'string') {
+            throw new Error('the proposal carries no file body.');
+        }
+        // The platform always records the hash the Agent saw; without it the
+        // write would be unguarded, so it is refused rather than applied blind.
+        if (typeof payload.baseHash !== 'string') {
+            throw new Error('the proposal carries no base content hash.');
+        }
         await this.files.write({
             userId: event.userId,
             agentId: event.agentId,
@@ -131,7 +145,7 @@ export class AgentProposalExecutionListener {
             // The hash the Agent saw when it proposed: if the file changed
             // since (the owner edited it), the write refuses instead of
             // overwriting the newer content with a stale proposal.
-            expectedHash: typeof payload.baseHash === 'string' ? payload.baseHash : undefined,
+            expectedHash: payload.baseHash,
             actor: 'agent',
             runId: typeof payload.runId === 'string' ? payload.runId : undefined,
         });

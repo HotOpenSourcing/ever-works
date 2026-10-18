@@ -189,12 +189,47 @@ describe('AgentProposalExecutionListener', () => {
         expect(files.write).not.toHaveBeenCalled();
     });
 
-    it('ignores a payload naming a file outside the five canonical files', async () => {
-        const { listener, files } = build();
+    it('never writes a payload naming a file outside the five canonical files — and says so', async () => {
+        const { listener, files, inbox } = build();
         await listener.handleProposalDecided(
             event({ ...filePayload, fileName: '../../etc/passwd' }),
         );
         expect(files.write).not.toHaveBeenCalled();
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({ body: expect.stringContaining('names no agent file') }),
+        );
+    });
+
+    // Review of #2769: an approved proposal that cannot be applied for ANY
+    // reason files the owner notice — a malformed payload or a service that is
+    // not wired used to return silently.
+    it.each([
+        ['a non-string body', { ...filePayload, body: 42 }, 'no file body'],
+        ['a missing base hash', { ...filePayload, baseHash: undefined }, 'no base content hash'],
+        ['a missing escalation id', { ...escalationPayload, escalationId: '' }, 'no escalation'],
+    ])('reports %s instead of returning silently', async (_label, payload, reason) => {
+        const { listener, files, escalations, inbox } = build();
+        await listener.handleProposalDecided(event(payload));
+        expect(files.write).not.toHaveBeenCalled();
+        expect(escalations.resolve).not.toHaveBeenCalled();
+        expect(inbox.notice).toHaveBeenCalledWith(
+            'owner-1',
+            expect.objectContaining({
+                title: expect.stringMatching(/NOT applied/),
+                body: expect.stringContaining(reason),
+            }),
+        );
+    });
+
+    it('reports an approval it cannot apply because the service is not wired', async () => {
+        const inbox = { notice: jest.fn().mockResolvedValue(undefined) };
+        const listener = new AgentProposalExecutionListener(undefined, undefined, inbox as never);
+        await listener.handleProposalDecided(event(filePayload));
+        await listener.handleProposalDecided(event(escalationPayload));
+        expect(inbox.notice).toHaveBeenCalledTimes(2);
+        expect(inbox.notice.mock.calls[0][1].body).toContain('agent files are not available');
+        expect(inbox.notice.mock.calls[1][1].body).toContain('escalations are not available');
     });
 
     it('never throws back into the decision (best-effort), and tells the owner it did not apply', async () => {
