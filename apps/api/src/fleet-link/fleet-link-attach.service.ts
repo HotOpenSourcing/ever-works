@@ -8,6 +8,8 @@ import {
     FLEET_LINK_VIEWER_TOKEN_TTL_SEC,
     fleetLinkViewerKey,
     fleetLinkViewerPath,
+    isFleetLinkActionFamily,
+    isFleetLinkConsentRequirement,
     isFleetLinkFamily,
     isFleetLinkViewerRole,
     isFleetLinkViewerTarget,
@@ -63,6 +65,8 @@ export interface FleetLinkViewerClaims {
     target: string;
     role: FleetLinkViewerRole;
     params: Record<string, unknown>;
+    /** The requirement the token was minted under — the open uses it again. */
+    requirement: Partial<FleetLinkRequirement>;
 }
 
 export interface FleetLinkViewerMintInput {
@@ -117,7 +121,10 @@ export class FleetLinkAttachService {
             throw fleetLinkError('invalid', 'viewer tokens are minted for a person');
         }
         const params = input.params ?? {};
-        if (JSON.stringify(params).length > FLEET_LINK_VIEWER_MAX_PARAMS_BYTES) {
+        // Bytes, not UTF-16 units: the token carries them base64url-encoded.
+        if (
+            Buffer.byteLength(JSON.stringify(params), 'utf8') > FLEET_LINK_VIEWER_MAX_PARAMS_BYTES
+        ) {
             throw fleetLinkError('invalid', 'params', {
                 maxBytes: FLEET_LINK_VIEWER_MAX_PARAMS_BYTES,
             });
@@ -129,11 +136,12 @@ export class FleetLinkAttachService {
                 : null;
         if (!node) throw fleetLinkError('not_found', 'no such computer');
         const facts = nodeFacts(node);
+        const requirement = FleetLinkAttachService.requirementFor(input.role, input.requirement);
         await this.authorizer.authorize({
             node: facts,
             caller: input.caller,
             family: input.family,
-            requirement: FleetLinkAttachService.requirementFor(input.role, input.requirement),
+            requirement,
         });
         if (!this.links.isConnected(node.id)) {
             const ago = describeAgo(facts.lastHeartbeatAt);
@@ -154,6 +162,8 @@ export class FleetLinkAttachService {
                 jti: randomUUID(),
                 linkNodeId: node.id,
                 linkParams: params,
+                // The open re-authorises under the SAME narrowed requirement.
+                linkRequirement: requirementClaim(requirement),
             },
             { ttlSec: FLEET_LINK_VIEWER_TOKEN_TTL_SEC },
         );
@@ -210,6 +220,7 @@ export class FleetLinkAttachService {
             target: path.target,
             role: claims.role,
             params,
+            requirement: requirementFromClaim(claims.linkRequirement),
         };
     }
 
@@ -231,4 +242,26 @@ export class FleetLinkAttachService {
             }
         }
     }
+}
+
+/** The requirement as a token claim: only its known fields, the target capped. */
+function requirementClaim(requirement: Partial<FleetLinkRequirement>): Record<string, unknown> {
+    const claim: Record<string, unknown> = {};
+    if (requirement.consent !== undefined) claim.consent = requirement.consent;
+    if (requirement.actionFamily !== undefined) claim.actionFamily = requirement.actionFamily;
+    if (requirement.stateChanging !== undefined) claim.stateChanging = requirement.stateChanging;
+    if (typeof requirement.target === 'string') claim.target = requirement.target.slice(0, 256);
+    return claim;
+}
+
+/** A requirement claim read back; a field this build does not recognise is dropped (the family default applies). */
+function requirementFromClaim(value: unknown): Partial<FleetLinkRequirement> {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    const claim = value as Record<string, unknown>;
+    const requirement: Partial<FleetLinkRequirement> = {};
+    if (isFleetLinkConsentRequirement(claim.consent)) requirement.consent = claim.consent;
+    if (isFleetLinkActionFamily(claim.actionFamily)) requirement.actionFamily = claim.actionFamily;
+    if (typeof claim.stateChanging === 'boolean') requirement.stateChanging = claim.stateChanging;
+    if (typeof claim.target === 'string') requirement.target = claim.target.slice(0, 256);
+    return requirement;
 }

@@ -219,6 +219,29 @@ describe('FleetLinkViewerBridge — what reaches the browser', () => {
         });
     });
 
+    it('holds what the node sends before the open is answered, and sends it after viewer.ready', () => {
+        const viewer = new Viewer();
+        const bridge = new FleetLinkViewerBridge({
+            socket: viewer,
+            family: 'session',
+            target: 's-1',
+            role: 'driver',
+        });
+        // The node answered ready and wrote at once; openChannel has not resolved yet.
+        bridge.events.binary!(FLEET_LINK_FRAME_KINDS.DATA, new Uint8Array([1]));
+        bridge.events.json!({ type: 'session.status', state: 'working' });
+        expect(viewer.frames).toHaveLength(0);
+        const channel = new Channel('session');
+        bridge.attach(channel);
+        const decoded = viewer.frames.map((frame) => decodeFleetLinkFrame(frame)!);
+        expect(decoded.map((frame) => frame.channel)).toEqual([
+            0,
+            FLEET_LINK_VIEWER_CHANNEL,
+            FLEET_LINK_VIEWER_CHANNEL,
+        ]);
+        expect(decodeFleetLinkControl(decoded[0].payload)).toMatchObject({ type: 'viewer.ready' });
+    });
+
     it('explains a channel that could not be opened', () => {
         const viewer = new Viewer();
         const bridge = new FleetLinkViewerBridge({

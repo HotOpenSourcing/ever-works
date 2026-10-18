@@ -241,7 +241,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
         const entry = this.directory.get(nodeId);
         if (!entry) return null;
         if (this.now() - entry.seenAt >= this.entryTtlMs) {
-            this.forget(nodeId, 'directory entry expired');
+            this.forget(nodeId, 'directory entry expired', true);
             return null;
         }
         return entry.replicaId;
@@ -334,6 +334,9 @@ export class FleetLinkRemote implements OnModuleDestroy {
         } catch (error) {
             this.opened.delete(ref);
             channel.end('normal', undefined, false);
+            // The holder may still answer the open after this replica gave up:
+            // tell it to drop the channel (a close for a ref it does not know is a no-op).
+            this.send(holder, RPC_TOPIC, { op: 'close', ref, reason: 'normal' });
             throw error;
         }
     }
@@ -520,7 +523,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
     private expire(): void {
         const cutoff = this.now() - this.entryTtlMs;
         for (const [nodeId, entry] of [...this.directory]) {
-            if (entry.seenAt <= cutoff) this.forget(nodeId, 'directory entry expired');
+            if (entry.seenAt <= cutoff) this.forget(nodeId, 'directory entry expired', true);
         }
     }
 
@@ -550,13 +553,21 @@ export class FleetLinkRemote implements OnModuleDestroy {
         }
     }
 
-    private forget(nodeId: string, reason: string): void {
+    /**
+     * Drop a directory entry. `endChannels` when the holder can no longer speak
+     * for them (it left, or went silent past the entry's lifetime); otherwise
+     * the holder itself tells each channel's fate — it may still resume them
+     * when the node comes back to it.
+     */
+    private forget(nodeId: string, reason: string, endChannels = false): void {
         const entry = this.directory.get(nodeId);
         if (!entry) return;
         this.directory.delete(nodeId);
-        for (const channel of [...this.opened.values()]) {
-            if (channel.nodeId === nodeId && channel.holder === entry.replicaId)
-                channel.end('resume_failed', 'the link to the computer dropped');
+        if (endChannels) {
+            for (const channel of [...this.opened.values()]) {
+                if (channel.nodeId === nodeId && channel.holder === entry.replicaId)
+                    channel.close('resume_failed', 'the link to the computer dropped');
+            }
         }
         this.emitLink({ type: 'dropped', nodeId, reason });
     }
@@ -568,7 +579,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
             return;
         }
         for (const [nodeId, entry] of [...this.directory]) {
-            if (entry.replicaId === replicaId) this.forget(nodeId, 'its API replica left');
+            if (entry.replicaId === replicaId) this.forget(nodeId, 'its API replica left', true);
         }
         for (const [rid, pending] of [...this.pending]) {
             if (pending.holder !== replicaId) continue;
@@ -693,6 +704,9 @@ export class FleetLinkRemote implements OnModuleDestroy {
             case 'resumed': {
                 const channel = isString(message.ref) ? this.opened.get(message.ref) : undefined;
                 if (channel && channel.holder === from) channel.deliver(message);
+                else if (isString(message.ref) && message.op !== 'closed')
+                    // A channel this replica no longer knows: the holder should not keep it open.
+                    this.send(from, RPC_TOPIC, { op: 'close', ref: message.ref, reason: 'normal' });
                 return;
             }
             // Calls from a peer, on this replica's links.

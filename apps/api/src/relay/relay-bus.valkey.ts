@@ -109,6 +109,8 @@ export class ValkeyRelayBus implements RelayBus {
         // Say hello as soon as the subscriber is (re)connected, so peers learn
         // of this replica without waiting for the next beacon.
         this.subscriber.on('ready', () => this.beacon());
+        // The beacon goes out through the publisher, which may connect later.
+        this.publisher.on('ready', () => this.beacon());
         void this.subscriber.subscribe(BROADCAST_CHANNEL, directChannel(this.replicaId)).then(
             () => this.beacon(),
             (error: Error) => this.logError(error),

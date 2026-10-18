@@ -256,6 +256,53 @@ describe('FleetLinkAttachService.mint', () => {
     });
 });
 
+describe('FleetLinkAttachService — what the token carries', () => {
+    it('measures params in UTF-8 bytes, as the token carries them', async () => {
+        const h = core();
+        h.node();
+        // 200 characters, 600 bytes: under the cap counted in UTF-16 units, over it in bytes.
+        await expect(
+            h.attach.mint({
+                nodeId: NODE_ID,
+                family: 'logs',
+                target: 'x',
+                role: 'viewer',
+                caller: owner,
+                params: { path: '日'.repeat(200) },
+            }),
+        ).rejects.toMatchObject({ linkError: { code: 'invalid', hint: 'params' } });
+    });
+
+    it('carries the narrowed requirement, so the open is authorised exactly as the mint was', async () => {
+        const h = core();
+        h.node();
+        const { token } = await h.attach.mint({
+            nodeId: NODE_ID,
+            family: 'logs',
+            target: 'n-1',
+            role: 'driver',
+            caller: owner,
+            requirement: { target: '/var/log/syslog' },
+        });
+        expect(h.signer.verify(token)!.linkRequirement).toEqual({ target: '/var/log/syslog' });
+        expect(await h.attach.verify(token, { family: 'logs', target: 'n-1' })).toMatchObject({
+            requirement: { target: '/var/log/syslog' },
+        });
+        const viewer = await h.attach.mint({
+            nodeId: NODE_ID,
+            family: 'logs',
+            target: 'n-2',
+            role: 'viewer',
+            caller: owner,
+        });
+        expect(
+            await h.attach.verify(viewer.token, { family: 'logs', target: 'n-2' }),
+        ).toMatchObject({
+            requirement: { stateChanging: false },
+        });
+    });
+});
+
 describe('FleetLinkAttachService.verify', () => {
     it('accepts a token once, on its own path only, and nothing minted for another socket', async () => {
         const h = core();

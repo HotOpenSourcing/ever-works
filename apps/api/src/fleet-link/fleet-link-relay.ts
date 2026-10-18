@@ -75,6 +75,9 @@ export class FleetLinkViewerBridge {
     private ended = false;
     private slowSince: number | null = null;
     private lastRefusalAt = -Infinity;
+    /** The node's frames that arrived before `viewer.ready` went out; null once it has. */
+    private early: Uint8Array[] | null = [];
+    private earlyBytes = 0;
     private readonly now: () => number;
     private readonly slowReaderMs: number;
     private readonly slowBufferBytes: number;
@@ -82,12 +85,12 @@ export class FleetLinkViewerBridge {
 
     /** What the channel tells the bridge — pass to `openChannel` so nothing is missed before {@link attach}. */
     readonly events: FleetLinkChannelEvents = {
-        json: (message) => this.out(encodeFleetLinkJson(FLEET_LINK_VIEWER_CHANNEL, message)),
+        json: (message) => this.outData(encodeFleetLinkJson(FLEET_LINK_VIEWER_CHANNEL, message)),
         binary: (kind, payload) =>
-            this.out(encodeFleetLinkFrame(FLEET_LINK_VIEWER_CHANNEL, kind, payload)),
+            this.outData(encodeFleetLinkFrame(FLEET_LINK_VIEWER_CHANNEL, kind, payload)),
         resume: (linkGeneration) => {
             const resumed: FleetLinkViewerResumed = { type: 'viewer.resumed', linkGeneration };
-            this.out(encodeFleetLinkControl(resumed));
+            this.outData(encodeFleetLinkControl(resumed));
         },
         close: (reason, hint) => this.channelClosed(reason, hint),
     };
@@ -118,6 +121,12 @@ export class FleetLinkViewerBridge {
             linkGeneration: channel.linkGeneration,
         };
         this.out(encodeFleetLinkControl(ready));
+        // The wire promises `viewer.ready` first: whatever the node sent while
+        // the open was being answered follows it, in order.
+        const early = this.early ?? [];
+        this.early = null;
+        this.earlyBytes = 0;
+        for (const frame of early) this.out(frame);
     }
 
     /** The channel could not be opened: say why on channel 0, then close. */
@@ -187,6 +196,21 @@ export class FleetLinkViewerBridge {
         this.send(encodeFleetLinkControl(refused));
     }
 
+    /** A frame from the node: held until `viewer.ready` is out, then sent. */
+    private outData(frame: Uint8Array | null): void {
+        if (this.ended || !frame) return;
+        if (this.early === null) {
+            this.out(frame);
+            return;
+        }
+        this.earlyBytes += frame.byteLength;
+        if (this.earlyBytes > this.maxBufferBytes) {
+            this.slowReader();
+            return;
+        }
+        this.early.push(frame);
+    }
+
     private out(frame: Uint8Array | null): void {
         if (this.ended || !frame) return;
         if (this.options.socket.bufferedAmount() + frame.byteLength > this.maxBufferBytes) {
@@ -248,6 +272,7 @@ export class FleetLinkViewerBridge {
     private end(code: number, reason: string): void {
         if (this.ended) return;
         this.ended = true;
+        this.early = null;
         try {
             this.options.socket.close(code, reason);
         } catch {

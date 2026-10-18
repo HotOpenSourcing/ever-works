@@ -211,6 +211,36 @@ describe('FleetLinkRemote — forwarding', () => {
         expect(seen.at(-1)).toEqual(['close', 'normal']);
     });
 
+    it('closes a channel on the holder that the caller no longer knows (it gave up waiting)', async () => {
+        const { a, b } = await twoReplicas();
+        const node = linkNode(a);
+        await until(() => b.remote.isHeldElsewhere(NODE_ID));
+        const opening = b.remote.openChannel({
+            nodeId: NODE_ID,
+            family: 'logs',
+            params: {},
+            requirement: LOGS,
+            requestedBy: 'x',
+        });
+        await until(() => node.port.controls().some((m) => m.type === 'channel.open'));
+        node.answerOpens();
+        const channel = (await opening) as unknown as { ref?: string };
+        // B forgets the channel (as when its open timed out); the node keeps writing.
+        (b.remote as unknown as { opened: Map<string, unknown> }).opened.clear();
+        const open = node.port.last('channel.open') as FleetLinkChannelOpen;
+        node.session.receive(jsonFrame(open.channel, { type: 'logs.line', text: 'hello' }));
+        await until(() =>
+            node.port
+                .controls()
+                .some(
+                    (m) =>
+                        m.type === 'channel.close' &&
+                        (m as { channel: number }).channel === open.channel,
+                ),
+        );
+        expect(channel).toBeDefined();
+    });
+
     it('closes the node’s side when the caller closes', async () => {
         const { a, b } = await twoReplicas();
         const node = linkNode(a);

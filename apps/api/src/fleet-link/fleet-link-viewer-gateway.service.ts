@@ -170,7 +170,7 @@ export class FleetLinkViewerGatewayService
                 family: claims.family,
                 params,
                 caller: { kind: 'user', userId: claims.userId },
-                requirement: FleetLinkAttachService.requirementFor(claims.role),
+                requirement: FleetLinkAttachService.requirementFor(claims.role, claims.requirement),
                 events: bridge.events,
             });
             bridge.attach(channel);

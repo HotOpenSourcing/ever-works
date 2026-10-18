@@ -47,6 +47,8 @@ export interface TerminalAttachClaims {
      */
     linkNodeId?: string;
     linkParams?: Record<string, unknown>;
+    /** The requirement the token was authorised under (consent, action family, state-changing, target). */
+    linkRequirement?: Record<string, unknown>;
 }
 
 /**
