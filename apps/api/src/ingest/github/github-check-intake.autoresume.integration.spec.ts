@@ -361,6 +361,13 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
 
     const HEAD = 'a'.repeat(40);
 
+    /** A `pull_requests[]` entry as GitHub sends it for a same-repository PR. */
+    const SAME_REPO_PR = {
+        number: 42,
+        head: { ref: 'task/t-42-9f3c1a2b', sha: HEAD, repo: { id: 7, name: 'site' } },
+        base: { ref: 'main', repo: { id: 7, name: 'site' } },
+    };
+
     function checkRun(
         options: {
             id?: number;
@@ -385,6 +392,9 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
         return {
             action: options.status === 'completed' ? 'completed' : 'created',
             repository: {
+                // The pull request entries below are based on THIS repository
+                // (same id) — the intake drops any other (F1).
+                id: 7,
                 full_name: options.repoFullName ?? 'octo/site',
                 owner: { login: 'octo' },
             },
@@ -451,7 +461,7 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             'check_suite',
             {
                 action: 'completed',
-                repository: { full_name: 'octo/site', owner: { login: 'octo' } },
+                repository: { id: 7, full_name: 'octo/site', owner: { login: 'octo' } },
                 sender: { login: 'github-actions[bot]', type: 'Bot' },
                 check_suite: {
                     id: 9,
@@ -461,7 +471,7 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
                     head_branch: 'task/t-42-9f3c1a2b',
                     updated_at: '2026-09-06T10:06:00Z',
                     app: { slug: 'github-actions' },
-                    pull_requests: [{ number: 42 }],
+                    pull_requests: [SAME_REPO_PR],
                 },
             },
         ]);
@@ -469,7 +479,7 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             'workflow_run',
             {
                 action: 'completed',
-                repository: { full_name: 'octo/site', owner: { login: 'octo' } },
+                repository: { id: 7, full_name: 'octo/site', owner: { login: 'octo' } },
                 sender: { login: 'github-actions[bot]', type: 'Bot' },
                 workflow_run: {
                     id: 77,
@@ -478,10 +488,11 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
                     conclusion: 'failure',
                     head_sha: HEAD,
                     head_branch: 'task/t-42-9f3c1a2b',
+                    head_repository: { full_name: 'octo/site' },
                     run_attempt: 1,
                     html_url: 'https://github.com/octo/site/actions/runs/77',
                     updated_at: '2026-09-06T10:07:00Z',
-                    pull_requests: [{ number: 42 }],
+                    pull_requests: [SAME_REPO_PR],
                 },
             },
         ]);
@@ -794,8 +805,14 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             const { task } = await seedWorkTaskAndRun();
             const service = buildService();
 
-            await service.handle(BINDING, 'workflow_run', forkWorkflowRun() as never);
+            const result = await service.handle(
+                BINDING,
+                'workflow_run',
+                forkWorkflowRun() as never,
+            );
 
+            // The fork's branch never reached the evaluator as a coordinate.
+            expect(result.autoResume?.reason).toBe('no-task');
             expect(resumes).toHaveLength(0);
             expect(await attemptRows.count()).toBe(0);
             expect(await rejectionRows.count()).toBe(0);
@@ -811,8 +828,13 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             });
             const service = buildService();
 
-            await service.handle(BINDING, 'workflow_run', forkWorkflowRun() as never);
+            const result = await service.handle(
+                BINDING,
+                'workflow_run',
+                forkWorkflowRun() as never,
+            );
 
+            expect(result.autoResume?.reason).toBe('no-task');
             expect(resumes).toHaveLength(0);
             expect(await attemptRows.count()).toBe(0);
             expect((await tasks.findById(task.id))?.ciHeadSha).toBe(HEAD);
@@ -824,14 +846,17 @@ describe('GitHub check intake → auto-resume (better-sqlite3, real handler)', (
             await seedWorkTaskAndRun();
             const service = buildService();
 
-            await service.handle(
+            const result = await service.handle(
                 BINDING,
                 'workflow_run',
                 forkWorkflowRun({ head_repository: { full_name: 'octo/site' } }) as never,
             );
 
-            // Branch-only and the commit is unknown to the Task → refused by
-            // the evaluator's own SHA gate (below), not resumed.
+            // The branch DID reach the Task this time (same repository) — and
+            // the evaluator's own SHA gate refused it: branch-only, commit
+            // unknown to the Task. Not `no-task`: that would mean the control
+            // proved nothing.
+            expect(result.autoResume).toMatchObject({ reason: 'unverified-branch' });
             expect(resumes).toHaveLength(0);
         });
 

@@ -163,8 +163,12 @@ export interface GitHubWebhookBody {
         login?: string;
     };
     repository?: {
+        /** GitHub's numeric repository id — compared with a check's PR stubs (F1). */
+        id?: number;
         full_name?: string;
         html_url?: string;
+        /** The API url (`https://api.github.com/repos/<owner>/<repo>`). */
+        url?: string;
         owner?: { login?: string };
     };
     sender?: {

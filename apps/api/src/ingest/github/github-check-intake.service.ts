@@ -164,6 +164,40 @@ function sameRepoName(a: string | null | undefined, b: string | null | undefined
 }
 
 /**
+ * The delivery's `pull_requests[]` entries that are pull requests OF THIS
+ * REPOSITORY — `base.repo` is the delivery's own repository, by numeric id
+ * or by API url (F1 review, 2026-10-18).
+ *
+ * GitHub has been seen to list, on a check that ran in one repository, a
+ * pull request whose base is ANOTHER repository (a fork's run naming the
+ * upstream pull request it belongs to). Such an entry's number is not a
+ * pull request here, its head pointer says nothing about this repository,
+ * and its head stub cannot prove anything about this repository's branch,
+ * so it is dropped before any of the three is read. An entry that does not
+ * say what its base is proves nothing either and is dropped too.
+ */
+function ownPullRequests(
+    refs: CheckPullRequestRef[] | undefined,
+    repository: GitHubWebhookBody['repository'],
+): CheckPullRequestRef[] {
+    const fullName = (repository?.full_name ?? '').trim().toLowerCase();
+    return (Array.isArray(refs) ? refs : []).filter((ref) => {
+        const base = ref?.base?.repo;
+        if (!base) return false;
+        if (typeof base.id === 'number' && typeof repository?.id === 'number') {
+            return base.id === repository.id;
+        }
+        if (base.url && repository?.url) return sameRepoName(base.url, repository.url);
+        // No numeric id on one side: the API url still names the repository.
+        return (
+            fullName.length > 0 &&
+            typeof base.url === 'string' &&
+            base.url.trim().toLowerCase().endsWith(`/repos/${fullName}`)
+        );
+    });
+}
+
+/**
  * Does this check delivery PROVE that its head branch lives in the
  * repository the delivery is about?
  *
@@ -284,7 +318,8 @@ export function normalizeGitHubCheck(
         if (!run) return null;
         granularity = 'check_run';
         headSha = nonEmpty(run.head_sha);
-        headBranch = provesSameRepoHead(run.pull_requests)
+        const ownRefs = ownPullRequests(run.pull_requests, body.repository);
+        headBranch = provesSameRepoHead(ownRefs)
             ? (nonEmpty(run.check_suite?.head_branch) ?? null)
             : null;
         appSlug = nonEmpty(run.app?.slug)?.toLowerCase() ?? null;
@@ -301,13 +336,14 @@ export function normalizeGitHubCheck(
         // the failing output a webhook can carry.
         outputSummary =
             nonEmpty(run.output?.summary ?? undefined) ?? nonEmpty(run.output?.text ?? undefined);
-        pulls = prHeads(run.pull_requests);
+        pulls = prHeads(ownRefs);
     } else if (eventName === 'check_suite') {
         const suite = body.check_suite;
         if (!suite) return null;
         granularity = 'check_suite';
         headSha = nonEmpty(suite.head_sha);
-        headBranch = provesSameRepoHead(suite.pull_requests)
+        const ownRefs = ownPullRequests(suite.pull_requests, body.repository);
+        headBranch = provesSameRepoHead(ownRefs)
             ? (nonEmpty(suite.head_branch ?? undefined) ?? null)
             : null;
         appSlug = nonEmpty(suite.app?.slug)?.toLowerCase() ?? null;
@@ -319,7 +355,7 @@ export function normalizeGitHubCheck(
         // A check suite payload carries no `html_url` at all — only the
         // API link, which is not a page a human can open, so no deep link
         // is stored rather than a misleading one.
-        pulls = prHeads(suite.pull_requests);
+        pulls = prHeads(ownRefs);
     } else if (eventName === 'workflow_run') {
         const workflow = body.workflow_run;
         if (!workflow) return null;
@@ -339,7 +375,7 @@ export function normalizeGitHubCheck(
         identity = `workflow:${workflow.id ?? 'unknown'}#${workflow.run_attempt ?? 1}`;
         occurredAtRaw = workflow.updated_at ?? workflow.run_started_at ?? workflow.created_at;
         url = httpsUrl(workflow.html_url);
-        pulls = prHeads(workflow.pull_requests);
+        pulls = prHeads(ownPullRequests(workflow.pull_requests, body.repository));
     } else {
         return null;
     }

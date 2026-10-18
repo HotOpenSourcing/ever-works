@@ -78,7 +78,7 @@ function checkRunBody(
     const { check_run: runOverrides, ...rest } = overrides;
     return {
         action: 'completed',
-        repository: { full_name: 'octo/site', owner: { login: 'octo' } },
+        repository: { id: 7, full_name: 'octo/site', owner: { login: 'octo' } },
         sender: { login: 'github-actions[bot]', type: 'Bot' },
         ...rest,
         check_run: {
@@ -340,14 +340,63 @@ describe('normalizeGitHubCheck', () => {
                 checkRunBody({ check_run: { pull_requests: [{ number: 42 }] } }) as never,
             );
             expect(normalized?.signal.headBranch).toBeNull();
+            // …not even that its NUMBER is a pull request of this repository.
+            expect(normalized?.signal.prNumbers).toEqual([]);
+        });
+
+        /**
+         * F1 review (2026-10-18): a check that ran in one repository can list
+         * a pull request whose base is ANOTHER repository. That number is
+         * not a pull request here, and its head pointer and head stub say
+         * nothing about this repository.
+         */
+        it('⭐ drops a PR entry whose BASE is another repository — number, head and branch alike', () => {
+            const upstream = {
+                number: 42,
+                head: { ref: TASK_BRANCH, sha: HEAD, repo: { id: 999, name: 'site' } },
+                base: { ref: 'main', sha: HEAD, repo: { id: 999, name: 'site' } },
+            };
+            const normalized = normalizeGitHubCheck(
+                'check_run',
+                checkRunBody({
+                    check_run: { pull_requests: [upstream, SAME_REPO_PR_42] },
+                }) as never,
+            );
+            // Only the entry based on THIS repository (id 7) survives.
             expect(normalized?.signal.prNumbers).toEqual([42]);
+            expect(normalized?.signal.prHeads).toEqual([{ number: 42, headSha: HEAD }]);
+            const onlyUpstream = normalizeGitHubCheck(
+                'check_run',
+                checkRunBody({ check_run: { pull_requests: [upstream] } }) as never,
+            );
+            expect(onlyUpstream?.signal).toMatchObject({ prNumbers: [], headBranch: null });
+        });
+
+        it('matches the base repository by API url when a side has no numeric id', () => {
+            const byUrl = {
+                number: 42,
+                head: {
+                    ref: TASK_BRANCH,
+                    sha: HEAD,
+                    repo: { url: 'https://api.github.com/repos/octo/site' },
+                },
+                base: { ref: 'main', repo: { url: 'https://api.github.com/repos/Octo/Site' } },
+            };
+            const normalized = normalizeGitHubCheck(
+                'check_run',
+                checkRunBody({
+                    repository: { full_name: 'octo/site', owner: { login: 'octo' } },
+                    check_run: { pull_requests: [byUrl] },
+                }) as never,
+            );
+            expect(normalized?.signal).toMatchObject({ prNumbers: [42], headBranch: TASK_BRANCH });
         });
 
         it('check_suite: the branch needs the same proof', () => {
             const suite = (pullRequests: unknown[]) =>
                 normalizeGitHubCheck('check_suite', {
                     action: 'completed',
-                    repository: { full_name: 'octo/site' },
+                    repository: { id: 7, full_name: 'octo/site' },
                     check_suite: {
                         id: 9,
                         status: 'completed',
