@@ -1,0 +1,54 @@
+import { Injectable } from '@nestjs/common';
+import type {
+    FleetLinkAudience,
+    FleetLinkAudienceDecision,
+    FleetLinkAudienceQuery,
+} from './fleet-link.types';
+
+/**
+ * The family-audience default until the Fleet hub's role derivation (FL-01)
+ * binds {@link FLEET_LINK_AUDIENCE} — seam owned by FL-01.
+ *
+ * A node belongs to the person who enrolled it (README D15), and today the
+ * code derives only `owner | stranger` (EXISTING-SUBSTRATE §2.10): so the
+ * owner is in every family's audience, and nobody else is in any. That is
+ * the CONTRACTS default for every family but `view` (`org-members`), and the
+ * safe reading of `view` until Organization roles exist. A stranger asking
+ * about a node gets `not_found`, exactly as the node endpoints answer one, so
+ * a refusal never confirms the node exists.
+ *
+ *  - a person: the node's owner only;
+ *  - a schedule: the owner's own (its command was created by the owner);
+ *  - a system job: the platform itself (drain-all, the idle policy);
+ *  - an Agent: refused here — the Agent gates (grants, trust ladder, caps)
+ *    are FL-19's, and an Agent may act only when BOTH they and the node's
+ *    audience allow it (CONTRACTS §2.1).
+ */
+@Injectable()
+export class OwnerOnlyFleetLinkAudience implements FleetLinkAudience {
+    check(query: FleetLinkAudienceQuery): FleetLinkAudienceDecision {
+        const { caller, node } = query;
+        switch (caller.kind) {
+            case 'system':
+                return { allowed: true };
+            case 'schedule':
+                return caller.ownerUserId === node.userId
+                    ? { allowed: true }
+                    : { allowed: false, asNotFound: true };
+            case 'user':
+                return caller.userId === node.userId
+                    ? { allowed: true }
+                    : { allowed: false, asNotFound: true };
+            case 'agent':
+                if (caller.ownerUserId !== node.userId) return { allowed: false, asNotFound: true };
+                // The owner's own Agent may see the owner's computers (as the
+                // existing read-only `list_fleet_nodes` tool does), not act on them.
+                return query.actionFamily === 'view'
+                    ? { allowed: true }
+                    : {
+                          allowed: false,
+                          hint: `Agents cannot act on ${node.name} yet: Agent access to computers arrives with the Fleet agent tools`,
+                      };
+        }
+    }
+}

@@ -116,6 +116,10 @@ describe('channel families', () => {
 		expect(fleetLinkMachineVerbActionFamily('git.setIdentity')).toBe('commands');
 		expect(fleetLinkMachineVerbActionFamily('wake.send')).toBe('machines');
 		expect(fleetLinkMachineVerbActionFamily('something.new')).toBe('machines');
+		expect(fleetLinkMachineVerbActionFamily('logs.sources')).toBe('logs');
+		// Never a prototype key.
+		expect(fleetLinkMachineVerbActionFamily('constructor')).toBe('machines');
+		expect(fleetLinkMachineVerbActionFamily('toString.x')).toBe('machines');
 	});
 
 	it('accepts dotted lower-camel verbs only', () => {

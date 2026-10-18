@@ -532,6 +532,8 @@ export const FLEET_LINK_MACHINE_VERB_ACTION_FAMILY: Readonly<Record<string, Flee
 	'git.identity': 'checkouts',
 	'git.setIdentity': 'commands',
 	'wake.send': 'machines',
+	// CONTRACTS §3.3 (rev 4): `logs.sources` is a machine verb (a list needs no open channel).
+	logs: 'logs',
 	services: 'services',
 	docker: 'docker',
 	compose: 'docker',
@@ -543,11 +545,15 @@ export const FLEET_LINK_MACHINE_VERB_ACTION_FAMILY: Readonly<Record<string, Flee
 
 /** The action family a `machine` verb answers to (exact entry first, then its prefix, then `machines`). */
 export function fleetLinkMachineVerbActionFamily(verb: string): FleetLinkActionFamily {
-	const exact = FLEET_LINK_MACHINE_VERB_ACTION_FAMILY[verb];
+	// Own keys only: `constructor` or `toString` must never read off the prototype.
+	const own = (key: string): FleetLinkActionFamily | undefined =>
+		Object.prototype.hasOwnProperty.call(FLEET_LINK_MACHINE_VERB_ACTION_FAMILY, key)
+			? FLEET_LINK_MACHINE_VERB_ACTION_FAMILY[key]
+			: undefined;
+	const exact = own(verb);
 	if (exact) return exact;
 	const dot = verb.indexOf('.');
-	const prefix = dot > 0 ? verb.slice(0, dot) : verb;
-	return FLEET_LINK_MACHINE_VERB_ACTION_FAMILY[prefix] ?? 'machines';
+	return own(dot > 0 ? verb.slice(0, dot) : verb) ?? 'machines';
 }
 
 /** `health.now`, `services.list`, `docker.container.start` — dotted, lower camel segments, bounded. */

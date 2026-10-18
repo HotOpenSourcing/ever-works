@@ -13,12 +13,23 @@
 
 import type { FleetLinkError, FleetLinkFamily, FleetLinkOperationProgressValue } from './fleet-link.types.js';
 
-export const FLEET_OPERATION_STATES = ['running', 'done', 'failed', 'cancelled'] as const;
+/**
+ * CONTRACTS §3.3 (rev 5): `interrupted` = the link or the node went away
+ * mid-operation (the node restarted, or never came back within the resume
+ * window). It is never reported as `done`, and a late completion from the
+ * node does not change it.
+ */
+export const FLEET_OPERATION_STATES = ['running', 'done', 'failed', 'cancelled', 'interrupted'] as const;
 
 export type FleetOperationState = (typeof FLEET_OPERATION_STATES)[number];
 
 /** States an operation never leaves. */
-export const FLEET_OPERATION_TERMINAL_STATES: readonly FleetOperationState[] = ['done', 'failed', 'cancelled'];
+export const FLEET_OPERATION_TERMINAL_STATES: readonly FleetOperationState[] = [
+	'done',
+	'failed',
+	'cancelled',
+	'interrupted'
+];
 
 export function isFleetOperationTerminal(state: FleetOperationState): boolean {
 	return (FLEET_OPERATION_TERMINAL_STATES as readonly string[]).includes(state);
@@ -35,7 +46,7 @@ export interface FleetOperationView {
 	progress: FleetLinkOperationProgressValue | null;
 	/** Present once `done`. */
 	result?: unknown;
-	/** Present once `failed` (or `cancelled`, with code `operation_failed` and the node's hint). */
+	/** Present once `failed`, `cancelled` (code `operation_failed`, the node's hint) or `interrupted` (code `unreachable`). */
 	error?: FleetLinkError;
 	startedAt: string;
 	endedAt: string | null;
