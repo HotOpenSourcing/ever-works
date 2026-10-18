@@ -62,27 +62,26 @@ export class TriggerPluginsModule {
     }
 
     private static build(options: PluginsModuleOptions): DynamicModule {
+        // Read once, when the module object is built — as before: every importer evaluates
+        // `forRoot()` in its `@Module` decorator, i.e. at import time, so the shared object reads
+        // the environment at the same moment the per-importer objects did.
+        const nodeEnv = process.env.NODE_ENV || 'development';
         return {
             module: TriggerPluginsModule,
             imports: [EventEmitterModule.forRoot(), TriggerInternalModule],
             providers: [
                 {
                     provide: PLUGINS_MODULE_OPTIONS,
-                    // A factory, so the environment is read when a context is built rather than
-                    // when the (now shared) module object was first created.
-                    useFactory: (): PluginsModuleOptions => {
-                        const nodeEnv = process.env.NODE_ENV || 'development';
-                        return {
-                            platformVersion: DEFAULT_PLATFORM_VERSION,
-                            pluginPaths: nodeEnv === 'development' ? ['../plugins'] : ['./plugins'], // ['./plugins'] Copied by prepare:plugins script before deployment
-                            autoLoadBuiltIn: true,
-                            autoEnableOnLoad: false,
-                            environment: nodeEnv,
-                            encryptSecrets: false,
-                            maxConcurrentLoads: 5,
-                            loadTimeout: 30000,
-                            ...options,
-                        };
+                    useValue: {
+                        platformVersion: DEFAULT_PLATFORM_VERSION,
+                        pluginPaths: nodeEnv === 'development' ? ['../plugins'] : ['./plugins'], // ['./plugins'] Copied by prepare:plugins script before deployment
+                        autoLoadBuiltIn: true,
+                        autoEnableOnLoad: false,
+                        environment: nodeEnv,
+                        encryptSecrets: false,
+                        maxConcurrentLoads: 5,
+                        loadTimeout: 30000,
+                        ...options,
                     },
                 },
                 {
