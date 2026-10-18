@@ -193,7 +193,16 @@ export default {
 					await call('POST', `/organizations/${fixtures.organizationId}/teams`, { name: 'Egress audit team' })
 				)
 			);
-		await attempt('goalId', async () => idOf(await call('POST', '/me/goals', { title: 'Egress audit goal' })));
+		// A delivery Goal (one open Definition-of-Done criterion) needs no metrics provider; it stays a draft.
+		await attempt('goalId', async () =>
+			idOf(
+				await call('POST', '/me/goals', {
+					title: 'Egress audit goal',
+					goalKind: 'delivery',
+					dodCriteria: [{ id: 'walked', text: 'The egress audit opened this goal.', status: 'open' }]
+				})
+			)
+		);
 		await attempt('ideaId', async () =>
 			idOf(
 				await call('POST', '/me/work-proposals', {

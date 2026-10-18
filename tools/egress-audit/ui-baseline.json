@@ -111,6 +111,12 @@
 			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
 		},
 		{
+			"route": "/:locale/goals/:id",
+			"attribute": "href",
+			"url": "https://docs.ever.works/",
+			"reason": "the Docs link of the dashboard navigation: the product documentation, a plain link (nothing is requested until a person follows it)"
+		},
+		{
 			"route": "/:locale/goals/new",
 			"attribute": "href",
 			"url": "https://docs.ever.works/",
