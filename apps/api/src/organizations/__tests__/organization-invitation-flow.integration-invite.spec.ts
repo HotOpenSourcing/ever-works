@@ -234,6 +234,42 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
         expect(mail.sendOrganizationInvitation).not.toHaveBeenCalled();
     });
 
+    it('answers already_member when a concurrent call added the person to the roster first', async () => {
+        const { service, members } = build({
+            existingUser: { id: 'u-colleague', tenantId: 'ten-1' },
+        });
+        // Not on the roster when checked, nor when the write re-checks; there once the insert lost.
+        members.findByOrgAndUser
+            .mockResolvedValueOnce(null as never)
+            .mockResolvedValueOnce(null as never)
+            .mockResolvedValueOnce({ organizationId: 'org-1', userId: 'u-colleague' } as never);
+        members.create.mockRejectedValueOnce(
+            Object.assign(new Error('duplicate key value violates unique constraint'), {
+                code: '23505',
+            }),
+        );
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            'colleague@example.com',
+        );
+        expect(outcome).toEqual({
+            status: 'already_member',
+            invitation: null,
+            userId: 'u-colleague',
+        });
+    });
+
+    it('still surfaces a roster write that fails for another reason', async () => {
+        const { service, members } = build({
+            existingUser: { id: 'u-colleague', tenantId: 'ten-1' },
+        });
+        members.create.mockRejectedValueOnce(new Error('connection reset'));
+        await expect(
+            service.inviteForIntegration('org-1', 'u-actor', 'colleague@example.com'),
+        ).rejects.toThrow(/connection reset/);
+    });
+
     it('invites a person whose account lives in another Tenant', async () => {
         const { service, invitations } = build({
             existingUser: { id: 'u-far', tenantId: 'ten-9' },

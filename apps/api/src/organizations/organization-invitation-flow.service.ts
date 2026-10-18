@@ -247,9 +247,21 @@ export class OrganizationInvitationFlowService {
         await this.assertSeatForTenant(tenantId);
 
         if (existing && inTenant) {
-            await this.recordMembership(organization.id, tenantId, existing.id, {
-                invitedById: actorUserId,
-            });
+            try {
+                await this.recordMembership(organization.id, tenantId, existing.id, {
+                    invitedById: actorUserId,
+                });
+            } catch (error) {
+                // A concurrent call added them first (the roster's unique (organizationId,
+                // userId) index refused this insert): they are a member now, so say so
+                // rather than fail. Any other error still surfaces.
+                const added = await this.members
+                    .findByOrgAndUser(organization.id, existing.id)
+                    .catch(() => null);
+                if (added)
+                    return { status: 'already_member', invitation: null, userId: existing.id };
+                throw error;
+            }
             return { status: 'added', invitation: null, userId: existing.id };
         }
 
