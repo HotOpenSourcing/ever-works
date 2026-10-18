@@ -1202,7 +1202,7 @@ describe('computer health wiring (FL-03)', () => {
 		await runtime.loop.start();
 		const afterFirstBeat = samples;
 		expect(afterFirstBeat).toBeGreaterThan(0);
-		expect(runtime.loop.isDropping('health')).toBe(true);
+		expect(runtime.loop.acceptsField('health')).toBe(false);
 		await runtime.loop.tick();
 		runtime.loop.stop();
 		// The second beat went out without health, and nothing was probed for it.

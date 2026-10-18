@@ -2,6 +2,7 @@ import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 
 import type {
     ComputerControlPolicy,
     FleetNodeHealthStored,
+    FleetConsents,
     FleetControlPolicyFamiliesInput,
     FleetNodeKind,
     FleetNodeModelThrottleView,
@@ -644,6 +645,29 @@ export class FleetNode {
     /** Computer health (FL-03, wake) — the last wake attempt on this node. */
     @PortableDateColumn({ nullable: true })
     lastWakeAttemptAt?: Date | null;
+
+    /**
+     * Fleet node link (FL-02, CONTRACTS §1.1) — what this machine's owner
+     * switched on when starting the node: `{ work, attend, manage, usageScan }`,
+     * as the last heartbeat reported it. NULL = never reported (a daemon
+     * older than the field); read it through `effectiveConsents`, which infers
+     * what it can for such a node and never infers `manage`.
+     *
+     * `simple-json` in a `text` column like {@link modelThrottles}, so one
+     * migration runs on SQLite and Postgres alike (CONTRACTS §4 preamble).
+     * Migration: `1796020000000-AddFleetNodeConsents`.
+     */
+    @Column({ type: 'simple-json', nullable: true })
+    consents?: FleetConsents | null;
+
+    /**
+     * Fleet node link (CONTRACTS §4.1, R-3) — whether "Open" on a listening
+     * port may use this node's owner-level preview browser profile. The column
+     * only: FL-10 owns setting and reading it. Default off.
+     * Migration: `1796020000000-AddFleetNodeConsents`.
+     */
+    @Column({ type: 'boolean', default: false })
+    previewProfileEnabled: boolean;
 
     @CreateDateColumn()
     createdAt: Date;

@@ -306,18 +306,41 @@ describe('FL-03 producers — each fires exactly in its condition (ACC-FL03-05)'
         it('is silent with any consent on, and while consents are not reported at all (never inferred)', () => {
             expect(
                 consentMissingItems(
-                    [node({ consents: { work: true, attend: false, manage: false } })],
+                    [
+                        node({
+                            consents: {
+                                work: true,
+                                attend: false,
+                                manage: false,
+                                usageScan: false,
+                            },
+                        }),
+                    ],
                     CONTEXT,
                 ),
             ).toEqual([]);
             expect(
                 consentMissingItems(
-                    [node({ consents: { work: false, attend: false, manage: true } })],
+                    [
+                        node({
+                            consents: {
+                                work: false,
+                                attend: false,
+                                manage: true,
+                                usageScan: false,
+                            },
+                        }),
+                    ],
                     CONTEXT,
                 ),
             ).toEqual([]);
             expect(consentMissingItems([node()], CONTEXT)).toEqual([]);
-            expect(consentMissingItems([node({ consents: { work: false } })], CONTEXT)).toEqual([]);
+            // A malformed row (not FL-02's normalized four) is silent, never "all off".
+            expect(
+                consentMissingItems([node({ consents: { work: false } as never })], CONTEXT),
+            ).toEqual([]);
+            // A daemon older than the field: null on the view.
+            expect(consentMissingItems([node({ consents: null })], CONTEXT)).toEqual([]);
         });
     });
 
@@ -402,7 +425,10 @@ describe('FL-03 producers in FL-01’s registry (CONTRACTS §4.6 conformance)', 
             effectiveLimits: { maxConcurrentJobs: 1, maxCpuPercent: 85, maxMemoryMb: null },
         }),
         node({ id: 'quarantined', workerState: 'quarantined', workerStateReason: 'unproven' }),
-        node({ id: 'enrol-only', consents: { work: false, attend: false, manage: false } }),
+        node({
+            id: 'enrol-only',
+            consents: { work: false, attend: false, manage: false, usageScan: false },
+        }),
         node({ id: 'helper', helperTrust: 'hash-pinned' }),
     ];
 

@@ -3,12 +3,13 @@ export * from './fleet-agent-credentials.types.js';
 export * from './fleet-commit-message.types.js';
 export * from './fleet-execution-preference.types.js';
 export * from './fleet-jobs.types.js';
+export * from './fleet-link.codec.js';
+export * from './fleet-link.types.js';
 export * from './fleet-model-usage-limit.types.js';
 export * from './fleet-needs-a-look.types.js';
 export * from './fleet-node.types.js';
 export * from './fleet-node-health.types.js';
-// seam owned by FL-01 — the "needs a look" item shape (CONTRACTS §4.6).
-export * from './fleet-needs-a-look.types.js';
+export * from './fleet-operations.types.js';
 export * from './fleet-panic.types.js';
 export * from './fleet-push-credential.types.js';
 export * from './fleet-run-secrets.types.js';

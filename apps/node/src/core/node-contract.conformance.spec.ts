@@ -140,9 +140,11 @@ describe('what the node actually puts on the wire', () => {
 		// versions, sent only by a node whose telemetry has a compat probe.
 		// 8 → 11 with remote node limits (slice AS): the limits the worker
 		// enforces, sent only by a node that HAS a worker.
-		// 11 → 12 with computer health (FL-03): the health snapshot, sent only
+		// 11 → 12 with the node link (FL-02): the consents, sent by a runtime
+		// that knows them (every start since the field) and never at enroll.
+		// 12 → 13 with computer health (FL-03): the health snapshot, sent only
 		// by a node whose heartbeat has a health probe wired.
-		expect(baseline.selfDescription.nodeEmitsOptional).toHaveLength(12);
+		expect(baseline.selfDescription.nodeEmitsOptional).toHaveLength(13);
 	});
 
 	it('enroll sends exactly the pinned body, to the pinned path', async () => {
@@ -245,7 +247,9 @@ describe('what the node actually puts on the wire', () => {
 			maxCpuPercent: 70,
 			maxMemoryMb: null,
 			// Computer health (FL-03).
-			health: { cpuPercent: 31.2, cpuCores: 4, gpu: null }
+			health: { cpuPercent: 31.2, cpuCores: 4, gpu: null },
+			// Fleet node link (FL-02).
+			consents: { work: true, attend: false, manage: true, usageScan: false }
 		});
 		const emitted = Object.keys(bodyOf(sent)).filter((key) => key !== 'nodeId' && key !== 'secret');
 		expect(emitted.sort()).toEqual(

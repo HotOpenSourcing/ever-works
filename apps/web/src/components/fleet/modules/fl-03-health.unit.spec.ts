@@ -8,9 +8,14 @@ vi.mock('../health/overview/HealthMetricsBlock', () => ({
         return null;
     },
 }));
+// The server action behind "Clear limit now" (the existing, audited route).
+const clearThrottle = vi.fn();
+vi.mock('@/app/actions/settings/fleet', () => ({
+    clearFleetNodeModelThrottleAction: (...args: unknown[]) => clearThrottle(...args),
+}));
 
 /** Computer health (FL-03) — what this epic registers into FL-01's module registry. */
-describe('FL-03 registration (components/fleet/modules/health.ts)', () => {
+describe('FL-03 registration (components/fleet/modules/fl-03-health.ts)', () => {
     beforeEach(async () => {
         resetFleetRegistryForTests();
         // A fresh module instance re-runs the registration against the reset registry.
@@ -19,7 +24,7 @@ describe('FL-03 registration (components/fleet/modules/health.ts)', () => {
 
     it('puts the metrics block first on every computer page, whatever flags are on', async () => {
         const registry = await import('../registry');
-        const { HEALTH_METRICS_BLOCK_ID } = await import('./health');
+        const { HEALTH_METRICS_BLOCK_ID } = await import('./fl-03-health');
         for (const flags of [{}, { FLEET_HEALTH_HISTORY_ENABLED: true }]) {
             const blocks = registry.getOverviewBlocks('computer', flags);
             expect(blocks[0]).toMatchObject({
@@ -44,10 +49,38 @@ describe('FL-03 registration (components/fleet/modules/health.ts)', () => {
 
     it('loads the metrics block component lazily — that module, on demand', async () => {
         const registry = await import('../registry');
-        await import('./health');
+        await import('./fl-03-health');
         const [block] = registry.getOverviewBlocks('computer', {});
         const loaded = await block.load();
         expect(loaded.default.name).toBe('HealthMetricsBlockStub');
+    });
+
+    it('registers the handler FL-01’s list runs for "Clear limit now": the clear route, every limit, that computer', async () => {
+        const { FLEET_CLEAR_MODEL_THROTTLE_COMMAND } = await import('@ever-works/contracts');
+        const commands = await import('../overview/needs-a-look-commands');
+        commands.resetNeedsALookCommandsForTests();
+        expect(commands.getNeedsALookCommand(FLEET_CLEAR_MODEL_THROTTLE_COMMAND)).toBeNull();
+        await import('./fl-03-health');
+        const handler = commands.getNeedsALookCommand(FLEET_CLEAR_MODEL_THROTTLE_COMMAND);
+        expect(handler).not.toBeNull();
+
+        const item = {
+            id: 'node-throttled:n1',
+            nodeId: 'n1',
+            severity: 'warn' as const,
+            kind: 'node-throttled' as const,
+            title: "Waiting for Claude Code's limit to reset",
+            detail: '',
+            action: { label: 'Clear limit now', command: FLEET_CLEAR_MODEL_THROTTLE_COMMAND },
+            since: '2026-10-18T09:00:00.000Z',
+        };
+        clearThrottle.mockResolvedValueOnce({ success: true, data: {}, error: null });
+        await expect(handler!(item)).resolves.toEqual({ ok: true });
+        // No provider: the row says "the limits on this computer", so all of them.
+        expect(clearThrottle).toHaveBeenCalledWith('n1', null);
+
+        clearThrottle.mockResolvedValueOnce({ success: false, data: null, error: 'Not yours' });
+        await expect(handler!(item)).resolves.toEqual({ ok: false, error: 'Not yours' });
     });
 
     it('a reset registry holds nothing until the module registers again (control)', () => {
