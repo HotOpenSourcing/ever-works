@@ -47,6 +47,12 @@ import {
     type ComputerPendingSessionsLookup,
 } from '@ever-works/agent/computer';
 import { FLEET_ATTENDED_CAPABILITY, FLEET_AUDIT_DEFAULT_LIMIT } from '@ever-works/contracts';
+import {
+    FLEET_LINK_HEARTBEAT_OBSERVER,
+    FLEET_LINK_NODE_STATE,
+    type FleetLinkHeartbeatObserver,
+    type FleetLinkNodeStateLookup,
+} from '../fleet-link/fleet-link.types';
 import { FleetPanicService } from './fleet-panic.service';
 import { FleetRunnerStatusService } from './fleet-runner-status.service';
 import {
@@ -177,6 +183,17 @@ export class FleetController {
         @Optional()
         @Inject(COMPUTER_PENDING_SESSIONS)
         private readonly pendingComputerSessions?: ComputerPendingSessionsLookup,
+        // Fleet node link (FL-02) — the consents a beat reported reach the
+        // link (a withdrawn consent closes its channels), and the node views
+        // show the link as the platform's own socket sees it. Appended LAST +
+        // @Optional() like the three above: unbound, every response keeps
+        // its exact shape.
+        @Optional()
+        @Inject(FLEET_LINK_HEARTBEAT_OBSERVER)
+        private readonly linkHeartbeat?: FleetLinkHeartbeatObserver,
+        @Optional()
+        @Inject(FLEET_LINK_NODE_STATE)
+        private readonly linkState?: FleetLinkNodeStateLookup,
     ) {}
 
     @Get('cost-ceiling')
@@ -284,7 +301,7 @@ export class FleetController {
             load = {};
         }
         return nodes.map((node) => ({
-            ...node,
+            ...this.withLink(node),
             // Cluster-sourced rows are never leased onto, so they stay null.
             load: node.persisted ? (load[node.id] ?? null) : null,
         })) as FleetNodeView[];
@@ -328,7 +345,7 @@ export class FleetController {
         const history = buildNodeJobHistory(recentJobs, runs);
 
         return {
-            node,
+            node: this.withLink(node),
             recentJobs: history,
             // Reconciled-aware, so the subset agrees with the badge each
             // row renders: a job the node called `done` whose run failed
@@ -608,6 +625,8 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Fleet node link (FL-02): the consents, should an enrolling node send them.
+            consents: body.consents,
         });
         if (!result) {
             // One undifferentiated message — never say WHICH check failed.
@@ -651,9 +670,25 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Fleet node link (FL-02): the four consents the node runs with.
+            consents: body.consents,
         });
         if (!result) {
             throw new UnauthorizedException('Invalid node credential');
+        }
+        // Fleet node link (FL-02, spec FR-22): a consent the node no longer
+        // holds closes the link channels that needed it. Never able to fail
+        // the beat.
+        if (result.consents && this.linkHeartbeat) {
+            try {
+                this.linkHeartbeat.onHeartbeat(result.node.id, result.consents);
+            } catch (err) {
+                this.logger.debug(
+                    `link consent update skipped for node ${result.node.id}: ${
+                        err instanceof Error ? err.message : String(err)
+                    }`,
+                );
+            }
         }
         // Two independent follow-ups, started together and awaited together
         // (neither can reject: each swallows its own failure), so the beat
@@ -697,7 +732,26 @@ export class FleetController {
         if (pending.length > 0) {
             response.pendingComputerSessions = pending;
         }
+        // Fleet node link (FL-02, CONTRACTS §1.1): the recommended daemon
+        // version, only when the operator named one.
+        if (result.recommendedNodeVersion) {
+            response.recommendedNodeVersion = result.recommendedNodeVersion;
+        }
         return response;
+    }
+
+    /**
+     * Fleet node link (FL-02) — the link as the platform's own socket sees it
+     * (spec FR-42), on an enrolled row; a cluster row and a build without
+     * the link module keep their exact shape.
+     */
+    private withLink<T extends FleetNodeView>(node: T): T {
+        if (!this.linkState || node.persisted === false) return node;
+        try {
+            return { ...node, link: this.linkState.linkView({ id: node.id, kind: node.kind }) };
+        } catch {
+            return node;
+        }
     }
 
     private async promoteWaitingJobsFor(node: FleetHeartbeatResponse['node']): Promise<void> {
