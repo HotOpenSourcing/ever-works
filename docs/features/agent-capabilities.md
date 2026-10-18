@@ -295,14 +295,16 @@ Substituting a secret into an arbitrary argument would hand it to wherever that 
 1. **A declared credential slot** — an argument a built-in tool marks as a credential field in its own schema (`'x-credential': true`). A schema that came from an MCP server can never declare one.
 2. **An operator allowance, per credential** — in the environment:
 
-   ```bash
-   # any argument of these tools may reference {{cred.billing_token}}
-   EVERWORKS_CRED_BILLING_TOKEN_ALLOW=mcp__billing__create_invoice,mcp__billing__refund
-   # only when the call's `url` argument points at exactly this host
-   EVERWORKS_CRED_DOCS_TOKEN_ALLOW=extractContent@api.docs.example.com
-   ```
+    ```bash
+    # any argument of these tools may reference {{cred.billing_token}}
+    EVERWORKS_CRED_BILLING_TOKEN_ALLOW=mcp__billing__create_invoice,mcp__billing__refund
+    # only when the call's `url` argument is https on exactly this host (default port)
+    EVERWORKS_CRED_DOCS_TOKEN_ALLOW=extractContent@api.docs.example.com
+    # ... or on this host and port
+    EVERWORKS_CRED_DOCS_TOKEN_ALLOW=extractContent@api.docs.example.com:8443
+    ```
 
-   Entries are comma-separated `tool` or `tool@host`. The tool name is the exact name the Agent calls (case-insensitive). A `tool@host` entry matches only when the call's `url` argument names exactly that host (no wildcards); a tool with no `url` argument never matches a host-bound entry. No entry means no substitution outside declared slots. (Avoid naming a credential `<other>_allow` — its variable would collide with `<other>`'s allow list.)
+    Entries are comma-separated `tool`, `tool@host` or `tool@host:port`. The tool name is the exact name the Agent calls (case-insensitive). A `tool@host` entry matches only when the call's `url` argument is an `https:` URL on exactly that host (no wildcards) and the default port; `tool@host:port` names another port. A tool with no `url` argument never matches a host-bound entry, and neither does a URL carrying userinfo (`user@` before the host), a backslash, whitespace or a control character (spellings URL parsers disagree on). No entry means no substitution outside declared slots. (Avoid naming a credential `<other>_allow` — its variable would collide with `<other>`'s allow list.)
 
 Credentials stored in an **MCP connection's auth headers** (`Authorization: Bearer {{cred.docs_token}}`) resolve on their own path when the connection is opened and need no allow entry.
 
