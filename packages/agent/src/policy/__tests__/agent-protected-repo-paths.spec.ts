@@ -23,6 +23,14 @@ describe('always-protected repository paths', () => {
         expect(isAlwaysProtectedRepoPath('.github/actions/')).toBe(true);
     });
 
+    // CodeQL on #2769: no polynomial regex on the (model-supplied) path.
+    it('stays linear on a path made of thousands of slashes', () => {
+        const started = Date.now();
+        expect(isAlwaysProtectedRepoPath(`${'/'.repeat(50_000)}x`)).toBe(false);
+        expect(isAlwaysProtectedRepoPath(`.github${'/'.repeat(50_000)}`)).toBe(true);
+        expect(Date.now() - started).toBeLessThan(1_000);
+    });
+
     it('leaves the rest of the repository, and look-alikes, alone', () => {
         expect(isAlwaysProtectedRepoPath('.github/CODEOWNERS')).toBe(false);
         expect(isAlwaysProtectedRepoPath('.github/dependabot.yml')).toBe(false);

@@ -42,6 +42,13 @@ export function workflowChangesAllowedForWork(
     return listed.includes(workId.trim().toLowerCase());
 }
 
+/** `text` without trailing `/` characters — a loop, not a regex (linear on any input). */
+function withoutTrailingSlashes(text: string): string {
+    let end = text.length;
+    while (end > 0 && text.charCodeAt(end - 1) === 47 /* '/' */) end -= 1;
+    return text.slice(0, end);
+}
+
 /** A repository path in the form the guard compares: posix, no `./`, lower-cased. */
 function comparable(path: string): string {
     let out = path.trim().replace(/\\/g, '/');
@@ -59,11 +66,11 @@ function comparable(path: string): string {
 export function isAlwaysProtectedRepoPath(path: string | null | undefined): boolean {
     if (typeof path !== 'string' || !path.trim()) return false;
     const candidate = comparable(path);
-    const bare = candidate.replace(/\/+$/, '');
+    const bare = withoutTrailingSlashes(candidate);
     return ALWAYS_PROTECTED_REPO_PREFIXES.some((prefix) => {
         if (candidate.startsWith(prefix)) return true;
         // Every ancestor directory of the prefix: `.github`, `.github/workflows`.
-        const parts = prefix.replace(/\/+$/, '').split('/');
+        const parts = withoutTrailingSlashes(prefix).split('/');
         return parts.some((_, index) => bare === parts.slice(0, index + 1).join('/'));
     });
 }
