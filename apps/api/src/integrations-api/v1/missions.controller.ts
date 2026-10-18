@@ -69,6 +69,7 @@ import {
     rethrowCursor,
     validationFailed,
     withExpectedVersion,
+    IsOptionalNonNull,
 } from './integration-request';
 import { IntegrationExternalRefDto } from './tasks-write.controller';
 
@@ -151,13 +152,13 @@ export class IntegrationCreateMissionDto {
  */
 export class IntegrationUpdateMissionDto {
     @ApiProperty({ required: false, minLength: 1, maxLength: 200 })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @Length(1, 200)
     title?: string;
 
     @ApiProperty({ required: false, minLength: 1, maxLength: 100000 })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     @Length(1, 100_000)
     description?: string;
@@ -168,7 +169,7 @@ export class IntegrationUpdateMissionDto {
         description:
             '`active` answers 422 domain_rule: a person resumes a Mission in Ever Works (D9).',
     })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     status?: string;
 
@@ -191,7 +192,7 @@ export class IntegrationUpdateMissionDto {
         description:
             'The Teams of the pinned organization (team_resources rows). Non-empty means visibility `team` unless visibility was set by hand (D11).',
     })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsArray()
     @ArrayMaxSize(50)
     @IsUUID('all', { each: true })
@@ -203,7 +204,7 @@ export class IntegrationUpdateMissionDto {
         description:
             'Integrations may set team or organization only; `private` answers 422 domain_rule. Setting it marks visibilityExplicit=true.',
     })
-    @IsOptional()
+    @IsOptionalNonNull()
     @IsString()
     visibility?: string;
 }
