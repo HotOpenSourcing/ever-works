@@ -1003,6 +1003,22 @@ export class TaskWorkspaceService {
             [...keptAttachments, ...extraMounts],
             input.primaryRepositoryId,
         );
+        // Prompt-injection hardening — a WRITABLE mount's commits are pushed to
+        // the Task branch by the node BEFORE any pull request exists, so that
+        // branch may never be the mount's own base (nor a protected branch): a
+        // matching ref would update the base directly (CodeRabbit on #2769).
+        // Refused while the plan is still on the platform, naming the mount.
+        for (const mount of normalized) {
+            if (!mount.writable) continue;
+            const reason = protectedTaskBranchReason(mount.branch, mount.baseRef);
+            if (reason) {
+                throw new Error(
+                    `Task ${input.task.id}: mounted repository ${mount.repositoryId} cannot be written on ` +
+                        `branch '${mount.branch}' — it is that repository's base branch ('${mount.baseRef}') ` +
+                        'or a protected branch. A writable mount needs its own working branch.',
+                );
+            }
+        }
         const envFilesRef: FleetRunEnvFileRef[] = [];
         for (const mount of normalized) {
             const source = sourceByMountDir.get(mount.mountDir.toLowerCase());
@@ -1136,6 +1152,13 @@ export class TaskWorkspaceService {
             baseRef: input.baseRef,
         });
         if (refusal) return this.refuseMountChange(task, input, refusal);
+
+        // Prompt-injection hardening — the always-protected-path floor on a
+        // MOUNTED repository too (CodeRabbit on #2769), before all three
+        // branches below: the node pushed this branch itself and nothing
+        // checked it on the way, whatever Work kind owns the repository.
+        const floorRefusal = await this.mountProtectedPathsRefusal(input, owner, repo, branch);
+        if (floorRefusal) return this.refuseMountChange(task, input, floorRefusal);
 
         // Idempotent on the pull request, exactly like the primary path: the
         // Task branch name is stable, so a re-run pushes MORE commits onto the
@@ -1504,9 +1527,7 @@ export class TaskWorkspaceService {
             `${reason}\n\n${consequence}`,
         );
         await this.transitionTask(task, TaskStatus.BLOCKED);
-        this.logger.warn(
-            `Task ${task.id}: mount ${input.repositoryId} refused by an App Work's change rules.`,
-        );
+        this.logger.warn(`Task ${task.id}: mount ${input.repositoryId} refused by a change guard.`);
         return {
             repositoryId: input.repositoryId,
             outcome: 'blocked-by-guard',
@@ -1977,6 +1998,38 @@ export class TaskWorkspaceService {
                 existingPullRequest: { number: task.prNumber, url: task.prUrl },
             });
             if (guarded) return guarded;
+
+            // Prompt-injection hardening — the always-protected-path floor on
+            // EVERY push, this one included (CodeRabbit on #2769): commits a
+            // node pushes onto a branch with an open pull request land in that
+            // pull request with nothing else in the way, on every Work kind.
+            const existingGitOptions = { userId, providerId: work.gitProvider, workId: work.id };
+            const existingRepository = await this.gitFacade
+                .getRepository(target.owner, target.repo, existingGitOptions)
+                .catch(() => null);
+            const existingBase =
+                (work.taskIsolationBaseBranch && work.taskIsolationBaseBranch.trim()) ||
+                existingRepository?.defaultBranch ||
+                '';
+            const existingPullRequest = { number: task.prNumber, url: task.prUrl };
+            const floorRefusal = existingBase
+                ? await this.protectedPathsRefusalForBranch({
+                      task,
+                      work,
+                      owner: target.owner,
+                      repo: target.repo,
+                      gitOptions: existingGitOptions,
+                      baseRef: existingBase,
+                      branch,
+                      existingPullRequest,
+                  })
+                : `The base branch of \`${target.owner}/${target.repo}\` could not be read, so the push to ` +
+                  `\`${branch}\` (pull request #${task.prNumber}) was not checked for GitHub workflow or action files.`;
+            if (floorRefusal) {
+                return this.refuseChange(input, task, floorRefusal, existingPullRequest, {
+                    reachedRemote: true,
+                });
+            }
 
             // `recordRemotePush` already kept the branch at `pr-open` for a
             // Task that carries a pull request (review Q-R1-01).
@@ -3339,6 +3392,53 @@ export class TaskWorkspaceService {
     }
 
     /**
+     * The always-protected-path floor for a MOUNTED repository's pushed branch
+     * (see {@link protectedPathsRefusalForBranch}), with that repository's own
+     * git options and base. The Task's Work decides the operator opt-in. A base
+     * that cannot be read is refused (fail closed); no git facade leaves the
+     * decision to the caller, which records that failure itself.
+     */
+    private async mountProtectedPathsRefusal(
+        input: {
+            task: Task;
+            userId: string;
+            agentId: string;
+            repositoryId: string;
+            baseRef?: string | null;
+        },
+        owner: string,
+        repo: string,
+        branch: string,
+    ): Promise<string | null> {
+        const { task } = input;
+        if (!this.gitFacade || workflowChangesAllowedForWork(task.workId)) return null;
+        let gitOptions: { userId: string; providerId: string; workId: string };
+        let baseRef: string;
+        try {
+            gitOptions = await this.resolveMountGitOptions(
+                task,
+                input.repositoryId,
+                input.userId,
+                input.agentId,
+            );
+            baseRef = await this.mountJudgementBase(input.baseRef, { owner, repo }, gitOptions);
+        } catch (error) {
+            return `The base branch of \`${owner}/${repo}\` could not be read (${
+                error instanceof Error ? error.message : String(error)
+            }), so the changes on \`${branch}\` were not checked for GitHub workflow or action files.`;
+        }
+        return this.protectedPathsRefusalForBranch({
+            task,
+            work: { id: task.workId ?? '' },
+            owner,
+            repo,
+            gitOptions,
+            baseRef,
+            branch,
+        });
+    }
+
+    /**
      * The always-protected-path floor for a branch that is ALREADY on the
      * remote (a fleet node pushed it, or a cloud run's push): the provider's
      * own diff of `branch` against `baseRef`. `null` when the pull request may
@@ -3349,12 +3449,15 @@ export class TaskWorkspaceService {
      */
     private async protectedPathsRefusalForBranch(args: {
         task: Task;
-        work: Work;
+        /** The Work whose operator opt-in (`AGENT_WORKFLOW_CHANGES_ALLOWED_WORKS`) applies. */
+        work: { id: string };
         owner: string;
         repo: string;
         gitOptions: { userId: string; providerId: string; workId: string };
         baseRef: string;
         branch: string;
+        /** Set when the branch already backs an open pull request (it now holds the change). */
+        existingPullRequest?: { number: number; url: string };
     }): Promise<string | null> {
         if (workflowChangesAllowedForWork(args.work.id) || !this.gitFacade) return null;
         if (typeof this.gitFacade.getCompareDiff !== 'function') return null;
@@ -3394,8 +3497,12 @@ export class TaskWorkspaceService {
             diff.files.flatMap((file) => [file.path, file.previousPath]),
         );
         if (hits.length === 0) return null;
+        const lead = args.existingPullRequest
+            ? `The push to \`${args.branch}\` is now in pull request #${args.existingPullRequest.number} ` +
+              `(${args.existingPullRequest.url}), which must not be merged as it stands`
+            : `No pull request was opened for \`${args.branch}\``;
         return [
-            `No pull request was opened for \`${args.branch}\`: ${protectedRepoPathsRefusal(hits)}`,
+            `${lead}: ${protectedRepoPathsRefusal(hits)}`,
             '',
             'Paths:',
             ...hits.map((path) => `- \`${path}\``),

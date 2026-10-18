@@ -116,6 +116,47 @@ describe('TaskWorkspaceService.finalizeRemotePush', () => {
             );
         });
 
+        // CodeRabbit on #2769: a push onto a branch that already has a pull
+        // request lands in it — the floor runs on that path too, every kind.
+        it('blocks the Task when a push onto an EXISTING pull request touches a workflow file', async () => {
+            const getCompareDiff = jest.fn().mockResolvedValue({
+                files: [{ path: '.github/workflows/release.yml', status: 'modified' }],
+                truncated: false,
+            });
+            Object.assign(gitFacade, { getCompareDiff });
+            const withPr = makeTask({
+                prNumber: 5,
+                prUrl: 'https://github.com/acme/site-data/pull/5',
+            });
+            tasks.findById.mockResolvedValue(withPr);
+            const outcome = await build().finalizeRemotePush({ ...input(), task: withPr });
+
+            expect(outcome).toEqual({
+                outcome: 'blocked-by-guard',
+                prNumber: 5,
+                prUrl: 'https://github.com/acme/site-data/pull/5',
+            });
+            expect(getCompareDiff).toHaveBeenCalledWith(
+                'acme',
+                'site-data',
+                'main',
+                'task/tsk-9-task1',
+                { maxFiles: 300 },
+                { userId: 'user-1', providerId: 'github', workId: 'work-1' },
+            );
+            expect(tasks.updateById).toHaveBeenCalledWith(
+                'task-1',
+                expect.objectContaining({
+                    branchGuardRefusal: expect.stringContaining('pull request #5'),
+                }),
+            );
+            expect(transitions.transition).toHaveBeenCalledWith(
+                expect.anything(),
+                TaskStatus.BLOCKED,
+                expect.anything(),
+            );
+        });
+
         it('refuses a diff too large to check', async () => {
             Object.assign(gitFacade, {
                 getCompareDiff: jest.fn().mockResolvedValue({ files: [], truncated: true }),
