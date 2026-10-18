@@ -21,7 +21,11 @@ describe('IntegrationMembersWriteController', () => {
         actAsUserId,
     });
     const user = (actAsUserId: string | null = null) =>
-        ({ userId: 'owner-1', authMethod: 'integration', integration: principal(actAsUserId) }) as never;
+        ({
+            userId: 'owner-1',
+            authMethod: 'integration',
+            integration: principal(actAsUserId),
+        }) as never;
     const req = () => ({
         method: 'POST',
         originalUrl: '/api/integrations/v1/members/invite',
@@ -45,7 +49,10 @@ describe('IntegrationMembersWriteController', () => {
         const scope = { getScope: () => ({ organizationId }) };
         const idempotency = {
             run: jest.fn(
-                async (_input: unknown, work: () => Promise<{ status: number; body: unknown }>) => ({
+                async (
+                    _input: unknown,
+                    work: () => Promise<{ status: number; body: unknown }>,
+                ) => ({
                     ...(await work()),
                     replayed: false,
                 }),
@@ -60,7 +67,11 @@ describe('IntegrationMembersWriteController', () => {
     };
 
     it('invites into the pinned organization as the key owner and answers 201 with the invitation', async () => {
-        const { controller, flow, idempotency } = setup({ status: 'invited', invitation, userId: null });
+        const { controller, flow, idempotency } = setup({
+            status: 'invited',
+            invitation,
+            userId: null,
+        });
         const response = res();
         const body = await controller.invite(
             user(),
@@ -68,10 +79,15 @@ describe('IntegrationMembersWriteController', () => {
             req(),
             response,
         );
-        expect(flow.inviteForIntegration).toHaveBeenCalledWith('org-a', 'owner-1', 'newcomer@example.com', {
-            role: 'member',
-            invitedName: 'Newcomer',
-        });
+        expect(flow.inviteForIntegration).toHaveBeenCalledWith(
+            'org-a',
+            'owner-1',
+            'newcomer@example.com',
+            {
+                role: 'member',
+                invitedName: 'Newcomer',
+            },
+        );
         expect(idempotency.run).toHaveBeenCalledTimes(1);
         expect(response.status).toHaveBeenCalledWith(201);
         expect(body).toEqual({
@@ -92,11 +108,21 @@ describe('IntegrationMembersWriteController', () => {
 
     it('sends the invitation as the act-as user when the request names one', async () => {
         const { controller, flow } = setup({ status: 'invited', invitation, userId: null });
-        await controller.invite(user('ada-1'), { email: 'newcomer@example.com', role: 'member' }, req(), res());
-        expect(flow.inviteForIntegration).toHaveBeenCalledWith('org-a', 'ada-1', 'newcomer@example.com', {
-            role: 'member',
-            invitedName: undefined,
-        });
+        await controller.invite(
+            user('ada-1'),
+            { email: 'newcomer@example.com', role: 'member' },
+            req(),
+            res(),
+        );
+        expect(flow.inviteForIntegration).toHaveBeenCalledWith(
+            'org-a',
+            'ada-1',
+            'newcomer@example.com',
+            {
+                role: 'member',
+                invitedName: undefined,
+            },
+        );
     });
 
     it('answers a pending invitation and a member with 200 (nothing new was created)', async () => {
@@ -106,7 +132,12 @@ describe('IntegrationMembersWriteController', () => {
         ]) {
             const { controller } = setup(outcome);
             const response = res();
-            const body = (await controller.invite(user(), { email: 'x@example.com' }, req(), response)) as {
+            const body = (await controller.invite(
+                user(),
+                { email: 'x@example.com' },
+                req(),
+                response,
+            )) as {
                 status: string;
                 userId: string | null;
             };
@@ -119,14 +150,21 @@ describe('IntegrationMembersWriteController', () => {
     it('answers a person added to the roster directly with 201 and their user id', async () => {
         const { controller } = setup({ status: 'added', invitation: null, userId: 'u-colleague' });
         const response = res();
-        const body = await controller.invite(user(), { email: 'colleague@example.com' }, req(), response);
+        const body = await controller.invite(
+            user(),
+            { email: 'colleague@example.com' },
+            req(),
+            response,
+        );
         expect(response.status).toHaveBeenCalledWith(201);
         expect(body).toEqual({ status: 'added', invitation: null, userId: 'u-colleague' });
     });
 
     it('refuses a request with no pinned organization (403 org_not_pinned) before inviting', async () => {
         const { controller, flow } = setup({ status: 'invited', invitation, userId: null }, null);
-        await expect(controller.invite(user(), { email: 'x@example.com' }, req(), res())).rejects.toMatchObject({
+        await expect(
+            controller.invite(user(), { email: 'x@example.com' }, req(), res()),
+        ).rejects.toMatchObject({
             status: 403,
         });
         expect(flow.inviteForIntegration).not.toHaveBeenCalled();

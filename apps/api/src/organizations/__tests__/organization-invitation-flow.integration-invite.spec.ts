@@ -70,7 +70,9 @@ function build(
             }
             return { invitation: issued, token: 'a'.repeat(64) };
         }),
-        listPending: jest.fn(async () => pending.map((row) => ({ ...row, email: row.emailNormalized }))),
+        listPending: jest.fn(async () =>
+            pending.map((row) => ({ ...row, email: row.emailNormalized })),
+        ),
         revoke: jest.fn().mockResolvedValue(undefined),
     };
     const members = {
@@ -85,7 +87,9 @@ function build(
         findById: jest.fn().mockResolvedValue({ id: 'u-actor', username: 'ada' }),
     };
     const tenants = {
-        findById: jest.fn().mockResolvedValue({ id: 'ten-1', ownerUserId: opts.owner ?? 'u-owner' }),
+        findById: jest
+            .fn()
+            .mockResolvedValue({ id: 'ten-1', ownerUserId: opts.owner ?? 'u-owner' }),
     };
     const membership = { ensureMember: jest.fn().mockResolvedValue(ORG) };
     const mail = {
@@ -120,9 +124,14 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
 
     it('issues the normal member invitation and emails it, as the acting user', async () => {
         const { service, invitations, mail, membership } = build();
-        const outcome = await service.inviteForIntegration('org-1', 'u-actor', 'Newcomer@Example.com', {
-            invitedName: 'Newcomer',
-        });
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            'Newcomer@Example.com',
+            {
+                invitedName: 'Newcomer',
+            },
+        );
         expect(membership.ensureMember).toHaveBeenCalledWith('org-1', 'u-actor');
         expect(invitations.issue).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -150,7 +159,11 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
                 { id: 'inv-old', emailNormalized: 'newcomer@example.com', tokenExpiresAt: FUTURE },
             ],
         });
-        const outcome = await service.inviteForIntegration('org-1', 'u-actor', ' NEWCOMER@example.com');
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            ' NEWCOMER@example.com',
+        );
         expect(outcome.status).toBe('pending');
         expect(outcome.invitation).toEqual(expect.objectContaining({ id: 'inv-old' }));
         expect(invitations.issue).not.toHaveBeenCalled();
@@ -167,7 +180,11 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
                 },
             ],
         });
-        const outcome = await service.inviteForIntegration('org-1', 'u-actor', 'newcomer@example.com');
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            'newcomer@example.com',
+        );
         expect(outcome.status).toBe('invited');
         expect(invitations.issue).toHaveBeenCalledTimes(1);
     });
@@ -199,7 +216,11 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
         const { service, members, mail, invitations } = build({
             existingUser: { id: 'u-colleague', tenantId: 'ten-1' },
         });
-        const outcome = await service.inviteForIntegration('org-1', 'u-actor', 'colleague@example.com');
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            'colleague@example.com',
+        );
         expect(outcome).toEqual({ status: 'added', invitation: null, userId: 'u-colleague' });
         expect(members.create).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -214,7 +235,9 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
     });
 
     it('invites a person whose account lives in another Tenant', async () => {
-        const { service, invitations } = build({ existingUser: { id: 'u-far', tenantId: 'ten-9' } });
+        const { service, invitations } = build({
+            existingUser: { id: 'u-far', tenantId: 'ten-9' },
+        });
         const outcome = await service.inviteForIntegration('org-1', 'u-actor', 'far@example.com');
         expect(outcome.status).toBe('invited');
         expect(invitations.issue).toHaveBeenCalledTimes(1);
@@ -222,7 +245,11 @@ describe('OrganizationInvitationFlowService.inviteForIntegration', () => {
 
     it('a concurrent invite of the same email answers the invitation that won the race', async () => {
         const { service, mail } = build({ issueConflict: true });
-        const outcome = await service.inviteForIntegration('org-1', 'u-actor', 'newcomer@example.com');
+        const outcome = await service.inviteForIntegration(
+            'org-1',
+            'u-actor',
+            'newcomer@example.com',
+        );
         expect(outcome.status).toBe('pending');
         expect(outcome.invitation).toEqual(expect.objectContaining({ id: 'inv-race' }));
         expect(mail.sendOrganizationInvitation).not.toHaveBeenCalled();
