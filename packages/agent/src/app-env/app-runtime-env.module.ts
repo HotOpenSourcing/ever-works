@@ -59,6 +59,15 @@
  * are dropped and the drop is logged — the documented behaviour, and an honest
  * one.
  *
+ * ⚠ Superseded 2026-10-18 (live e2e, lane aw-live-fix): the port IS bound now —
+ * by the agent `AppWorksModule`, where its consumer is declared, to
+ * `AppEnvPromptedValuesAdapter`. The two objections above are answered there
+ * rather than by inventing either: the create path passes the creator's
+ * `userId` as the actor, and `apply({ allowWithoutSpec, origin: 'prompted' })`
+ * stores the answers against an empty spec until a real one is effective. This
+ * module still does not bind it (a binding here would be invisible to the
+ * create service).
+ *
  * `APP_DEPENDENCY_PROVISION_DISPATCHER`, `APP_DEPENDENCY_SPEC_SOURCE`,
  * `APP_ENV_SPEC_SOURCE` and `APP_DEPENDENCY_CLUSTER_ACCESS` belong to APW-03 and
  * APW-06 and have no implementation in this tree. Every one of them is
@@ -72,6 +81,7 @@ import { AppDependenciesService } from '../app-dependencies/app-dependencies.ser
 import { APP_RUNTIME_ENV_SOURCE } from '../app-runtime/ports';
 import { APP_ENV_DEPLOY_READINESS, AppEnvRuntimeSource } from './app-env-runtime.source';
 import { AppEnvListener } from './app-env.listener';
+import { AppEnvSmtpBridgeListener } from './app-env-smtp-bridge.listener';
 import { AppEnvModule } from './app-env.module';
 
 @Module({
@@ -79,6 +89,10 @@ import { AppEnvModule } from './app-env.module';
     providers: [
         AppEnvRuntimeSource,
         AppEnvListener,
+        // Lane aw-env-smtp (GAP-22) — an owner's own `SMTP_*` App env values become the `smtp`
+        // dependency's configuration. Here, and only here, because it needs both modules (the same
+        // reason `AppEnvListener` is here).
+        AppEnvSmtpBridgeListener,
         // The readiness pass, and the reason it is an alias rather than a
         // narrowed wrapper: `ensureReadyForDeploy` also DISPATCHES provisioning
         // for the `pending` kinds (GAP-05), and a wrapper that forwarded only

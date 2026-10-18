@@ -51,7 +51,9 @@ import {
 	MIN_WORKSPACE_COUNT,
 	MIN_WORKSPACE_MAX_AGE_DAYS,
 	redactConfig,
+	resolveNodeExecutionPolicy,
 	type NodeConfig,
+	type NodeExecutionPolicy,
 	type NodeResourceLimits,
 	type NodeWorkspaceGcPolicy
 } from '../core/types';
@@ -59,11 +61,18 @@ import { API_URL_ENV, describeApiBase, readApiUrlPin, resolveApiBase } from '../
 import {
 	compareFleetNodeVersions,
 	FLEET_NODE_UPGRADE_COMMAND,
+	isFleetLinkEligible,
 	isFleetNodeVersionBelowFloor
 } from '@ever-works/contracts';
 import { isModelCliCompatible, ModelCliCompatibilityProbe, type ModelCliCompatibility } from '../core/model-cli-compat';
 import type { ModelCliPaths } from '../core/executors/model-cli';
 import { readNodeLifecycleRecord, writeNodeLifecycleRecord, type NodeLifecycleRecord } from '../core/node-lifecycle';
+import {
+	describeConsents,
+	describeLinkRecord,
+	readNodeLinkRecord,
+	writeNodeLinkRecord
+} from '../core/link/link-record';
 import { NODE_SOURCE_UPGRADE_HINT } from '../core/worker-loop';
 
 /**
@@ -377,6 +386,13 @@ export interface StartCommandOptions {
 	 * taking platform work, and vice versa.
 	 */
 	attend?: boolean;
+	/**
+	 * Fleet node link (FL-02) — allow managing this machine from the
+	 * dashboard: owner sessions, logs, services, Docker, processes, ports,
+	 * files, commands, schedules, checkout discovery, wake. A fourth consent,
+	 * independent of `--work` and `--attend`.
+	 */
+	manage?: boolean;
 }
 
 /**
@@ -462,6 +478,7 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 
 	const workerEnabled = options.work === true;
 	const attendEnabled = options.attend === true;
+	const manageEnabled = options.manage === true;
 	// A node paused by `ever-works-node pause` comes back paused: the
 	// operator drained the machine on purpose, and a service restart
 	// (or a reboot) must not quietly hand it work again.
@@ -515,23 +532,38 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		// Written directly (not via a conditional spread) so excess-property
 		// checking keeps this name tied to the runtime option it feeds.
 		agentTaskWorkspaceRoot: workspaceRoot,
-		persistUnsafe: async (unsafe) =>
-			saveConfig(
+		// Re-read before writing: the file may have changed since this service
+		// started (`ever-works-node policy` run meanwhile), and a quarantine must
+		// record `unsafe` without reverting anything else in it.
+		persistUnsafe: async (unsafe) => {
+			const current =
+				(await loadConfig(deps.fs, deps.configPath, {
+					secrets: deps.secrets ?? null,
+					logger: deps.io.logger
+				}).catch(() => null)) ?? config;
+			await saveConfig(
 				deps.fs,
 				deps.configPath,
-				{ ...config, unsafe },
+				{ ...current, unsafe },
 				{
 					platform: deps.platform,
 					secrets: deps.secrets ?? null,
 					logger: deps.io.logger
 				}
-			),
+			);
+		},
 		workerSafetyGate: createConfigWorkerSafetyGate(deps.fs, deps.configPath, { platform: deps.platform }),
 		// Node lifecycle (slice AR): what the platform last said about this
 		// daemon's version, recorded beside the config for `status`/`doctor`.
 		persistLifecycle: (record) => writeNodeLifecycleRecord(deps.fs, deps.configPath, record),
 		...(deps.resourceProbe ? { resourceProbe: deps.resourceProbe } : {}),
-		attendEnabled
+		attendEnabled,
+		// Fleet node link (FL-02): the fourth consent, and the link itself. The
+		// link opens on the first accepted heartbeat when any of --work,
+		// --attend, --manage is on; its state is recorded for `status`.
+		manageEnabled,
+		nodeLink: true,
+		persistLinkState: (record) => writeNodeLinkRecord(deps.fs, deps.configPath, record)
 	});
 	if (workerEnabled) {
 		// Node lifecycle (slice AR): say at startup what each pinned CLI is
@@ -676,6 +708,12 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 		// work should not have to infer it from an absence of log lines.
 		deps.out('Worker host disabled — reporting liveness only (pass --work to execute platform work)');
 	}
+	// Fleet node link (FL-02): which consents this process holds, in one line.
+	deps.out(
+		isFleetLinkEligible(runtime.consents)
+			? `Consents — ${describeConsents(runtime.consents)}; the node link opens after the first accepted heartbeat`
+			: 'Consents — none: the node link stays closed and this computer only reports health (pass --work, --attend or --manage)'
+	);
 
 	// Block until shutdown is requested: the injected hook (tests) or a signal
 	// (the real service). With neither wired there is nothing that could ever
@@ -684,6 +722,9 @@ export async function runStart(deps: CliDeps, options: StartCommandOptions): Pro
 
 	reaper?.stop();
 	shuttingDown = true;
+	// The link first: channels end `normal` and nothing reconnects while the
+	// lanes below drain.
+	runtime.link?.close();
 	loop.stop();
 	await loop.settled();
 	// A start that was waiting for an accepted beat ends here (the loop is
@@ -754,6 +795,85 @@ export function parseConcurrency(raw: string | undefined): number | undefined {
 export interface PauseCommandOptions {
 	/** Skip the API call and only flip the local flag (offline machines). */
 	localOnly?: boolean;
+}
+
+/** `policy` flags, as commander hands them over: `on` / `off` strings. */
+export interface PolicyCommandOptions {
+	allowSkipPermissions?: string;
+	allowShellCommands?: string;
+	restrictedMode?: string;
+}
+
+/** One line: both control-18 switches, in words. */
+export function describeExecutionPolicy(policy: NodeExecutionPolicy): string {
+	return (
+		`skip-permissions ${policy.allowSkipPermissions ? 'ALLOWED' : 'refused'}, ` +
+		`node-run shell commands ${policy.allowShellCommands ? 'ALLOWED' : 'refused'}, ` +
+		`Claude Code restricted mode ${policy.restrictedMode ? 'on' : 'OFF'}`
+	);
+}
+
+function parsePolicySwitch(flag: string, value: string | undefined): boolean | undefined {
+	if (value === undefined) return undefined;
+	const normalized = value.trim().toLowerCase();
+	if (normalized === 'on' || normalized === 'true' || normalized === 'yes') return true;
+	if (normalized === 'off' || normalized === 'false' || normalized === 'no') return false;
+	throw new CliError(`${flag} takes 'on' or 'off', not '${value}'`);
+}
+
+/**
+ * Control 18 — show or change the machine owner's local execution policy.
+ *
+ * Purely local, on purpose: there is no API call, and the platform has no
+ * route that writes this. A job asks; this machine decides. A running
+ * service reads the policy at start, so a change applies from the next
+ * restart — said in the output rather than left to be discovered.
+ */
+export async function runPolicy(deps: CliDeps, options: PolicyCommandOptions): Promise<void> {
+	const config = await requireConfig(deps);
+	const current = resolveNodeExecutionPolicy(config.executionPolicy);
+	const skip = parsePolicySwitch('--allow-skip-permissions', options.allowSkipPermissions);
+	const shell = parsePolicySwitch('--allow-shell-commands', options.allowShellCommands);
+	const restricted = parsePolicySwitch('--restricted-mode', options.restrictedMode);
+	if (skip === undefined && shell === undefined && restricted === undefined) {
+		deps.out(`policy       ${describeExecutionPolicy(current)}`);
+		deps.out(
+			'Change it with `ever-works-node policy --allow-skip-permissions on|off --allow-shell-commands on|off --restricted-mode on|off`.'
+		);
+		return;
+	}
+	const next: NodeExecutionPolicy = {
+		allowSkipPermissions: skip ?? current.allowSkipPermissions,
+		allowShellCommands: shell ?? current.allowShellCommands,
+		restrictedMode: restricted ?? current.restrictedMode
+	};
+	await saveConfig(
+		deps.fs,
+		deps.configPath,
+		{ ...config, executionPolicy: next },
+		{ platform: deps.platform, secrets: deps.secrets ?? null, logger: deps.io.logger }
+	);
+	deps.out(`policy       ${describeExecutionPolicy(next)}`);
+	if (next.allowSkipPermissions) {
+		deps.out(
+			'WARNING: jobs may now run the model CLI with its permission checks OFF. A prompt injection in a Task, ' +
+				'a repository or a review comment then has an unrestricted shell as this account, with no filesystem ' +
+				'or network boundary.'
+		);
+	}
+	if (next.allowShellCommands) {
+		deps.out(
+			'WARNING: jobs may now make this node run shell commands (setup, acceptance checks). They execute ' +
+				'repository code as this account — after a model step, code the model may have written.'
+		);
+	}
+	if (!next.restrictedMode) {
+		deps.out(
+			'Note: Claude Code restricted mode is OFF — runs keep the baseline isolation (no repository settings, no ' +
+				'hooks) but get the command-running built-ins back and read your ~/.claude/settings.json.'
+		);
+	}
+	deps.out('Restart the node service for a running worker to apply the change.');
 }
 
 /**
@@ -970,6 +1090,13 @@ export async function runStatus(deps: CliDeps): Promise<void> {
 	// service last heard it from the platform.
 	const lifecycleRecord = await readNodeLifecycleRecord(deps.fs, deps.configPath);
 	deps.out(`daemon       ${describeDaemonLifecycle(deps, lifecycleRecord)}`);
+	// Fleet node link (FL-02): the consents the running service holds and
+	// its link, as the service last recorded them.
+	const linkRecord = await readNodeLinkRecord(deps.fs, deps.configPath);
+	deps.out(
+		`consents     ${linkRecord ? describeConsents(linkRecord.consents) : 'unknown (the service has not reported them yet)'}`
+	);
+	deps.out(`link         ${describeLinkRecord(linkRecord, (deps.now ?? (() => Date.now()))())}`);
 	deps.out(
 		`offering     ${view.capabilitySelection ? view.capabilitySelection.join(', ') || '(identity only)' : '(everything detected)'}`
 	);
@@ -978,6 +1105,8 @@ export async function runStatus(deps: CliDeps): Promise<void> {
 	// running service last heard it, and what the node enforces under it.
 	deps.out(`ceiling      ${describePlatformCeiling(lifecycleRecord, view.limits)}`);
 	deps.out(`workspace gc ${describeWorkspaceGc(view.workspaceGc ?? DEFAULT_WORKSPACE_GC_POLICY)}`);
+	// Control 18: what this machine lets a job do, decided here, never by the platform.
+	deps.out(`policy       ${describeExecutionPolicy(view.executionPolicy)}`);
 	// The secret itself is never printed — only whether one is stored.
 	deps.out(`credential   ${view.hasSecret ? 'stored' : 'MISSING'}`);
 	deps.out(`config       ${deps.configPath}`);
@@ -1306,6 +1435,11 @@ function describeModelCli(compat: ModelCliCompatibility): string {
 	if (compat.missingConditionalFlags.length > 0) {
 		notes.push(`runs that need ${compat.missingConditionalFlags.join(', ')} will fail here`);
 	}
+	if ((compat.missingHardeningFlags ?? []).length > 0) {
+		notes.push(
+			`runs go without the stricter ${compat.missingHardeningFlags.join(', ')} mode (upgrade the CLI to get it)`
+		);
+	}
 	return `${head} — compatible${notes.length > 0 ? `; ${notes.join('; ')}` : ''}`;
 }
 
@@ -1383,6 +1517,7 @@ function lifecycleJson(deps: CliDeps, report: LifecycleReport): Record<string, u
 			missingRequiredFlags: compat.missingRequiredFlags,
 			missingConditionalFlags: compat.missingConditionalFlags,
 			unsupportedOptionalFlags: compat.unsupportedOptionalFlags,
+			missingHardeningFlags: compat.missingHardeningFlags ?? [],
 			note: compat.note
 		}))
 	};
@@ -1419,6 +1554,12 @@ export async function runDoctor(deps: CliDeps, options: DoctorCommandOptions): P
 	}
 	printHousekeepingHeader(deps, report, now);
 	printLifecycle(deps, lifecycle);
+	// Fleet node link (FL-02): consents and link, as the service last recorded them.
+	const linkRecord = await readNodeLinkRecord(deps.fs, deps.configPath);
+	deps.out(
+		`consents     ${linkRecord ? describeConsents(linkRecord.consents) : 'unknown (the service has not reported them yet)'}`
+	);
+	deps.out(`link         ${describeLinkRecord(linkRecord, now)}`);
 	printPlan(deps, report.plan, now);
 }
 
@@ -1551,6 +1692,10 @@ export function buildProgram(deps: CliDeps): Command {
 			'Allow live viewing of this machine from the dashboard (off by default; independent of --work)'
 		)
 		.option(
+			'--manage',
+			'Allow managing this machine from the dashboard — owner sessions, logs, services, Docker, processes, ports, files, commands, schedules (off by default; independent of --work and --attend)'
+		)
+		.option(
 			'-c, --concurrency <count>',
 			'Max jobs to execute at once when --work is set (overrides the stored limit)'
 		)
@@ -1593,6 +1738,27 @@ export function buildProgram(deps: CliDeps): Command {
 		.option('--local-only', 'Only clear the local flag; do not tell the platform')
 		.action(async (options: PauseCommandOptions) => {
 			await runPause(deps, false, options);
+		});
+
+	program
+		.command('policy')
+		.description(
+			'Show or change what platform jobs may make this machine do (local only; the platform cannot change it)'
+		)
+		.option(
+			'--allow-skip-permissions <on|off>',
+			'Let jobs run the model CLI with its permission checks off (--dangerously-skip-permissions). Default off.'
+		)
+		.option(
+			'--allow-shell-commands <on|off>',
+			'Let jobs make this node run shell commands: setup, command steps, acceptance checks. Default off.'
+		)
+		.option(
+			'--restricted-mode <on|off>',
+			'Run Claude Code with --restricted when it supports it (no shell tools, no settings files). Default on.'
+		)
+		.action(async (options: PolicyCommandOptions) => {
+			await runPolicy(deps, options);
 		});
 
 	program

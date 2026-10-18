@@ -19,6 +19,7 @@ export * from './fleet-client';
 export * from './gpu-probe';
 export * from './job-client';
 export * from './heartbeat';
+export * from './health-probe';
 export * from './logger';
 export * from './model-execution/model-process';
 export * from './runtime';
@@ -51,3 +52,10 @@ export * from './screen/headless-browser-backend';
 export * from './screen/input-injector';
 export * from './screen/node-leg';
 export * from './screen/terminal-channel';
+// Fleet node link (FL-02) — the one outbound multiplexed socket, its channel
+// table, the compile-time module registry and the record `status` reads.
+export * from './link/channel-mux';
+export * from './link/link-client';
+export * from './link/link-record';
+export * from './link/link-socket';
+export * from './link/modules';

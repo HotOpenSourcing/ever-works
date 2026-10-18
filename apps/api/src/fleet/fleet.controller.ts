@@ -1,8 +1,10 @@
 import {
     BadRequestException,
     Body,
+    ConflictException,
     Controller,
     Delete,
+    ForbiddenException,
     Get,
     HttpCode,
     HttpStatus,
@@ -15,10 +17,11 @@ import {
     Post,
     Put,
     Query,
+    Res,
     UnauthorizedException,
     UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type {
     CreateEnrollmentTokenResult,
@@ -30,6 +33,8 @@ import {
     FleetExecutionPreferenceService,
     FleetJobService,
     FleetService,
+    NeedsALookService,
+    fleetOwnerOnlyBody,
 } from '@ever-works/agent/fleet';
 import type {
     FleetAuditView,
@@ -40,13 +45,26 @@ import type {
     FleetNodeRotateCredentialResponse,
     FleetNodeView,
     FleetRunnerStatusView,
+    NeedsALookItem,
 } from '@ever-works/contracts';
 import { AgentRunRepository } from '@ever-works/agent/database';
 import {
     COMPUTER_PENDING_SESSIONS,
     type ComputerPendingSessionsLookup,
 } from '@ever-works/agent/computer';
-import { FLEET_ATTENDED_CAPABILITY, FLEET_AUDIT_DEFAULT_LIMIT } from '@ever-works/contracts';
+import {
+    FLEET_ATTENDED_CAPABILITY,
+    FLEET_AUDIT_DEFAULT_LIMIT,
+    NEEDS_A_LOOK_PARTIAL_HEADER,
+} from '@ever-works/contracts';
+import {
+    FLEET_LINK_HEARTBEAT_OBSERVER,
+    FLEET_LINK_NODE_LIFECYCLE,
+    FLEET_LINK_NODE_STATE,
+    type FleetLinkHeartbeatObserver,
+    type FleetLinkNodeLifecycle,
+    type FleetLinkNodeStateLookup,
+} from '../fleet-link/fleet-link.types';
 import { FleetPanicService } from './fleet-panic.service';
 import { FleetRunnerStatusService } from './fleet-runner-status.service';
 import {
@@ -67,6 +85,7 @@ import {
     FleetHeartbeatDto,
     FleetNodePauseDto,
     FleetUnenrollDto,
+    FLEET_NODE_LIST_SCOPES,
     RotateFleetNodeCredentialDto,
     SetFleetCostCeilingDto,
     SetFleetNodeLimitCeilingDto,
@@ -78,6 +97,16 @@ import { FleetEnabledGuard } from './guards/fleet-enabled.guard';
 
 /** How much of a node's job history the detail drawer reads. */
 const NODE_HISTORY_LIMIT = 25;
+
+/**
+ * Fleet hub (FL-01) — set on a needs-a-look response when at least one
+ * producer failed or timed out and was skipped (spec U11): the list is what
+ * the others said, not proof that nothing needs a look.
+ */
+export const FLEET_PARTIAL_HEADER = NEEDS_A_LOOK_PARTIAL_HEADER;
+
+/** The one thing the needs-a-look routes do with the response (same posture as the CSV export's). */
+type HeaderResponse = { setHeader(name: string, value: string): void };
 
 /**
  * Fleet (Wave 12, slice 1) — thin HTTP surface over the agent-side
@@ -177,6 +206,25 @@ export class FleetController {
         @Optional()
         @Inject(COMPUTER_PENDING_SESSIONS)
         private readonly pendingComputerSessions?: ComputerPendingSessionsLookup,
+        // Fleet hub (FL-01) — the needs-a-look registry. Appended LAST and
+        // @Optional() like the three above: unbound, both needs-a-look routes
+        // answer an empty, complete list.
+        @Optional() private readonly needsALook?: NeedsALookService,
+        // Fleet node link (FL-02) — the consents a beat reported reach the
+        // link (a withdrawn consent closes its channels), and the node views
+        // show the link as the platform's own socket sees it. Appended LAST +
+        // @Optional() like the four above: unbound, every response keeps
+        // its exact shape.
+        @Optional()
+        @Inject(FLEET_LINK_HEARTBEAT_OBSERVER)
+        private readonly linkHeartbeat?: FleetLinkHeartbeatObserver,
+        @Optional()
+        @Inject(FLEET_LINK_NODE_STATE)
+        private readonly linkState?: FleetLinkNodeStateLookup,
+        // A removed or re-keyed node's live link closes at once (FL-02).
+        @Optional()
+        @Inject(FLEET_LINK_NODE_LIFECYCLE)
+        private readonly linkLifecycle?: FleetLinkNodeLifecycle,
     ) {}
 
     @Get('cost-ceiling')
@@ -267,11 +315,29 @@ export class FleetController {
     @Get('nodes')
     @ApiOperation({
         summary:
-            'List my fleet nodes (enrolled machines + live nodes of my own configured clusters), each with its current execution load',
+            'List my fleet nodes (enrolled machines + live nodes of my own configured clusters), each with its current execution load. `scope=visible` (the Fleet hub) also lists computers other people own that are shared with me through an Organization, each row carrying my role on it (`viewerRole`).',
     })
     @HttpCode(HttpStatus.OK)
-    async list(@CurrentUser() auth: AuthenticatedUser): Promise<FleetNodeView[]> {
-        const nodes = await this.service.listForUser(auth.userId);
+    @ApiQuery({
+        name: 'scope',
+        required: false,
+        enum: FLEET_NODE_LIST_SCOPES,
+        description:
+            '`own` (default): my computers. `visible`: also the computers shared with me through an Organization.',
+    })
+    async list(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Query('scope') scope?: string,
+    ): Promise<FleetNodeView[]> {
+        // The default stays OWNER-ONLY, byte for byte: Settings → Fleet, the
+        // panic controls and every existing caller keep reading exactly what
+        // they read before the hub existed (spec FR-15). A single named query
+        // value, not a whitelisted DTO, so any other query parameter is still
+        // ignored rather than refused; an unknown scope reads as `own`.
+        const nodes =
+            scope === 'visible'
+                ? await this.service.listVisibleForUser(auth.userId)
+                : await this.service.listForUser(auth.userId);
         // Per-node load (Desktop PRD §4.1 "current load (running Tasks)")
         // is composed at the edge rather than inside `FleetService`, so
         // the registry stays independent of the job runtime. Strictly
@@ -284,10 +350,50 @@ export class FleetController {
             load = {};
         }
         return nodes.map((node) => ({
-            ...node,
+            ...this.withLink(node),
             // Cluster-sourced rows are never leased onto, so they stay null.
+            // A shared row is someone else's runner: its load is not in the
+            // caller's job ledger, so it is not shown (null = idle/unknown).
             load: node.persisted ? (load[node.id] ?? null) : null,
         })) as FleetNodeView[];
+    }
+
+    @Get('needs-a-look')
+    @ApiOperation({
+        summary:
+            'Fleet hub — what needs a look across every computer I may see (CONTRACTS §4.6): critical first, then warn, then info, the longest-standing first. Computed from the registered producers, never stored; a producer that fails is skipped and the response carries `X-Fleet-Partial: true`.',
+    })
+    @HttpCode(HttpStatus.OK)
+    async needsALookFleet(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Res({ passthrough: true }) res?: HeaderResponse,
+    ): Promise<NeedsALookItem[]> {
+        if (!this.needsALook) return [];
+        const nodes = (
+            await this.service.listVisibleForUser(auth.userId, { includeClusters: false })
+        ).filter((node) => node.persisted);
+        const result = await this.needsALook.forNodes(nodes, { userId: auth.userId });
+        if (result.partial) res?.setHeader(FLEET_PARTIAL_HEADER, 'true');
+        return result.items;
+    }
+
+    @Get('nodes/:id/needs-a-look')
+    @ApiOperation({
+        summary:
+            'Fleet hub — what needs a look on one computer I may see. A computer outside my view answers 404, exactly like an unknown id.',
+    })
+    @HttpCode(HttpStatus.OK)
+    async needsALookNode(
+        @CurrentUser() auth: AuthenticatedUser,
+        @Param('id', ParseUUIDPipe) id: string,
+        @Res({ passthrough: true }) res?: HeaderResponse,
+    ): Promise<NeedsALookItem[]> {
+        // Visibility FIRST: a hidden node 404s before any producer runs.
+        const { view } = await this.service.getVisibleForUser(auth.userId, id);
+        if (!this.needsALook) return [];
+        const result = await this.needsALook.forNodes([view], { userId: auth.userId });
+        if (result.partial) res?.setHeader(FLEET_PARTIAL_HEADER, 'true');
+        return result.items;
     }
 
     @Get('nodes/:id')
@@ -300,19 +406,22 @@ export class FleetController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
     ): Promise<FleetNodeDetailView> {
-        // Ownership is settled FIRST and by the registry: if this throws
-        // 404 nothing else runs, so the job history can never be read
-        // for a node the caller does not own.
-        const node = await this.service.getForUser(auth.userId, id);
+        // Visibility is settled FIRST and by the registry: if this throws
+        // 404 nothing else runs. The job history is the OWNER's ledger, so it
+        // is read only for the owner — someone the node is shared with
+        // (Fleet hub, `view` grants listing only) gets the node, no history.
+        const { view: node, role } = await this.service.getVisibleForUser(auth.userId, id);
 
         let recentJobs: Awaited<ReturnType<FleetJobService['historyForNode']>> = [];
         let historyUnavailable = false;
-        try {
-            recentJobs = await this.jobs.historyForNode(auth.userId, id, NODE_HISTORY_LIMIT);
-        } catch {
-            // Same degradation contract as `list`: a job-runtime hiccup
-            // must not make an existing node look missing.
-            historyUnavailable = true;
+        if (role === 'owner') {
+            try {
+                recentJobs = await this.jobs.historyForNode(auth.userId, id, NODE_HISTORY_LIMIT);
+            } catch {
+                // Same degradation contract as `list`: a job-runtime hiccup
+                // must not make an existing node look missing.
+                historyUnavailable = true;
+            }
         }
 
         // The RECONCILED outcome (EW-776): a fleet job and the Agent run it
@@ -328,7 +437,7 @@ export class FleetController {
         const history = buildNodeJobHistory(recentJobs, runs);
 
         return {
-            node,
+            node: this.withLink(node),
             recentJobs: history,
             // Reconciled-aware, so the subset agrees with the badge each
             // row renders: a job the node called `done` whose run failed
@@ -401,7 +510,11 @@ export class FleetController {
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
     ): Promise<CreateEnrollmentTokenResult> {
-        return this.service.rotateCredentialForUser(auth.userId, id);
+        const result = await this.service.rotateCredentialForUser(auth.userId, id);
+        // The old secret is dead the instant the hash is replaced; so is the
+        // link it authenticated.
+        this.closeLink(id, 'credential replaced');
+        return result;
     }
 
     @Get('nodes/:id/audit')
@@ -442,10 +555,22 @@ export class FleetController {
         @Param('id', ParseUUIDPipe) id: string,
         @Body() body: DrainFleetNodeDto,
     ): Promise<FleetNodeDrainResult> {
+        // Fleet hub (FL-01, FR-22): drain / return is a `machines`-family
+        // act, answered server-side before anything moves. The owner drains
+        // exactly as before.
+        const actor = await this.service.resolveMachinesActor(auth.userId, id);
         // The drain itself (disable FIRST, then requeue — the order is
         // load-bearing) lives in FleetPanicService so that drain-all
         // (EW-778) performs exactly this, once per node.
-        return this.panic.drainNodeForUser(auth.userId, id, body.drain);
+        if (actor.role === 'owner') return this.panic.drainNodeForUser(auth.userId, id, body.drain);
+        // Someone the family admits drains the OWNER's node (their row, their
+        // claims), recorded as themselves, and is answered with the view the
+        // owner shares with them — never the owner's full row.
+        const result = await this.panic.drainNodeForUser(actor.ownerUserId, id, body.drain, {
+            actorUserId: auth.userId,
+            details: actor.ctx.details,
+        });
+        return { ...result, node: (await this.service.getVisibleForUser(auth.userId, id)).view };
     }
 
     @Post('nodes/:id/clear-model-throttle')
@@ -518,15 +643,47 @@ export class FleetController {
             typeof body.disabled !== 'boolean' &&
             typeof body.paused !== 'boolean' &&
             !Array.isArray(body.capabilities) &&
-            body.dailyCostCeilingCents === undefined
+            body.dailyCostCeilingCents === undefined &&
+            typeof body.isFavorite !== 'boolean' &&
+            body.controlPolicyFamilies === undefined
         ) {
             throw new BadRequestException(
-                'Provide name, disabled, paused, capabilities and/or dailyCostCeilingCents',
+                'Provide name, disabled, paused, capabilities, dailyCostCeilingCents, isFavorite and/or controlPolicyFamilies',
             );
+        }
+        // Fleet hub (FL-01, FR-22): rename, pause / resume and disable /
+        // enable are `machines`-family acts — resolved once, server-side,
+        // before anything is written (404 outside `view`, permission_denied
+        // outside the family). The owner acts exactly as before; a role the
+        // family admits acts on the owner's row and is audited as themselves.
+        const actor =
+            typeof body.name === 'string' ||
+            typeof body.paused === 'boolean' ||
+            typeof body.disabled === 'boolean'
+                ? await this.service.resolveMachinesActor(auth.userId, id)
+                : null;
+        const sharedActor = actor && actor.role !== 'owner' ? actor : null;
+        if (
+            sharedActor &&
+            (Array.isArray(body.capabilities) ||
+                body.dailyCostCeilingCents !== undefined ||
+                typeof body.isFavorite === 'boolean' ||
+                body.controlPolicyFamilies !== undefined)
+        ) {
+            // Owner-only edits beside a lifecycle act are refused before ANY
+            // write, so a mixed body can never half-apply.
+            throw new ForbiddenException(fleetOwnerOnlyBody({ name: sharedActor.nodeName }));
         }
         let view: FleetNodeView | null = null;
         if (typeof body.name === 'string') {
-            view = await this.service.renameForUser(auth.userId, id, body.name);
+            view = sharedActor
+                ? await this.service.renameForUser(
+                      sharedActor.ownerUserId,
+                      id,
+                      body.name,
+                      sharedActor.ctx,
+                  )
+                : await this.service.renameForUser(auth.userId, id, body.name);
         }
         // Fleet cost accounting (EW-777): `null` is a value here (clear the
         // ceiling), so the test is on `undefined`, never on truthiness.
@@ -548,26 +705,96 @@ export class FleetController {
                 body.capabilitiesPinned ?? true,
             );
         }
+        // Fleet hub (FL-01): the owner's star and the per-family policy —
+        // both owner-only, refused with permission_denied for anyone else who
+        // may see the node. The policy write audits node.policy.change.
+        if (typeof body.isFavorite === 'boolean') {
+            view = await this.service.setFavoriteForUser(auth.userId, id, body.isFavorite);
+        }
+        if (body.controlPolicyFamilies !== undefined) {
+            view = await this.service.setControlPolicyFamiliesForUser(
+                auth.userId,
+                id,
+                body.controlPolicyFamilies,
+            );
+        }
         // Pause first, disable second: when both arrive, the harder stop
         // is the one that must be visible in the returned view.
         if (typeof body.paused === 'boolean') {
-            view = await this.service.setPausedForUser(auth.userId, id, body.paused);
+            view = sharedActor
+                ? await this.service.setPausedForUser(
+                      sharedActor.ownerUserId,
+                      id,
+                      body.paused,
+                      sharedActor.ctx,
+                  )
+                : await this.service.setPausedForUser(auth.userId, id, body.paused);
         }
         if (typeof body.disabled === 'boolean') {
-            view = await this.service.setDisabledForUser(auth.userId, id, body.disabled);
+            view = sharedActor
+                ? await this.service.setDisabledForUser(
+                      sharedActor.ownerUserId,
+                      id,
+                      body.disabled,
+                      sharedActor.ctx,
+                  )
+                : await this.service.setDisabledForUser(auth.userId, id, body.disabled);
         }
+        // A non-owner is answered with the view the owner shares with them.
+        if (sharedActor) return (await this.service.getVisibleForUser(auth.userId, id)).view;
         return view as FleetNodeView;
     }
 
     @Delete('nodes/:id')
     @ApiOperation({ summary: 'Delete a fleet node registration' })
+    @ApiBody({
+        required: false,
+        description:
+            '`confirmName` is the typed-name confirmation (CONTRACTS §2.2 `confirm-destructive`): when sent it must be the node’s name, or nothing is deleted (400 `invalid`). Optional for the node’s OWNER — without it the owner’s delete works exactly as it always has. Required for anyone else the node’s Lifecycle (`machines`) family admits: without it they get 409 `confirmation_required`.',
+        schema: { type: 'object', properties: { confirmName: { type: 'string' } } },
+    })
+    @ApiResponse({
+        status: 409,
+        description:
+            '`confirmation_required` — someone other than the owner sent no `confirmName`; `error.details` carries `{ class: "confirm-destructive", summary }`.',
+    })
     @HttpCode(HttpStatus.NO_CONTENT)
     @Throttle({ long: { limit: 30, ttl: 60_000 } })
     async remove(
         @CurrentUser() auth: AuthenticatedUser,
         @Param('id', ParseUUIDPipe) id: string,
+        // Read by name, not through a DTO: a body this route never validated
+        // must keep being accepted exactly as it was (no field = no check).
+        @Body('confirmName') confirmName?: unknown,
     ): Promise<void> {
-        await this.service.deleteForUser(auth.userId, id);
+        // Fleet hub (FL-01, FR-22): remove is a `machines`-family act.
+        const actor = await this.service.resolveMachinesActor(auth.userId, id);
+        if (actor.role !== 'owner' && confirmName === undefined) {
+            // "No field = as before" protects the owner's existing callers. Someone
+            // else removing the owner's computer has no such history: the act is
+            // `confirm-destructive` (CONTRACTS §2.2), so the typed name is required.
+            const summary = `Remove ${actor.nodeName} from Fleet?`;
+            throw new ConflictException({
+                statusCode: 409,
+                message: summary,
+                error: {
+                    code: 'confirmation_required',
+                    hint: `Type ${actor.nodeName} as confirmName to remove it.`,
+                    details: { class: 'confirm-destructive', summary },
+                },
+            });
+        }
+        if (actor.role === 'owner' && confirmName === undefined) {
+            await this.service.deleteForUser(auth.userId, id);
+        } else {
+            await this.service.deleteForUser(
+                actor.ownerUserId,
+                id,
+                actor.ctx,
+                confirmName === undefined ? {} : { confirmName },
+            );
+        }
+        this.closeLink(id, 'node removed');
     }
 
     @Public()
@@ -608,6 +835,10 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Computer health (FL-03): sanitised by the service, never trusted.
+            health: body.health,
+            // Fleet node link (FL-02): the consents, should an enrolling node send them.
+            consents: body.consents,
         });
         if (!result) {
             // One undifferentiated message — never say WHICH check failed.
@@ -651,9 +882,27 @@ export class FleetController {
             maxConcurrentJobs: body.maxConcurrentJobs,
             maxCpuPercent: body.maxCpuPercent,
             maxMemoryMb: body.maxMemoryMb,
+            // Computer health (FL-03): the snapshot, sanitised by the service.
+            health: body.health,
+            // Fleet node link (FL-02): the four consents the node runs with.
+            consents: body.consents,
         });
         if (!result) {
             throw new UnauthorizedException('Invalid node credential');
+        }
+        // Fleet node link (FL-02, spec FR-22): a consent the node no longer
+        // holds closes the link channels that needed it. Never able to fail
+        // the beat.
+        if (result.consents && this.linkHeartbeat) {
+            try {
+                this.linkHeartbeat.onHeartbeat(result.node.id, result.consents);
+            } catch (err) {
+                this.logger.debug(
+                    `link consent update skipped for node ${result.node.id}: ${
+                        err instanceof Error ? err.message : String(err)
+                    }`,
+                );
+            }
         }
         // Two independent follow-ups, started together and awaited together
         // (neither can reject: each swallows its own failure), so the beat
@@ -697,7 +946,47 @@ export class FleetController {
         if (pending.length > 0) {
             response.pendingComputerSessions = pending;
         }
+        // Fleet node link (FL-02, CONTRACTS §1.1): the recommended daemon
+        // version, only when the operator named one.
+        if (result.recommendedNodeVersion) {
+            response.recommendedNodeVersion = result.recommendedNodeVersion;
+        }
         return response;
+    }
+
+    /**
+     * Fleet node link (FL-02) — the link as the platform's own socket sees it
+     * (spec FR-42), on an enrolled row the caller owns; a cluster row and a
+     * build without the link module keep their exact shape. A row someone
+     * else sees through an Organization (FL-01's shared view, an allow-list)
+     * does not gain it: the link's traffic counters and generation are the
+     * owner's, and a shared field is a decision, not a side effect.
+     */
+    /** Close a gone node's live link; never the reason a lifecycle call fails. */
+    private closeLink(
+        nodeId: string,
+        reason: Parameters<FleetLinkNodeLifecycle['nodeGone']>[1],
+    ): void {
+        if (!this.linkLifecycle) return;
+        try {
+            this.linkLifecycle.nodeGone(nodeId, reason);
+        } catch (error) {
+            this.logger.warn(
+                `node ${nodeId}: its link could not be closed (${reason}): ${
+                    error instanceof Error ? error.message : String(error)
+                }`,
+            );
+        }
+    }
+
+    private withLink<T extends FleetNodeView>(node: T): T {
+        if (!this.linkState || node.persisted === false) return node;
+        if (node.viewerRole !== undefined && node.viewerRole !== 'owner') return node;
+        try {
+            return { ...node, link: this.linkState.linkView({ id: node.id, kind: node.kind }) };
+        } catch {
+            return node;
+        }
     }
 
     private async promoteWaitingJobsFor(node: FleetHeartbeatResponse['node']): Promise<void> {
@@ -801,6 +1090,7 @@ export class FleetController {
         if (!removed) {
             throw new UnauthorizedException('Invalid node credential');
         }
+        this.closeLink(body.nodeId, 'node unenrolled');
         return { ok: true };
     }
 }

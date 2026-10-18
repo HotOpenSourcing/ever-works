@@ -1,6 +1,9 @@
 import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
 import type {
     ComputerControlPolicy,
+    FleetNodeHealthStored,
+    FleetConsents,
+    FleetControlPolicyFamiliesInput,
     FleetNodeKind,
     FleetNodeModelThrottleView,
     FleetNodeStatus,
@@ -510,6 +513,34 @@ export class FleetNode {
     recordingRetentionDays: number;
 
     /**
+     * Fleet hub (FL-01) — the per-family control policy (CONTRACTS §2.1): a
+     * map from action family (`view · sessions · desktop · logs · services ·
+     * docker · processes · ports · files · commands · schedules · checkouts ·
+     * machines`) to audience (`owner · org-admins · org-members`). Absent
+     * families take their default (`view: org-members`, the rest `owner`).
+     *
+     * {@link controlPolicy} stays, unchanged, as the `desktop` family's
+     * MIRROR: a map with no `desktop` entry reads `desktop` from it, and
+     * every write of the map's `desktop` entry writes it back in the same
+     * UPDATE (`FleetService.setControlPolicyFamiliesForUser`). Read it only
+     * through `effectiveControlPolicy` from `@ever-works/contracts`, never
+     * by indexing this column. NULL = no map stored (every existing row).
+     *
+     * Migration: `1796010000000-AddFleetNodeControlPolicyFamilies`.
+     */
+    @Column({ type: 'simple-json', nullable: true })
+    controlPolicyFamilies?: FleetControlPolicyFamiliesInput | null;
+
+    /**
+     * Fleet hub (FL-01) — the owner's star; favourites sort first on the hub.
+     * One flag per Node because a Node has one owner (README D15); it is
+     * never shown as set to anyone else. Migration:
+     * `1796010100000-AddFleetNodeFavorite`.
+     */
+    @Column({ type: 'boolean', default: false })
+    isFavorite: boolean;
+
+    /**
      * The four `controlHolder*` columns are a COMPARE-AND-SET LOCK, not a
      * cache of who is looking. Exactly one person may drive a machine at a
      * time across every live view of it: taking control is one conditional
@@ -576,6 +607,67 @@ export class FleetNode {
     /** When the pending request was made. See {@link controlIdleAt}. */
     @PortableDateColumn({ nullable: true })
     controlRequestedAt?: Date | null;
+
+    /**
+     * Computer health (FL-03) — the latest health snapshot the node
+     * reported, stamped with the platform's RECEIPT time (`at`), plus the
+     * platform's own `diskLowSince` marker. NULL = this node has never
+     * reported one (a daemon older than the field). Kept on the row so every
+     * list of computers reads one row per computer and never joins the
+     * history table. Replaced whole on every beat that carries one; a beat
+     * without one leaves it alone.
+     *
+     * `simple-json` text, as `modelThrottles` (CONTRACTS §4 storage types).
+     * Migration: `1796030100000-AddFleetNodeWakeFields`.
+     */
+    @Column({ type: 'simple-json', nullable: true })
+    health?: FleetNodeHealthStored | null;
+
+    /**
+     * Computer health (FL-03, wake) — the node's primary hardware address,
+     * reported only with `--manage` and only ever returned, masked, to the
+     * node's owner. Read and written from FL-03's wake phase; the column
+     * ships with the slot. Migration: `1796030100000-AddFleetNodeWakeFields`.
+     */
+    // `text` as CONTRACTS §4.1 types it: no length that a notation other than
+    // `aa:bb:cc:dd:ee:ff` (EUI-64, a dash form) would overflow.
+    @Column({ type: 'text', nullable: true })
+    macAddress?: string | null;
+
+    /**
+     * Computer health (FL-03, wake) — an opaque identity of the network the
+     * node is on, so siblings on the same network can be matched without
+     * storing an address. Migration: `1796030100000-AddFleetNodeWakeFields`.
+     */
+    @Column({ type: 'text', nullable: true })
+    lanId?: string | null;
+
+    /** Computer health (FL-03, wake) — the last wake attempt on this node. */
+    @PortableDateColumn({ nullable: true })
+    lastWakeAttemptAt?: Date | null;
+
+    /**
+     * Fleet node link (FL-02, CONTRACTS §1.1) — what this machine's owner
+     * switched on when starting the node: `{ work, attend, manage, usageScan }`,
+     * as the last heartbeat reported it. NULL = never reported (a daemon
+     * older than the field); read it through `effectiveConsents`, which infers
+     * what it can for such a node and never infers `manage`.
+     *
+     * `simple-json` in a `text` column like {@link modelThrottles}, so one
+     * migration runs on SQLite and Postgres alike (CONTRACTS §4 preamble).
+     * Migration: `1796020000000-AddFleetNodeConsents`.
+     */
+    @Column({ type: 'simple-json', nullable: true })
+    consents?: FleetConsents | null;
+
+    /**
+     * Fleet node link (CONTRACTS §4.1, R-3) — whether "Open" on a listening
+     * port may use this node's owner-level preview browser profile. The column
+     * only: FL-10 owns setting and reading it. Default off.
+     * Migration: `1796020000000-AddFleetNodeConsents`.
+     */
+    @Column({ type: 'boolean', default: false })
+    previewProfileEnabled: boolean;
 
     @CreateDateColumn()
     createdAt: Date;

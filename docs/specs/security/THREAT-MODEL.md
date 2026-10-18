@@ -143,39 +143,42 @@ Concretely:
 
 ## 7. Convergence checklist (audit findings → posture above)
 
-| Posture statement                                        | Findings that enforce it  | Status                                                     |
-| -------------------------------------------------------- | ------------------------- | ---------------------------------------------------------- |
-| Tokens travel only via secondary channel                 | C-01, C-02                | ✅ Batch 1                                                 |
-| Shared-secret comparisons are constant-time              | C-05, H-08, L-09          | ✅ Batch 1                                                 |
-| API docs are not public in production                    | C-09                      | ✅ Batch 1                                                 |
-| Agentic subprocesses don't inherit host secrets          | C-10                      | ✅ Batch 1                                                 |
-| Cookie encryption key has real entropy                   | H-14                      | ✅ Batch 1                                                 |
-| Callback URLs go through host allow-list                 | C-04                      | ✅ Batch 2                                                 |
-| Postgres `synchronize` is off in every env               | C-07 PR-A + PR-B          | ✅ Batch 2 / pending PR-B                                  |
-| Password complexity matches Better Auth runtime          | H-02                      | ✅ Batch 2                                                 |
-| Forgot-password is timing-uniform                        | H-03                      | ✅ Batch 2                                                 |
-| Email verification is required before login              | H-07                      | ✅ Batch 2                                                 |
-| Trigger.dev callback exposes only allow-listed fields    | H-06                      | ✅ Batch 2                                                 |
-| Outbound HTTP from API is SSRF-guarded                   | H-09 / H-10 / H-11 / M-23 | ✅ Batch 2 (lexical guard; DNS-rebinding still on roadmap) |
-| Plugin README renders are sanitized                      | H-12                      | ✅ Batch 2                                                 |
-| CI fails on high/critical transitive CVEs                | H-15                      | ✅ Batch 2                                                 |
-| Production fails fast on missing CORS allow-list         | H-19                      | ✅ Batch 2                                                 |
-| Task-payload path components are validated UUIDs         | H-22                      | ✅ Batch 2                                                 |
-| Agentic file tools can't escape the workspace            | H-23                      | ✅ Batch 2                                                 |
-| Plugin readme HTML is sanitized                          | H-12                      | ✅ Batch 2                                                 |
-| OAuth state validated against signed cookie              | C-03                      | ✅ Batch 3 + EW-OAUTH-STATE-FIX (dual-host round-trip)     |
-| Trigger remote-call surface is allow-listed              | C-05 RPC half             | 🚧 Batch 3                                                 |
-| Plugin secret settings are encrypted at rest             | C-08                      | 🚧 Batch 3                                                 |
-| Community-PR auto-apply gated by Verified-org membership | C-11                      | 🚧 Batch 3                                                 |
-| Bearer tokens hashed at rest                             | H-01                      | 🚧 Batch 3                                                 |
-| Anonymous sessions bind to IP/UA + short TTL             | H-04 / H-05               | 🚧 Batch 3                                                 |
-| Distributed throttler with per-user lockout              | H-17 / H-18               | 🚧 Batch 3                                                 |
-| K8s pod runs as non-root with capabilities dropped       | H-20                      | 🚧 Batch 3                                                 |
-| MCP server has per-user identity (dual-mode)             | H-21                      | 🚧 Batch 3                                                 |
-| Agentic boundaries are feature-flag toggled              | H-24 / H-25               | 🚧 Batch 3                                                 |
-| Plugin loader verifies integrity / signature             | C-12                      | ❌ Deferred — see §6                                       |
-| K8s secrets live in `Secret` resources                   | H-13                      | ❌ Deferred — operator opted out for now                   |
-| Prompt-injection canary for the fleet model step         | Audit #23                 | ✅ 2026-10-08 (slice AL); gaps in the fleet trust model    |
+| Posture statement                                                        | Findings that enforce it  | Status                                                     |
+| ------------------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------- |
+| Tokens travel only via secondary channel                                 | C-01, C-02                | ✅ Batch 1                                                 |
+| Shared-secret comparisons are constant-time                              | C-05, H-08, L-09          | ✅ Batch 1                                                 |
+| API docs are not public in production                                    | C-09                      | ✅ Batch 1                                                 |
+| Agentic subprocesses don't inherit host secrets                          | C-10                      | ✅ Batch 1                                                 |
+| Cookie encryption key has real entropy                                   | H-14                      | ✅ Batch 1                                                 |
+| Callback URLs go through host allow-list                                 | C-04                      | ✅ Batch 2                                                 |
+| Postgres `synchronize` is off in every env                               | C-07 PR-A + PR-B          | ✅ Batch 2 / pending PR-B                                  |
+| Password complexity matches Better Auth runtime                          | H-02                      | ✅ Batch 2                                                 |
+| Forgot-password is timing-uniform                                        | H-03                      | ✅ Batch 2                                                 |
+| Email verification is required before login                              | H-07                      | ✅ Batch 2                                                 |
+| Trigger.dev callback exposes only allow-listed fields                    | H-06                      | ✅ Batch 2                                                 |
+| Outbound HTTP from API is SSRF-guarded                                   | H-09 / H-10 / H-11 / M-23 | ✅ Batch 2 (lexical guard; DNS-rebinding still on roadmap) |
+| Plugin README renders are sanitized                                      | H-12                      | ✅ Batch 2                                                 |
+| CI fails on high/critical transitive CVEs                                | H-15                      | ✅ Batch 2                                                 |
+| Production fails fast on missing CORS allow-list                         | H-19                      | ✅ Batch 2                                                 |
+| Task-payload path components are validated UUIDs                         | H-22                      | ✅ Batch 2                                                 |
+| Agentic file tools can't escape the workspace                            | H-23                      | ✅ Batch 2                                                 |
+| Plugin readme HTML is sanitized                                          | H-12                      | ✅ Batch 2                                                 |
+| OAuth state validated against signed cookie                              | C-03                      | ✅ Batch 3 + EW-OAUTH-STATE-FIX (dual-host round-trip)     |
+| Trigger remote-call surface is allow-listed                              | C-05 RPC half             | 🚧 Batch 3                                                 |
+| Plugin secret settings are encrypted at rest                             | C-08                      | 🚧 Batch 3                                                 |
+| Community-PR auto-apply gated by Verified-org membership                 | C-11                      | 🚧 Batch 3                                                 |
+| Bearer tokens hashed at rest                                             | H-01                      | 🚧 Batch 3                                                 |
+| Anonymous sessions bind to IP/UA + short TTL                             | H-04 / H-05               | 🚧 Batch 3                                                 |
+| Distributed throttler with per-user lockout                              | H-17 / H-18               | 🚧 Batch 3                                                 |
+| K8s pod runs as non-root with capabilities dropped                       | H-20                      | 🚧 Batch 3                                                 |
+| MCP server has per-user identity (dual-mode)                             | H-21                      | 🚧 Batch 3                                                 |
+| Agentic boundaries are feature-flag toggled                              | H-24 / H-25               | 🚧 Batch 3                                                 |
+| Plugin loader verifies integrity / signature                             | C-12                      | ❌ Deferred — see §6                                       |
+| K8s secrets live in `Secret` resources                                   | H-13                      | ❌ Deferred — operator opted out for now                   |
+| Prompt-injection canary for the fleet model step                         | Audit #23                 | ✅ 2026-10-08 (slice AL); gaps in the fleet trust model    |
+| A repository's Claude Code hooks/settings never run on a fleet node      | Fleet control 17          | ✅ 2026-10-18 (works-security)                             |
+| Skip-permissions and node-run shell commands are the PC owner's switch   | Fleet control 18          | ✅ 2026-10-18 (works-security)                             |
+| Task brief cannot counterfeit the owner's answer (fenced, per-plan code) | Fleet control 19          | ✅ 2026-10-18 (works-security)                             |
 
 ## 8. Revision log
 

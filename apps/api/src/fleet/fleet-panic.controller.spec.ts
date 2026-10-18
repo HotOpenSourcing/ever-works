@@ -170,6 +170,30 @@ describe('FleetPanicService', () => {
             });
         });
 
+        // Fleet hub (FL-01, FR-22) — someone the node's machines audience
+        // admits drains the OWNER's node: their row, their claims, and the
+        // audit row names the person who did it.
+        it('records a non-owner who drained as the actor, on the owner’s node', async () => {
+            await service.drainNodeForUser('user-1', 'node-online', true, {
+                actorUserId: 'admin-2',
+                details: { family: 'machines', viewerRole: 'org-admin' },
+            });
+            expect(jobs.releaseClaimsForNode).toHaveBeenCalledWith('user-1', 'node-online');
+            expect(audit.recordNodeAction).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    action: 'node.drain',
+                    actorUserId: 'admin-2',
+                    ownerUserId: 'user-1',
+                    extra: expect.objectContaining({
+                        releasedJobs: 1,
+                        via: 'node-drain',
+                        family: 'machines',
+                        viewerRole: 'org-admin',
+                    }),
+                }),
+            );
+        });
+
         it('returning to service requeues nothing', async () => {
             const result = await service.drainNodeForUser('user-1', 'node-online', false);
             expect(jobs.releaseClaimsForNode).not.toHaveBeenCalled();
@@ -273,6 +297,40 @@ describe('FleetPanicService', () => {
             expect(result.nodes).toHaveLength(4);
             expect(result.nodes.find((n) => n.id === 'node-online')?.status).toBe('disabled');
             expect(result.nodes.find((n) => n.id === 'node-enrolling')?.status).toBe('enrolling');
+        });
+
+        it('warns the owner sessions on every enrolled node over the link, 60 s ahead — an earlier-disabled one too (FL-02, FR-27)', async () => {
+            const linkDrain = { drainNodes: jest.fn() };
+            const withLink = new FleetPanicService(
+                fleet as never,
+                jobs as never,
+                agentRuns as never,
+                audit as never,
+                linkDrain,
+            );
+            await withLink.drainAllForUser('user-1');
+            expect(linkDrain.drainNodes).toHaveBeenCalledTimes(1);
+            expect(linkDrain.drainNodes).toHaveBeenCalledWith(
+                ['node-online', 'node-busy', 'node-disabled'],
+                60,
+            );
+        });
+
+        it('drains all the same when the link notice throws', async () => {
+            const withLink = new FleetPanicService(
+                fleet as never,
+                jobs as never,
+                agentRuns as never,
+                audit as never,
+                {
+                    drainNodes: jest.fn(() => {
+                        throw new Error('registry down');
+                    }),
+                },
+            );
+            await expect(withLink.drainAllForUser('user-1')).resolves.toMatchObject({
+                drainedNodes: 2,
+            });
         });
 
         it('records the drain-all decision ONCE, not once per node', async () => {

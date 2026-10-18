@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { AgentRunRepository } from '@ever-works/agent/database';
 import { FleetAuditService, FleetJobService, FleetService } from '@ever-works/agent/fleet';
 import type {
@@ -10,7 +10,15 @@ import type {
     FleetNodeDrainResult,
     FleetNodeView,
 } from '@ever-works/contracts';
-import { FLEET_CANCEL_IN_FLIGHT_MAX_IDS, FLEET_JOB_CANCEL_STATES } from '@ever-works/contracts';
+import {
+    FLEET_CANCEL_IN_FLIGHT_MAX_IDS,
+    FLEET_JOB_CANCEL_STATES,
+    FLEET_LINK_DRAIN_GRACE_SEC,
+} from '@ever-works/contracts';
+import {
+    FLEET_LINK_DRAIN_NOTIFIER,
+    type FleetLinkDrainNotifier,
+} from '../fleet-link/fleet-link.types';
 import { correlateAgentTaskJob } from './fleet-agent-task.correlation';
 
 /** How one per-node drain should be recorded (EW-799). */
@@ -23,6 +31,15 @@ export interface DrainNodeOptions {
      * rows beside it would bury the row an operator came to read.
      */
     suppressAudit?: boolean;
+    /**
+     * Fleet hub (FL-01, FR-22) — who drained, when it is not the owner: a
+     * person the node's `machines` audience admits. `userId` stays the
+     * owner (whose row and claims the drain touches); the audit row names
+     * this person as the actor. Omitted = the owner, exactly as before.
+     */
+    actorUserId?: string;
+    /** Extra facts for the audit row (the family and role acted through). */
+    details?: Record<string, unknown>;
 }
 
 export interface CancelInFlightOptions {
@@ -70,6 +87,12 @@ export class FleetPanicService {
         private readonly jobs: FleetJobService,
         private readonly agentRuns: AgentRunRepository,
         private readonly audit: FleetAuditService,
+        // Fleet node link (FL-02, CONTRACTS R-24): drain-all warns every owner
+        // session on the drained nodes and ends it after the grace. Appended
+        // LAST + @Optional(): unbound, drain-all is exactly what it was.
+        @Optional()
+        @Inject(FLEET_LINK_DRAIN_NOTIFIER)
+        private readonly linkDrain?: FleetLinkDrainNotifier,
     ) {}
 
     /**
@@ -105,12 +128,16 @@ export class FleetPanicService {
         if (!options.suppressAudit) {
             await this.audit.recordNodeAction({
                 action: 'node.drain',
-                actorUserId: userId,
+                actorUserId: options.actorUserId ?? userId,
                 ownerUserId: userId,
                 nodeId,
                 before: before ? { status: before, drained: before === 'disabled' } : null,
                 after: { status: node.status, drained: drain },
-                extra: { releasedJobs, via: options.via ?? 'node-drain' },
+                extra: {
+                    releasedJobs,
+                    via: options.via ?? 'node-drain',
+                    ...(options.details ?? {}),
+                },
             });
         }
         return { node, releasedJobs };
@@ -175,6 +202,25 @@ export class FleetPanicService {
         this.logger.warn(
             `drain-all by ${userId}: drained ${drainedIds.length} node(s), skipped ${skippedNodes}, requeued ${releasedJobs} job(s)`,
         );
+        // Owner sessions get their 60-second warning over the link; Agent
+        // sessions end as their Runs end. EVERY enrolled node is told, not
+        // only the ones drained just now: a node disabled earlier still runs
+        // its owner sessions (disabling drains jobs, not sessions), and one
+        // whose job drain failed should still stop. Never able to fail the drain.
+        const linkNodeIds = nodes
+            .filter((node) => node.status !== 'enrolling')
+            .map((node) => node.id);
+        if (this.linkDrain && linkNodeIds.length > 0) {
+            try {
+                this.linkDrain.drainNodes(linkNodeIds, FLEET_LINK_DRAIN_GRACE_SEC);
+            } catch (error) {
+                this.logger.warn(
+                    `drain-all: the link drain notice could not be sent: ${
+                        error instanceof Error ? error.message : String(error)
+                    }`,
+                );
+            }
+        }
         const auditFailed = !(await this.tryAudit('drain-all', userId, {
             drainedNodes: drainedIds.length,
             skippedNodes,

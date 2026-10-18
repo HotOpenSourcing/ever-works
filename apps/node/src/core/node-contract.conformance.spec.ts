@@ -122,7 +122,7 @@ describe('what the node actually puts on the wire', () => {
 		]);
 		for (const [route, variants] of Object.entries({
 			enroll: ['current', 'legacy', 'minimal'],
-			heartbeat: ['current', 'legacy', 'credentialOnly'],
+			heartbeat: ['current', 'legacy', 'credentialOnly', 'withHealth'],
 			pause: ['current', 'resume'],
 			unenroll: ['current'],
 			'jobs-lease': ['current', 'legacy'],
@@ -140,7 +140,11 @@ describe('what the node actually puts on the wire', () => {
 		// versions, sent only by a node whose telemetry has a compat probe.
 		// 8 → 11 with remote node limits (slice AS): the limits the worker
 		// enforces, sent only by a node that HAS a worker.
-		expect(baseline.selfDescription.nodeEmitsOptional).toHaveLength(11);
+		// 11 → 12 with the node link (FL-02): the consents, sent by a runtime
+		// that knows them (every start since the field) and never at enroll.
+		// 12 → 13 with computer health (FL-03): the health snapshot, sent only
+		// by a node whose heartbeat has a health probe wired.
+		expect(baseline.selfDescription.nodeEmitsOptional).toHaveLength(13);
 	});
 
 	it('enroll sends exactly the pinned body, to the pinned path', async () => {
@@ -241,7 +245,11 @@ describe('what the node actually puts on the wire', () => {
 			// the projection: it means "no ceiling in force", not "said nothing".
 			maxConcurrentJobs: 2,
 			maxCpuPercent: 70,
-			maxMemoryMb: null
+			maxMemoryMb: null,
+			// Computer health (FL-03).
+			health: { cpuPercent: 31.2, cpuCores: 4, gpu: null },
+			// Fleet node link (FL-02).
+			consents: { work: true, attend: false, manage: true, usageScan: false }
 		});
 		const emitted = Object.keys(bodyOf(sent)).filter((key) => key !== 'nodeId' && key !== 'secret');
 		expect(emitted.sort()).toEqual(
@@ -254,6 +262,21 @@ describe('what the node actually puts on the wire', () => {
 		expect(bodyOf(sent).cliVersions).toEqual(['claude-code 2.1.3', 'codex 0.48.0']);
 		expect(bodyOf(sent)).toMatchObject(baseline.limitCeiling.reportedLimits);
 		expect(bodyOf(sent)).toHaveProperty('maxMemoryMb', null);
+		expect(bodyOf(sent).health).toEqual({ cpuPercent: 31.2, cpuCores: 4, gpu: null });
+	});
+
+	it('a beat with a health snapshot sends exactly the pinned body (FL-03)', async () => {
+		const { fetchFn, sent } = recorder(200, baseline.routes.heartbeat.response);
+		const pinned = request('heartbeat', 'withHealth');
+		await fleetClient(fetchFn).heartbeat({
+			nodeId: NODE_ID,
+			secret: SECRET,
+			platform: 'linux/x64',
+			version: '1.0.0',
+			capabilities: ['terminal', 'workspace'],
+			health: pinned.health as never
+		});
+		expect(bodyOf(sent)).toEqual(pinned);
 	});
 
 	it('pause and unenroll send exactly the pinned bodies', async () => {
