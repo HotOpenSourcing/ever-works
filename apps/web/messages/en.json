@@ -9474,6 +9474,63 @@
                         "remove": "Removal requested.",
                         "cancelDeploy": "Cancellation requested."
                     }
+                },
+                "environment": {
+                    "title": "Environment",
+                    "description": "The values this app runs with. Secret values are never shown — only whether they are set.",
+                    "summary": "{set} of {total} set",
+                    "missingRequired": "{count, plural, one {# required value is missing} other {# required values are missing}}",
+                    "loading": "Reading the environment…",
+                    "unavailable": "Environment values can't be edited on this instance yet.",
+                    "error": "Couldn't read the environment. Reload the page to try again.",
+                    "empty": "This app's App spec declares no environment values.",
+                    "secureStorageOff": "Secure storage isn't configured on this installation, so values can't be saved.",
+                    "edit": "Edit",
+                    "setValue": "Set value",
+                    "editAria": "Edit {name}",
+                    "saved": "{name} saved",
+                    "removed": "{name} removed",
+                    "states": {
+                        "set": "Set",
+                        "unset": "Not set",
+                        "missing": "Required — not set",
+                        "fromSpec": "From the App spec",
+                        "fromDependency": "Injected by {kind}",
+                        "generated": "Generated"
+                    },
+                    "badges": {
+                        "secret": "Secret",
+                        "required": "Required"
+                    },
+                    "phases": {
+                        "build": "Build",
+                        "runtime": "Runtime",
+                        "both": "Build + runtime"
+                    },
+                    "kinds": {
+                        "postgres": "Postgres",
+                        "redis": "Redis",
+                        "objectStorage": "Object storage",
+                        "smtp": "SMTP mail"
+                    },
+                    "dialog": {
+                        "title": "Edit {name}",
+                        "valueLabel": "Value",
+                        "secretHint": "This value is secret. It is stored encrypted and never shown again.",
+                        "secretStored": "A value is stored. Type a new one to replace it.",
+                        "dependencyHint": "Normally injected by {kind}. A value you set here overrides it — for example, your own SMTP server.",
+                        "redeployHint": "Where the app uses this value, it is rebuilt or redeployed with the new one.",
+                        "empty": "Enter a value, or remove the stored one.",
+                        "save": "Save",
+                        "saving": "Saving…",
+                        "remove": "Remove value",
+                        "cancel": "Cancel"
+                    },
+                    "errors": {
+                        "undeclaredName": "The App spec doesn't declare this name.",
+                        "specUnavailable": "This app has no usable App spec yet.",
+                        "failed": "The value couldn't be saved. Try again."
+                    }
                 }
             }
         },
