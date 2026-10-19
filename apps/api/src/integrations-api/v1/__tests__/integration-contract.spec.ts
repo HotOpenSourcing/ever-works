@@ -237,10 +237,18 @@ function dtoShape(dto: new () => object): {
     // F39: absent is fine, `null` is refused). A bare `@ValidateIf(v => v !== null)`
     // still validates an absent value, so it makes a property nullable and still
     // required (e.g. MoveKbDocument.folderId).
+    // Absence-only: skipped when the property is absent AND validated once it is
+    // present, so a condition on ANOTHER field (`o => o.kind === 'x'`, false for
+    // both) does not read as optional.
     const skippedWhenAbsent = (entry: (typeof metadata)[number]): boolean => {
         if (entry.name === 'isOptional') return true;
         const condition = entry.constraints?.[0] as unknown;
-        return typeof condition === 'function' && condition({}, undefined) === false;
+        if (typeof condition !== 'function') return false;
+        const present = 'x';
+        return (
+            condition({}, undefined) === false &&
+            condition({ [entry.propertyName]: present }, present) === true
+        );
     };
     const optional = new Set(
         metadata
