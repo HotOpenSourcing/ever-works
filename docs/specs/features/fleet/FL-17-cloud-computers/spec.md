@@ -489,7 +489,7 @@ Dialog keyboard-operable; sizes are a radio group with price read by assistive t
 ## 7. Key entities & concepts
 
 | Concept                       | New?                    | Description                                                                                                                                                                     |
-| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----- | -------- |
+| ----------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Node** (Computer)           | Existing                | Gains `origin: cloud`, `providerPluginId`, `providerMachineRef`, `providerMeta` (region, size, rate, created at, power state, idle policy, cost snapshot — no secrets) — C §4.1 |
 | **Machine provider plugin**   | New category/capability | A plugin that can list options, create, power, destroy and report usage of machines at a provider — C R-15                                                                      |
 | **Provider options**          | New (read model)        | Regions, sizes with prices, software presets for one provider+account                                                                                                           |
@@ -497,7 +497,7 @@ Dialog keyboard-operable; sizes are a radio group with price read by assistive t
 | **Idle policy**               | New (per Node)          | nothing · tell me after N h · power off after N h                                                                                                                               |
 | **Needs a look `cloud-idle`** | Existing kind (C §4.6)  | Produced by the idle job; the same kind carries the "never came online", "powered off by policy" and "unclaimed machine" variants in its title, detail and action               |
 | **Operation**                 | Existing (FL-02)        | Progress of create/power/destroy                                                                                                                                                |
-| **Fleet audit**               | Existing                | `node.cloud.create                                                                                                                                                              | power | destroy` |
+| **Fleet audit**               | Existing                | `node.cloud.create\|power\|destroy`                                                                                                                                             |
 
 ---
 

@@ -511,7 +511,7 @@ no literal dots.
 ## 7. Key entities & concepts
 
 | Concept              | New?             | Description (shapes in CONTRACTS)                                                                                                  |
-| -------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----- | ---- | ------- | ------ | -------------------------------------------- |
+| -------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Node** (Computer)  | Existing         | Gains `origin` (`enrolled · virtual · cloud`), `hostNodeId` and `virtualKind` (`vm · container`) — C §4.1. `kind` unchanged (R-4). |
 | **Host**             | Role, not a noun | A Node that hosts virtual computers; must advertise `docker` + `managed` (+ `kvm` for VMs).                                        |
 | **Virtual computer** | UI copy          | A child Node with `origin: virtual`; **VM** when `virtualKind = vm`, **Container** when `container`.                               |
@@ -519,7 +519,7 @@ no literal dots.
 | **Operation**        | Existing (FL-02) | Progress of a create / power / destroy; polled or streamed.                                                                        |
 | **Job kinds**        | Existing union   | `vm-create`, `vm-control` — durable (C §12), leased by the host's management lane under `--manage` (C R-34).                       |
 | **Enrolment token**  | Existing         | Minted for the child when the guest signals readiness, both kinds (C R-35; FR-14, FR-24).                                          |
-| **Fleet audit**      | Existing         | `node.vm.create                                                                                                                    | start | stop | destroy | resize | rebuild`and`node.vm.password.reveal` (C §7). |
+| **Fleet audit**      | Existing         | `node.vm.create\|start\|stop\|destroy\|resize\|rebuild` and `node.vm.password.reveal` (C §7).                                      |
 
 ---
 

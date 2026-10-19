@@ -174,11 +174,11 @@ None. (A future `model-price-source` plugin could feed the port; not in this epi
 
 ## 9. Agent / MCP / CLI surface
 
-| Surface | Name                                       | Annotation       |
-| ------- | ------------------------------------------ | ---------------- | --- | --------------------------- | ------------ |
-| Agent   | `fleet_usage_get { days?, node? }`         | `readOnly: true` |
-| MCP     | `fleet_usage_get` → `GET /api/fleet/usage` | `readOnlyHint`   |
-| CLI     | `ever-works fleet usage [--days 1          | 7                | 30  | 90] [--on <node>] [--json]` | exit `0/1/2` |
+| Surface | Name                                                                  | Annotation       |
+| ------- | --------------------------------------------------------------------- | ---------------- |
+| Agent   | `fleet_usage_get { days?, node? }`                                    | `readOnly: true` |
+| MCP     | `fleet_usage_get` → `GET /api/fleet/usage`                            | `readOnlyHint`   |
+| CLI     | `ever-works fleet usage [--days 1\|7\|30\|90] [--on <node>] [--json]` | exit `0/1/2`     |
 
 ## 10. Background jobs
 
