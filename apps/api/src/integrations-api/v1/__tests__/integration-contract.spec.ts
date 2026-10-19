@@ -232,13 +232,19 @@ function dtoShape(dto: new () => object): {
 } {
     const metadata = getMetadataStorage().getTargetValidationMetadatas(dto, '', true, false);
     const properties = new Set(metadata.map((entry) => entry.propertyName));
-    // `@IsOptional()` only: a bare `@ValidateIf(v => v !== null)` makes a
-    // property nullable, still required (e.g. MoveKbDocument.folderId).
+    // Optional = a conditional that skips validation when the property is ABSENT:
+    // `@IsOptional()`, and `IsOptionalNonNull()` (`ValidateIf(v => v !== undefined)`,
+    // F39: absent is fine, `null` is refused). A bare `@ValidateIf(v => v !== null)`
+    // still validates an absent value, so it makes a property nullable and still
+    // required (e.g. MoveKbDocument.folderId).
+    const skippedWhenAbsent = (entry: (typeof metadata)[number]): boolean => {
+        if (entry.name === 'isOptional') return true;
+        const condition = entry.constraints?.[0] as unknown;
+        return typeof condition === 'function' && condition({}, undefined) === false;
+    };
     const optional = new Set(
         metadata
-            .filter(
-                (entry) => entry.type === 'conditionalValidation' && entry.name === 'isOptional',
-            )
+            .filter((entry) => entry.type === 'conditionalValidation' && skippedWhenAbsent(entry))
             .map((entry) => entry.propertyName),
     );
     // `@IsIn(values)` (also `{ each: true }` on arrays): the values it accepts.
