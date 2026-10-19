@@ -178,7 +178,8 @@ export const APP_SPEC_REL_PATH_PATTERN =
  * the platform does; the build plugin refuses the same strings again
  * (`github-actions-build/src/workflow/input-guard.ts`).
  */
-export const APP_SPEC_WORKFLOW_SAFE_TEXT_PATTERN = /^(?![\s\S]*\$\{)[^\u0000-\u001f\u007f-\u009f\u2028\u2029\ufeff]*$/;
+export const APP_SPEC_WORKFLOW_SAFE_TEXT_PATTERN =
+    /^(?![\s\S]*\$\{)[^\u0000-\u001f\u007f-\u009f\u2028\u2029\ufeff]*$/;
 
 /**
  * `RelPath` as the build workflow carries it (`build.context`, `build.dockerfile`):
