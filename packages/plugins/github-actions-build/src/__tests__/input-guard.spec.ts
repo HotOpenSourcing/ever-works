@@ -53,7 +53,8 @@ function refusalOf(input: WorkflowGeneratorInput): WorkflowInputRefusedError {
 }
 
 /** The newline payload: end the build-args block and add a job with every permission. */
-const BREAKOUT = 'production\n  pwn:\n    runs-on: ubuntu-latest\n    permissions: write-all\n    steps:\n      - run: curl evil';
+const BREAKOUT =
+	'production\n  pwn:\n    runs-on: ubuntu-latest\n    permissions: write-all\n    steps:\n      - run: curl evil';
 
 describe('unsafeWorkflowTextCause — the three classes', () => {
 	it.each([
@@ -123,7 +124,13 @@ describe('generateWorkflow refuses every hostile interpolation site', () => {
 			'a service env NAME that injects a YAML key',
 			base({
 				build: minimalBuild({
-					services: [{ name: 'cache', image: 'redis:7', env: [{ name: 'A: b\n        options: --privileged', value: 'x' }] }]
+					services: [
+						{
+							name: 'cache',
+							image: 'redis:7',
+							env: [{ name: 'A: b\n        options: --privileged', value: 'x' }]
+						}
+					]
 				})
 			}),
 			'build.services[0].env[0].name',
@@ -144,7 +151,12 @@ describe('generateWorkflow refuses every hostile interpolation site', () => {
 			base({
 				build: minimalBuild({
 					services: [
-						{ name: 'db', image: 'evil/img:1', port: 1, env: [{ name: 'LEAK', value: '${{ secrets.ORG_DEPLOY_KEY }}' }] }
+						{
+							name: 'db',
+							image: 'evil/img:1',
+							port: 1,
+							env: [{ name: 'LEAK', value: '${{ secrets.ORG_DEPLOY_KEY }}' }]
+						}
 					]
 				})
 			}),
@@ -199,7 +211,11 @@ describe('generateWorkflow refuses every hostile interpolation site', () => {
 		],
 		[
 			'a build timeout that is not a number',
-			base({ build: minimalBuild({ resources: { cpu: 2, timeoutMinutes: '30\n    permissions: write-all' as never } }) }),
+			base({
+				build: minimalBuild({
+					resources: { cpu: 2, timeoutMinutes: '30\n    permissions: write-all' as never }
+				})
+			}),
 			'build.resources.timeoutMinutes',
 			'pattern'
 		],
@@ -217,7 +233,11 @@ describe('generateWorkflow refuses every hostile interpolation site', () => {
 		],
 		[
 			'a build value name that would become a YAML key / secret reference',
-			base({ values: [{ name: 'A }} ${{ secrets.B', value: 'v', secret: true, fromBuildService: false, fingerprint: 'v1' }] }),
+			base({
+				values: [
+					{ name: 'A }} ${{ secrets.B', value: 'v', secret: true, fromBuildService: false, fingerprint: 'v1' }
+				]
+			}),
 			'values[0].name',
 			'expression'
 		],
@@ -241,7 +261,9 @@ describe('generateWorkflow refuses every hostile interpolation site', () => {
 		],
 		[
 			'a check `required` that is a string (written raw into the matrix row)',
-			base({ checks: [{ name: 'lint', command: 'true', required: 'true }, { x: y' as never, timeoutSeconds: 60 }] }),
+			base({
+				checks: [{ name: 'lint', command: 'true', required: 'true }, { x: y' as never, timeoutSeconds: 60 }]
+			}),
 			'checks[0].required',
 			'pattern'
 		]
@@ -299,7 +321,12 @@ describe('the honest inputs are untouched (the goldens hold them byte for byte)'
 			base({
 				build: minimalBuild({
 					services: [
-						{ name: 'search', image: 'elasticsearch:8', port: 9200, env: [{ name: 'discovery.type', value: 'single-node' }] }
+						{
+							name: 'search',
+							image: 'elasticsearch:8',
+							port: 9200,
+							env: [{ name: 'discovery.type', value: 'single-node' }]
+						}
 					]
 				})
 			})
@@ -318,7 +345,13 @@ const AUTH: BuildAuth = { token: 'ghs-not-a-real-token' };
 function prepareInput(build: unknown): PrepareRepositoryInput {
 	return {
 		workId: '11111111-1111-4111-8111-111111111111',
-		repository: { owner: 'acme', repo: 'their-app', visibility: 'public', trackedBranch: 'main', createdByAppWork: true },
+		repository: {
+			owner: 'acme',
+			repo: 'their-app',
+			visibility: 'public',
+			trackedBranch: 'main',
+			createdByAppWork: true
+		},
 		build: build as never,
 		appSpecHash: `sha256:${'a'.repeat(64)}`,
 		values: [],
@@ -350,7 +383,10 @@ describe('prepareRepository — a hostile App spec is `specInvalid`, and nothing
 			commitFiles: vi.fn(async () => ({ commitSha: 'c'.repeat(40) })),
 			createBranch: vi.fn(),
 			createPullRequest: vi.fn()
-		} as unknown as RepositoryWriter & { commitFiles: ReturnType<typeof vi.fn>; getFileContent: ReturnType<typeof vi.fn> };
+		} as unknown as RepositoryWriter & {
+			commitFiles: ReturnType<typeof vi.fn>;
+			getFileContent: ReturnType<typeof vi.fn>;
+		};
 
 		const result = await new TestPlugin(port).prepareRepository(
 			prepareInput({
@@ -372,5 +408,32 @@ describe('prepareRepository — a hostile App spec is `specInvalid`, and nothing
 		expect(writer.getFileContent).not.toHaveBeenCalled();
 		expect(port.putRepoSecret).not.toHaveBeenCalled();
 		expect(JSON.stringify(result)).not.toContain('write-all');
+	});
+
+	it('reports the hash already on record, so the next prepare does not read our own file as hand-edited', async () => {
+		// The runner stores `contentSha256` of an `unchanged` result as the platform's
+		// last write. An empty hash there makes the platform's own workflow look edited
+		// by hand once the spec is fixed, and the update goes out as a pull request.
+		const onRecord = 'd'.repeat(64);
+		const result = await new TestPlugin({
+			getRepoPublicKey: vi.fn(),
+			putRepoSecret: vi.fn(),
+			deleteRepoSecret: vi.fn()
+		} as unknown as RepositorySecretPort).prepareRepository(
+			{
+				...prepareInput({
+					strategy: 'dockerfile',
+					args: [{ name: 'NODE_ENV', value: BREAKOUT }],
+					services: [],
+					resources: { cpu: 2, timeoutMinutes: 30 }
+				}),
+				lastWrittenWorkflowSha256: onRecord
+			},
+			AUTH,
+			{ getFileContent: vi.fn(), commitFiles: vi.fn() } as unknown as RepositoryWriter
+		);
+
+		expect(result.blocked?.reason).toBe('specInvalid');
+		expect(result.workflow).toEqual({ state: 'unchanged', contentSha256: onRecord });
 	});
 });

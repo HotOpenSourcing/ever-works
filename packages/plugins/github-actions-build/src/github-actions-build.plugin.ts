@@ -250,7 +250,10 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 		});
 		if (!selection.ok) {
 			return {
-				workflow: { state: 'unchanged', contentSha256: '' },
+				// A blocked prepare wrote nothing, so it reports the hash already on record:
+				// an empty one would be stored as the platform's last write and turn the
+				// platform's own file into an "edited by hand" one on the next prepare.
+				workflow: { state: 'unchanged', contentSha256: input.lastWrittenWorkflowSha256 ?? '' },
 				secretsWritten: [],
 				secretsRemoved: [],
 				buildInputsHash: computeBuildInputsHash(input.values ?? []),
@@ -290,7 +293,10 @@ export class GitHubActionsBuildPlugin implements IBuildPlugin {
 		const refusal = findUnsafeWorkflowInput(generatorInput);
 		if (refusal) {
 			return {
-				workflow: { state: 'unchanged', contentSha256: '' },
+				// A blocked prepare wrote nothing, so it reports the hash already on record:
+				// an empty one would be stored as the platform's last write and turn the
+				// platform's own file into an "edited by hand" one on the next prepare.
+				workflow: { state: 'unchanged', contentSha256: input.lastWrittenWorkflowSha256 ?? '' },
 				secretsWritten: [],
 				secretsRemoved: [],
 				buildInputsHash: computeBuildInputsHash(input.values ?? []),
