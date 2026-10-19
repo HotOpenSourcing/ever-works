@@ -182,7 +182,8 @@ export function findUnsafeWorkflowInput(input: WorkflowGeneratorInput): Workflow
 		(build.services ?? []).forEach((service, index) => {
 			shaped(`build.services[${index}].name`, service?.name, WORKFLOW_SERVICE_NAME_PATTERN);
 			text(`build.services[${index}].image`, service?.image);
-			const postgres = typeof service?.image === 'string' && resolveBuildServiceKind(service.image) === 'postgres';
+			const postgres =
+				typeof service?.image === 'string' && resolveBuildServiceKind(service.image) === 'postgres';
 			if (service?.port !== undefined) finiteNumber(`build.services[${index}].port`, service.port);
 			(service?.env ?? []).forEach((entry, envIndex) => {
 				const at = `build.services[${index}].env[${envIndex}]`;
@@ -204,7 +205,8 @@ export function findUnsafeWorkflowInput(input: WorkflowGeneratorInput): Workflow
 	(input.checks ?? []).forEach((check, index) => {
 		text(`checks[${index}].name`, check?.name);
 		// Written raw into the matrix row's flow mapping, so only a real boolean / number may pass.
-		if (typeof check?.required !== 'boolean') refusals.push({ field: `checks[${index}].required`, cause: 'pattern' });
+		if (typeof check?.required !== 'boolean')
+			refusals.push({ field: `checks[${index}].required`, cause: 'pattern' });
 		finiteNumber(`checks[${index}].timeoutSeconds`, check?.timeoutSeconds);
 	});
 

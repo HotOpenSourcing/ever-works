@@ -59,15 +59,21 @@ describe('workflowChanges', () => {
     });
 
     it('counts a rename on either side', () => {
-        const out = workflowChanges(diff([{ path: 'docs/ci.yml', previousPath: '.github/workflows/ci.yml' }]));
-        const into = workflowChanges(diff([{ path: '.github/workflows/ci.yml', previousPath: 'docs/ci.yml' }]));
+        const out = workflowChanges(
+            diff([{ path: 'docs/ci.yml', previousPath: '.github/workflows/ci.yml' }]),
+        );
+        const into = workflowChanges(
+            diff([{ path: '.github/workflows/ci.yml', previousPath: 'docs/ci.yml' }]),
+        );
 
         expect(out.paths).toEqual(['.github/workflows/ci.yml']);
         expect(into.paths).toEqual(['.github/workflows/ci.yml']);
     });
 
     it('answers clean and complete for a range with no protected path', () => {
-        const changes = workflowChanges(diff([{ path: 'src/a.ts' }, { path: '.github/CODEOWNERS' }]));
+        const changes = workflowChanges(
+            diff([{ path: 'src/a.ts' }, { path: '.github/CODEOWNERS' }]),
+        );
 
         expect(changes).toEqual({ paths: [], pathCount: 0, complete: true });
         expect(holdsForWorkflowReview(changes)).toBe(false);
