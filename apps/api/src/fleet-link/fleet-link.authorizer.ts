@@ -4,15 +4,10 @@ import {
     effectiveConsents,
     fleetConsentMissingHint,
     fleetConsentSatisfies,
-    fleetLinkMachineVerbActionFamily,
-    fleetLinkVerbConsent,
-    FLEET_LINK_FAMILY_ACTION_FAMILY,
-    FLEET_LINK_FAMILY_CONSENT,
-    isFleetLinkStateChangingFamily,
-    type FleetLinkConsentRequirement,
     type FleetLinkFamily,
 } from '@ever-works/contracts';
 import { fleetLinkError } from './fleet-link.errors';
+import { resolveFleetLinkRequirement } from './fleet-link-requirement';
 import { FleetLinkRegistry } from './fleet-link.registry';
 import { FleetLinkRemote } from './fleet-link-remote.service';
 import {
@@ -48,42 +43,10 @@ import {
  * refusal is never a reason to wake a machine.
  */
 
-/** How strict each consent requirement is, for "a caller may narrow, never widen". */
-function atLeastAsStrict(
-    candidate: FleetLinkConsentRequirement,
-    base: FleetLinkConsentRequirement,
-): boolean {
-    if (candidate === base || base === 'link') return true;
-    return base === 'work-or-manage' && (candidate === 'work' || candidate === 'manage');
-}
-
-/** The requirement of a family (or one `machine` verb), narrowed by the caller where it asked to be. */
-export function resolveFleetLinkRequirement(
-    family: FleetLinkFamily,
-    verb: string | null,
-    narrow: Partial<FleetLinkRequirement> = {},
-): FleetLinkRequirement {
-    const machineVerb = family === 'machine' && verb !== null;
-    const baseConsent = machineVerb
-        ? fleetLinkVerbConsent(verb)
-        : FLEET_LINK_FAMILY_CONSENT[family];
-    const consent =
-        narrow.consent !== undefined && atLeastAsStrict(narrow.consent, baseConsent)
-            ? narrow.consent
-            : baseConsent;
-    const actionFamily =
-        narrow.actionFamily ??
-        (machineVerb
-            ? fleetLinkMachineVerbActionFamily(verb)
-            : FLEET_LINK_FAMILY_ACTION_FAMILY[family]);
-    // A `machine` verb changes the machine unless it is a `view` read; a
-    // family by the CONTRACTS list. Fail-safe both ways: when in doubt it is
-    // treated as state-changing (audited, refused while stopped).
-    const stateChanging =
-        narrow.stateChanging ??
-        (machineVerb ? actionFamily !== 'view' : isFleetLinkStateChangingFamily(family));
-    return { consent, actionFamily, stateChanging, target: narrow.target ?? null };
-}
+// The requirement resolver lives in its own module so `FleetLinkRemote` (which
+// the authoriser injects) can rebuild a forwarded requirement with it without
+// an import cycle; re-exported here, where callers have always found it.
+export { resolveFleetLinkRequirement } from './fleet-link-requirement';
 
 @Injectable()
 export class FleetLinkAuthorizer {

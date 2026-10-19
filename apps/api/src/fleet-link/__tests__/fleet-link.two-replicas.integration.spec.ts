@@ -325,6 +325,40 @@ describe('two API replicas, one Valkey (S7)', () => {
         first.socket.close();
     });
 
+    it('keeps a viewer token single-use across replicas: used on B, replayed on A, closed 4001', async () => {
+        const node = connectNode(a.url, a.tokens.mint(NODE_ID).token);
+        await until(() => node.state.ready);
+        await until(() => b.links.isConnected(NODE_ID));
+        const grant = await a.attach.mint({
+            nodeId: NODE_ID,
+            family: 'logs',
+            target: NODE_ID,
+            role: 'viewer',
+            caller: { kind: 'user', userId: OWNER },
+        });
+        const viewer = (url: string) => {
+            const tab = new WebSocket(`${url}${grant.wsPath}`);
+            tab.on('error', () => undefined);
+            const controls: Array<Record<string, unknown>> = [];
+            tab.on('open', () => tab.send(JSON.stringify({ type: 'auth', token: grant.token })));
+            tab.on('message', (raw: Buffer) => {
+                const frame = decodeFleetLinkFrame(new Uint8Array(raw));
+                if (frame?.channel === 0)
+                    controls.push(decodeFleetLinkControl(frame.payload) as never);
+            });
+            const closed = new Promise<number>((resolve) =>
+                tab.on('close', (code) => resolve(code)),
+            );
+            return { tab, controls, closed };
+        };
+        const first = viewer(b.url);
+        await until(() => first.controls.some((message) => message?.type === 'viewer.ready'));
+        const replay = viewer(a.url);
+        expect(await replay.closed).toBe(4001);
+        first.tab.close();
+        node.socket.close();
+    });
+
     if (!REAL_URL) {
         it('reads degraded when the bus is lost, and up again when it is back', async () => {
             expect(b.bus.health()).toEqual({ configured: true, mode: 'valkey', status: 'up' });

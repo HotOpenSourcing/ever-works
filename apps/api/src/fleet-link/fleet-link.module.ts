@@ -143,7 +143,8 @@ import { FleetOperationsService } from './fleet-operations.service';
         FleetOperationsService,
         FleetLinkTokenService,
         FleetLinkGatewayService,
-        FleetLinkRemote,
+        // `FleetLinkRemote` is NOT exported (L8): it is this module's own
+        // plumbing; every other module reaches a link through `FleetLinkService`.
         FleetLinkAttachService,
         FLEET_LINK_AUDIENCE,
         FLEET_LINK_HEARTBEAT_OBSERVER,

@@ -3,7 +3,11 @@ import { randomUUID } from 'crypto';
 import {
     FLEET_LINK_CHANNEL_OPEN_TIMEOUT_MS,
     FLEET_LINK_CLOSE_CODES,
+    FLEET_LINK_CONTROL_TYPES,
     FLEET_LINK_REQUEST_TIMEOUT_MS,
+    isFleetLinkActionFamily,
+    isFleetLinkConsentRequirement,
+    isFleetLinkErrorCode,
     isFleetLinkFamily,
     isFleetLinkFrameKind,
     normalizeFleetConsents,
@@ -27,6 +31,7 @@ import {
     type FleetLinkEvent,
     type FleetLinkLinkSnapshot,
 } from './fleet-link.registry';
+import { resolveFleetLinkRequirement } from './fleet-link-requirement';
 import type { FleetLinkRequirement } from './fleet-link.types';
 
 /**
@@ -46,9 +51,15 @@ import type { FleetLinkRequirement } from './fleet-link.types';
  *    resume) and a channel-0 control to the holder, and answers the caller as
  *    if the link were local. The caller was authorised on its own replica
  *    before anything is forwarded; the holder applies its registry's own
- *    rules (channel count, the link being there);
+ *    rules (channel count, the link being there), rebuilds the requirement
+ *    from what it can validate, checks the consent against the link's live
+ *    consents again, and forwards only a family's own channel-0 types — never
+ *    the link's (`link.*`, `channel.*`, `operation.*`). Every 10 s each side
+ *    tells the other which forwarded channels it still knows, and a channel
+ *    one side forgot is ended on the other (after a grace);
  *  - **fans out** what every replica must act on for a node it may hold:
- *    consents a heartbeat reported, drain-all, a node that is gone;
+ *    consents a heartbeat reported, drain-all (re-sent, with what is left of
+ *    its grace, to a replica that joins meanwhile), a node that is gone;
  *  - **replicates operation records** so `GET /api/fleet/operations/:id`
  *    answers on any replica.
  *
@@ -74,6 +85,33 @@ export const FLEET_LINK_REMOTE_MARGIN_MS = 2_000;
 
 /** How long a forwarded channel-0 control waits for the holder's answer. */
 export const FLEET_LINK_REMOTE_CONTROL_TIMEOUT_MS = 3_000;
+
+/**
+ * A forwarded channel younger than this is never ended by the reconciliation
+ * (M3): the other side's list may have been taken before it existed.
+ */
+export const FLEET_LINK_REMOTE_RECONCILE_GRACE_MS = FLEET_LINK_DIRECTORY_SYNC_MS;
+
+/** The longest a forwarded request may ask the holder to wait (what the bus says is bounded, not trusted). */
+export const FLEET_LINK_REMOTE_MAX_REQUEST_TIMEOUT_MS = 10 * 60_000;
+
+/** Drain-all's grace, as the link codec bounds it. */
+const MAX_DRAIN_GRACE_SEC = 3_600;
+
+/** Recent drain-alls remembered for a replica that joins during their grace. */
+const MAX_REMEMBERED_DRAINS = 32;
+
+/** Refs listed in one reconciliation message at most; a longer list is sent incomplete and not acted on. */
+const MAX_RECONCILE_REFS = 20_000;
+
+/** The early events a remote channel holds while its open is answered (L8: past it, the channel closes). */
+export const FLEET_LINK_REMOTE_EARLY_EVENTS = 1_024;
+
+/** The first segments of the link's own channel-0 types: never forwarded to a node from the bus. */
+const RESERVED_CONTROL_PREFIXES: ReadonlySet<string> = new Set(['link', 'channel', 'operation']);
+const LINK_CONTROL_TYPES: ReadonlySet<string> = new Set(FLEET_LINK_CONTROL_TYPES);
+/** A family's own channel-0 type (the link codec's extension pattern). */
+const EXTENSION_TYPE_PATTERN = /^[a-z][a-zA-Z0-9]{0,31}(?:\.[a-z][a-zA-Z0-9-]{0,31}){1,3}$/;
 
 const DIRECTORY_TOPIC = 'fleet-link.dir';
 const RPC_TOPIC = 'fleet-link.rpc';
@@ -119,6 +157,20 @@ interface Served {
     origin: string;
     ref: string;
     channel: FleetLinkChannel;
+    /** Epoch ms it was opened (the reconciliation's grace). */
+    since: number;
+}
+
+/** A forwarded open the holder is still waiting on the node for; a `close` that arrives meanwhile is kept here. */
+interface Serving {
+    origin: string;
+    closed: { reason: FleetLinkCloseReason; hint?: string } | null;
+}
+
+interface RememberedDrain {
+    nodeIds: string[];
+    graceSec: number;
+    at: number;
 }
 
 function parse(body: string): Json | null {
@@ -132,6 +184,71 @@ function parse(body: string): Json | null {
 
 const isString = (value: unknown): value is string =>
     typeof value === 'string' && value.length > 0 && value.length <= 256;
+
+/** A request timeout from the bus, bounded; undefined (the default applies) for anything that is not a number. */
+function boundedTimeoutMs(value: unknown): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+    return Math.min(Math.max(Math.round(value), 1), FLEET_LINK_REMOTE_MAX_REQUEST_TIMEOUT_MS);
+}
+
+/** A drain grace from the bus, bounded as the link codec bounds it; 60 s for anything else. */
+function boundedGraceSec(value: unknown): number {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return 60;
+    return Math.min(Math.max(Math.round(value), 0), MAX_DRAIN_GRACE_SEC);
+}
+
+/** A close reason from the bus: `normal` or a link error code; `normal` for anything else. */
+function closeReasonOf(value: unknown): FleetLinkCloseReason {
+    return value === 'normal' || isFleetLinkErrorCode(value) ? value : 'normal';
+}
+
+/** A close hint from the bus: a short string, or nothing. */
+function closeHintOf(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value.slice(0, 256) : undefined;
+}
+
+/**
+ * The requirement a forwarded open carries, when it is one (M2): a consent
+ * requirement, an action family and a boolean `stateChanging`, a target that is
+ * a short string or nothing. Null otherwise — the holder refuses the open.
+ */
+function forwardedRequirement(value: unknown): Partial<FleetLinkRequirement> | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const record = value as Json;
+    if (
+        !isFleetLinkConsentRequirement(record.consent) ||
+        !isFleetLinkActionFamily(record.actionFamily) ||
+        typeof record.stateChanging !== 'boolean'
+    ) {
+        return null;
+    }
+    const target = record.target;
+    if (target !== undefined && target !== null && !isString(target)) return null;
+    return {
+        consent: record.consent,
+        actionFamily: record.actionFamily,
+        stateChanging: record.stateChanging,
+        target: isString(target) ? target : null,
+    };
+}
+
+/**
+ * True when a channel-0 message from the bus may go to the node: a family's
+ * own type only. The link's own types — and anything in their namespaces —
+ * would let a peer replica speak for the link (`link.drain`, `channel.close`,
+ * `operation.cancel` …), so they are never forwarded.
+ */
+export function isForwardableNodeControl(value: unknown): value is FleetLinkExtensionMessage {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const type = (value as Json).type;
+    if (typeof type !== 'string' || !EXTENSION_TYPE_PATTERN.test(type)) return false;
+    if (LINK_CONTROL_TYPES.has(type)) return false;
+    return !RESERVED_CONTROL_PREFIXES.has(type.slice(0, type.indexOf('.')));
+}
+
+function refsOf(value: unknown): Set<string> {
+    return new Set(Array.isArray(value) ? value.filter(isString).slice(0, MAX_RECONCILE_REFS) : []);
+}
 
 function asError(value: unknown): FleetLinkError {
     return (
@@ -179,6 +296,10 @@ export class FleetLinkRemote implements OnModuleDestroy {
     private readonly pending = new Map<string, Pending>();
     private readonly opened = new Map<string, RemoteFleetLinkChannel>();
     private readonly served = new Map<string, Served>();
+    /** Forwarded opens still waiting on the node, by `origin|ref`. */
+    private readonly serving = new Map<string, Serving>();
+    /** Drain-alls whose grace has not run out, for a replica that joins (M6). */
+    private readonly drains: RememberedDrain[] = [];
     private readonly linkListeners = new Set<(event: FleetLinkEvent) => void>();
     private readonly operationListeners = new Set<(snapshot: FleetOperationSnapshot) => void>();
     private readonly cancelListeners = new Set<(operationId: string) => void>();
@@ -212,6 +333,9 @@ export class FleetLinkRemote implements OnModuleDestroy {
             this.bus.subscribe(OPS_TOPIC, (body) => this.onOps(body)),
             this.bus.onPeerChange((replicaId, present) => this.onPeer(replicaId, present)),
             this.registry.onLinkEvent((event) => this.onLocalLink(event)),
+            // L1: a heartbeat changed a held link's consents — every replica's
+            // directory entry takes them now, not at the next sync.
+            this.registry.onConsentsChange((nodeId) => this.onLocalConsents(nodeId)),
         );
         this.scheduleSync();
     }
@@ -227,6 +351,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
         }
         for (const channel of [...this.opened.values()]) channel.end('normal');
         for (const served of [...this.served.values()]) served.channel.close('normal');
+        for (const serving of this.serving.values()) serving.closed ??= { reason: 'normal' };
     }
 
     get replicaId(): string {
@@ -330,6 +455,14 @@ export class FleetLinkRemote implements OnModuleDestroy {
                 ref,
             );
             channel.markOpen(answer.channel, answer.generation);
+            // Closed while the open was being answered (its early buffer
+            // overflowed): the holder was told; the caller gets a refusal.
+            if (channel.isClosed) {
+                throw fleetLinkError(
+                    'limit_exceeded',
+                    'the computer sent more than this API replica holds before the channel opened',
+                );
+            }
             return channel;
         } catch (error) {
             this.opened.delete(ref);
@@ -387,10 +520,22 @@ export class FleetLinkRemote implements OnModuleDestroy {
         if (holder) this.send(holder, FAN_TOPIC, { op: 'consents', nodeId, consents });
     }
 
-    /** Drain-all on every replica's links. */
+    /**
+     * Drain-all on every replica's links. A drain that could not be sent is
+     * logged (M6), and every drain is re-sent — with what is left of its
+     * grace — to a replica that joins before that grace runs out, so a link
+     * that lands there meanwhile is drained too.
+     */
     broadcastDrain(nodeIds: readonly string[], graceSec: number): void {
-        if (nodeIds.length > 0)
-            this.broadcast(FAN_TOPIC, { op: 'drain', nodeIds: [...nodeIds], graceSec });
+        if (nodeIds.length === 0 || this.bus.mode === 'single-replica') return;
+        this.rememberDrain({ nodeIds: [...nodeIds], graceSec, at: this.now() });
+        const sent = this.broadcast(FAN_TOPIC, { op: 'drain', nodeIds: [...nodeIds], graceSec });
+        if (!sent && this.bus.health().status !== 'up') {
+            this.logger.warn(
+                `drain-all for ${nodeIds.length} computer(s) could not reach the other API replicas: the relay bus is down. ` +
+                    'A replica that joins within the grace period is told then; links already on another replica are not drained.',
+            );
+        }
     }
 
     /** A node removed or re-keyed: whichever replica holds its link closes it. */
@@ -434,6 +579,11 @@ export class FleetLinkRemote implements OnModuleDestroy {
     /** @internal */
     forgetChannel(ref: string): void {
         this.opened.delete(ref);
+    }
+
+    /** @internal — the channel's clock (the reconciliation's grace). */
+    clock(): number {
+        return this.now();
     }
 
     // ─── Bus plumbing ──────────────────────────────────────────────────────
@@ -501,6 +651,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
             this.syncTimer = null;
             this.broadcastSync();
             this.expire();
+            this.sendRefs();
             this.scheduleSync();
         }, this.syncIntervalMs);
     }
@@ -514,10 +665,90 @@ export class FleetLinkRemote implements OnModuleDestroy {
         return out;
     }
 
-    private broadcastSync(to?: string): void {
-        const message = { op: 'sync', links: this.localSnapshots() };
+    /** `want`: the receiver answers with its own list (L6 — a replica that just met another asks). */
+    private broadcastSync(to?: string, want = false): void {
+        const message = {
+            op: 'sync',
+            links: this.localSnapshots(),
+            ...(want ? { want: true } : {}),
+        };
         if (to) this.send(to, DIRECTORY_TOPIC, message);
         else this.broadcast(DIRECTORY_TOPIC, message);
+    }
+
+    /**
+     * M3: tell each peer which forwarded channels this replica still knows —
+     * the ones it opened on that peer, and the ones it serves for it. The
+     * peer ends what it holds that this replica no longer lists (see
+     * {@link reconcile}). Sent to every peer, an empty list included: a peer
+     * may still serve a channel this replica forgot entirely.
+     */
+    private sendRefs(): void {
+        for (const peer of this.bus.peers()) {
+            const opened: string[] = [];
+            for (const channel of this.opened.values())
+                if (channel.holder === peer) opened.push(channel.ref);
+            const served: string[] = [];
+            for (const entry of this.served.values())
+                if (entry.origin === peer) served.push(entry.ref);
+            for (const [key, entry] of this.serving)
+                if (entry.origin === peer) served.push(key.slice(key.indexOf('|') + 1));
+            const complete =
+                opened.length <= MAX_RECONCILE_REFS && served.length <= MAX_RECONCILE_REFS;
+            this.send(peer, RPC_TOPIC, {
+                op: 'refs',
+                opened: opened.slice(0, MAX_RECONCILE_REFS),
+                served: served.slice(0, MAX_RECONCILE_REFS),
+                complete,
+            });
+        }
+    }
+
+    /** M3: end the forwarded channels `from` no longer knows, once they are past the grace. */
+    private reconcile(from: string, message: Json): void {
+        if (message.complete !== true) return;
+        const opened = refsOf(message.opened);
+        const served = refsOf(message.served);
+        const cutoff = this.now() - FLEET_LINK_REMOTE_RECONCILE_GRACE_MS;
+        for (const [key, entry] of [...this.served]) {
+            if (entry.origin !== from || entry.since > cutoff || opened.has(entry.ref)) continue;
+            // The caller's replica forgot it (its close never arrived): close it on the node.
+            this.served.delete(key);
+            entry.channel.close('normal');
+        }
+        for (const channel of [...this.opened.values()]) {
+            if (channel.holder !== from || !channel.isOpen || channel.createdAt > cutoff) continue;
+            if (served.has(channel.ref)) continue;
+            // The holder no longer serves it (its `closed` never arrived).
+            channel.end(
+                'resume_failed',
+                'the API replica holding this computer no longer serves the channel',
+            );
+        }
+    }
+
+    private rememberDrain(drain: RememberedDrain): void {
+        const now = this.now();
+        for (let i = this.drains.length - 1; i >= 0; i -= 1) {
+            const old = this.drains[i];
+            if (now - old.at >= old.graceSec * 1_000) this.drains.splice(i, 1);
+        }
+        this.drains.push(drain);
+        while (this.drains.length > MAX_REMEMBERED_DRAINS) this.drains.shift();
+    }
+
+    /** M6: a replica that just joined gets the drain-alls whose grace is still running, with what is left of it. */
+    private resendDrains(replicaId: string): void {
+        const now = this.now();
+        for (const drain of this.drains) {
+            const leftSec = Math.floor((drain.at + drain.graceSec * 1_000 - now) / 1_000);
+            if (leftSec <= 0) continue;
+            this.send(replicaId, FAN_TOPIC, {
+                op: 'drain',
+                nodeIds: drain.nodeIds,
+                graceSec: leftSec,
+            });
+        }
     }
 
     private expire(): void {
@@ -530,6 +761,13 @@ export class FleetLinkRemote implements OnModuleDestroy {
     private remember(replicaId: string, link: FleetLinkLinkSnapshot): void {
         const known = this.directory.get(link.nodeId);
         this.directory.set(link.nodeId, { replicaId, link, seenAt: this.now() });
+        // Generations are fleet-wide: a node that bounces A → B → A presents
+        // B's generation on A, which must read as the same process continuing
+        // (else every running operation of the node is marked interrupted).
+        this.registry.observeGeneration(link.nodeId, link.generation);
+        // M4: what an older link of this node left suspended here cannot be
+        // resumed here any more — end it now, not after the resume window.
+        this.registry.finishOrphansBelow(link.nodeId, link.generation);
         // One link per node fleet-wide: a newer link elsewhere replaces ours.
         const local = this.registry.describeLink(link.nodeId);
         if (
@@ -574,8 +812,10 @@ export class FleetLinkRemote implements OnModuleDestroy {
 
     private onPeer(replicaId: string, present: boolean): void {
         if (present) {
-            // A replica that just joined learns this one's links at once.
-            this.broadcastSync(replicaId);
+            // A replica that just joined learns this one's links at once, and
+            // is asked for its own (L6); drain-alls still in their grace reach it (M6).
+            this.broadcastSync(replicaId, true);
+            this.resendDrains(replicaId);
             return;
         }
         for (const [nodeId, entry] of [...this.directory]) {
@@ -598,6 +838,15 @@ export class FleetLinkRemote implements OnModuleDestroy {
             this.served.delete(key);
             served.channel.close('normal');
         }
+        // Opens still waiting on the node for a replica that left: closed as they complete.
+        for (const serving of this.serving.values()) {
+            if (serving.origin === replicaId) serving.closed ??= { reason: 'normal' };
+        }
+    }
+
+    private onLocalConsents(nodeId: string): void {
+        const link = this.registry.describeLink(nodeId);
+        if (link) this.broadcast(DIRECTORY_TOPIC, { op: 'up', link });
     }
 
     private onLocalLink(event: FleetLinkEvent): void {
@@ -646,6 +895,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
                 if (entry.replicaId === from && !listed.has(nodeId))
                     this.forget(nodeId, 'no longer held');
             }
+            if (message.want === true) this.broadcastSync(from);
         }
     }
 
@@ -658,8 +908,10 @@ export class FleetLinkRemote implements OnModuleDestroy {
             return;
         }
         if (message.op === 'drain' && Array.isArray(message.nodeIds)) {
-            const graceSec = typeof message.graceSec === 'number' ? message.graceSec : 60;
-            this.registry.drainNodes(message.nodeIds.filter(isString), graceSec);
+            this.registry.drainNodes(
+                message.nodeIds.slice(0, 100_000).filter(isString),
+                boundedGraceSec(message.graceSec),
+            );
             return;
         }
         if (message.op === 'gone' && isString(message.nodeId)) {
@@ -726,6 +978,9 @@ export class FleetLinkRemote implements OnModuleDestroy {
             case 'req':
                 this.serveChannel(from, message);
                 return;
+            case 'refs':
+                this.reconcile(from, message);
+                return;
             default:
                 return;
         }
@@ -771,10 +1026,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
                 message.params && typeof message.params === 'object'
                     ? (message.params as Json)
                     : {},
-                {
-                    timeoutMs:
-                        typeof message.timeoutMs === 'number' ? message.timeoutMs : undefined,
-                },
+                { timeoutMs: boundedTimeoutMs(message.timeoutMs) },
             );
             this.answer(from, message.rid, { value: reply });
         } catch (error) {
@@ -790,8 +1042,33 @@ export class FleetLinkRemote implements OnModuleDestroy {
             });
             return;
         }
+        // M2: the requirement is rebuilt from what validates — never taken
+        // as sent — and floored at the family's own consent.
+        const narrow = forwardedRequirement(message.requirement);
+        if (!narrow) {
+            this.answer(from, message.rid, {
+                error: fleetLinkError('invalid', 'a forwarded open carried no valid requirement'),
+            });
+            return;
+        }
+        const requirement = resolveFleetLinkRequirement(message.family, null, narrow);
         const key = `${from}|${ref}`;
+        if (this.served.has(key) || this.serving.has(key)) {
+            this.answer(from, message.rid, {
+                error: fleetLinkError('invalid', 'a forwarded open reused a channel reference'),
+            });
+            return;
+        }
+        // L1 / consent withdrawal: the caller's replica read the consents from
+        // a directory entry that can lag a heartbeat; the link here is the truth.
+        const refusal = this.registry.consentRefusal(message.nodeId, requirement.consent);
+        if (refusal) {
+            this.answer(from, message.rid, { error: new FleetLinkException(refusal) });
+            return;
+        }
         const forward = (payload: Json) => this.send(from, RPC_TOPIC, { ...payload, ref });
+        const serving: Serving = { origin: from, closed: null };
+        this.serving.set(key, serving);
         try {
             const channel = await this.registry.openChannel({
                 nodeId: message.nodeId,
@@ -800,7 +1077,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
                     message.params && typeof message.params === 'object'
                         ? (message.params as Json)
                         : {},
-                requirement: message.requirement as FleetLinkRequirement,
+                requirement,
                 requestedBy: isString(message.requestedBy) ? message.requestedBy : 'system:relay',
                 events: {
                     json: (m) => forward({ op: 'json', m }),
@@ -813,11 +1090,22 @@ export class FleetLinkRemote implements OnModuleDestroy {
                     resume: (generation) => forward({ op: 'resumed', generation }),
                 },
             });
-            this.served.set(key, { origin: from, ref, channel });
+            this.serving.delete(key);
+            if (serving.closed) {
+                // The caller closed (or left) while the node was still
+                // answering: the channel must not stay open on the node.
+                channel.close(serving.closed.reason, serving.closed.hint);
+                this.answer(from, message.rid, {
+                    error: fleetLinkError('unreachable', 'the channel was closed while it opened'),
+                });
+                return;
+            }
+            this.served.set(key, { origin: from, ref, channel, since: this.now() });
             this.answer(from, message.rid, {
                 value: { channel: channel.channel, generation: channel.linkGeneration },
             });
         } catch (error) {
+            this.serving.delete(key);
             this.answer(from, message.rid, { error });
         }
     }
@@ -844,11 +1132,12 @@ export class FleetLinkRemote implements OnModuleDestroy {
             });
             return;
         }
-        const control = message.message as FleetLinkExtensionMessage | undefined;
-        const sent =
-            !!control && typeof control.type === 'string'
-                ? this.registry.sendNodeControl(message.nodeId, control)
-                : false;
+        // Only a family's own types: the link's (`link.*`, `channel.*`,
+        // `operation.*`) are the registry's to send, never a peer's.
+        const control = message.message;
+        const sent = isForwardableNodeControl(control)
+            ? this.registry.sendNodeControl(message.nodeId, control)
+            : false;
         this.answer(from, message.rid, { value: { sent } });
     }
 
@@ -857,6 +1146,17 @@ export class FleetLinkRemote implements OnModuleDestroy {
             ? this.served.get(`${from}|${message.ref}`)
             : undefined;
         if (!served) {
+            const serving = isString(message.ref)
+                ? this.serving.get(`${from}|${message.ref}`)
+                : undefined;
+            if (serving && message.op === 'close') {
+                // The open is still waiting on the node: close it as soon as it completes.
+                serving.closed ??= {
+                    reason: closeReasonOf(message.reason),
+                    hint: closeHintOf(message.hint),
+                };
+                return;
+            }
             if (message.op === 'req')
                 this.answer(from, message.rid, {
                     error: fleetLinkError('unreachable', 'the channel is closed'),
@@ -875,10 +1175,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
             }
             case 'close':
                 this.served.delete(`${from}|${message.ref}`);
-                channel.close(
-                    (message.reason as FleetLinkCloseReason) ?? 'normal',
-                    typeof message.hint === 'string' ? message.hint : undefined,
-                );
+                channel.close(closeReasonOf(message.reason), closeHintOf(message.hint));
                 return;
             case 'req':
                 if (!isString(message.verb)) return;
@@ -888,12 +1185,7 @@ export class FleetLinkRemote implements OnModuleDestroy {
                         message.params && typeof message.params === 'object'
                             ? (message.params as Json)
                             : {},
-                        {
-                            timeoutMs:
-                                typeof message.timeoutMs === 'number'
-                                    ? message.timeoutMs
-                                    : undefined,
-                        },
+                        { timeoutMs: boundedTimeoutMs(message.timeoutMs) },
                     )
                     .then(
                         (reply) => this.answer(from, message.rid, { value: reply }),
@@ -916,14 +1208,18 @@ export class RemoteFleetLinkChannel implements FleetLinkChannel {
     private generation: number | null = null;
     private readonly listeners = new Set<FleetLinkChannelEvents>();
     private early: Json[] = [];
+    /** Epoch ms this side asked for it (the reconciliation's grace). */
+    readonly createdAt: number;
 
     constructor(
         private readonly remote: FleetLinkRemote,
         readonly holder: string,
-        private readonly ref: string,
+        readonly ref: string,
         readonly nodeId: string,
         readonly family: FleetLinkFamily,
-    ) {}
+    ) {
+        this.createdAt = remote.clock();
+    }
 
     get channel(): number {
         return this.number;
@@ -1010,7 +1306,21 @@ export class RemoteFleetLinkChannel implements FleetLinkChannel {
     deliver(message: Json): void {
         if (this.state === 'closed') return;
         if (this.state === 'opening') {
-            if (this.early.length < 1_024) this.early.push(message);
+            if (this.early.length < FLEET_LINK_REMOTE_EARLY_EVENTS) {
+                this.early.push(message);
+                return;
+            }
+            // L8: more than this replica holds before the open was answered.
+            // Dropping silently would hand the caller a stream with a hole in
+            // it; close the channel instead. The holder is told, and the
+            // caller learns it from the open itself (it refuses), so nothing
+            // is emitted here.
+            this.remote.sendOnChannel(this.holder, {
+                op: 'close',
+                ref: this.ref,
+                reason: 'limit_exceeded',
+            });
+            this.end('limit_exceeded', undefined, false);
             return;
         }
         switch (message.op) {

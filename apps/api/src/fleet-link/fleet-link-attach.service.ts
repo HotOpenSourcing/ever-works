@@ -22,6 +22,7 @@ import { describeAgo, fleetLinkError } from './fleet-link.errors';
 import { FleetLinkService, nodeFacts } from './fleet-link.service';
 import {
     FLEET_LINK_REPLAY_GUARD,
+    fleetLinkClaimTtlMs,
     InProcessFleetLinkReplayGuard,
     type FleetLinkReplayGuard,
 } from './fleet-link-token.service';
@@ -84,6 +85,9 @@ export interface FleetLinkViewerMintInput {
 
 const RATE_WINDOW_MS = 60_000;
 
+/** The longest `requirement.target` a viewer token carries; a longer one is refused at mint, never cut. */
+export const FLEET_LINK_VIEWER_MAX_TARGET_LENGTH = 256;
+
 @Injectable()
 export class FleetLinkAttachService {
     private readonly replay: FleetLinkReplayGuard;
@@ -127,6 +131,19 @@ export class FleetLinkAttachService {
         ) {
             throw fleetLinkError('invalid', 'params', {
                 maxBytes: FLEET_LINK_VIEWER_MAX_PARAMS_BYTES,
+            });
+        }
+        // The token must carry the target it was authorised for, whole: a
+        // cut one would open (and audit) a different target than the mint
+        // checked.
+        const target = input.requirement?.target;
+        if (
+            target !== undefined &&
+            target !== null &&
+            (typeof target !== 'string' || target.length > FLEET_LINK_VIEWER_MAX_TARGET_LENGTH)
+        ) {
+            throw fleetLinkError('invalid', 'requirement.target', {
+                maxLength: FLEET_LINK_VIEWER_MAX_TARGET_LENGTH,
             });
         }
         this.admit(input.caller.userId);
@@ -201,7 +218,7 @@ export class FleetLinkAttachService {
         try {
             const fresh = await this.replay.claim(
                 `viewer:${claims.jti}`,
-                Math.max(1, claims.exp - Date.now()),
+                fleetLinkClaimTtlMs(claims.exp),
             );
             if (!fresh) return null;
         } catch {
@@ -244,13 +261,13 @@ export class FleetLinkAttachService {
     }
 }
 
-/** The requirement as a token claim: only its known fields, the target capped. */
+/** The requirement as a token claim: only its known fields (`mint` already refused a target over the cap). */
 function requirementClaim(requirement: Partial<FleetLinkRequirement>): Record<string, unknown> {
     const claim: Record<string, unknown> = {};
     if (requirement.consent !== undefined) claim.consent = requirement.consent;
     if (requirement.actionFamily !== undefined) claim.actionFamily = requirement.actionFamily;
     if (requirement.stateChanging !== undefined) claim.stateChanging = requirement.stateChanging;
-    if (typeof requirement.target === 'string') claim.target = requirement.target.slice(0, 256);
+    if (typeof requirement.target === 'string') claim.target = requirement.target;
     return claim;
 }
 
@@ -262,6 +279,10 @@ function requirementFromClaim(value: unknown): Partial<FleetLinkRequirement> {
     if (isFleetLinkConsentRequirement(claim.consent)) requirement.consent = claim.consent;
     if (isFleetLinkActionFamily(claim.actionFamily)) requirement.actionFamily = claim.actionFamily;
     if (typeof claim.stateChanging === 'boolean') requirement.stateChanging = claim.stateChanging;
-    if (typeof claim.target === 'string') requirement.target = claim.target.slice(0, 256);
+    if (
+        typeof claim.target === 'string' &&
+        claim.target.length <= FLEET_LINK_VIEWER_MAX_TARGET_LENGTH
+    )
+        requirement.target = claim.target;
     return requirement;
 }

@@ -11,7 +11,11 @@ import {
     type FleetLinkChannelOpen,
 } from '@ever-works/contracts';
 import { TerminalAttachService } from '../../terminal/terminal-attach.service';
-import { FleetLinkAttachService } from '../fleet-link-attach.service';
+import {
+    FLEET_LINK_VIEWER_MAX_TARGET_LENGTH,
+    FleetLinkAttachService,
+} from '../fleet-link-attach.service';
+import { FLEET_LINK_CLAIM_SKEW_MARGIN_MS } from '../fleet-link-token.service';
 import { OwnerOnlyFleetLinkAudience } from '../fleet-link-audience';
 import { FleetLinkAuthorizer } from '../fleet-link.authorizer';
 import { FleetLinkGatewayService } from '../fleet-link-gateway.service';
@@ -303,6 +307,67 @@ describe('FleetLinkAttachService — what the token carries', () => {
     });
 });
 
+describe('FleetLinkAttachService — the target it was authorised for', () => {
+    it('refuses a requirement target over the cap at mint, rather than signing a cut one', async () => {
+        const h = core();
+        h.node();
+        const mint = (target: unknown) =>
+            h.attach.mint({
+                nodeId: NODE_ID,
+                family: 'logs',
+                target: 'n-1',
+                role: 'driver',
+                caller: owner,
+                requirement: { target: target as string },
+            });
+        await expect(
+            mint('x'.repeat(FLEET_LINK_VIEWER_MAX_TARGET_LENGTH + 1)),
+        ).rejects.toMatchObject({
+            linkError: {
+                code: 'invalid',
+                hint: 'requirement.target',
+                details: { maxLength: FLEET_LINK_VIEWER_MAX_TARGET_LENGTH },
+            },
+        });
+        await expect(mint(42)).rejects.toMatchObject({ linkError: { code: 'invalid' } });
+        const exact = 'y'.repeat(FLEET_LINK_VIEWER_MAX_TARGET_LENGTH);
+        const { token } = await mint(exact);
+        expect(h.signer.verify(token)!.linkRequirement).toEqual({ target: exact });
+        expect(await h.attach.verify(token, { family: 'logs', target: 'n-1' })).toMatchObject({
+            requirement: { target: exact },
+        });
+    });
+
+    it('holds a token’s single-use claim past its expiry by a clock-skew margin (L4)', async () => {
+        const claims: number[] = [];
+        const h = core();
+        h.node();
+        const attach = new FleetLinkAttachService(
+            h.signer,
+            h.nodes as never,
+            h.authorizer,
+            h.links,
+            {
+                claim: (_jti: string, ttlMs: number) => {
+                    claims.push(ttlMs);
+                    return true;
+                },
+            },
+        );
+        const { token } = await attach.mint({
+            nodeId: NODE_ID,
+            family: 'logs',
+            target: 'n-1',
+            role: 'viewer',
+            caller: owner,
+        });
+        await attach.verify(token, { family: 'logs', target: 'n-1' });
+        expect(claims).toHaveLength(1);
+        expect(claims[0]).toBeGreaterThan(FLEET_LINK_CLAIM_SKEW_MARGIN_MS + 55_000);
+        expect(claims[0]).toBeLessThanOrEqual(FLEET_LINK_CLAIM_SKEW_MARGIN_MS + 60_000);
+    });
+});
+
 describe('FleetLinkAttachService.verify', () => {
     it('accepts a token once, on its own path only, and nothing minted for another socket', async () => {
         const h = core();
@@ -527,6 +592,52 @@ describe('FleetLinkViewerGatewayService', () => {
                 hint: 'build-01 (node 0.3.0) cannot do this yet: logs',
             },
         ]);
+    });
+
+    it('re-authorises at open time: a kill switch thrown between mint and open refuses the channel', async () => {
+        const node = h.node();
+        const { token, wsPath } = await h.attach.mint({
+            nodeId: NODE_ID,
+            family: 'logs',
+            target: NODE_ID,
+            role: 'driver',
+            caller: owner,
+        });
+        h.killSwitch.isStopped.mockResolvedValue(true);
+        const tab = browser(wsPath, token);
+        expect(await tab.closed).toBe(4013);
+        expect(tab.controls).toEqual([
+            expect.objectContaining({ type: 'channel.close', reason: 'kill_switch' }),
+        ]);
+        expect(node.port.controls().some((m) => m.type === 'channel.open')).toBe(false);
+    });
+
+    it('opens a session channel with the viewer’s role as its mode, so the node enforces it too', async () => {
+        const node = h.node();
+        for (const role of ['viewer', 'driver'] as const) {
+            const { token, wsPath } = await h.attach.mint({
+                nodeId: NODE_ID,
+                family: 'session',
+                target: `s-${role}`,
+                role,
+                caller: owner,
+                params: { sessionId: `s-${role}`, mode: 'driver' },
+            });
+            const tab = browser(wsPath, token);
+            await until(
+                () =>
+                    (node.port.last('channel.open') as FleetLinkChannelOpen | undefined)?.params
+                        ?.sessionId === `s-${role}`,
+            );
+            const open = node.answerOpen();
+            // The token's own params cannot widen it: the mode is the role.
+            expect(open).toMatchObject({
+                family: 'session',
+                params: { sessionId: `s-${role}`, mode: role },
+            });
+            await until(() => tab.controls.some((m) => m.type === 'viewer.ready'));
+            tab.socket.close();
+        }
     });
 
     it('closes an unauthenticated socket after 5 s with 4001', async () => {
