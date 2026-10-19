@@ -354,10 +354,10 @@ export class ValkeyRelayBus implements RelayBus {
         this.emitPeer(replicaId, false);
     }
 
-    /** A presence message addressed to `replicaId`, carrying this replica's broadcast sequence. */
-    private sendPresence(replicaId: string, ask: boolean): void {
-        if (!this.isUp()) return;
-        this.send(replicaId, RELAY_BUS_PRESENCE_TOPIC, `${ask ? '?' : ''}${this.sentAll}`);
+    /** A presence message addressed to `replicaId`, carrying this replica's broadcast sequence. False when it could not go out. */
+    private sendPresence(replicaId: string, ask: boolean): boolean {
+        if (!this.isUp()) return false;
+        return this.send(replicaId, RELAY_BUS_PRESENCE_TOPIC, `${ask ? '?' : ''}${this.sentAll}`);
     }
 
     /** Ask a sender this replica holds no broadcast sequence for to send it (at most once a second). */
@@ -409,10 +409,7 @@ export class ValkeyRelayBus implements RelayBus {
             if (presence) {
                 this.lastAll.set(from, Math.max(this.lastAll.get(from) ?? 0, presence.seq));
                 this.asked.delete(from);
-                if (presence.ask) {
-                    this.sendPresence(from, false);
-                    answered = true;
-                }
+                if (presence.ask) answered = this.sendPresence(from, false);
             }
         }
         if (topic === RELAY_BUS_LEAVE_TOPIC) {
@@ -424,16 +421,16 @@ export class ValkeyRelayBus implements RelayBus {
             // it is genuine and fresh, so it is delivered, but the sender is
             // not a peer until the handshake is done.
             this.askForSequence(from);
-        } else {
-            const known = this.heard.has(from);
+        } else if (this.heard.has(from)) {
             this.heard.set(from, this.now());
-            if (!known) {
-                // A newcomer: tell it this replica's sequence (before anything
-                // the peer listeners send it) so it takes this replica's
-                // broadcasts too.
-                if (!answered) this.sendPresence(from, false);
-                this.emitPeer(from, true);
-            }
+        } else if (answered || this.sendPresence(from, false)) {
+            // A newcomer, told this replica's sequence (before anything the
+            // peer listeners send it) so it takes this replica's broadcasts
+            // too. Not a peer while that could not go out (the publisher is
+            // reconnecting): the one-shot "a peer joined" work would be lost
+            // on it. Its next message tries again.
+            this.heard.set(from, this.now());
+            this.emitPeer(from, true);
         }
         if (topic === RELAY_BUS_PRESENCE_TOPIC) return;
         for (const handler of [...(this.handlers.get(topic) ?? [])]) {

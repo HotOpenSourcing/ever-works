@@ -455,9 +455,11 @@ export class FleetLinkRemote implements OnModuleDestroy {
                 ref,
             );
             channel.markOpen(answer.channel, answer.generation);
-            // Closed while the open was being answered (its early buffer
-            // overflowed): the holder was told; the caller gets a refusal.
-            if (channel.isClosed) {
+            // Its early buffer overflowed while the open was being answered:
+            // the holder was told; the caller gets a refusal. (A channel the
+            // node closed right after accepting it is handed back closed —
+            // its listeners already got the real reason.)
+            if (channel.overflowed) {
                 throw fleetLinkError(
                     'limit_exceeded',
                     'the computer sent more than this API replica holds before the channel opened',
@@ -1091,6 +1093,14 @@ export class FleetLinkRemote implements OnModuleDestroy {
                 },
             });
             this.serving.delete(key);
+            // Closed between the node's ack and here (the close went out to
+            // the caller already): nothing to serve.
+            if (channel.isClosed) {
+                this.answer(from, message.rid, {
+                    value: { channel: channel.channel, generation: channel.linkGeneration },
+                });
+                return;
+            }
             if (serving.closed) {
                 // The caller closed (or left) while the node was still
                 // answering: the channel must not stay open on the node.
@@ -1208,6 +1218,7 @@ export class RemoteFleetLinkChannel implements FleetLinkChannel {
     private generation: number | null = null;
     private readonly listeners = new Set<FleetLinkChannelEvents>();
     private early: Json[] = [];
+    private overflow = false;
     /** Epoch ms this side asked for it (the reconciliation's grace). */
     readonly createdAt: number;
 
@@ -1235,6 +1246,11 @@ export class RemoteFleetLinkChannel implements FleetLinkChannel {
 
     get linkGeneration(): number | null {
         return this.generation;
+    }
+
+    /** True when it was closed because the holder sent more than {@link FLEET_LINK_REMOTE_EARLY_EVENTS} before the open was answered. */
+    get overflowed(): boolean {
+        return this.overflow;
     }
 
     request(
@@ -1315,6 +1331,7 @@ export class RemoteFleetLinkChannel implements FleetLinkChannel {
             // it; close the channel instead. The holder is told, and the
             // caller learns it from the open itself (it refuses), so nothing
             // is emitted here.
+            this.overflow = true;
             this.remote.sendOnChannel(this.holder, {
                 op: 'close',
                 ref: this.ref,

@@ -716,6 +716,38 @@ describe('FleetLinkRemote — the holder’s own checks', () => {
         await expect(reply).resolves.toMatchObject({ result: 1 });
     });
 
+    it('hands back a channel the node closed right after accepting it, with the real reason — not as an overflow', async () => {
+        const { a, b } = await twoReplicas();
+        const node = linkNode(a);
+        await until(() => b.remote.isHeldElsewhere(NODE_ID));
+        const reasons: string[] = [];
+        const opening = b.remote.openChannel({
+            nodeId: NODE_ID,
+            family: 'logs',
+            params: {},
+            requirement: LOGS,
+            requestedBy: 'x',
+            events: { close: (reason) => reasons.push(reason) },
+        });
+        await until(() => node.port.controls().some((m) => m.type === 'channel.open'));
+        const open = node.port.last('channel.open') as FleetLinkChannelOpen;
+        // The ack and a close in one chunk: the holder's `closed` goes out
+        // before its answer to the open, and B replays it when the open lands.
+        node.answerOpens();
+        node.session.receive(
+            controlFrame({
+                type: 'channel.close',
+                channel: open.channel,
+                reason: 'unsupported_on_node',
+            }),
+        );
+        const channel = await opening;
+        expect(channel.isClosed).toBe(true);
+        expect(reasons).toEqual(['unsupported_on_node']);
+        // …and the holder keeps no entry for a channel that is already over.
+        expect(internals(a.remote).served.size).toBe(0);
+    });
+
     it('closes a remote channel whose early buffer overflows instead of dropping frames (L8)', async () => {
         const { a, b } = await twoReplicas();
         const node = linkNode(a);

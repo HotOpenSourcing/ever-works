@@ -230,6 +230,38 @@ describe('ValkeyRelayBus — the handshake (a replica that has never heard a sen
         await until(() => seenByA.length === 1);
     });
 
+    it('does not count a sender as a peer while this replica cannot answer it (its publisher is down)', async () => {
+        const hub = new FakeValkey();
+        const b = bus(hub); // hub.clients[0] is b's publisher
+        await until(() => b.health().status === 'up');
+        const changes: Array<[string, boolean]> = [];
+        b.onPeerChange((replicaId, present) => changes.push([replicaId, present]));
+        const key = relayBusKey(TEST_RELAY_SECRET)!;
+        const sender = newRelayReplicaId('00000000-0000-4000-8000-0000000000aa');
+        const spy = hub.client();
+        const askB = (seq: number) =>
+            spy.publish(
+                `ew:relay:${relayBusNamespace(key)}:to:${b.replicaId}`,
+                encodeRelayEnvelope(key, {
+                    from: sender,
+                    to: b.replicaId,
+                    topic: 'relay.presence',
+                    seq,
+                    body: '?7',
+                }),
+            );
+        hub.clients[0].cut();
+        await askB(1);
+        await flushBus(10);
+        // Its answer could not go out: no peer yet, so the one-shot "a peer
+        // joined" work (directory sync, drain re-sends) is not spent on it.
+        expect(changes).toEqual([]);
+        expect(b.peers()).not.toContain(sender);
+        hub.clients[0].restore();
+        await askB(2);
+        await until(() => changes.some(([replicaId, present]) => replicaId === sender && present));
+    });
+
     it('reads a presence body: the sender’s sequence, `?` when it asks for ours', () => {
         expect(parseRelayPresenceBody('17')).toEqual({ seq: 17, ask: false });
         expect(parseRelayPresenceBody('?0')).toEqual({ seq: 0, ask: true });

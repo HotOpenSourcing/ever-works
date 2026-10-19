@@ -76,6 +76,10 @@ export class RelayTerminalFanoutBus implements TerminalFanoutBus {
     ) {}
 
     publishRemote(runId: string, wire: string): void {
+        // A run first seen from a peer whose worker now publishes HERE (it
+        // reconnected to this replica) is alive: its idle clock restarts.
+        const tracked = this.remoteRuns.get(runId);
+        if (tracked) tracked.lastFrameAt = this.now();
         this.bus.publish(RELAY_TERMINAL_TOPIC, encodePair(runId, wire));
     }
 
@@ -120,8 +124,12 @@ export class RelayTerminalFanoutBus implements TerminalFanoutBus {
             if (!status.ended) {
                 tracked.endedSeenAt = null;
                 if (now - tracked.lastFrameAt < RELAY_TERMINAL_REMOTE_IDLE_MS) continue;
-                if (registry.reclaim(runId, { force: true })) released += 1;
-                this.remoteRuns.delete(runId);
+                // Never ended here: only the idle release frees it. Tracking
+                // is dropped only once the session really is gone.
+                if (registry.reclaim(runId, { idleRelease: true })) {
+                    released += 1;
+                    this.remoteRuns.delete(runId);
+                }
                 continue;
             }
             if (tracked.endedSeenAt === null) {
@@ -129,8 +137,10 @@ export class RelayTerminalFanoutBus implements TerminalFanoutBus {
                 continue;
             }
             if (now - tracked.endedSeenAt < RELAY_TERMINAL_REMOTE_RETENTION_MS) continue;
-            if (registry.reclaim(runId, { force: true })) released += 1;
-            this.remoteRuns.delete(runId);
+            if (registry.reclaim(runId, { force: true })) {
+                released += 1;
+                this.remoteRuns.delete(runId);
+            }
         }
         return released;
     }

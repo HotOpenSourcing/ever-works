@@ -73,15 +73,19 @@ describe('createRelayBus', () => {
         }
     });
 
-    it('reads FLEET_RELAY_BUS_ENABLED as on unless it is exactly false', () => {
+    it('reads FLEET_RELAY_BUS_ENABLED as on unless it says false, 0 or off (any case)', () => {
         const original = process.env.FLEET_RELAY_BUS_ENABLED;
         try {
             delete process.env.FLEET_RELAY_BUS_ENABLED;
             expect(config.fleet.isRelayBusEnabled()).toBe(true);
-            process.env.FLEET_RELAY_BUS_ENABLED = 'true';
-            expect(config.fleet.isRelayBusEnabled()).toBe(true);
-            process.env.FLEET_RELAY_BUS_ENABLED = 'false';
-            expect(config.fleet.isRelayBusEnabled()).toBe(false);
+            for (const on of ['true', '1', 'on', 'TRUE', 'yes', '']) {
+                process.env.FLEET_RELAY_BUS_ENABLED = on;
+                expect(config.fleet.isRelayBusEnabled()).toBe(true);
+            }
+            for (const off of ['false', 'FALSE', 'False', '0', 'off', 'OFF', ' off ']) {
+                process.env.FLEET_RELAY_BUS_ENABLED = off;
+                expect(config.fleet.isRelayBusEnabled()).toBe(false);
+            }
         } finally {
             if (original === undefined) delete process.env.FLEET_RELAY_BUS_ENABLED;
             else process.env.FLEET_RELAY_BUS_ENABLED = original;
@@ -196,6 +200,35 @@ function lifecycleWith(bus: Partial<RelayBus>, signals: SignalDouble) {
     );
 }
 
+describe('RelayBusLifecycle: the boot log', () => {
+    it('warns, with the bus switched off over a Redis URL, that single-use tokens become per-process', () => {
+        const original = {
+            url: process.env.REDIS_URL,
+            enabled: process.env.FLEET_RELAY_BUS_ENABLED,
+        };
+        const warn = jest
+            .spyOn(require('@nestjs/common').Logger.prototype, 'warn')
+            .mockImplementation(() => undefined);
+        try {
+            process.env.REDIS_URL = 'redis://valkey:6379';
+            process.env.FLEET_RELAY_BUS_ENABLED = 'off';
+            lifecycleWith({ mode: 'single-replica' }, new SignalDouble()).onApplicationBootstrap();
+            const lines = warn.mock.calls.map((call) => String(call[0])).join('\n');
+            expect(lines).toContain('FLEET_RELAY_BUS_ENABLED');
+            expect(lines).toContain('once per replica');
+        } finally {
+            warn.mockRestore();
+            for (const [name, value] of [
+                ['REDIS_URL', original.url],
+                ['FLEET_RELAY_BUS_ENABLED', original.enabled],
+            ] as const) {
+                if (value === undefined) delete process.env[name];
+                else process.env[name] = value;
+            }
+        }
+    });
+});
+
 describe('RelayBusLifecycle: the goodbye on SIGTERM (no app-wide shutdown hooks)', () => {
     it('closes the bus (its leave goes out), then re-raises the signal so the process ends as before', async () => {
         const signals = new SignalDouble();
@@ -256,7 +289,7 @@ describe('RelayBusLifecycle: the goodbye on SIGTERM (no app-wide shutdown hooks)
     });
 });
 
-describe('RelayTerminalFanoutBus: remote-created runs released', () => {
+describe('RelayTerminalFanoutBus: remote-created runs released (real TerminalRelayRegistry)', () => {
     function seam() {
         let deliver: ((body: string, from: string) => void) | null = null;
         const bus = {
@@ -268,24 +301,21 @@ describe('RelayTerminalFanoutBus: remote-created runs released', () => {
         } as unknown as RelayBus;
         let now = 1_000_000;
         const fanout = new RelayTerminalFanoutBus(bus, () => now);
-        fanout.onRemote(() => undefined);
-        const frame = (runId: string) => deliver!(JSON.stringify([runId, 'wire']), 'r-peer');
-        const status = new Map<string, { exists: boolean; ended: boolean; clientCount: number }>();
-        const reclaimed: string[] = [];
-        const registry = {
-            getStatus: (runId: string) =>
-                status.get(runId) ?? { exists: false, ended: false, clientCount: 0 },
-            reclaim: (runId: string) => {
-                reclaimed.push(runId);
-                return true;
-            },
-        } as never;
+        const registry = new TerminalRelayRegistry(fanout);
+        let seq = 0;
+        const stdout = (): TerminalFrame => ({
+            kind: 'stdout',
+            seq: seq++,
+            data: Buffer.from('x').toString('base64'),
+        });
+        /** A frame of `runId` published on a PEER replica. */
+        const remote = (runId: string, frame: TerminalFrame = stdout()) =>
+            deliver!(JSON.stringify([runId, encodeTerminalFrame(frame)]), 'r-peer');
         return {
             fanout,
-            frame,
-            status,
-            reclaimed,
             registry,
+            remote,
+            stdout,
             advance: (ms: number) => {
                 now += ms;
             },
@@ -294,30 +324,54 @@ describe('RelayTerminalFanoutBus: remote-created runs released', () => {
 
     it('releases a run that never ended here once it was silent for an hour with nobody watching', () => {
         const h = seam();
-        h.frame('run-orphan');
-        h.status.set('run-orphan', { exists: true, ended: false, clientCount: 0 });
+        h.remote('run-orphan');
+        expect(h.registry.getStatus('run-orphan')).toMatchObject({ exists: true, ended: false });
         h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
         expect(h.fanout.sweep(h.registry)).toBe(0);
-        h.frame('run-orphan'); // still alive: the clock restarts
+        h.remote('run-orphan'); // still alive: the clock restarts
         h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
         expect(h.fanout.sweep(h.registry)).toBe(0);
         h.advance(1);
         expect(h.fanout.sweep(h.registry)).toBe(1);
-        expect(h.reclaimed).toEqual(['run-orphan']);
+        expect(h.registry.getStatus('run-orphan').exists).toBe(false);
         expect(h.fanout.trackedRuns).toBe(0);
     });
 
-    it('keeps a silent run somebody here watches, and releases an ended one after the retention', () => {
+    it('keeps a run alive whose worker now publishes on THIS replica', () => {
         const h = seam();
-        h.frame('run-watched');
-        h.frame('run-ended');
-        h.status.set('run-watched', { exists: true, ended: false, clientCount: 1 });
-        h.status.set('run-ended', { exists: true, ended: true, clientCount: 0 });
+        h.remote('run-moved');
+        h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
+        // The worker reconnected here: its frames are published locally.
+        expect(h.registry.publish('run-moved', h.stdout())).toBe(true);
+        h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
+        expect(h.fanout.sweep(h.registry)).toBe(0);
+        expect(h.registry.getStatus('run-moved').exists).toBe(true);
+        expect(h.fanout.trackedRuns).toBe(1);
+    });
+
+    it('never releases a run somebody here watches, and keeps tracking it', () => {
+        const h = seam();
+        h.remote('run-watched');
+        h.registry.attach('run-watched', { id: 'tab-1', role: 'viewer', send: () => undefined });
         h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS * 2);
+        expect(h.fanout.sweep(h.registry)).toBe(0);
+        expect(h.registry.getStatus('run-watched').exists).toBe(true);
+        expect(h.fanout.trackedRuns).toBe(1);
+        // Once the viewer leaves and the run stays silent, it goes.
+        h.registry.detach('run-watched', 'tab-1');
+        expect(h.fanout.sweep(h.registry)).toBe(1);
+        expect(h.registry.getStatus('run-watched').exists).toBe(false);
+    });
+
+    it('releases an ended run after the retention', () => {
+        const h = seam();
+        h.remote('run-ended');
+        h.remote('run-ended', { kind: 'exit', code: 0, reason: 'completed' });
+        expect(h.registry.getStatus('run-ended').ended).toBe(true);
         expect(h.fanout.sweep(h.registry)).toBe(0); // ended: first seen now
         h.advance(RELAY_TERMINAL_REMOTE_RETENTION_MS);
         expect(h.fanout.sweep(h.registry)).toBe(1);
-        expect(h.reclaimed).toEqual(['run-ended']);
-        expect(h.fanout.trackedRuns).toBe(1);
+        expect(h.registry.getStatus('run-ended').exists).toBe(false);
+        expect(h.fanout.trackedRuns).toBe(0);
     });
 });

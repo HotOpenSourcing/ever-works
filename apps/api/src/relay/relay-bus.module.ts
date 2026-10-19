@@ -29,8 +29,9 @@ export const RELAY_BUS_REQUIRED_MESSAGE =
 
 /** What the boot log says when an operator switched the bus off (`FLEET_RELAY_BUS_ENABLED=false`). */
 export const RELAY_BUS_DISABLED_MESSAGE =
-    'Relay bus: off (FLEET_RELAY_BUS_ENABLED=false) — the terminal relay, the computer live view and node links ' +
-    'serve this process only, although a Redis URL is configured';
+    'Relay bus: off (FLEET_RELAY_BUS_ENABLED) — the terminal relay, the computer live view and node links ' +
+    'serve this process only, although a Redis URL is configured; single-use link and viewer tokens are ' +
+    'claimed per process, so with several replicas one token can be accepted once per replica';
 
 /**
  * Pick the relay bus (CONTRACTS R-7): Valkey exactly when a Redis URL is
