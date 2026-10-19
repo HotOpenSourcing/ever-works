@@ -41,7 +41,8 @@ export const APP_UPSTREAM_WORKFLOW_PATHS_MAX = 100;
 export const APP_UPSTREAM_COMPARE_MAX_FILES = 300;
 
 /** Operator switch naming the App Works whose upstream sync may carry workflow changes unheld. */
-export const APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS_ENV = 'APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS';
+export const APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS_ENV =
+    'APP_UPSTREAM_WORKFLOW_CHANGES_ALLOWED_WORKS';
 
 /** What one upstream range does to the protected paths. */
 export interface UpstreamWorkflowChanges {
