@@ -428,10 +428,11 @@ export class ValkeyRelayBus implements RelayBus {
             const known = this.heard.has(from);
             this.heard.set(from, this.now());
             if (!known) {
-                this.emitPeer(from, true);
-                // A newcomer: tell it this replica's sequence so it can take
-                // this replica's broadcasts too.
+                // A newcomer: tell it this replica's sequence (before anything
+                // the peer listeners send it) so it takes this replica's
+                // broadcasts too.
                 if (!answered) this.sendPresence(from, false);
+                this.emitPeer(from, true);
             }
         }
         if (topic === RELAY_BUS_PRESENCE_TOPIC) return;
