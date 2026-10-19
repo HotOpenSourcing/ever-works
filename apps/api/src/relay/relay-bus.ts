@@ -25,7 +25,11 @@ import { createHash, createHmac, timingSafeEqual } from 'crypto';
  * bus. Every message is SIGNED with a key derived from the secret the replicas
  * already share and carries a per-sender sequence, so a client that can merely
  * publish to the Valkey server can neither forge a replica's message nor
- * replay one; the channels are namespaced by that key. Payloads are never
+ * replay one; the channels are namespaced by that key. A replica that has
+ * never heard a sender learns that sender's broadcast sequence from a message
+ * addressed to it (its id is new per process, so no such message can predate
+ * it) before it accepts any broadcast — so even a brand-new replica cannot be
+ * fed a broadcast captured earlier (see `ValkeyRelayBus`). Payloads are never
  * logged.
  */
 
@@ -103,7 +107,13 @@ export function isRelayReplicaId(value: unknown): value is string {
 
 /** Separator of the envelope fields; never inside a replica id, a topic or a number. */
 const SEPARATOR = '';
-const ENVELOPE_VERSION = '2';
+/**
+ * `3`: a replica accepts a sender's broadcasts only once it holds that
+ * sender's broadcast sequence from an addressed presence message (the
+ * handshake). A `2` replica, which trusted the first broadcast it heard, is
+ * not understood.
+ */
+const ENVELOPE_VERSION = '3';
 
 /** One message on the bus, as the receiving replica sees it once its signature checked out. */
 export interface RelayEnvelope {
@@ -148,7 +158,7 @@ function macOf(key: Buffer, fields: string): string {
     return createHmac('sha256', key).update(fields).digest('base64url');
 }
 
-/** `2␟from␟to␟topic␟seq␟mac␟body`, the MAC over every other field. */
+/** `3␟from␟to␟topic␟seq␟mac␟body`, the MAC over every other field. */
 export function encodeRelayEnvelope(key: Buffer, envelope: RelayEnvelope): string {
     const head = [
         ENVELOPE_VERSION,

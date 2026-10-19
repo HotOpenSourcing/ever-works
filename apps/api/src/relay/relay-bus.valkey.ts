@@ -38,6 +38,20 @@ import {
  * also read it cannot replay what it read. Without a secret the bus carries
  * nothing and reads `degraded` (fail-closed).
  *
+ * **The handshake** closes the gap a sequence alone leaves: a replica that has
+ * never heard a sender has no sequence to compare a broadcast with, so a
+ * broadcast captured before it started would pass. A replica therefore never
+ * accepts a broadcast from a sender it holds no broadcast sequence for; it
+ * drops it and asks that sender, in a message addressed to it, for its
+ * sequence. The answer is addressed to this replica's id — random per process,
+ * so no message addressed to it can predate it, and its own per-sender
+ * sequence refuses a replay — and carries the sender's broadcast sequence at
+ * the time it answered; only broadcasts above it are accepted. Every presence
+ * message addressed to a replica carries the sender's sequence the same way.
+ * A sender is a peer only once this handshake is done. A signed timestamp
+ * would add a clock-skew failure mode and still admit a capture made seconds
+ * before the receiver started, so there is none.
+ *
  * Presence: a beacon every {@link RELAY_BUS_PRESENCE_INTERVAL_MS} (and a short
  * burst at start, and whenever a connection comes back); a newcomer's beacon
  * is answered at once; a replica not heard from for
@@ -47,11 +61,11 @@ import {
  * Broadcasts are skipped while nobody else is there.
  *
  * The publisher keeps no offline queue: while Valkey is unreachable a publish
- * is dropped (relays are live, not durable) and `claimOnce` throws — except
- * for a replica that has never heard a peer (a single replica on a shared
- * Redis), whose claims are then kept in this process until the bus is back.
- * ioredis reconnects on its own; health reads `degraded` meanwhile. The URL
- * is never logged — it may carry a password.
+ * is dropped (relays are live, not durable) and `claimOnce` throws, on every
+ * replica — a single-use token is refused, never accepted once per replica.
+ * (A deployment with no Redis URL at all runs the in-process bus, whose
+ * claims are this process's.) ioredis reconnects on its own; health reads
+ * `degraded` meanwhile. The URL is never logged — it may carry a password.
  */
 
 /** The ioredis surface this bus uses — what the spec's double implements. */
@@ -78,6 +92,20 @@ export interface ValkeyRelayBusOptions {
 
 /** Extra beacons right after start, so two replicas starting together find each other fast. */
 const STARTUP_BEACONS_MS = [250, 1_000, 2_500];
+
+/** A replica asks one sender for its broadcast sequence at most this often. */
+export const RELAY_BUS_HANDSHAKE_RETRY_MS = 1_000;
+
+/**
+ * The body of a presence message addressed to one replica: the sender's
+ * broadcast sequence when it sent it, `?`-prefixed when the sender also asks
+ * for the receiver's (the handshake). Null for anything else.
+ */
+export function parseRelayPresenceBody(body: string): { seq: number; ask: boolean } | null {
+    const match = /^(\?)?([0-9]{1,15})$/.exec(body);
+    if (!match) return null;
+    return { seq: Number(match[2]), ask: match[1] === '?' };
+}
 
 export function createDefaultRelayRedisClient(
     url: string,
@@ -116,12 +144,15 @@ export class ValkeyRelayBus implements RelayBus {
     /** Sequences this replica sends: the broadcast's, and one per addressee. */
     private sentAll = 0;
     private readonly sentTo = new Map<string, number>();
-    /** Highest sequence received from each sender, per channel. */
+    /**
+     * Highest sequence received from each sender, per channel. A sender with
+     * no `lastAll` entry has not completed the handshake: its broadcasts are
+     * dropped and it is not a peer.
+     */
     private readonly lastAll = new Map<string, number>();
     private readonly lastDirect = new Map<string, number>();
-    /** Claims kept here while the bus is down and no peer was ever heard. */
-    private readonly localClaims = new Map<string, number>();
-    private everHeardPeer = false;
+    /** When this replica last asked each sender for its broadcast sequence. */
+    private readonly asked = new Map<string, number>();
     private closed = false;
     private lastErrorLogAt = 0;
 
@@ -218,28 +249,21 @@ export class ValkeyRelayBus implements RelayBus {
     }
 
     async claimOnce(key: string, ttlMs: number): Promise<boolean> {
-        const ttl = Math.max(1, Math.ceil(ttlMs));
-        if (this.key && this.publisher.status === 'ready' && !this.closed) {
-            const answer = await this.publisher.set(
-                `${this.channelPrefix}once:${key}`,
-                '1',
-                'PX',
-                ttl,
-                'NX',
-            );
-            return answer === 'OK';
+        // Fail closed: a configured bus that cannot answer refuses the claim
+        // (and so the token) on every replica. Claims kept in this process
+        // while Valkey is down would let one token be accepted once per
+        // replica, and would never reach Valkey afterwards.
+        if (!this.key || this.publisher.status !== 'ready' || this.closed) {
+            throw new Error('the relay bus is not connected');
         }
-        // Down. A replica that has never heard another keeps its claims here
-        // (a single replica on a shared Redis keeps working); one that has
-        // peers fails closed — a token is refused rather than accepted twice.
-        if (this.everHeardPeer || !this.key) throw new Error('the relay bus is not connected');
-        const now = this.now();
-        for (const [held, until] of this.localClaims)
-            if (until <= now) this.localClaims.delete(held);
-        const until = this.localClaims.get(key);
-        if (until !== undefined && until > now) return false;
-        this.localClaims.set(key, now + ttl);
-        return true;
+        const answer = await this.publisher.set(
+            `${this.channelPrefix}once:${key}`,
+            '1',
+            'PX',
+            Math.max(1, Math.ceil(ttlMs)),
+            'NX',
+        );
+        return answer === 'OK';
     }
 
     async close(): Promise<void> {
@@ -330,9 +354,26 @@ export class ValkeyRelayBus implements RelayBus {
         this.emitPeer(replicaId, false);
     }
 
+    /** A presence message addressed to `replicaId`, carrying this replica's broadcast sequence. */
+    private sendPresence(replicaId: string, ask: boolean): void {
+        if (!this.isUp()) return;
+        this.send(replicaId, RELAY_BUS_PRESENCE_TOPIC, `${ask ? '?' : ''}${this.sentAll}`);
+    }
+
+    /** Ask a sender this replica holds no broadcast sequence for to send it (at most once a second). */
+    private askForSequence(replicaId: string): void {
+        const now = this.now();
+        const last = this.asked.get(replicaId);
+        if (last !== undefined && now - last < RELAY_BUS_HANDSHAKE_RETRY_MS) return;
+        this.asked.delete(replicaId);
+        this.asked.set(replicaId, now);
+        this.boundSequences();
+        this.sendPresence(replicaId, true);
+    }
+
     /** Sequence tables grow by one entry per replica ever heard; past 10 000, forget the oldest. */
     private boundSequences(): void {
-        for (const table of [this.lastAll, this.lastDirect, this.sentTo]) {
+        for (const table of [this.lastAll, this.lastDirect, this.sentTo, this.asked]) {
             while (table.size > 10_000) {
                 const oldest = table.keys().next().value;
                 if (oldest === undefined) break;
@@ -349,21 +390,49 @@ export class ValkeyRelayBus implements RelayBus {
         if (!envelope || envelope.from === this.replicaId) return;
         // The destination is signed too: a broadcast cannot be replayed as a direct message, nor the reverse.
         if (envelope.to !== (direct ? this.replicaId : 'all')) return;
-        const last = direct ? this.lastDirect : this.lastAll;
-        if (envelope.seq <= (last.get(envelope.from) ?? 0)) return;
-        last.set(envelope.from, envelope.seq);
         const { from, topic, body } = envelope;
+        if (!direct && !this.lastAll.has(from)) {
+            // No handshake with this sender yet: nothing to compare the
+            // sequence with, so the broadcast could be a capture. Drop it and
+            // ask the sender, addressed, for its sequence.
+            this.askForSequence(from);
+            return;
+        }
+        const last = direct ? this.lastDirect : this.lastAll;
+        if (envelope.seq <= (last.get(from) ?? 0)) return;
+        last.set(from, envelope.seq);
+        let answered = false;
+        if (direct && topic === RELAY_BUS_PRESENCE_TOPIC) {
+            // Addressed to this process, so sent after it started: the
+            // sender's broadcast sequence it carries is a safe floor.
+            const presence = parseRelayPresenceBody(body);
+            if (presence) {
+                this.lastAll.set(from, Math.max(this.lastAll.get(from) ?? 0, presence.seq));
+                this.asked.delete(from);
+                if (presence.ask) {
+                    this.sendPresence(from, false);
+                    answered = true;
+                }
+            }
+        }
         if (topic === RELAY_BUS_LEAVE_TOPIC) {
             this.peerGone(from);
             return;
         }
-        const known = this.heard.has(from);
-        this.heard.set(from, this.now());
-        if (!known) {
-            this.everHeardPeer = true;
-            this.emitPeer(from, true);
-            // A newcomer: answer its beacon directly so it knows this replica now.
-            if (this.isUp()) this.send(from, RELAY_BUS_PRESENCE_TOPIC, '');
+        if (!this.lastAll.has(from)) {
+            // An addressed message from a sender still without a handshake:
+            // it is genuine and fresh, so it is delivered, but the sender is
+            // not a peer until the handshake is done.
+            this.askForSequence(from);
+        } else {
+            const known = this.heard.has(from);
+            this.heard.set(from, this.now());
+            if (!known) {
+                this.emitPeer(from, true);
+                // A newcomer: tell it this replica's sequence so it can take
+                // this replica's broadcasts too.
+                if (!answered) this.sendPresence(from, false);
+            }
         }
         if (topic === RELAY_BUS_PRESENCE_TOPIC) return;
         for (const handler of [...(this.handlers.get(topic) ?? [])]) {

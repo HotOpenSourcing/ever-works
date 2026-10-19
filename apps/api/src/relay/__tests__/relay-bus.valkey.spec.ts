@@ -9,7 +9,7 @@ import {
     type RelayBus,
 } from '../relay-bus';
 import { InProcessRelayBus } from '../relay-bus.in-process';
-import { ValkeyRelayBus, type RelayRedisClient } from '../relay-bus.valkey';
+import { parseRelayPresenceBody, ValkeyRelayBus, type RelayRedisClient } from '../relay-bus.valkey';
 import { FakeValkey, flushBus, TEST_RELAY_SECRET } from './relay-test-kit';
 
 /**
@@ -165,6 +165,81 @@ describe('ValkeyRelayBus — what it refuses', () => {
     });
 });
 
+describe('ValkeyRelayBus — the handshake (a replica that has never heard a sender)', () => {
+    function bus(hub: FakeValkey) {
+        const created = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: () => hub.client(),
+        });
+        buses.push(created);
+        return created;
+    }
+
+    it('refuses a broadcast captured before it started, before AND after the handshake', async () => {
+        const hub = new FakeValkey();
+        const a = bus(hub);
+        const b = bus(hub);
+        await until(() => a.peers().includes(b.replicaId) && b.peers().includes(a.replicaId));
+        // Capture a genuine broadcast of A's (as anyone who can read the server could).
+        const raw: Array<[string, string]> = [];
+        const spy = hub.client();
+        spy.on('message', (channel: string, message: string) => raw.push([channel, message]));
+        const namespace = relayBusNamespace(relayBusKey(TEST_RELAY_SECRET)!);
+        await spy.subscribe(`ew:relay:${namespace}:all`);
+        const seenByB: string[] = [];
+        b.subscribe('test.topic', (body) => seenByB.push(body));
+        a.publish('test.topic', 'drain everything');
+        await until(() => seenByB.length === 1 && raw.some(([, m]) => m.includes('drain')));
+        const [channel, captured] = raw.find(([, m]) => m.includes('drain'))!;
+
+        // A brand-new replica: it holds no sequence for A, so the replay
+        // would have passed a sequence check alone.
+        const c = bus(hub);
+        const seenByC: string[] = [];
+        c.subscribe('test.topic', (body) => seenByC.push(body));
+        await spy.publish(channel, captured);
+        await flushBus(10);
+        expect(seenByC).toEqual([]);
+        // After the handshake C holds A's sequence at the time A answered:
+        // the capture is below it, so it is still refused.
+        await until(() => c.peers().includes(a.replicaId));
+        await spy.publish(channel, captured);
+        await flushBus(10);
+        expect(seenByC).toEqual([]);
+        // …and what A sends from now on is delivered.
+        a.publish('test.topic', 'fresh');
+        await until(() => seenByC.length === 1);
+        expect(seenByC).toEqual(['fresh']);
+    });
+
+    it('makes a sender a peer only once the handshake is done, on both sides', async () => {
+        const hub = new FakeValkey();
+        const a = bus(hub);
+        const joined: string[] = [];
+        a.onPeerChange((replicaId, present) => {
+            if (present) joined.push(replicaId);
+        });
+        const b = bus(hub);
+        await until(() => a.peers().includes(b.replicaId) && b.peers().includes(a.replicaId));
+        expect(joined).toEqual([b.replicaId]);
+        // Both directions carry broadcasts.
+        const seenByA: string[] = [];
+        a.subscribe('test.topic', (body) => seenByA.push(body));
+        b.publish('test.topic', 'from b');
+        await until(() => seenByA.length === 1);
+    });
+
+    it('reads a presence body: the sender’s sequence, `?` when it asks for ours', () => {
+        expect(parseRelayPresenceBody('17')).toEqual({ seq: 17, ask: false });
+        expect(parseRelayPresenceBody('?0')).toEqual({ seq: 0, ask: true });
+        expect(parseRelayPresenceBody('')).toBeNull();
+        expect(parseRelayPresenceBody('?')).toBeNull();
+        expect(parseRelayPresenceBody('-1')).toBeNull();
+        expect(parseRelayPresenceBody('1e9')).toBeNull();
+    });
+});
+
 describe('InProcessRelayBus', () => {
     it('has no peers, sends nothing, and holds a claim in this process', async () => {
         let now = 0;
@@ -255,6 +330,23 @@ describe('ValkeyRelayBus — a lost connection', () => {
         b.subscribe('test.topic', (body) => seen.push(body));
         a.publish('test.topic', 'back');
         await until(() => seen.length === 1);
+    });
+
+    it('refuses a claim while down even if it never heard a peer — one token is never accepted once per replica', async () => {
+        const hub = new FakeValkey();
+        const lonely = new ValkeyRelayBus({
+            secret: TEST_RELAY_SECRET,
+            url: 'redis://fake',
+            createClient: () => hub.client(),
+        });
+        buses.push(lonely);
+        expect(lonely.peers()).toEqual([]);
+        hub.cutAll();
+        await expect(lonely.claimOnce('jti-lonely', 1_000)).rejects.toThrow('not connected');
+        hub.restoreAll();
+        // Back: the claim is made on Valkey, so it holds for every replica.
+        expect(await lonely.claimOnce('jti-lonely', 1_000)).toBe(true);
+        expect(await lonely.claimOnce('jti-lonely', 1_000)).toBe(false);
     });
 
     it('logs a connection error at most once a minute and never the URL', async () => {

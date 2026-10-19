@@ -1,10 +1,23 @@
+import { EventEmitter } from 'events';
+import { config } from '@ever-works/agent/config';
 import { encodeTerminalFrame, type TerminalFrame } from '@ever-works/contracts';
 import { ComputerRelayRegistry } from '../../computer/computer-relay.registry';
 import { TerminalRelayRegistry } from '../../terminal/terminal-relay.registry';
-import { createRelayBus, RELAY_BUS_REQUIRED_MESSAGE } from '../relay-bus.module';
+import type { RelayBus } from '../relay-bus';
+import {
+    createRelayBus,
+    RELAY_BUS_REQUIRED_MESSAGE,
+    RelayBusLifecycle,
+    type RelayBusSignalProcess,
+} from '../relay-bus.module';
 import { InProcessRelayBus } from '../relay-bus.in-process';
 import { ValkeyRelayBus } from '../relay-bus.valkey';
-import { RelayComputerFanoutBus, RelayTerminalFanoutBus } from '../relay-fanout';
+import {
+    RELAY_TERMINAL_REMOTE_IDLE_MS,
+    RELAY_TERMINAL_REMOTE_RETENTION_MS,
+    RelayComputerFanoutBus,
+    RelayTerminalFanoutBus,
+} from '../relay-fanout';
 import { FakeValkey, flushBus, TEST_RELAY_SECRET } from './relay-test-kit';
 
 /**
@@ -46,6 +59,33 @@ describe('createRelayBus', () => {
         expect(bus).toBeInstanceOf(ValkeyRelayBus);
         expect(bus.mode).toBe('valkey');
         expect(bus.health()).toMatchObject({ configured: true, mode: 'valkey' });
+    });
+
+    it('stays in-process with a Redis URL when the operator switched the bus off, even where it is required', () => {
+        for (const required of [false, true]) {
+            const bus = createRelayBus({ url: 'redis://valkey:6379', required, enabled: false });
+            expect(bus).toBeInstanceOf(InProcessRelayBus);
+            expect(bus.health()).toEqual({
+                configured: false,
+                mode: 'single-replica',
+                status: 'up',
+            });
+        }
+    });
+
+    it('reads FLEET_RELAY_BUS_ENABLED as on unless it is exactly false', () => {
+        const original = process.env.FLEET_RELAY_BUS_ENABLED;
+        try {
+            delete process.env.FLEET_RELAY_BUS_ENABLED;
+            expect(config.fleet.isRelayBusEnabled()).toBe(true);
+            process.env.FLEET_RELAY_BUS_ENABLED = 'true';
+            expect(config.fleet.isRelayBusEnabled()).toBe(true);
+            process.env.FLEET_RELAY_BUS_ENABLED = 'false';
+            expect(config.fleet.isRelayBusEnabled()).toBe(false);
+        } finally {
+            if (original === undefined) delete process.env.FLEET_RELAY_BUS_ENABLED;
+            else process.env.FLEET_RELAY_BUS_ENABLED = original;
+        }
     });
 
     it('fails boot with a message naming FLEET_RELAY_REQUIRE_BUS when a required bus is missing', () => {
@@ -129,5 +169,155 @@ describe('the computer relay over the bus', () => {
         a.publish('relay.computer', JSON.stringify(['ok', 'wire']));
         await until(() => seen.length === 1);
         expect(seen).toEqual([['ok', 'wire']]);
+    });
+});
+
+/** A `process` double: signals delivered by hand, `kill` recorded. */
+class SignalDouble extends EventEmitter implements RelayBusSignalProcess {
+    readonly pid = 4242;
+    readonly killed: Array<[number, NodeJS.Signals]> = [];
+    kill(pid: number, signal: NodeJS.Signals): boolean {
+        this.killed.push([pid, signal]);
+        return true;
+    }
+}
+
+function lifecycleWith(bus: Partial<RelayBus>, signals: SignalDouble) {
+    return new RelayBusLifecycle(
+        {
+            mode: 'valkey',
+            replicaId: 'r-x',
+            close: jest.fn(async () => undefined),
+            ...bus,
+        } as RelayBus,
+        { publishRemote: () => undefined, onRemote: () => undefined },
+        {} as never,
+        signals,
+    );
+}
+
+describe('RelayBusLifecycle: the goodbye on SIGTERM (no app-wide shutdown hooks)', () => {
+    it('closes the bus (its leave goes out), then re-raises the signal so the process ends as before', async () => {
+        const signals = new SignalDouble();
+        const close = jest.fn(async () => undefined);
+        const lifecycle = lifecycleWith({ close }, signals);
+        lifecycle.onApplicationBootstrap();
+        expect(signals.listenerCount('SIGTERM')).toBe(1);
+        expect(signals.listenerCount('SIGINT')).toBe(1);
+        signals.emit('SIGTERM');
+        await flushBus();
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(signals.killed).toEqual([[4242, 'SIGTERM']]);
+        // Both listeners are gone: a second signal gets Node's default at once.
+        expect(signals.listenerCount('SIGTERM')).toBe(0);
+        expect(signals.listenerCount('SIGINT')).toBe(0);
+    });
+
+    it('leaves the signal to another listener when there is one (as it would without this hook)', async () => {
+        const signals = new SignalDouble();
+        const close = jest.fn(async () => undefined);
+        const other = jest.fn();
+        signals.on('SIGTERM', other);
+        lifecycleWith({ close }, signals).onApplicationBootstrap();
+        signals.emit('SIGTERM');
+        await flushBus();
+        expect(close).toHaveBeenCalledTimes(1);
+        expect(other).toHaveBeenCalledTimes(1);
+        expect(signals.killed).toEqual([]);
+    });
+
+    it('never holds the exit up for long: a goodbye that hangs is abandoned', async () => {
+        jest.useFakeTimers();
+        try {
+            const signals = new SignalDouble();
+            const lifecycle = lifecycleWith(
+                { close: () => new Promise<void>(() => undefined) },
+                signals,
+            );
+            lifecycle.onApplicationBootstrap();
+            const done = lifecycle.onSignal('SIGTERM');
+            await jest.advanceTimersByTimeAsync(2_000);
+            await done;
+            expect(signals.killed).toEqual([[4242, 'SIGTERM']]);
+        } finally {
+            jest.useRealTimers();
+        }
+    });
+
+    it('does not listen with the in-process bus, and stops listening on an orderly shutdown', async () => {
+        const signals = new SignalDouble();
+        lifecycleWith({ mode: 'single-replica' }, signals).onApplicationBootstrap();
+        expect(signals.listenerCount('SIGTERM')).toBe(0);
+        const lifecycle = lifecycleWith({}, signals);
+        lifecycle.onApplicationBootstrap();
+        await lifecycle.onApplicationShutdown();
+        expect(signals.listenerCount('SIGTERM')).toBe(0);
+        expect(signals.listenerCount('SIGINT')).toBe(0);
+    });
+});
+
+describe('RelayTerminalFanoutBus: remote-created runs released', () => {
+    function seam() {
+        let deliver: ((body: string, from: string) => void) | null = null;
+        const bus = {
+            publish: () => true,
+            subscribe: (_topic: string, handler: (body: string, from: string) => void) => {
+                deliver = handler;
+                return () => undefined;
+            },
+        } as unknown as RelayBus;
+        let now = 1_000_000;
+        const fanout = new RelayTerminalFanoutBus(bus, () => now);
+        fanout.onRemote(() => undefined);
+        const frame = (runId: string) => deliver!(JSON.stringify([runId, 'wire']), 'r-peer');
+        const status = new Map<string, { exists: boolean; ended: boolean; clientCount: number }>();
+        const reclaimed: string[] = [];
+        const registry = {
+            getStatus: (runId: string) =>
+                status.get(runId) ?? { exists: false, ended: false, clientCount: 0 },
+            reclaim: (runId: string) => {
+                reclaimed.push(runId);
+                return true;
+            },
+        } as never;
+        return {
+            fanout,
+            frame,
+            status,
+            reclaimed,
+            registry,
+            advance: (ms: number) => {
+                now += ms;
+            },
+        };
+    }
+
+    it('releases a run that never ended here once it was silent for an hour with nobody watching', () => {
+        const h = seam();
+        h.frame('run-orphan');
+        h.status.set('run-orphan', { exists: true, ended: false, clientCount: 0 });
+        h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
+        expect(h.fanout.sweep(h.registry)).toBe(0);
+        h.frame('run-orphan'); // still alive: the clock restarts
+        h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS - 1);
+        expect(h.fanout.sweep(h.registry)).toBe(0);
+        h.advance(1);
+        expect(h.fanout.sweep(h.registry)).toBe(1);
+        expect(h.reclaimed).toEqual(['run-orphan']);
+        expect(h.fanout.trackedRuns).toBe(0);
+    });
+
+    it('keeps a silent run somebody here watches, and releases an ended one after the retention', () => {
+        const h = seam();
+        h.frame('run-watched');
+        h.frame('run-ended');
+        h.status.set('run-watched', { exists: true, ended: false, clientCount: 1 });
+        h.status.set('run-ended', { exists: true, ended: true, clientCount: 0 });
+        h.advance(RELAY_TERMINAL_REMOTE_IDLE_MS * 2);
+        expect(h.fanout.sweep(h.registry)).toBe(0); // ended: first seen now
+        h.advance(RELAY_TERMINAL_REMOTE_RETENTION_MS);
+        expect(h.fanout.sweep(h.registry)).toBe(1);
+        expect(h.reclaimed).toEqual(['run-ended']);
+        expect(h.fanout.trackedRuns).toBe(1);
     });
 });

@@ -729,6 +729,18 @@ export const config = {
         isRelayBusRequired(): boolean {
             return process.env.FLEET_RELAY_REQUIRE_BUS === 'true';
         },
+        /**
+         * Fleet node link (FL-02, CONTRACTS R-7) — the cross-replica relay
+         * bus's kill switch (`FLEET_RELAY_BUS_ENABLED`). On unless set to
+         * `false`: with a Redis URL configured the terminal relay, the
+         * computer live view and the node link then fan out over Valkey.
+         * `false` keeps every relay in-process (the behaviour before the bus
+         * existed) even when `REDIS_URL` is set — for an operator who needs the
+         * bus off without a code change. Read once, at boot.
+         */
+        isRelayBusEnabled(): boolean {
+            return process.env.FLEET_RELAY_BUS_ENABLED !== 'false';
+        },
         /** Max capability tags one node may advertise. Default 16, hard ceiling 64. */
         getMaxCapabilityTags(): number {
             return clampedIntEnv(
