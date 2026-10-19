@@ -17,7 +17,7 @@ import {
     TerminalRelayRegistry,
     type TerminalFanoutBus,
 } from '../terminal/terminal-relay.registry';
-import { RELAY_BUS, type RelayBus } from './relay-bus';
+import { RELAY_BUS, relayBusKey, relayBusSecretFromEnv, type RelayBus } from './relay-bus';
 import { InProcessRelayBus } from './relay-bus.in-process';
 import { ValkeyRelayBus, type ValkeyRelayBusOptions } from './relay-bus.valkey';
 import { RelayComputerFanoutBus, RelayTerminalFanoutBus } from './relay-fanout';
@@ -26,6 +26,15 @@ import { RelayComputerFanoutBus, RelayTerminalFanoutBus } from './relay-fanout';
 export const RELAY_BUS_REQUIRED_MESSAGE =
     'FLEET_RELAY_REQUIRE_BUS=true but no relay bus is configured: set REDIS_URL to the Valkey every API replica shares, ' +
     'or unset FLEET_RELAY_REQUIRE_BUS on a single-replica deployment.';
+
+/**
+ * The boot error a required bus with no usable signing secret gets: without a key the bus
+ * sends nothing, drops everything and refuses every single-use claim, which is the same
+ * misconfiguration as a missing URL. It names the settings, never the secret.
+ */
+export const RELAY_BUS_SECRET_REQUIRED_MESSAGE =
+    'FLEET_RELAY_REQUIRE_BUS=true but the relay bus has no signing secret: set TERMINAL_ATTACH_SECRET ' +
+    '(or BETTER_AUTH_SECRET), at least 16 characters and the same on every API replica.';
 
 /** What the boot log says when an operator switched the bus off (`FLEET_RELAY_BUS_ENABLED=false`). */
 export const RELAY_BUS_DISABLED_MESSAGE =
@@ -57,6 +66,11 @@ export function createRelayBus(input: {
     if (!input.url) {
         if (input.required) throw new Error(RELAY_BUS_REQUIRED_MESSAGE);
         return new InProcessRelayBus();
+    }
+    if (input.required) {
+        const secret =
+            input.valkey?.secret === undefined ? relayBusSecretFromEnv() : input.valkey.secret;
+        if (!relayBusKey(secret)) throw new Error(RELAY_BUS_SECRET_REQUIRED_MESSAGE);
     }
     return new ValkeyRelayBus({ ...input.valkey, url: input.url });
 }

@@ -7,6 +7,7 @@ import type { RelayBus } from '../relay-bus';
 import {
     createRelayBus,
     RELAY_BUS_REQUIRED_MESSAGE,
+    RELAY_BUS_SECRET_REQUIRED_MESSAGE,
     RelayBusLifecycle,
     type RelayBusSignalProcess,
 } from '../relay-bus.module';
@@ -98,6 +99,35 @@ describe('createRelayBus', () => {
         );
         expect(RELAY_BUS_REQUIRED_MESSAGE).toContain('FLEET_RELAY_REQUIRE_BUS');
         expect(RELAY_BUS_REQUIRED_MESSAGE).toContain('REDIS_URL');
+    });
+
+    it('fails boot when a required bus has no usable signing secret (it would carry nothing)', () => {
+        const hub = new FakeValkey();
+        for (const secret of [null, '', 'too-short']) {
+            expect(() =>
+                createRelayBus({
+                    url: 'redis://valkey:6379',
+                    required: true,
+                    valkey: { secret, createClient: () => hub.client() },
+                }),
+            ).toThrow(RELAY_BUS_SECRET_REQUIRED_MESSAGE);
+        }
+        expect(RELAY_BUS_SECRET_REQUIRED_MESSAGE).toContain('TERMINAL_ATTACH_SECRET');
+        expect(RELAY_BUS_SECRET_REQUIRED_MESSAGE).not.toContain('too-short');
+
+        // A usable secret boots; an optional bus without one still boots (and logs) as before.
+        for (const [required, secret] of [
+            [true, 'a-shared-secret-of-enough-length'],
+            [false, null],
+        ] as const) {
+            const bus = createRelayBus({
+                url: 'redis://valkey:6379',
+                required,
+                valkey: { secret, createClient: () => hub.client() },
+            });
+            closers.push(() => bus.close());
+            expect(bus).toBeInstanceOf(ValkeyRelayBus);
+        }
     });
 });
 
