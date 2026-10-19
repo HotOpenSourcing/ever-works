@@ -63,8 +63,7 @@
       `status` / `doctor` print consents.
       **Test**: extend `apps/node/src/core/capabilities.spec.ts` (`managed` only with the flag) and
       `apps/node/src/cli/program.spec.ts` (flag parsed, independent of `--work`/`--attend`).
-- [x] **T-07**. Heartbeat `consents`: `describe()` in `runtime.ts` adds `{ work, attend, manage,
-      usageScan: false }` (CONTRACTS §1.1; FL-20 wires `usageScan`);
+- [x] **T-07**. Heartbeat `consents`: `describe()` in `runtime.ts` adds `{ work, attend, manage, usageScan: false }` (CONTRACTS §1.1; FL-20 wires `usageScan`);
       `OPTIONAL_DESCRIPTION_FIELD_TIERS` in `apps/node/src/core/heartbeat.ts:72-90` gains `consents` in
       the newest tier; `apps/node/src/core/types.ts` `NodeSelfDescription.consents?`.
       **Test**: extend `apps/node/src/core/heartbeat.spec.ts` — sent on every beat; dropped first on a
@@ -86,8 +85,7 @@
 ## P1.C — API: token, gateway, registry, authoriser, operations
 
 - [x] **T-10**. Migration `apps/api/src/migrations/1796020000000-AddFleetNodeConsents.ts` (guarded
-      `ADD COLUMN consents text NULL` and `ADD COLUMN previewProfileEnabled boolean NOT NULL DEFAULT
-      false` — CONTRACTS §13 puts both in this slot; FL-10 owns the behaviour); entity columns in
+      `ADD COLUMN consents text NULL` and `ADD COLUMN previewProfileEnabled boolean NOT NULL DEFAULT false` — CONTRACTS §13 puts both in this slot; FL-10 owns the behaviour); entity columns in
       `packages/agent/src/entities/fleet-node.entity.ts`;
       `FleetService.heartbeat` (`packages/agent/src/fleet/fleet.service.ts:534-630`) stores `consents`,
       emits `node.consent.change` through `FleetAuditService`, and calls a `ConsentChangeListener` port.
@@ -123,8 +121,7 @@
       foreign caller 404.
 - [x] **T-15**. Kill switch and panic: `fleet-link.registry.ts` subscribes to
       `FleetKillSwitchService` changes (poll each ping tick, as the computer relay does) → `link.pause`
-      / `link.resume` broadcast; `apps/api/src/fleet/fleet-panic.service.ts` drain-all → `link.drain
-      { graceSec: 60 }`. Consent withdrawal (T-10 listener) closes affected channels with
+      / `link.resume` broadcast; `apps/api/src/fleet/fleet-panic.service.ts` drain-all → `link.drain { graceSec: 60 }`. Consent withdrawal (T-10 listener) closes affected channels with
       `consent_missing`.
       **Test**: extend `fleet-link.registry.spec.ts` — pause within 5 s, resume without reconnect,
       drain warning, channels closed on consent loss.
@@ -161,8 +158,7 @@
       existing `GET /api/health/ready`.
       **Test**: extend `apps/api/src/health/health.controller.spec.ts` — both modes and the degraded
       status.
-- [x] **T-21**. Viewer side: `fleet-link-attach.service.ts` (`mint(nodeId, family, target, role,
-      caller)`; channel claim `fleet-link`, role `viewer|driver`, 60 s, single use) over
+- [x] **T-21**. Viewer side: `fleet-link-attach.service.ts` (`mint(nodeId, family, target, role, caller)`; channel claim `fleet-link`, role `viewer|driver`, 60 s, single use) over
       `TerminalAttachService`, authoriser applied — no HTTP route of its own: each epic calls it from
       its CONTRACTS §11.2 attach-token path; `fleet-link-viewer-gateway.service.ts` on `/ws/fleet/:family/:id`;
       `fleet-link-relay.ts` bridging viewer sockets ↔ node channels through the bus.
