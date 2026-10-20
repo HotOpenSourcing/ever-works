@@ -1,141 +1,141 @@
 {
-	"name": "@ever-works/job-runtime-trigger-plugin",
-	"version": "1.0.0",
-	"description": "Trigger.dev IJobRuntimeProvider plugin for Ever Works — canonical pluggable form of the trigger runtime, peer to BullMQ/pg-boss/Temporal/Inngest plugins. Per-task dispatching is operator-provisioned (operator pins @trigger.dev/sdk and wires per-payload-type tasks).",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"type-check": "tsc --noEmit",
-		"clean": "rm -rf dist",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"peerDependencies": {
-		"@ever-works/plugin": "workspace:*"
-	},
-	"devDependencies": {
-		"@ever-works/plugin": "workspace:*",
-		"@types/node": "^26.6.4",
-		"tsup": "^8.4.0",
-		"typescript": "^5.7.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "job-runtime-trigger",
-			"name": "Trigger.dev Job Runtime",
-			"version": "1.0.0",
-			"category": "job-runtime",
-			"capabilities": [
-				"job-runtime-enqueue",
-				"job-runtime-cancel",
-				"job-runtime-status",
-				"job-runtime-schedule",
-				"job-runtime-bind-tenant"
-			],
-			"description": "Trigger.dev (https://trigger.dev) IJobRuntimeProvider — canonical pluggable form for the EW-742 tenant overlay. Implements bindToTenant via per-tenant project access tokens (BYO/override require per-tenant projects per ADR-017 providers.md § Trigger.dev). Per-task dispatchers throw 'not implemented' until the operator wires per-payload-type Trigger.dev tasks via TriggerDispatcherFactory.",
-			"author": {
-				"name": "Ever Works Team"
-			},
-			"license": "AGPL-3.0",
-			"autoEnable": false,
-			"systemPlugin": false,
-			"distribution": "core",
-			"builtIn": true,
-			"visibility": "operator",
-			"envVars": [
-				"TRIGGER_SECRET_KEY",
-				"TRIGGER_PROJECT_REF",
-				"TRIGGER_API_URL"
-			],
-			"settingsSchema": {
-				"type": "object",
-				"properties": {
-					"mode": {
-						"type": "string",
-						"enum": [
-							"inherit",
-							"byo",
-							"override"
-						],
-						"default": "inherit",
-						"title": "Tenant Mode",
-						"description": "Tenant overlay mode. `inherit` uses the platform default; `byo` / `override` use the tenant credentials below."
-					},
-					"accessToken": {
-						"type": "string",
-						"title": "Trigger.dev Personal Access Token (PAT)",
-						"description": "Tenant-supplied management PAT (tr_pat_*). Required when mode is `byo` or `override`.",
-						"x-secret": true,
-						"x-scope": "tenant"
-					},
-					"secretKey": {
-						"type": "string",
-						"title": "Trigger.dev Secret Key",
-						"description": "Project-scoped server secret (tr_dev_* or tr_prod_*). Used by the SDK to authenticate tasks.trigger calls. Required when mode is `byo` or `override`; in `inherit` mode the operator default (TRIGGER_SECRET_KEY) is used.",
-						"x-secret": true,
-						"x-scope": "tenant",
-						"x-envVar": "TRIGGER_SECRET_KEY"
-					},
-					"projectRef": {
-						"type": "string",
-						"title": "Trigger.dev Project Ref",
-						"description": "Trigger.dev project reference (e.g. proj_abc123). Required when mode is `byo` or `override`.",
-						"x-scope": "tenant",
-						"x-envVar": "TRIGGER_PROJECT_REF"
-					},
-					"apiUrl": {
-						"type": "string",
-						"title": "Trigger.dev API URL",
-						"description": "Override for self-hosted Trigger.dev (default https://api.trigger.dev).",
-						"default": "https://api.trigger.dev",
-						"x-scope": "tenant",
-						"x-envVar": "TRIGGER_API_URL"
-					}
-				},
-				"allOf": [
-					{
-						"if": {
-							"properties": {
-								"mode": {
-									"enum": [
-										"byo",
-										"override"
-									]
-								}
-							},
-							"required": [
-								"mode"
-							]
-						},
-						"then": {
-							"required": [
-								"accessToken",
-								"secretKey",
-								"projectRef"
-							]
-						}
-					}
-				]
-			}
-		}
-	}
+  "name": "@ever-works/job-runtime-trigger-plugin",
+  "version": "1.0.0",
+  "description": "Trigger.dev IJobRuntimeProvider plugin for Ever Works \u2014 canonical pluggable form of the trigger runtime, peer to BullMQ/pg-boss/Temporal/Inngest plugins. Per-task dispatching is operator-provisioned (operator pins @trigger.dev/sdk and wires per-payload-type tasks).",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "peerDependencies": {
+    "@ever-works/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@ever-works/plugin": "workspace:*",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "job-runtime-trigger",
+      "name": "Trigger.dev Job Runtime",
+      "version": "1.0.0",
+      "category": "job-runtime",
+      "capabilities": [
+        "job-runtime-enqueue",
+        "job-runtime-cancel",
+        "job-runtime-status",
+        "job-runtime-schedule",
+        "job-runtime-bind-tenant"
+      ],
+      "description": "Trigger.dev (https://trigger.dev) IJobRuntimeProvider \u2014 canonical pluggable form for the EW-742 tenant overlay. Implements bindToTenant via per-tenant project access tokens (BYO/override require per-tenant projects per ADR-017 providers.md \u00a7 Trigger.dev). Per-task dispatchers throw 'not implemented' until the operator wires per-payload-type Trigger.dev tasks via TriggerDispatcherFactory.",
+      "author": {
+        "name": "Ever Works Team"
+      },
+      "license": "AGPL-3.0",
+      "autoEnable": false,
+      "systemPlugin": false,
+      "distribution": "core",
+      "builtIn": true,
+      "visibility": "operator",
+      "envVars": [
+        "TRIGGER_SECRET_KEY",
+        "TRIGGER_PROJECT_REF",
+        "TRIGGER_API_URL"
+      ],
+      "settingsSchema": {
+        "type": "object",
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "inherit",
+              "byo",
+              "override"
+            ],
+            "default": "inherit",
+            "title": "Tenant Mode",
+            "description": "Tenant overlay mode. `inherit` uses the platform default; `byo` / `override` use the tenant credentials below."
+          },
+          "accessToken": {
+            "type": "string",
+            "title": "Trigger.dev Personal Access Token (PAT)",
+            "description": "Tenant-supplied management PAT (tr_pat_*). Required when mode is `byo` or `override`.",
+            "x-secret": true,
+            "x-scope": "tenant"
+          },
+          "secretKey": {
+            "type": "string",
+            "title": "Trigger.dev Secret Key",
+            "description": "Project-scoped server secret (tr_dev_* or tr_prod_*). Used by the SDK to authenticate tasks.trigger calls. Required when mode is `byo` or `override`; in `inherit` mode the operator default (TRIGGER_SECRET_KEY) is used.",
+            "x-secret": true,
+            "x-scope": "tenant",
+            "x-envVar": "TRIGGER_SECRET_KEY"
+          },
+          "projectRef": {
+            "type": "string",
+            "title": "Trigger.dev Project Ref",
+            "description": "Trigger.dev project reference (e.g. proj_abc123). Required when mode is `byo` or `override`.",
+            "x-scope": "tenant",
+            "x-envVar": "TRIGGER_PROJECT_REF"
+          },
+          "apiUrl": {
+            "type": "string",
+            "title": "Trigger.dev API URL",
+            "description": "Override for self-hosted Trigger.dev (default https://api.trigger.dev).",
+            "default": "https://api.trigger.dev",
+            "x-scope": "tenant",
+            "x-envVar": "TRIGGER_API_URL"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "mode": {
+                  "enum": [
+                    "byo",
+                    "override"
+                  ]
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            },
+            "then": {
+              "required": [
+                "accessToken",
+                "secretKey",
+                "projectRef"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
 }

@@ -1,4 +1,3 @@
-.env
 
 # Agent/e2e build scratch — never commit. Put transient agent files under one of
 # these blanket-ignored dirs (preferred); the explicit patterns below also catch
@@ -34,7 +33,6 @@ node_modules
 *.sublime-workspace
 
 # IDE - VSCode
-.vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
@@ -113,3 +111,4 @@ apps/desktop-node/release
 # Egress audit (tools/egress-audit): the pinned harness checkout and the evidence of a run
 .egress-audit/
 egress-audit-artifacts/
+config.bat
