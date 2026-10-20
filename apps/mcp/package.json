@@ -1,51 +1,51 @@
 {
-	"name": "ever-works-mcp",
-	"version": "0.1.0",
-	"description": "Ever Works MCP - Model Context Protocol server for the Ever Works platform",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": true,
-	"type": "module",
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"format": "prettier --write \"**/*.{ts,json,md}\"",
-		"lint": "eslint .",
-		"start:stdio": "node dist/stdio.js",
-		"start:http": "node dist/http.js",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"type-check": "tsc --noEmit"
-	},
-	"dependencies": {
-		"@apidevtools/swagger-parser": "^12.1.0",
-		"@ever-works/contracts": "workspace:*",
-		"@modelcontextprotocol/sdk": "^1.32.1",
-		"@nestjs/common": "^11.2.7",
-		"@nestjs/core": "^11.2.7",
-		"@nestjs/platform-express": "^11.2.7",
-		"@rekog/mcp-nest": "^1.9.6",
-		"reflect-metadata": "^0.2.2",
-		"rxjs": "^7.8.2",
-		"zod": "^4.3.6"
-	},
-	"devDependencies": {
-		"@eslint/js": "^9.28.0",
-		"@types/node": "^26.6.4",
-		"eslint": "^9.28.0",
-		"eslint-config-prettier": "^10.1.5",
-		"eslint-plugin-prettier": "^5.4.1",
-		"globals": "^16.2.0",
-		"tsup": "^8.5.0",
-		"typescript": "^5.9.3",
-		"typescript-eslint": "8.53.1",
-		"vitest": "^5.0.5"
-	},
-	"engines": {
-		"node": ">=26.0.0"
-	}
+  "name": "ever-works-mcp",
+  "version": "0.1.0",
+  "description": "Ever Works MCP - Model Context Protocol server for the Ever Works platform",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "format": "prettier --write \"**/*.{ts,json,md}\"",
+    "lint": "eslint .",
+    "start:stdio": "node init && node dist/stdio.js",
+    "start:http": "node init && node dist/http.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@apidevtools/swagger-parser": "^12.1.0",
+    "@ever-works/contracts": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "@nestjs/common": "^11.2.7",
+    "@nestjs/core": "^11.2.7",
+    "@nestjs/platform-express": "^11.2.7",
+    "@rekog/mcp-nest": "^1.9.6",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.28.0",
+    "@types/node": "^26.6.4",
+    "eslint": "^9.28.0",
+    "eslint-config-prettier": "^10.1.5",
+    "eslint-plugin-prettier": "^5.4.1",
+    "globals": "^16.2.0",
+    "tsup": "^8.5.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "8.53.1",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=26.0.0"
+  }
 }

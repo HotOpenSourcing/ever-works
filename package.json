@@ -1,213 +1,213 @@
 {
-	"name": "ever-works",
-	"version": "0.1.0",
-	"description": "Ever Works - Open Work Builder Platform",
-	"homepage": "https://ever.works",
-	"repository": {
-		"type": "git",
-		"url": "https://github.com/ever-works/ever-works.git"
-	},
-	"bugs": {
-		"url": "https://github.com/ever-works/ever-works/issues"
-	},
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"private": true,
-	"scripts": {
-		"dev:apps": "turbo run dev --filter=./apps/* --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
-		"dev:api": "turbo run dev --filter=ever-works-api",
-		"dev:web": "turbo run dev --filter=ever-works-web",
-		"dev:docs": "turbo run dev --filter=ever-works-docs",
-		"dev:trigger": "turbo run dev:trigger --filter=@ever-works/trigger-tasks",
-		"deploy:trigger": "turbo run deploy:trigger --filter=@ever-works/trigger-tasks",
-		"build": "turbo run build --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
-		"build:all": "turbo run build",
-		"build:apps": "turbo run build --filter=./apps/* --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
-		"build:desktop": "turbo run build --filter=ever-works-desktop",
-		"build:node": "turbo run build --filter=ever-works-node",
-		"build:desktop-node": "turbo run build --filter=ever-works-desktop-node",
-		"build:packages": "turbo run build --filter=./packages/*",
-		"build:plugins": "turbo run build --filter=./packages/plugin --filter=./packages/plugins/*",
-		"build:api": "turbo run build --filter=ever-works-api",
-		"build:web": "turbo run build --filter=ever-works-web",
-		"build:docs": "turbo run build --filter=ever-works-docs",
-		"prepare:husky": "husky install .husky",
-		"prepare": "husky",
-		"lint": "turbo run lint",
-		"test": "turbo run test --continue",
-		"type-check": "turbo run type-check",
-		"clean": "turbo run clean",
-		"format": "prettier --write \"**/*.{ts,tsx,jsx,json,css,md}\" --log-level warn",
-		"test:e2e": "turbo run test:e2e --filter=ever-works-web",
-		"format:check": "prettier --check \"**/*.{ts,tsx,jsx,json,css,md}\"",
-		"changeset": "changeset",
-		"changeset:version": "changeset version",
-		"changeset:publish": "changeset publish",
-		"publish:plugins:dry": "node scripts/release-npm-packages.mjs --dry-run",
-		"publish:plugins": "node scripts/release-npm-packages.mjs"
-	},
-	"keywords": [],
-	"devDependencies": {
-		"@changesets/cli": "^2.27.10",
-		"@commitlint/cli": "^19.8.1",
-		"@commitlint/config-conventional": "^19.8.1",
-		"@types/node": "^26.6.4",
-		"husky": "^9.1.7",
-		"prettier": "^3.7.4",
-		"prettier-eslint-cli": "^8.0.1",
-		"prettier-plugin-tailwindcss": "^0.5.14",
-		"turbo": "^2.9.14"
-	},
-	"engines": {
-		"node": ">=26",
-		"pnpm": ">=9.9.0"
-	},
-	"packageManager": "pnpm@10.33.3",
-	"pnpm": {
-		"auditConfig": {
-			"ignoreGhsas": [
-				"GHSA-jmr9-qjv8-65gv",
-				"GHSA-7pqw-9j4j-h8q3",
-				"GHSA-ch52-4w7c-c8xp",
-				"GHSA-vfj7-8cjw-p6xm"
-			]
-		},
-		"overrides": {
-			"protobufjs@<7.5.5": ">=7.5.5",
-			"protobufjs@>=8.0.0 <=8.4.0": ">=8.4.1",
-			"@opentelemetry/otlp-transformer>protobufjs": ">=8.4.1",
-			"minimatch@<3.1.4": ">=3.1.4",
-			"minimatch@>=4.0.0 <9.0.7": ">=9.0.7",
-			"minimatch@>=10.0.0 <10.2.3": ">=10.2.3",
-			"picomatch@<2.3.2": ">=2.3.2",
-			"picomatch@>=3.0.0 <4.0.4": ">=4.0.4",
-			"fast-xml-parser@<5.3.6": ">=5.5.6",
-			"fast-xml-parser@>=5.4.0 <5.5.6": ">=5.5.6",
-			"flatted@<3.4.2": ">=3.4.2",
-			"undici@>=6.0.0 <6.28.1": ">=6.28.1 <7.0.0",
-			"undici@>=7.0.0 <7.29.1": ">=7.29.1 <8.0.0",
-			"undici@>=8.0.0 <8.10.2": ">=8.10.2 <9.0.0",
-			"@brightdata/sdk>undici": ">=8.10.2 <9.0.0",
-			"effect@<3.20.0": ">=3.20.0 <4.0.0",
-			"nodemailer@<10.0.6": ">=10.0.6 <11.0.0",
-			"serialize-javascript@<7.0.3": ">=7.0.3 <8.0.0",
-			"socket.io-parser@<3.3.6": ">=3.3.6 <3.4.0",
-			"socket.io-parser@>=3.4.0 <3.4.5": ">=3.4.5 <4.0.0",
-			"socket.io-parser@>=4.0.0 <4.2.7": ">=4.2.7 <5.0.0",
-			"systeminformation@<5.31.7": ">=5.31.7",
-			"websocket-driver@<0.7.5": ">=0.7.5",
-			"defu@<6.1.5": ">=6.1.5",
-			"rollup@>=4.0.0 <4.59.0": ">=4.59.0",
-			"@hono/node-server@<1.19.10": ">=1.19.10",
-			"hono@<4.12.25": ">=4.12.25",
-			"multer@<2.3.0": ">=2.3.0 <3.0.0",
-			"express-rate-limit@<8.2.2": ">=8.2.2",
-			"vite@>=7.0.0 <7.3.2": ">=7.3.2",
-			"vite@>=8.0.0 <8.0.16": ">=8.0.16",
-			"vite@8.0.10": "8.0.16",
-			"vitest>vite": ">=8.0.16",
-			"cookie@<0.7.0": ">=0.7.0",
-			"path-to-regexp@>=8.0.0 <8.4.0": ">=8.4.0",
-			"lodash@<=4.17.23": ">=4.18.0",
-			"postcss@<8.5.12": ">=8.5.12",
-			"fflate@>=0.4.5 <0.4.9": ">=0.4.9 <0.5.0",
-			"vitest@>=2.1.0 <4.1.11": ">=4.1.11",
-			"@vitest/mocker@>=2.1.0 <4.1.11": ">=4.1.11",
-			"fast-uri@<3.1.5": ">=3.1.5 <4.0.0",
-			"@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3": ">=7.29.4",
-			"langsmith@<0.6.0": ">=0.6.0",
-			"fast-xml-builder@<=1.1.6": ">=1.1.7",
-			"tmp@<0.2.7": ">=0.2.7",
-			"ws@>=8.0.0 <8.21.0": ">=8.21.0",
-			"ws@>=7.0.0 <7.5.11": ">=7.5.11",
-			"webpack-bundle-analyzer>ws": ">=8.21.0",
-			"form-data@>=4.0.0 <4.0.6": ">=4.0.6",
-			"shell-quote@<=1.8.4": ">=1.9.0 <2.0.0",
-			"esbuild@>=0.17.0 <0.28.1": ">=0.28.1",
-			"protobufjs@>=7.5.5 <7.6.3": ">=7.6.3 <8.0.0",
-			"typeorm@<0.3.29": ">=0.3.29",
-			"dompurify@<=3.4.10": ">=3.4.11",
-			"http-proxy-middleware@<3.0.6": ">=3.0.6",
-			"webpack-dev-server@<5.2.5": ">=5.2.5",
-			"markdown-it@<=14.1.1": ">=14.2.0",
-			"tar@<=7.5.20": ">=7.5.21 <8.0.0",
-			"next@>=16.0.0 <16.3.5": ">=16.3.5 <16.4.0",
-			"launch-editor@<=2.14.0": ">=2.14.1",
-			"js-yaml@>=4.0.0 <4.3.2": ">=4.3.2 <5.0.0",
-			"js-yaml@>=3.0.0 <3.15.2": ">=3.15.2 <4.0.0",
-			"handlebars@<4.7.10": ">=4.7.10 <5.0.0",
-			"engine.io@>=4.1.0 <6.6.10": ">=6.6.10 <7.0.0",
-			"@opentelemetry/core@<2.8.0": ">=2.8.0 <3.0.0",
-			"joi@<17.13.7": ">=17.13.7 <18.0.0",
-			"qs@>=6.11.1 <=6.15.1": ">=6.15.2",
-			"uuid@>=11.0.0 <11.1.1": ">=11.1.1",
-			"mermaid@>=11.0.0-alpha.1 <11.15.0": ">=11.15.0",
-			"ip-address@>=10.0.0 <10.3.1": ">=10.3.1 <11.0.0",
-			"smol-toml@<1.7.1": ">=1.7.1 <2.0.0",
-			"piscina@<4.9.4": ">=4.9.4 <5.0.0",
-			"@babel/core@<=7.29.0": ">=7.29.6 <8.0.0",
-			"linkify-it@<=5.0.1": ">=5.0.2 <6.0.0",
-			"svgo@>=3.0.0 <3.3.5": ">=3.3.5 <4.0.0",
-			"svgo@>=4.0.0 <4.1.0": ">=4.1.0 <5.0.0",
-			"sharp@<0.35.4": ">=0.35.4 <1.0.0",
-			"liquidjs@<10.27.1": ">=10.27.1",
-			"js-yaml@>=5.0.0 <5.2.2": ">=5.2.2 <6.0.0",
-			"better-auth@<1.6.22": ">=1.6.22 <2.0.0",
-			"brace-expansion@<1.1.20": ">=1.1.20 <2.0.0",
-			"brace-expansion@>=2.0.0 <2.1.6": ">=2.1.6 <3.0.0",
-			"brace-expansion@>=3.0.0 <3.0.8": ">=3.0.8 <4.0.0",
-			"brace-expansion@>=4.0.0 <5.0.11": ">=5.0.11 <6.0.0",
-			"nanoid@<3.3.17": ">=3.3.17 <4.0.0",
-			"browserslist@<=4.28.6": ">=4.28.7 <5.0.0",
-			"mysql2@<3.22.0": ">=3.22.0 <4.0.0",
-			"fast-uri@<3.1.6": ">=3.1.6 <4.0.0",
-			"@xmldom/xmldom@>=0.7.0 <0.8.15": ">=0.8.15 <0.9.0",
-			"@grpc/grpc-js@>=1.14.0 <1.14.5": ">=1.14.5 <2.0.0",
-			"tinypool@<2.1.2": ">=2.1.2 <3.0.0",
-			"seroval@<1.6.3": ">=1.6.3 <2.0.0",
-			"http-cache-semantics@<4.3.0": ">=4.3.0 <5.0.0"
-		}
-	},
-	"prettier": {
-		"printWidth": 120,
-		"singleQuote": true,
-		"semi": true,
-		"useTabs": true,
-		"tabWidth": 4,
-		"arrowParens": "always",
-		"trailingComma": "none",
-		"quoteProps": "as-needed",
-		"overrides": [
-			{
-				"files": "*.scss",
-				"options": {
-					"useTabs": false,
-					"tabWidth": 2
-				}
-			},
-			{
-				"files": "*.yml",
-				"options": {
-					"useTabs": false,
-					"tabWidth": 2
-				}
-			},
-			{
-				"files": "*.yaml",
-				"options": {
-					"useTabs": false,
-					"tabWidth": 2
-				}
-			}
-		]
-	},
-	"commitlint": {
-		"extends": [
-			"@commitlint/config-conventional"
-		]
-	},
-	"snyk": true
+  "name": "ever-works",
+  "version": "0.1.0",
+  "description": "Ever Works - Open Work Builder Platform",
+  "homepage": "https://ever.works",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ever-works/ever-works.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ever-works/ever-works/issues"
+  },
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "private": true,
+  "scripts": {
+    "dev:apps": "node init && turbo run dev --filter=./apps/* --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
+    "dev:api": "node init && turbo run dev --filter=ever-works-api",
+    "dev:web": "node init && turbo run dev --filter=ever-works-web",
+    "dev:docs": "node init && turbo run dev --filter=ever-works-docs",
+    "dev:trigger": "node init && turbo run dev:trigger --filter=@ever-works/trigger-tasks",
+    "deploy:trigger": "turbo run deploy:trigger --filter=@ever-works/trigger-tasks",
+    "build": "node init && turbo run build --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
+    "build:all": "node init && turbo run build",
+    "build:apps": "node init && turbo run build --filter=./apps/* --filter=!./apps/docs --filter=!./apps/desktop --filter=!./apps/desktop-node --filter=!./apps/node",
+    "build:desktop": "node init && turbo run build --filter=ever-works-desktop",
+    "build:node": "node init && turbo run build --filter=ever-works-node",
+    "build:desktop-node": "node init && turbo run build --filter=ever-works-desktop-node",
+    "build:packages": "node init && turbo run build --filter=./packages/*",
+    "build:plugins": "node init && turbo run build --filter=./packages/plugin --filter=./packages/plugins/*",
+    "build:api": "node init && turbo run build --filter=ever-works-api",
+    "build:web": "node init && turbo run build --filter=ever-works-web",
+    "build:docs": "node init && turbo run build --filter=ever-works-docs",
+    "prepare:husky": "husky install .husky",
+    "prepare": "husky",
+    "lint": "turbo run lint",
+    "test": "turbo run test --continue",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean",
+    "format": "prettier --write \"**/*.{ts,tsx,jsx,json,css,md}\" --log-level warn",
+    "test:e2e": "turbo run test:e2e --filter=ever-works-web",
+    "format:check": "prettier --check \"**/*.{ts,tsx,jsx,json,css,md}\"",
+    "changeset": "changeset",
+    "changeset:version": "changeset version",
+    "changeset:publish": "changeset publish",
+    "publish:plugins:dry": "node scripts/release-npm-packages.mjs --dry-run",
+    "publish:plugins": "node scripts/release-npm-packages.mjs"
+  },
+  "keywords": [],
+  "devDependencies": {
+    "@changesets/cli": "^2.27.10",
+    "@commitlint/cli": "^19.8.1",
+    "@commitlint/config-conventional": "^19.8.1",
+    "@types/node": "^26.6.4",
+    "husky": "^9.1.7",
+    "prettier": "^3.7.4",
+    "prettier-eslint-cli": "^8.0.1",
+    "prettier-plugin-tailwindcss": "^0.5.14",
+    "turbo": "^2.9.14"
+  },
+  "engines": {
+    "node": ">=26",
+    "pnpm": ">=9.9.0"
+  },
+  "packageManager": "pnpm@10.33.3",
+  "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-jmr9-qjv8-65gv",
+        "GHSA-7pqw-9j4j-h8q3",
+        "GHSA-ch52-4w7c-c8xp",
+        "GHSA-vfj7-8cjw-p6xm"
+      ]
+    },
+    "overrides": {
+      "protobufjs@<7.5.5": ">=7.5.5",
+      "protobufjs@>=8.0.0 <=8.4.0": ">=8.4.1",
+      "@opentelemetry/otlp-transformer>protobufjs": ">=8.4.1",
+      "minimatch@<3.1.4": ">=3.1.4",
+      "minimatch@>=4.0.0 <9.0.7": ">=9.0.7",
+      "minimatch@>=10.0.0 <10.2.3": ">=10.2.3",
+      "picomatch@<2.3.2": ">=2.3.2",
+      "picomatch@>=3.0.0 <4.0.4": ">=4.0.4",
+      "fast-xml-parser@<5.3.6": ">=5.5.6",
+      "fast-xml-parser@>=5.4.0 <5.5.6": ">=5.5.6",
+      "flatted@<3.4.2": ">=3.4.2",
+      "undici@>=6.0.0 <6.28.1": ">=6.28.1 <7.0.0",
+      "undici@>=7.0.0 <7.29.1": ">=7.29.1 <8.0.0",
+      "undici@>=8.0.0 <8.10.2": ">=8.10.2 <9.0.0",
+      "@brightdata/sdk>undici": ">=8.10.2 <9.0.0",
+      "effect@<3.20.0": ">=3.20.0 <4.0.0",
+      "nodemailer@<10.0.6": ">=10.0.6 <11.0.0",
+      "serialize-javascript@<7.0.3": ">=7.0.3 <8.0.0",
+      "socket.io-parser@<3.3.6": ">=3.3.6 <3.4.0",
+      "socket.io-parser@>=3.4.0 <3.4.5": ">=3.4.5 <4.0.0",
+      "socket.io-parser@>=4.0.0 <4.2.7": ">=4.2.7 <5.0.0",
+      "systeminformation@<5.31.7": ">=5.31.7",
+      "websocket-driver@<0.7.5": ">=0.7.5",
+      "defu@<6.1.5": ">=6.1.5",
+      "rollup@>=4.0.0 <4.59.0": ">=4.59.0",
+      "@hono/node-server@<1.19.10": ">=1.19.10",
+      "hono@<4.12.25": ">=4.12.25",
+      "multer@<2.3.0": ">=2.3.0 <3.0.0",
+      "express-rate-limit@<8.2.2": ">=8.2.2",
+      "vite@>=7.0.0 <7.3.2": ">=7.3.2",
+      "vite@>=8.0.0 <8.0.16": ">=8.0.16",
+      "vite@8.0.10": "8.0.16",
+      "vitest>vite": ">=8.0.16",
+      "cookie@<0.7.0": ">=0.7.0",
+      "path-to-regexp@>=8.0.0 <8.4.0": ">=8.4.0",
+      "lodash@<=4.17.23": ">=4.18.0",
+      "postcss@<8.5.12": ">=8.5.12",
+      "fflate@>=0.4.5 <0.4.9": ">=0.4.9 <0.5.0",
+      "vitest@>=2.1.0 <4.1.11": ">=4.1.11",
+      "@vitest/mocker@>=2.1.0 <4.1.11": ">=4.1.11",
+      "fast-uri@<3.1.5": ">=3.1.5 <4.0.0",
+      "@babel/plugin-transform-modules-systemjs@>=7.12.0 <=7.29.3": ">=7.29.4",
+      "langsmith@<0.6.0": ">=0.6.0",
+      "fast-xml-builder@<=1.1.6": ">=1.1.7",
+      "tmp@<0.2.7": ">=0.2.7",
+      "ws@>=8.0.0 <8.21.0": ">=8.21.0",
+      "ws@>=7.0.0 <7.5.11": ">=7.5.11",
+      "webpack-bundle-analyzer>ws": ">=8.21.0",
+      "form-data@>=4.0.0 <4.0.6": ">=4.0.6",
+      "shell-quote@<=1.8.4": ">=1.9.0 <2.0.0",
+      "esbuild@>=0.17.0 <0.28.1": ">=0.28.1",
+      "protobufjs@>=7.5.5 <7.6.3": ">=7.6.3 <8.0.0",
+      "typeorm@<0.3.29": ">=0.3.29",
+      "dompurify@<=3.4.10": ">=3.4.11",
+      "http-proxy-middleware@<3.0.6": ">=3.0.6",
+      "webpack-dev-server@<5.2.5": ">=5.2.5",
+      "markdown-it@<=14.1.1": ">=14.2.0",
+      "tar@<=7.5.20": ">=7.5.21 <8.0.0",
+      "next@>=16.0.0 <16.3.5": ">=16.3.5 <16.4.0",
+      "launch-editor@<=2.14.0": ">=2.14.1",
+      "js-yaml@>=4.0.0 <4.3.2": ">=4.3.2 <5.0.0",
+      "js-yaml@>=3.0.0 <3.15.2": ">=3.15.2 <4.0.0",
+      "handlebars@<4.7.10": ">=4.7.10 <5.0.0",
+      "engine.io@>=4.1.0 <6.6.10": ">=6.6.10 <7.0.0",
+      "@opentelemetry/core@<2.8.0": ">=2.8.0 <3.0.0",
+      "joi@<17.13.7": ">=17.13.7 <18.0.0",
+      "qs@>=6.11.1 <=6.15.1": ">=6.15.2",
+      "uuid@>=11.0.0 <11.1.1": ">=11.1.1",
+      "mermaid@>=11.0.0-alpha.1 <11.15.0": ">=11.15.0",
+      "ip-address@>=10.0.0 <10.3.1": ">=10.3.1 <11.0.0",
+      "smol-toml@<1.7.1": ">=1.7.1 <2.0.0",
+      "piscina@<4.9.4": ">=4.9.4 <5.0.0",
+      "@babel/core@<=7.29.0": ">=7.29.6 <8.0.0",
+      "linkify-it@<=5.0.1": ">=5.0.2 <6.0.0",
+      "svgo@>=3.0.0 <3.3.5": ">=3.3.5 <4.0.0",
+      "svgo@>=4.0.0 <4.1.0": ">=4.1.0 <5.0.0",
+      "sharp@<0.35.4": ">=0.35.4 <1.0.0",
+      "liquidjs@<10.27.1": ">=10.27.1",
+      "js-yaml@>=5.0.0 <5.2.2": ">=5.2.2 <6.0.0",
+      "better-auth@<1.6.22": ">=1.6.22 <2.0.0",
+      "brace-expansion@<1.1.20": ">=1.1.20 <2.0.0",
+      "brace-expansion@>=2.0.0 <2.1.6": ">=2.1.6 <3.0.0",
+      "brace-expansion@>=3.0.0 <3.0.8": ">=3.0.8 <4.0.0",
+      "brace-expansion@>=4.0.0 <5.0.11": ">=5.0.11 <6.0.0",
+      "nanoid@<3.3.17": ">=3.3.17 <4.0.0",
+      "browserslist@<=4.28.6": ">=4.28.7 <5.0.0",
+      "mysql2@<3.22.0": ">=3.22.0 <4.0.0",
+      "fast-uri@<3.1.6": ">=3.1.6 <4.0.0",
+      "@xmldom/xmldom@>=0.7.0 <0.8.15": ">=0.8.15 <0.9.0",
+      "@grpc/grpc-js@>=1.14.0 <1.14.5": ">=1.14.5 <2.0.0",
+      "tinypool@<2.1.2": ">=2.1.2 <3.0.0",
+      "seroval@<1.6.3": ">=1.6.3 <2.0.0",
+      "http-cache-semantics@<4.3.0": ">=4.3.0 <5.0.0"
+    }
+  },
+  "prettier": {
+    "printWidth": 120,
+    "singleQuote": true,
+    "semi": true,
+    "useTabs": true,
+    "tabWidth": 4,
+    "arrowParens": "always",
+    "trailingComma": "none",
+    "quoteProps": "as-needed",
+    "overrides": [
+      {
+        "files": "*.scss",
+        "options": {
+          "useTabs": false,
+          "tabWidth": 2
+        }
+      },
+      {
+        "files": "*.yml",
+        "options": {
+          "useTabs": false,
+          "tabWidth": 2
+        }
+      },
+      {
+        "files": "*.yaml",
+        "options": {
+          "useTabs": false,
+          "tabWidth": 2
+        }
+      }
+    ]
+  },
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "snyk": true
 }
