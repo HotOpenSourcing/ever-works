@@ -1,154 +1,154 @@
 {
-	"name": "@ever-works/plugin",
-	"version": "1.1.0",
-	"description": "Plugin system contracts, helpers, and utilities for Ever Works platform",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.js",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./contracts": {
-			"types": "./dist/contracts/index.d.ts",
-			"import": "./dist/contracts/index.js",
-			"require": "./dist/contracts/index.cjs"
-		},
-		"./contracts-conformance": {
-			"types": "./dist/contracts-conformance/index.d.ts",
-			"import": "./dist/contracts-conformance/index.js",
-			"require": "./dist/contracts-conformance/index.cjs"
-		},
-		"./pipeline": {
-			"types": "./dist/pipeline/index.d.ts",
-			"import": "./dist/pipeline/index.js",
-			"require": "./dist/pipeline/index.cjs"
-		},
-		"./events": {
-			"types": "./dist/events/index.d.ts",
-			"import": "./dist/events/index.js",
-			"require": "./dist/events/index.cjs"
-		},
-		"./settings": {
-			"types": "./dist/settings/index.d.ts",
-			"import": "./dist/settings/index.js",
-			"require": "./dist/settings/index.cjs"
-		},
-		"./common": {
-			"types": "./dist/common/index.d.ts",
-			"import": "./dist/common/index.js",
-			"require": "./dist/common/index.cjs"
-		},
-		"./helpers": {
-			"types": "./dist/helpers/index.d.ts",
-			"import": "./dist/helpers/index.js",
-			"require": "./dist/helpers/index.cjs"
-		},
-		"./helpers/ssrf-guard": {
-			"types": "./dist/helpers/ssrf-guard.d.ts",
-			"import": "./dist/helpers/ssrf-guard.js",
-			"require": "./dist/helpers/ssrf-guard.cjs"
-		},
-		"./abstract": {
-			"types": "./dist/abstract/index.d.ts",
-			"import": "./dist/abstract/index.js",
-			"require": "./dist/abstract/index.cjs"
-		},
-		"./testing": {
-			"types": "./dist/testing/index.d.ts",
-			"import": "./dist/testing/index.js",
-			"require": "./dist/testing/index.cjs"
-		},
-		"./api": {
-			"types": "./dist/api/index.d.ts",
-			"import": "./dist/api/index.js",
-			"require": "./dist/api/index.cjs"
-		},
-		"./git": {
-			"types": "./dist/git/index.d.ts",
-			"import": "./dist/git/index.js",
-			"require": "./dist/git/index.cjs"
-		},
-		"./ai": {
-			"types": "./dist/ai/index.d.ts",
-			"import": "./dist/ai/index.js",
-			"require": "./dist/ai/index.cjs"
-		},
-		"./keywords": {
-			"types": "./dist/keywords/index.d.ts",
-			"import": "./dist/keywords/index.js",
-			"require": "./dist/keywords/index.cjs"
-		},
-		"./cli-pipeline": {
-			"types": "./dist/cli-pipeline/index.d.ts",
-			"import": "./dist/cli-pipeline/index.js",
-			"require": "./dist/cli-pipeline/index.cjs"
-		},
-		"./code-edit": {
-			"types": "./dist/code-edit/index.d.ts",
-			"import": "./dist/code-edit/index.js",
-			"require": "./dist/code-edit/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsup",
-		"dev": "tsup --watch",
-		"clean": "rm -rf dist",
-		"type-check": "tsc --noEmit && tsc -p tsconfig.specs.json --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest"
-	},
-	"devDependencies": {
-		"@langchain/core": "^0.3.80",
-		"@langchain/openai": "^0.6.17",
-		"@types/json-schema": "^7.0.15",
-		"@types/node": "^26.6.4",
-		"@types/stopword": "^2.0.3",
-		"isomorphic-git": "^1.36.3",
-		"stopword": "^3.1.5",
-		"tsup": "^8.0.0",
-		"typescript": "^5.9.3",
-		"vitest": "^5.0.5"
-	},
-	"peerDependencies": {
-		"@langchain/core": "^0.3.80",
-		"@langchain/openai": "^0.6.17",
-		"isomorphic-git": "^1.27.0",
-		"stopword": "^3.1.5"
-	},
-	"peerDependenciesMeta": {
-		"isomorphic-git": {
-			"optional": true
-		},
-		"@langchain/openai": {
-			"optional": true
-		},
-		"@langchain/core": {
-			"optional": true
-		},
-		"stopword": {
-			"optional": true
-		}
-	},
-	"dependencies": {
-		"@ever-works/contracts": "workspace:*",
-		"jsonrepair": "^3.13.2",
-		"zod": "^3.25.0"
-	},
-	"publishConfig": {
-		"access": "public"
-	}
+  "name": "@ever-works/plugin",
+  "version": "1.1.0",
+  "description": "Plugin system contracts, helpers, and utilities for Ever Works platform",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./contracts": {
+      "types": "./dist/contracts/index.d.ts",
+      "import": "./dist/contracts/index.js",
+      "require": "./dist/contracts/index.cjs"
+    },
+    "./contracts-conformance": {
+      "types": "./dist/contracts-conformance/index.d.ts",
+      "import": "./dist/contracts-conformance/index.js",
+      "require": "./dist/contracts-conformance/index.cjs"
+    },
+    "./pipeline": {
+      "types": "./dist/pipeline/index.d.ts",
+      "import": "./dist/pipeline/index.js",
+      "require": "./dist/pipeline/index.cjs"
+    },
+    "./events": {
+      "types": "./dist/events/index.d.ts",
+      "import": "./dist/events/index.js",
+      "require": "./dist/events/index.cjs"
+    },
+    "./settings": {
+      "types": "./dist/settings/index.d.ts",
+      "import": "./dist/settings/index.js",
+      "require": "./dist/settings/index.cjs"
+    },
+    "./common": {
+      "types": "./dist/common/index.d.ts",
+      "import": "./dist/common/index.js",
+      "require": "./dist/common/index.cjs"
+    },
+    "./helpers": {
+      "types": "./dist/helpers/index.d.ts",
+      "import": "./dist/helpers/index.js",
+      "require": "./dist/helpers/index.cjs"
+    },
+    "./helpers/ssrf-guard": {
+      "types": "./dist/helpers/ssrf-guard.d.ts",
+      "import": "./dist/helpers/ssrf-guard.js",
+      "require": "./dist/helpers/ssrf-guard.cjs"
+    },
+    "./abstract": {
+      "types": "./dist/abstract/index.d.ts",
+      "import": "./dist/abstract/index.js",
+      "require": "./dist/abstract/index.cjs"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js",
+      "require": "./dist/testing/index.cjs"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "require": "./dist/api/index.cjs"
+    },
+    "./git": {
+      "types": "./dist/git/index.d.ts",
+      "import": "./dist/git/index.js",
+      "require": "./dist/git/index.cjs"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js",
+      "require": "./dist/ai/index.cjs"
+    },
+    "./keywords": {
+      "types": "./dist/keywords/index.d.ts",
+      "import": "./dist/keywords/index.js",
+      "require": "./dist/keywords/index.cjs"
+    },
+    "./cli-pipeline": {
+      "types": "./dist/cli-pipeline/index.d.ts",
+      "import": "./dist/cli-pipeline/index.js",
+      "require": "./dist/cli-pipeline/index.cjs"
+    },
+    "./code-edit": {
+      "types": "./dist/code-edit/index.d.ts",
+      "import": "./dist/code-edit/index.js",
+      "require": "./dist/code-edit/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsup",
+    "dev": "node init && tsup --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit && tsc -p tsconfig.specs.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@langchain/core": "^0.3.80",
+    "@langchain/openai": "^0.6.17",
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^26.6.4",
+    "@types/stopword": "^2.0.3",
+    "isomorphic-git": "^1.36.3",
+    "stopword": "^3.1.5",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "peerDependencies": {
+    "@langchain/core": "^0.3.80",
+    "@langchain/openai": "^0.6.17",
+    "isomorphic-git": "^1.27.0",
+    "stopword": "^3.1.5"
+  },
+  "peerDependenciesMeta": {
+    "isomorphic-git": {
+      "optional": true
+    },
+    "@langchain/openai": {
+      "optional": true
+    },
+    "@langchain/core": {
+      "optional": true
+    },
+    "stopword": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "@ever-works/contracts": "workspace:*",
+    "jsonrepair": "^3.13.2",
+    "zod": "^3.25.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

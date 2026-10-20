@@ -1,81 +1,81 @@
 {
-	"name": "@ever-works/scrapfly-plugin",
-	"version": "1.0.0",
-	"description": "Scrapfly Plugin - Screenshot capture and content extraction using Scrapfly API",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"type-check": "tsc --noEmit",
-		"clean": "rm -rf dist",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"dependencies": {
-		"scrapfly-sdk": "^0.7.3"
-	},
-	"peerDependencies": {
-		"@ever-works/plugin": "workspace:*"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"@ever-works/plugin": "workspace:*",
-		"tsup": "^8.4.0",
-		"typescript": "^5.7.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "scrapfly",
-			"name": "Scrapfly",
-			"version": "1.0.0",
-			"category": "content-extractor",
-			"capabilities": [
-				"screenshot",
-				"content-extractor"
-			],
-			"description": "Screenshot capture and content extraction using the Scrapfly API. Supports JavaScript rendering, anti-bot bypass, and multiple output formats.",
-			"author": {
-				"name": "Ever Works Team"
-			},
-			"license": "AGPL-3.0",
-			"autoEnable": false,
-			"systemPlugin": false,
-			"builtIn": true,
-			"envVars": [
-				{
-					"name": "PLUGIN_SCRAPFLY_API_KEY",
-					"required": false,
-					"secret": true,
-					"description": "Scrapfly API key (optional - can be set via admin/user settings)"
-				}
-			],
-			"distribution": "registry"
-		}
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org"
-	}
+  "name": "@ever-works/scrapfly-plugin",
+  "version": "1.0.0",
+  "description": "Scrapfly Plugin - Screenshot capture and content extraction using Scrapfly API",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "scrapfly-sdk": "^0.7.3"
+  },
+  "peerDependencies": {
+    "@ever-works/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@ever-works/plugin": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "scrapfly",
+      "name": "Scrapfly",
+      "version": "1.0.0",
+      "category": "content-extractor",
+      "capabilities": [
+        "screenshot",
+        "content-extractor"
+      ],
+      "description": "Screenshot capture and content extraction using the Scrapfly API. Supports JavaScript rendering, anti-bot bypass, and multiple output formats.",
+      "author": {
+        "name": "Ever Works Team"
+      },
+      "license": "AGPL-3.0",
+      "autoEnable": false,
+      "systemPlugin": false,
+      "builtIn": true,
+      "envVars": [
+        {
+          "name": "PLUGIN_SCRAPFLY_API_KEY",
+          "required": false,
+          "secret": true,
+          "description": "Scrapfly API key (optional - can be set via admin/user settings)"
+        }
+      ],
+      "distribution": "registry"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
 }
