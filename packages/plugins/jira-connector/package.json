@@ -1,115 +1,115 @@
 {
-	"name": "@ever-works/jira-connector-plugin",
-	"version": "1.0.0",
-	"description": "JIRA connector plugin for Ever Works platform (outbound issue comments via jira.js and event-source pull of issues/comments into the event-ingest pipeline, with opt-in historical backfill)",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"clean": "rm -rf dist",
-		"type-check": "tsc --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest"
-	},
-	"dependencies": {
-		"@ever-works/contracts": "workspace:*",
-		"@ever-works/plugin": "workspace:*",
-		"jira.js": "^5.4.0"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"tsup": "^8.0.0",
-		"typescript": "^5.9.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "jira-connector",
-			"name": "JIRA Connector",
-			"version": "1.0.0",
-			"category": "connector",
-			"capabilities": [
-				"connector",
-				"event-source"
-			],
-			"description": "JIRA connector. Outbound posts comments on JIRA issues via the jira.js Cloud REST client. Event-source pull ingests issues (created/updated) and comments since the last watermark into the platform event-ingest pipeline, with opt-in historical backfill (backfillDays, max 90).",
-			"systemPlugin": false,
-			"builtIn": true,
-			"isDefault": false,
-			"autoEnable": false,
-			"settings": {
-				"type": "object",
-				"required": [
-					"baseUrl",
-					"email",
-					"apiToken"
-				],
-				"properties": {
-					"baseUrl": {
-						"type": "string",
-						"title": "JIRA site base URL (https://your-site.atlassian.net)",
-						"x-envVar": "JIRA_BASE_URL"
-					},
-					"email": {
-						"type": "string",
-						"title": "Atlassian account email (API-token basic auth)",
-						"x-envVar": "JIRA_EMAIL"
-					},
-					"apiToken": {
-						"type": "string",
-						"title": "Atlassian API token",
-						"x-secret": true,
-						"x-envVar": "JIRA_API_TOKEN"
-					},
-					"projectKeys": {
-						"type": "string",
-						"title": "Project keys to ingest events from (comma-separated; all projects when empty)"
-					},
-					"backfillDays": {
-						"type": "number",
-						"title": "Historical backfill window in days on first pull (0 = off, max 90)",
-						"default": 0,
-						"minimum": 0,
-						"maximum": 90
-					},
-					"defaultIssueKey": {
-						"type": "string",
-						"title": "Default issue key for outbound comments (e.g. ENG-42)"
-					},
-					"webhookSecret": {
-						"type": "string",
-						"title": "Webhook secret",
-						"description": "Secret set on the Jira Cloud webhook that points at the platform ingest receiver (POST /api/ingest/jira/events). Jira signs every delivery with it (X-Hub-Signature, HMAC SHA-256); deliveries with a missing or mismatched signature are rejected, so a webhook created without a secret never files anything. Leave blank to keep the inbound receiver disabled for your account.",
-						"x-secret": true,
-						"x-scope": "user",
-						"x-widget": "password"
-					}
-				}
-			}
-		}
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org"
-	}
+  "name": "@ever-works/jira-connector-plugin",
+  "version": "1.0.0",
+  "description": "JIRA connector plugin for Ever Works platform (outbound issue comments via jira.js and event-source pull of issues/comments into the event-ingest pipeline, with opt-in historical backfill)",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@ever-works/contracts": "workspace:*",
+    "@ever-works/plugin": "workspace:*",
+    "jira.js": "^5.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "jira-connector",
+      "name": "JIRA Connector",
+      "version": "1.0.0",
+      "category": "connector",
+      "capabilities": [
+        "connector",
+        "event-source"
+      ],
+      "description": "JIRA connector. Outbound posts comments on JIRA issues via the jira.js Cloud REST client. Event-source pull ingests issues (created/updated) and comments since the last watermark into the platform event-ingest pipeline, with opt-in historical backfill (backfillDays, max 90).",
+      "systemPlugin": false,
+      "builtIn": true,
+      "isDefault": false,
+      "autoEnable": false,
+      "settings": {
+        "type": "object",
+        "required": [
+          "baseUrl",
+          "email",
+          "apiToken"
+        ],
+        "properties": {
+          "baseUrl": {
+            "type": "string",
+            "title": "JIRA site base URL (https://your-site.atlassian.net)",
+            "x-envVar": "JIRA_BASE_URL"
+          },
+          "email": {
+            "type": "string",
+            "title": "Atlassian account email (API-token basic auth)",
+            "x-envVar": "JIRA_EMAIL"
+          },
+          "apiToken": {
+            "type": "string",
+            "title": "Atlassian API token",
+            "x-secret": true,
+            "x-envVar": "JIRA_API_TOKEN"
+          },
+          "projectKeys": {
+            "type": "string",
+            "title": "Project keys to ingest events from (comma-separated; all projects when empty)"
+          },
+          "backfillDays": {
+            "type": "number",
+            "title": "Historical backfill window in days on first pull (0 = off, max 90)",
+            "default": 0,
+            "minimum": 0,
+            "maximum": 90
+          },
+          "defaultIssueKey": {
+            "type": "string",
+            "title": "Default issue key for outbound comments (e.g. ENG-42)"
+          },
+          "webhookSecret": {
+            "type": "string",
+            "title": "Webhook secret",
+            "description": "Secret set on the Jira Cloud webhook that points at the platform ingest receiver (POST /api/ingest/jira/events). Jira signs every delivery with it (X-Hub-Signature, HMAC SHA-256); deliveries with a missing or mismatched signature are rejected, so a webhook created without a secret never files anything. Leave blank to keep the inbound receiver disabled for your account.",
+            "x-secret": true,
+            "x-scope": "user",
+            "x-widget": "password"
+          }
+        }
+      }
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
 }

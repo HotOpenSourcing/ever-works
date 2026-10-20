@@ -1,81 +1,81 @@
 {
-	"name": "@ever-works/brightdata-plugin",
-	"version": "1.0.0",
-	"description": "Bright Data Plugin - Web search and content extraction using Bright Data API",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"type-check": "tsc --noEmit",
-		"clean": "rm -rf dist",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"dependencies": {
-		"@brightdata/sdk": "^0.2.0"
-	},
-	"peerDependencies": {
-		"@ever-works/plugin": "workspace:*"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"@ever-works/plugin": "workspace:*",
-		"tsup": "^8.4.0",
-		"typescript": "^5.7.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "brightdata",
-			"name": "Bright Data",
-			"version": "1.0.0",
-			"category": "search",
-			"capabilities": [
-				"search",
-				"content-extractor"
-			],
-			"description": "Web search (SERP API) and content extraction (Web Scraper) using the Bright Data API. Handles bot detection bypass and supports multiple search engines.",
-			"author": {
-				"name": "Ever Works Team"
-			},
-			"license": "AGPL-3.0",
-			"autoEnable": false,
-			"systemPlugin": false,
-			"builtIn": true,
-			"envVars": [
-				{
-					"name": "PLUGIN_BRIGHTDATA_API_KEY",
-					"required": false,
-					"secret": true,
-					"description": "Bright Data API key (optional - can be set via admin/user settings)"
-				}
-			],
-			"distribution": "registry"
-		}
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org"
-	}
+  "name": "@ever-works/brightdata-plugin",
+  "version": "1.0.0",
+  "description": "Bright Data Plugin - Web search and content extraction using Bright Data API",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@brightdata/sdk": "^0.2.0"
+  },
+  "peerDependencies": {
+    "@ever-works/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@ever-works/plugin": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "brightdata",
+      "name": "Bright Data",
+      "version": "1.0.0",
+      "category": "search",
+      "capabilities": [
+        "search",
+        "content-extractor"
+      ],
+      "description": "Web search (SERP API) and content extraction (Web Scraper) using the Bright Data API. Handles bot detection bypass and supports multiple search engines.",
+      "author": {
+        "name": "Ever Works Team"
+      },
+      "license": "AGPL-3.0",
+      "autoEnable": false,
+      "systemPlugin": false,
+      "builtIn": true,
+      "envVars": [
+        {
+          "name": "PLUGIN_BRIGHTDATA_API_KEY",
+          "required": false,
+          "secret": true,
+          "description": "Bright Data API key (optional - can be set via admin/user settings)"
+        }
+      ],
+      "distribution": "registry"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
 }
