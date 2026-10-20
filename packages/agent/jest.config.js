@@ -56,8 +56,4 @@ module.exports = {
         '^p-map$': '<rootDir>/../test/jest-mocks/p-map.ts',
         // Handle .js extension in ESM-style imports (resolve to .ts)
         '^(\\.{1,2}/.*)\\.js$': '$1',
-    },
-    // Ignore dist folder and .d.ts files
-    testPathIgnorePatterns: ['/node_modules/', '/dist/'],
-    modulePathIgnorePatterns: ['<rootDir>/../dist/'],
-};
+    },;

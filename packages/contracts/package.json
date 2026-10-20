@@ -1,74 +1,74 @@
 {
-	"name": "@ever-works/contracts",
-	"version": "1.0.0",
-	"description": "Shared type definitions and contracts for Ever Works platform",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		},
-		"./item": {
-			"types": "./dist/item/index.d.ts",
-			"import": "./dist/item/index.js",
-			"require": "./dist/item/index.cjs"
-		},
-		"./domain": {
-			"types": "./dist/domain/index.d.ts",
-			"import": "./dist/domain/index.js",
-			"require": "./dist/domain/index.cjs"
-		},
-		"./form": {
-			"types": "./dist/form/index.d.ts",
-			"import": "./dist/form/index.js",
-			"require": "./dist/form/index.cjs"
-		},
-		"./api": {
-			"types": "./dist/api/index.d.ts",
-			"import": "./dist/api/index.js",
-			"require": "./dist/api/index.cjs"
-		},
-		"./telemetry": {
-			"types": "./dist/telemetry/index.d.ts",
-			"import": "./dist/telemetry/index.js",
-			"require": "./dist/telemetry/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsup",
-		"dev": "tsup --watch",
-		"clean": "rm -rf dist",
-		"type-check": "tsc --noEmit",
-		"type-check:tests": "tsc -p tsconfig.speccheck.json --noEmit",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"tsup": "^8.0.0",
-		"typescript": "^5.9.3",
-		"vitest": "^5.0.5"
-	},
-	"peerDependencies": {},
-	"dependencies": {
-		"@ever-co/connect-contracts": "1.0.0-rc.7"
-	},
-	"publishConfig": {
-		"access": "public"
-	}
+  "name": "@ever-works/contracts",
+  "version": "1.0.0",
+  "description": "Shared type definitions and contracts for Ever Works platform",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./item": {
+      "types": "./dist/item/index.d.ts",
+      "import": "./dist/item/index.js",
+      "require": "./dist/item/index.cjs"
+    },
+    "./domain": {
+      "types": "./dist/domain/index.d.ts",
+      "import": "./dist/domain/index.js",
+      "require": "./dist/domain/index.cjs"
+    },
+    "./form": {
+      "types": "./dist/form/index.d.ts",
+      "import": "./dist/form/index.js",
+      "require": "./dist/form/index.cjs"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js",
+      "require": "./dist/api/index.cjs"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry/index.d.ts",
+      "import": "./dist/telemetry/index.js",
+      "require": "./dist/telemetry/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsup",
+    "dev": "node init && tsup --watch",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit",
+    "type-check:tests": "tsc -p tsconfig.speccheck.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsup": "^8.0.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  },
+  "peerDependencies": {},
+  "dependencies": {
+    "@ever-co/connect-contracts": "1.0.0-rc.7"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
