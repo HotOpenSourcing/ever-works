@@ -1,78 +1,78 @@
 {
-	"name": "@ever-works/jina-plugin",
-	"version": "1.0.0",
-	"description": "Jina AI Plugin - Web search and content extraction using Jina AI APIs",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": false,
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"type-check": "tsc --noEmit",
-		"clean": "rm -rf dist",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"peerDependencies": {
-		"@ever-works/plugin": "workspace:*"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"@ever-works/plugin": "workspace:*",
-		"tsup": "^8.4.0",
-		"typescript": "^5.7.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "jina",
-			"name": "Jina AI",
-			"version": "1.0.0",
-			"category": "content-extractor",
-			"capabilities": [
-				"search",
-				"content-extractor"
-			],
-			"description": "Web search and content extraction using Jina AI APIs. Search via s.jina.ai and extract content via r.jina.ai, no SDK needed.",
-			"author": {
-				"name": "Ever Works Team"
-			},
-			"license": "AGPL-3.0",
-			"autoEnable": false,
-			"systemPlugin": false,
-			"builtIn": true,
-			"envVars": [
-				{
-					"name": "PLUGIN_JINA_API_KEY",
-					"required": true,
-					"secret": true,
-					"description": "Jina API key"
-				}
-			],
-			"distribution": "registry"
-		}
-	},
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org"
-	}
+  "name": "@ever-works/jina-plugin",
+  "version": "1.0.0",
+  "description": "Jina AI Plugin - Web search and content extraction using Jina AI APIs",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": false,
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "peerDependencies": {
+    "@ever-works/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "@ever-works/plugin": "workspace:*",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "jina",
+      "name": "Jina AI",
+      "version": "1.0.0",
+      "category": "content-extractor",
+      "capabilities": [
+        "search",
+        "content-extractor"
+      ],
+      "description": "Web search and content extraction using Jina AI APIs. Search via s.jina.ai and extract content via r.jina.ai, no SDK needed.",
+      "author": {
+        "name": "Ever Works Team"
+      },
+      "license": "AGPL-3.0",
+      "autoEnable": false,
+      "systemPlugin": false,
+      "builtIn": true,
+      "envVars": [
+        {
+          "name": "PLUGIN_JINA_API_KEY",
+          "required": true,
+          "secret": true,
+          "description": "Jina API key"
+        }
+      ],
+      "distribution": "registry"
+    }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
 }

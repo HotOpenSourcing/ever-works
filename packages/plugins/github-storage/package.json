@@ -1,142 +1,142 @@
 {
-	"name": "@ever-works/github-storage-plugin",
-	"version": "1.1.0",
-	"description": "GitHub-blob storage backend for Ever Works — stores uploaded objects as files in a configured repository or the Work's data repo. Supports Git LFS.",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"type": "module",
-	"main": "./dist/index.cjs",
-	"module": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js",
-			"require": "./dist/index.cjs"
-		}
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsup",
-		"dev": "tsup --watch",
-		"type-check": "tsc --noEmit",
-		"clean": "rm -rf dist",
-		"test": "vitest run --passWithNoTests",
-		"test:watch": "vitest",
-		"test:coverage": "vitest run --coverage"
-	},
-	"dependencies": {
-		"octokit": "^4.0.0"
-	},
-	"peerDependencies": {
-		"@ever-works/plugin": "workspace:*"
-	},
-	"devDependencies": {
-		"@ever-works/plugin": "workspace:*",
-		"@types/node": "^26.6.4",
-		"tsup": "^8.4.0",
-		"typescript": "^5.7.3",
-		"vitest": "^5.0.5"
-	},
-	"everworks": {
-		"plugin": {
-			"id": "github-storage",
-			"name": "GitHub Storage",
-			"version": "1.1.0",
-			"category": "storage",
-			"capabilities": [
-				"storage",
-				"put-object",
-				"get-object",
-				"lfs"
-			],
-			"description": "Stores uploaded objects as commits in a GitHub repository. Pick between a dedicated storage repo or reusing the Work's existing data repo, with optional Git LFS support.",
-			"author": {
-				"name": "Ever Works Team"
-			},
-			"license": "AGPL-3.0",
-			"systemPlugin": false,
-			"distribution": "registry",
-			"builtIn": false,
-			"envVars": [
-				{
-					"name": "GITHUB_STORAGE_MODE",
-					"required": false,
-					"secret": false,
-					"description": "`separate-repo` (default) or `data-repo`. `data-repo` reuses each Work's existing data repo and looks up coordinates per upload."
-				},
-				{
-					"name": "GITHUB_STORAGE_TOKEN",
-					"required": false,
-					"secret": true,
-					"description": "GitHub Personal Access Token with `contents:write` scope on the storage repo. Required in `separate-repo` mode; ignored in `data-repo` mode (the Work-owner OAuth token is used)."
-				},
-				{
-					"name": "GITHUB_STORAGE_OWNER",
-					"required": false,
-					"secret": false,
-					"description": "Owner (user or org) of the storage repository. Required in `separate-repo` mode."
-				},
-				{
-					"name": "GITHUB_STORAGE_REPO",
-					"required": false,
-					"secret": false,
-					"description": "Storage repository name. Required in `separate-repo` mode."
-				},
-				{
-					"name": "GITHUB_STORAGE_BRANCH",
-					"required": false,
-					"secret": false,
-					"description": "Branch to commit blobs to (default `main`)."
-				},
-				{
-					"name": "GITHUB_STORAGE_PATH_PREFIX",
-					"required": false,
-					"secret": false,
-					"description": "Prefix prepended to every blob path (default `uploads`)."
-				},
-				{
-					"name": "GITHUB_STORAGE_LFS_ENABLED",
-					"required": false,
-					"secret": false,
-					"description": "When true (default for fresh installs), uploads are stored as Git LFS objects with a pointer file in the tree. Defaults to false for already-deployed installs (set legacy env vars only, no mode set) to preserve byte-for-byte commit shape."
-				},
-				{
-					"name": "GITHUB_STORAGE_LFS_TRANSPORT",
-					"required": false,
-					"secret": false,
-					"description": "`api` (default) — uses the GitHub LFS Batch API directly over HTTPS, no binaries required. `git-cli` — shells out to `git` + `git-lfs` (both must be on PATH). The plugin probes for the binaries at boot when `git-cli` is selected and refuses to start if either is missing."
-				},
-				{
-					"name": "GITHUB_STORAGE_TRANSPORT",
-					"required": false,
-					"secret": false,
-					"description": "`auto` (default — picks per mode), `contents-api`, or `clone-and-push`. Controls how the pointer or blob is committed."
-				},
-				{
-					"name": "GITHUB_STORAGE_API_HOST",
-					"required": false,
-					"secret": false,
-					"description": "LFS Batch API host base. Defaults to `https://github.com`. GitHub Enterprise Server deployments set this to their host (e.g. `https://ghe.example.com`)."
-				},
-				{
-					"name": "GITHUB_STORAGE_DATA_REPO_BRANCH",
-					"required": false,
-					"secret": false,
-					"description": "Branch the `data-repo` mode resolver uses for every Work's data repo. Defaults to `main`. Set to `master` (or a custom branch) for repos that don't follow the modern default."
-				}
-			]
-		}
-	},
-	"private": false,
-	"publishConfig": {
-		"access": "public",
-		"registry": "https://registry.npmjs.org"
-	}
+  "name": "@ever-works/github-storage-plugin",
+  "version": "1.1.0",
+  "description": "GitHub-blob storage backend for Ever Works \u2014 stores uploaded objects as files in a configured repository or the Work's data repo. Supports Git LFS.",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsup",
+    "dev": "node init && tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "octokit": "^4.0.0"
+  },
+  "peerDependencies": {
+    "@ever-works/plugin": "workspace:*"
+  },
+  "devDependencies": {
+    "@ever-works/plugin": "workspace:*",
+    "@types/node": "^26.6.4",
+    "tsup": "^8.4.0",
+    "typescript": "^5.7.3",
+    "vitest": "^5.0.5"
+  },
+  "everworks": {
+    "plugin": {
+      "id": "github-storage",
+      "name": "GitHub Storage",
+      "version": "1.1.0",
+      "category": "storage",
+      "capabilities": [
+        "storage",
+        "put-object",
+        "get-object",
+        "lfs"
+      ],
+      "description": "Stores uploaded objects as commits in a GitHub repository. Pick between a dedicated storage repo or reusing the Work's existing data repo, with optional Git LFS support.",
+      "author": {
+        "name": "Ever Works Team"
+      },
+      "license": "AGPL-3.0",
+      "systemPlugin": false,
+      "distribution": "registry",
+      "builtIn": false,
+      "envVars": [
+        {
+          "name": "GITHUB_STORAGE_MODE",
+          "required": false,
+          "secret": false,
+          "description": "`separate-repo` (default) or `data-repo`. `data-repo` reuses each Work's existing data repo and looks up coordinates per upload."
+        },
+        {
+          "name": "GITHUB_STORAGE_TOKEN",
+          "required": false,
+          "secret": true,
+          "description": "GitHub Personal Access Token with `contents:write` scope on the storage repo. Required in `separate-repo` mode; ignored in `data-repo` mode (the Work-owner OAuth token is used)."
+        },
+        {
+          "name": "GITHUB_STORAGE_OWNER",
+          "required": false,
+          "secret": false,
+          "description": "Owner (user or org) of the storage repository. Required in `separate-repo` mode."
+        },
+        {
+          "name": "GITHUB_STORAGE_REPO",
+          "required": false,
+          "secret": false,
+          "description": "Storage repository name. Required in `separate-repo` mode."
+        },
+        {
+          "name": "GITHUB_STORAGE_BRANCH",
+          "required": false,
+          "secret": false,
+          "description": "Branch to commit blobs to (default `main`)."
+        },
+        {
+          "name": "GITHUB_STORAGE_PATH_PREFIX",
+          "required": false,
+          "secret": false,
+          "description": "Prefix prepended to every blob path (default `uploads`)."
+        },
+        {
+          "name": "GITHUB_STORAGE_LFS_ENABLED",
+          "required": false,
+          "secret": false,
+          "description": "When true (default for fresh installs), uploads are stored as Git LFS objects with a pointer file in the tree. Defaults to false for already-deployed installs (set legacy env vars only, no mode set) to preserve byte-for-byte commit shape."
+        },
+        {
+          "name": "GITHUB_STORAGE_LFS_TRANSPORT",
+          "required": false,
+          "secret": false,
+          "description": "`api` (default) \u2014 uses the GitHub LFS Batch API directly over HTTPS, no binaries required. `git-cli` \u2014 shells out to `git` + `git-lfs` (both must be on PATH). The plugin probes for the binaries at boot when `git-cli` is selected and refuses to start if either is missing."
+        },
+        {
+          "name": "GITHUB_STORAGE_TRANSPORT",
+          "required": false,
+          "secret": false,
+          "description": "`auto` (default \u2014 picks per mode), `contents-api`, or `clone-and-push`. Controls how the pointer or blob is committed."
+        },
+        {
+          "name": "GITHUB_STORAGE_API_HOST",
+          "required": false,
+          "secret": false,
+          "description": "LFS Batch API host base. Defaults to `https://github.com`. GitHub Enterprise Server deployments set this to their host (e.g. `https://ghe.example.com`)."
+        },
+        {
+          "name": "GITHUB_STORAGE_DATA_REPO_BRANCH",
+          "required": false,
+          "secret": false,
+          "description": "Branch the `data-repo` mode resolver uses for every Work's data repo. Defaults to `main`. Set to `master` (or a custom branch) for repos that don't follow the modern default."
+        }
+      ]
+    }
+  },
+  "private": false,
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  }
 }

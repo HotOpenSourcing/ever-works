@@ -1,52 +1,52 @@
 {
-	"name": "ever-works-node",
-	"version": "0.2.6",
-	"description": "Ever Works Node - headless execution node (CLI + long-running service): fleet enrollment, heartbeat and capability reporting",
-	"author": {
-		"name": "Ever Co. LTD",
-		"email": "ever@ever.co",
-		"url": "https://ever.co"
-	},
-	"license": "AGPL-3.0",
-	"private": true,
-	"main": "dist/index.js",
-	"types": "dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
-		},
-		"./core": {
-			"types": "./dist/core/index.d.ts",
-			"default": "./dist/core/index.js"
-		}
-	},
-	"bin": {
-		"ever-works-node": "dist/cli.js"
-	},
-	"files": [
-		"dist"
-	],
-	"scripts": {
-		"build": "tsc --noEmit && tsc -p tsconfig.build.json",
-		"build:bundle": "node build.js",
-		"type-check": "tsc --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"start": "node dist/cli.js start",
-		"clean": "rm -rf dist"
-	},
-	"dependencies": {
-		"@ever-works/contracts": "workspace:*",
-		"@ever-works/local-workspace-plugin": "workspace:*",
-		"@ever-works/plugin": "workspace:*",
-		"@ever-works/pty-local-plugin": "workspace:*",
-		"commander": "^14.0.2"
-	},
-	"devDependencies": {
-		"@types/node": "^26.6.4",
-		"esbuild": "^0.25.12",
-		"typescript": "^5.9.3",
-		"vitest": "^5.0.5"
-	}
+  "name": "ever-works-node",
+  "version": "0.2.6",
+  "description": "Ever Works Node - headless execution node (CLI + long-running service): fleet enrollment, heartbeat and capability reporting",
+  "author": {
+    "name": "Ever Co. LTD",
+    "email": "ever@ever.co",
+    "url": "https://ever.co"
+  },
+  "license": "AGPL-3.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    }
+  },
+  "bin": {
+    "ever-works-node": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node init && tsc --noEmit && tsc -p tsconfig.build.json",
+    "build:bundle": "node init && node build.js",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node init && node dist/cli.js start",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ever-works/contracts": "workspace:*",
+    "@ever-works/local-workspace-plugin": "workspace:*",
+    "@ever-works/plugin": "workspace:*",
+    "@ever-works/pty-local-plugin": "workspace:*",
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.5"
+  }
 }
